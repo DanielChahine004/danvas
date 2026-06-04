@@ -494,6 +494,8 @@ function InspectorView({ shape }) {
   const id = componentIdOf(shape.id)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
+  // Which row is drilled into (its key), or null for the table view.
+  const [selected, setSelected] = useState(null)
 
   let rows = []
   try {
@@ -509,14 +511,6 @@ function InspectorView({ shape }) {
     // keep default
   }
 
-  const types = ['all', ...Array.from(new Set(rows.map((r) => r.type))).sort()]
-  const q = query.toLowerCase()
-  const shown = rows.filter(
-    (r) =>
-      (typeFilter === 'all' || r.type === typeFilter) &&
-      (!q || String(r.name ?? '').toLowerCase().includes(q))
-  )
-
   const controlStyle = {
     fontSize: 12,
     padding: '3px 6px',
@@ -525,12 +519,64 @@ function InspectorView({ shape }) {
     pointerEvents: 'all',
   }
 
+  // --- detail (drill-down) view -------------------------------------------
+  if (selected != null) {
+    let detail = null
+    try {
+      detail = JSON.parse(shape.props.detail || 'null')
+    } catch {
+      detail = null
+    }
+    // Only show detail once it's arrived for the row we clicked (avoid stale).
+    const ready = detail && detail.key === selected
+    return (
+      <DetailView
+        selected={selected}
+        detail={ready ? detail : null}
+        onBack={() => setSelected(null)}
+        controlStyle={controlStyle}
+      />
+    )
+  }
+
+  const types = ['all', ...Array.from(new Set(rows.map((r) => r.type))).sort()]
+  const q = query.toLowerCase()
+  const shown = rows.filter(
+    (r) =>
+      (typeFilter === 'all' || r.type === typeFilter) &&
+      (!q || String(r.name ?? '').toLowerCase().includes(q))
+  )
+
+  const openDetail = (r) => {
+    const key = r.key ?? r.name
+    if (!key) return
+    setSelected(key)
+    sendInput(id, { action: 'detail', key })
+  }
+
+  const source = shape.props.source || 'components'
+  const switchSource = (next) => {
+    if (next === source) return
+    setTypeFilter('all') // the type set differs between the two views
+    setQuery('')
+    sendInput(id, { action: 'source', source: next })
+  }
+
   return (
     <>
       <div
         style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}
         onPointerDown={(e) => e.stopPropagation()}
       >
+        <select
+          value={source}
+          onChange={(e) => switchSource(e.target.value)}
+          style={controlStyle}
+          title="what to inspect"
+        >
+          <option value="components">panels</option>
+          <option value="globals">globals</option>
+        </select>
         <input
           placeholder="search name…"
           value={query}
@@ -579,7 +625,12 @@ function InspectorView({ shape }) {
           </thead>
           <tbody>
             {shown.map((r, i) => (
-              <tr key={i}>
+              <tr
+                key={i}
+                onClick={() => openDetail(r)}
+                style={{ cursor: 'pointer' }}
+                title="click to inspect fields"
+              >
                 {cols.map((c) => (
                   <td
                     key={c}
@@ -601,6 +652,124 @@ function InspectorView({ shape }) {
   )
 }
 
+// Drill-down: an object's type/repr header plus a field/type/value table.
+function DetailView({ selected, detail, onBack, controlStyle }) {
+  const fields = detail && Array.isArray(detail.fields) ? detail.fields : []
+  return (
+    <>
+      <div
+        style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button style={{ ...controlStyle, cursor: 'pointer' }} onClick={onBack}>
+          ← back
+        </button>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {selected}
+        </span>
+        {detail && (
+          <span style={{ fontSize: 12, color: '#888' }}>: {detail.type}</span>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}>
+        {!detail ? (
+          <div style={{ fontSize: 12, color: '#999', padding: 6 }}>loading…</div>
+        ) : detail.missing ? (
+          <div style={{ fontSize: 12, color: '#999', padding: 6 }}>
+            no longer available
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                fontSize: 12,
+                fontFamily: 'ui-monospace, monospace',
+                color: '#444',
+                background: '#f7f7f7',
+                border: '1px solid #eee',
+                borderRadius: 4,
+                padding: '4px 6px',
+                marginBottom: 6,
+                wordBreak: 'break-all',
+              }}
+            >
+              {detail.repr}
+            </div>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['field', 'type', 'value'].map((c) => (
+                    <th
+                      key={c}
+                      style={{
+                        textAlign: 'left',
+                        padding: '2px 6px',
+                        borderBottom: '1px solid #ddd',
+                        color: '#666',
+                        position: 'sticky',
+                        top: 0,
+                        background: '#fff',
+                      }}
+                    >
+                      {c}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fields.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      style={{ padding: 6, color: '#999', fontStyle: 'italic' }}
+                    >
+                      no fields — see repr above
+                    </td>
+                  </tr>
+                ) : (
+                  fields.map((f, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: '2px 6px', borderBottom: '1px solid #f0f0f0' }}>
+                        {f.field}
+                      </td>
+                      <td
+                        style={{
+                          padding: '2px 6px',
+                          borderBottom: '1px solid #f0f0f0',
+                          color: '#888',
+                        }}
+                      >
+                        {f.type}
+                      </td>
+                      <td
+                        style={{
+                          padding: '2px 6px',
+                          borderBottom: '1px solid #f0f0f0',
+                          fontFamily: 'ui-monospace, monospace',
+                        }}
+                      >
+                        {f.value}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
+
 export class InspectorShapeUtil extends PcShapeUtil {
   static type = 'pcInspector'
   static props = {
@@ -609,6 +778,8 @@ export class InspectorShapeUtil extends PcShapeUtil {
     label: T.string,
     rows: T.string,
     cols: T.string,
+    detail: T.string,
+    source: T.string,
   }
 
   getDefaultProps() {
@@ -618,6 +789,8 @@ export class InspectorShapeUtil extends PcShapeUtil {
       label: 'inspector',
       rows: '[]',
       cols: JSON.stringify(INSPECTOR_COLS),
+      detail: '',
+      source: 'components',
     }
   }
 

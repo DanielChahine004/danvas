@@ -8,8 +8,11 @@ you can type things like
     status.update("hi")     # any variable in this file is in scope
 
 and see the output right below the editor (Ctrl/Cmd+Enter runs the cell). The
-Inspector panel lists every component with its live value and geometry — hit
-Refresh after you move panels or change values.
+Inspector panel has a dropdown to switch between the canvas panels (every
+component, Repls and Inspectors included, with live value + geometry) and the
+shared REPL namespace (this file's globals, `canvas` included). Hit Refresh
+after you move panels or change values, and click any row to drill into that
+object's fields and attributes.
 
 A Repl executes arbitrary Python in this process, so serving is local-only by
 default; pass `allow_remote_exec=True` to `serve` to expose it on a network.
@@ -39,13 +42,10 @@ gain = 1.5
 mode = "auto"
 waypoints = [(0, 0), (10, 5), (20, 0)]
 
-# Two inspectors: the canvas panels, and the shared REPL namespace (this file's
-# globals). Both have a name-search box and a type filter.
-canvas.insert(pycanvas.Inspector(label="panels", refresh=1.0), x=420, y=80)
-canvas.insert(
-    pycanvas.Inspector(label="globals", source="globals", refresh=1.0),
-    x=420, y=440,
-)
+# One inspector with a source dropdown in its header: switch between the canvas
+# panels and the shared REPL namespace (this file's globals) live. It also has a
+# name-search box, a type filter, and click-to-drill-into-fields.
+canvas.insert(pycanvas.Inspector(label="inspector", refresh=1.0), x=420, y=80)
 canvas.insert(pycanvas.Repl(label="poke"), x=80, y=320)
 
 print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
