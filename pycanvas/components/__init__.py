@@ -6,6 +6,8 @@ from .custom import Custom
 from .toggle import Toggle
 from .plot import Plot
 from .liveplot import LivePlot
+from .repl import Repl
+from .inspector import Inspector
 
 __all__ = [
     "BaseComponent",
@@ -16,4 +18,6 @@ __all__ = [
     "Toggle",
     "Plot",
     "LivePlot",
+    "Repl",
+    "Inspector",
 ]

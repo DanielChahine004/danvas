@@ -4,9 +4,11 @@ from .canvas import Canvas
 from .components import (
     BaseComponent,
     Custom,
+    Inspector,
     Label,
     LivePlot,
     Plot,
+    Repl,
     Slider,
     Toggle,
     VideoFeed,
@@ -23,5 +25,7 @@ __all__ = [
     "Toggle",
     "Plot",
     "LivePlot",
+    "Repl",
+    "Inspector",
     "BaseComponent",
 ]

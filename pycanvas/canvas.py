@@ -6,6 +6,7 @@ import uuid
 
 from . import server
 from .bridge import Bridge
+from .kernel import Kernel
 
 
 # Friendly snake_case names mapped onto tldraw's arrow shape prop names.
@@ -130,6 +131,31 @@ class Canvas:
         self._named = {}  # name -> component, for canvas.<name> / canvas["<name>"]
         self._serving = False
         self._server = None
+        # Shared by all Repl cells: one kernel thread runs their code serially
+        # against one namespace (set by enable_repl). None until enable_repl.
+        self._kernel = Kernel()
+        self._namespace = None
+
+    def enable_repl(self, namespace=None):
+        """Bind the namespace that ``Repl`` cells execute against.
+
+        Call this before inserting any :class:`~pycanvas.Repl`. Pass
+        ``globals()`` from your notebook/script to share its variables with the
+        on-canvas cells; omit it to auto-detect the IPython user namespace (or
+        an empty namespace outside IPython). ``canvas`` is always made available
+        inside it so cells can write ``canvas.<panel>`` straight away.
+
+        Because a REPL runs arbitrary Python in this process, it is gated to
+        local-only serving unless ``serve(..., allow_remote_exec=True)``.
+        """
+        if namespace is None:
+            try:
+                namespace = get_ipython().user_ns  # type: ignore[name-defined]  # noqa: F821
+            except NameError:
+                namespace = {}
+        namespace.setdefault("canvas", self)
+        self._namespace = namespace
+        return self
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, movable=True, resizable=True, name=None):
@@ -183,6 +209,15 @@ class Canvas:
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
         self._components.append(component)
+        # Wire the execution/introspection components to canvas-level resources.
+        # Duck-typed so the common components stay untouched: a Repl exposes a
+        # ``_kernel`` slot (shared kernel + namespace); an Inspector a ``_canvas``
+        # slot (to read live component state).
+        if getattr(component, "_kernel", "missing") is None:
+            component._kernel = self._kernel
+            component._namespace = self._namespace
+        if getattr(component, "_canvas", "missing") is None:
+            component._canvas = self
         if self._serving:
             self._bridge.register_live(component)
         return component
@@ -368,17 +403,39 @@ class Canvas:
     def __getitem__(self, name):
         return self._named[name]
 
-    def serve(self, port=8000, open_browser=True, host="127.0.0.1"):
+    def _check_remote_exec(self, host, allow_remote_exec):
+        """Refuse to expose a code-executing canvas on a non-local address.
+
+        A :class:`~pycanvas.Repl` runs arbitrary Python in this process; serving
+        it on anything but loopback hands remote browsers code execution with no
+        auth. Block that unless the caller explicitly opts in.
+        """
+        if host in ("127.0.0.1", "localhost") or allow_remote_exec:
+            return
+        if any(c.component == "Repl" for c in self._components):
+            raise RuntimeError(
+                f"a Repl cell executes arbitrary Python in this process; refusing "
+                f"to serve it on host={host!r} (no auth). Bind to '127.0.0.1', or "
+                f"pass allow_remote_exec=True if you really intend remote code "
+                f"execution on a trusted network."
+            )
+
+    def serve(self, port=8000, open_browser=True, host="127.0.0.1",
+              allow_remote_exec=False):
         """Start the server, open the browser, and block until shutdown.
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
-        ``http://<this-machine-ip>:<port>``.
+        ``http://<this-machine-ip>:<port>``. If any ``Repl`` is on the canvas,
+        non-local serving is refused unless ``allow_remote_exec=True`` (a REPL is
+        unauthenticated remote code execution).
         """
+        self._check_remote_exec(host, allow_remote_exec)
         self._serving = True
         server.run(self._bridge, port=port, open_browser=open_browser, host=host)
 
-    def serve_background(self, port=8000, open_browser=True, wait=True, host="127.0.0.1"):
+    def serve_background(self, port=8000, open_browser=True, wait=True, host="127.0.0.1",
+                         allow_remote_exec=False):
         """Start the server without blocking; return ``self`` for chaining.
 
         Intended for interactive sessions (e.g. Jupyter): the call returns so
@@ -387,8 +444,10 @@ class Canvas:
         so the first post-serve insert is guaranteed to broadcast.
 
         ``host`` is the bind address; pass ``"0.0.0.0"`` for LAN access (see
-        ``serve``).
+        ``serve``). A ``Repl`` on the canvas blocks non-local serving unless
+        ``allow_remote_exec=True``.
         """
+        self._check_remote_exec(host, allow_remote_exec)
         self._server = server.run_background(
             self._bridge, port=port, open_browser=open_browser, host=host
         )

@@ -192,6 +192,7 @@ python examples/custom_html.py        # hand-written HTML panel, bidirectional
 python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
+python examples/repl_inspector.py     # on-canvas Python REPL + live component inspector
 ```
 
 The notebook example opens in Jupyter:

@@ -387,6 +387,198 @@ export class LivePlotShapeUtil extends PcShapeUtil {
   }
 }
 
+// --- Repl (code cell against the shared kernel namespace) -------------------
+export class ReplShapeUtil extends PcShapeUtil {
+  static type = 'pcRepl'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    code: T.string,
+    output: T.string,
+    result: T.string,
+  }
+
+  getDefaultProps() {
+    return { w: 460, h: 260, label: 'repl', code: '', output: '', result: '' }
+  }
+
+  component(shape) {
+    const { label, code, output, result } = shape.props
+    const id = componentIdOf(shape.id)
+    // Send the current editor text (kept in the `code` prop) to Python to run.
+    const run = () => sendInput(id, { code: shape.props.code })
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{label}</div>
+        <textarea
+          value={code}
+          spellCheck={false}
+          style={{
+            flex: 1,
+            width: '100%',
+            minHeight: 0,
+            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+            fontSize: 13,
+            border: '1px solid #e2e2e2',
+            borderRadius: 4,
+            padding: 6,
+            resize: 'none',
+            pointerEvents: 'all',
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) =>
+            this.editor.updateShape({
+              id: shape.id,
+              type: shape.type,
+              props: { code: e.target.value },
+            })
+          }
+          // Ctrl/Cmd+Enter runs the cell, like a notebook.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault()
+              run()
+            }
+          }}
+        />
+        <button
+          style={{
+            alignSelf: 'flex-start',
+            marginTop: 6,
+            padding: '4px 10px',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            background: '#2563eb',
+            color: '#fff',
+            cursor: 'pointer',
+            pointerEvents: 'all',
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={run}
+        >
+          Run (⌘/Ctrl+Enter)
+        </button>
+        {(output || result) && (
+          <pre
+            style={{
+              margin: '6px 0 0',
+              maxHeight: '40%',
+              overflow: 'auto',
+              background: '#f6f6f6',
+              borderRadius: 4,
+              fontSize: 12,
+              padding: 6,
+              whiteSpace: 'pre-wrap',
+              pointerEvents: 'all',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {output}
+            {result ? `=> ${result}` : ''}
+          </pre>
+        )}
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
+// --- Inspector (live table of the canvas's components) ----------------------
+const INSPECTOR_COLS = ['name', 'type', 'value', 'x', 'y', 'w', 'h']
+
+export class InspectorShapeUtil extends PcShapeUtil {
+  static type = 'pcInspector'
+  static props = { w: T.number, h: T.number, label: T.string, rows: T.string }
+
+  getDefaultProps() {
+    return { w: 520, h: 320, label: 'inspector', rows: '[]' }
+  }
+
+  component(shape) {
+    const id = componentIdOf(shape.id)
+    let rows = []
+    try {
+      rows = JSON.parse(shape.props.rows) || []
+    } catch {
+      rows = []
+    }
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{shape.props.label}</div>
+        <button
+          style={{
+            alignSelf: 'flex-start',
+            marginBottom: 6,
+            padding: '4px 10px',
+            border: '1px solid #ddd',
+            borderRadius: 6,
+            fontSize: 13,
+            cursor: 'pointer',
+            pointerEvents: 'all',
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => sendInput(id, { action: 'refresh' })}
+        >
+          Refresh
+        </button>
+        <div
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {INSPECTOR_COLS.map((c) => (
+                  <th
+                    key={c}
+                    style={{
+                      textAlign: 'left',
+                      padding: '2px 6px',
+                      borderBottom: '1px solid #ddd',
+                      color: '#666',
+                    }}
+                  >
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  {INSPECTOR_COLS.map((c) => (
+                    <td
+                      key={c}
+                      style={{
+                        padding: '2px 6px',
+                        borderBottom: '1px solid #f0f0f0',
+                        fontFamily:
+                          c === 'value' ? 'ui-monospace, monospace' : 'inherit',
+                      }}
+                    >
+                      {String(r[c] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
 // Map of the `component` string sent by Python -> tldraw shape type.
 export const COMPONENT_TO_SHAPE = {
   Slider: 'pcSlider',
@@ -395,6 +587,8 @@ export const COMPONENT_TO_SHAPE = {
   Custom: 'pcHtml',
   Toggle: 'pcToggle',
   LivePlot: 'pcLivePlot',
+  Repl: 'pcRepl',
+  Inspector: 'pcInspector',
 }
 
 export const shapeUtils = [
@@ -404,4 +598,6 @@ export const shapeUtils = [
   HtmlShapeUtil,
   ToggleShapeUtil,
   LivePlotShapeUtil,
+  ReplShapeUtil,
+  InspectorShapeUtil,
 ]
