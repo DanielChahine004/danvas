@@ -1,5 +1,6 @@
 import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
+import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
 import { setEditor } from './bridge'
 
@@ -13,6 +14,17 @@ export default function App() {
           // standalone (vite dev) without a running Python backend.
           if (location.search.includes('demo')) {
             seedDemo(editor)
+          }
+          // Default to dark mode on first load, but only once: tldraw persists
+          // the color scheme, so after the first visit we leave it alone and the
+          // user's menu choice (Preferences -> Dark mode) sticks across reloads.
+          try {
+            if (!localStorage.getItem('pc-theme-init')) {
+              editor.user.updateUserPreferences({ colorScheme: 'dark' })
+              localStorage.setItem('pc-theme-init', '1')
+            }
+          } catch {
+            editor.user.updateUserPreferences({ colorScheme: 'dark' })
           }
           setEditor(editor)
         }}

@@ -130,7 +130,40 @@ function handle(msg) {
     sendRaw({ type: 'snapshot', reqId: msg.reqId, data: userContent(msg.panelIds || []) })
   } else if (msg.type === 'load_snapshot') {
     loadSnapshot(msg.data)
+  } else if (msg.type === 'complete_result') {
+    resolveCompletion(msg.reqId, msg.completions)
   }
+}
+
+// --- editor autocomplete round-trip (used by the Repl's Monaco editor) -------
+// A request carries a reqId; Python answers with a `complete_result` carrying
+// the same id. Pending requests resolve their promise when the answer lands (or
+// after a short timeout, so a stuck/busy backend never hangs the editor).
+const pendingCompletions = new Map() // reqId -> { resolve, timer }
+let completionSeq = 0
+
+export function requestCompletions(id, text) {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      resolve([])
+      return
+    }
+    const reqId = `cmp${++completionSeq}`
+    const timer = setTimeout(() => {
+      pendingCompletions.delete(reqId)
+      resolve([])
+    }, 1500)
+    pendingCompletions.set(reqId, { resolve, timer })
+    sendRaw({ type: 'input', id, payload: { action: 'complete', reqId, text } })
+  })
+}
+
+function resolveCompletion(reqId, completions) {
+  const pending = pendingCompletions.get(reqId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  pendingCompletions.delete(reqId)
+  pending.resolve(completions || [])
 }
 
 // Collect tldraw "content" for everything on the page except the pycanvas

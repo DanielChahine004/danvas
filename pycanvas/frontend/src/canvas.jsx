@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
+import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue } from 'tldraw'
 import Plotly from 'plotly.js-basic-dist-min'
-import { sendInput, componentIdOf, registerLive, unregisterLive } from './bridge'
+import { sendInput, componentIdOf, registerLive, unregisterLive, requestCompletions } from './bridge'
 
 // Monaco is heavy, so the Repl editor is code-split into its own chunk that
 // only loads when a Repl panel is shown (see MonacoRepl.jsx).
@@ -18,10 +18,11 @@ function cardStyle(shape) {
     height: shape.props.h,
     boxSizing: 'border-box',
     padding: '10px 12px',
-    background: '#ffffff',
-    border: '1px solid #e2e2e2',
+    background: 'var(--pc-bg)',
+    color: 'var(--pc-text)',
+    border: '1px solid var(--pc-border)',
     borderRadius: 8,
-    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+    boxShadow: '0 1px 3px var(--pc-shadow)',
     fontFamily: 'system-ui, sans-serif',
     overflow: 'hidden',
     // Anchors the lock overlay (see Card) to the card's own box.
@@ -53,7 +54,7 @@ function Card({ shape, children }) {
 const labelStyle = {
   fontSize: 12,
   fontWeight: 600,
-  color: '#666',
+  color: 'var(--pc-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   marginBottom: 6,
@@ -127,7 +128,7 @@ export class SliderShapeUtil extends PcShapeUtil {
             sendInput(id, { value: v })
           }}
         />
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#222', marginTop: 4 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--pc-text)', marginTop: 4 }}>
           {value}
         </div>
       </Card>
@@ -158,7 +159,7 @@ export class LabelShapeUtil extends PcShapeUtil {
     return (
       <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
-        <div style={{ fontSize: 20, fontWeight: 600, color: '#222' }}>{value}</div>
+        <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--pc-text)' }}>{value}</div>
       </Card>
     )
   }
@@ -193,7 +194,7 @@ export class VideoShapeUtil extends PcShapeUtil {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: '#111',
+            background: 'var(--pc-video-bg)',
             borderRadius: 4,
             overflow: 'hidden',
           }}
@@ -210,7 +211,7 @@ export class VideoShapeUtil extends PcShapeUtil {
               }}
             />
           ) : (
-            <span style={{ color: '#666', fontSize: 13 }}>no signal</span>
+            <span style={{ color: 'var(--pc-muted)', fontSize: 13 }}>no signal</span>
           )}
         </div>
       </Card>
@@ -253,7 +254,7 @@ export class HtmlShapeUtil extends PcShapeUtil {
             width: '100%',
             border: 'none',
             borderRadius: 4,
-            background: '#fff',
+            background: 'var(--pc-bg)',
             pointerEvents: 'all',
           }}
           // Keep tldraw from hijacking drags/zoom meant for the iframe content.
@@ -304,8 +305,8 @@ export class ToggleShapeUtil extends PcShapeUtil {
                   fontSize: 14,
                   fontWeight: 600,
                   cursor: 'pointer',
-                  background: active ? '#2563eb' : '#eee',
-                  color: active ? '#fff' : '#333',
+                  background: active ? 'var(--pc-accent)' : 'var(--pc-off-bg)',
+                  color: active ? 'var(--pc-accent-text)' : 'var(--pc-off-text)',
                   pointerEvents: 'all',
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -410,6 +411,10 @@ export class ReplShapeUtil extends PcShapeUtil {
   component(shape) {
     const { label, code, output, result } = shape.props
     const id = componentIdOf(shape.id)
+    // Follow tldraw's theme so the Monaco editor uses a matching dark/light
+    // syntax theme (CSS vars handle the rest of the card). useValue keeps this
+    // reactive, so toggling tldraw's dark mode re-themes the editor live.
+    const dark = useValue('pc-dark', () => this.editor.user.getIsDarkMode(), [])
     // Run the given text (from the editor), falling back to the stored prop.
     const run = (text) =>
       sendInput(id, { code: text != null ? text : shape.props.code })
@@ -426,9 +431,9 @@ export class ReplShapeUtil extends PcShapeUtil {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#888',
+                color: 'var(--pc-faint)',
                 fontSize: 13,
-                border: '1px solid #e2e2e2',
+                border: '1px solid var(--pc-border)',
                 borderRadius: 4,
               }}
             >
@@ -436,7 +441,13 @@ export class ReplShapeUtil extends PcShapeUtil {
             </div>
           }
         >
-          <MonacoRepl value={code} onChange={setCode} onRun={run} />
+          <MonacoRepl
+            value={code}
+            dark={dark}
+            onChange={setCode}
+            onRun={run}
+            onComplete={(text) => requestCompletions(id, text)}
+          />
         </Suspense>
         <button
           style={{
@@ -447,8 +458,8 @@ export class ReplShapeUtil extends PcShapeUtil {
             borderRadius: 6,
             fontSize: 13,
             fontWeight: 600,
-            background: '#2563eb',
-            color: '#fff',
+            background: 'var(--pc-accent)',
+            color: 'var(--pc-accent-text)',
             cursor: 'pointer',
             pointerEvents: 'all',
           }}
@@ -463,7 +474,8 @@ export class ReplShapeUtil extends PcShapeUtil {
               margin: '6px 0 0',
               maxHeight: '40%',
               overflow: 'auto',
-              background: '#f6f6f6',
+              background: 'var(--pc-code-bg)',
+              color: 'var(--pc-text)',
               borderRadius: 4,
               fontSize: 12,
               padding: 6,
@@ -514,8 +526,10 @@ function InspectorView({ shape }) {
   const controlStyle = {
     fontSize: 12,
     padding: '3px 6px',
-    border: '1px solid #ddd',
+    border: '1px solid var(--pc-border-mid)',
     borderRadius: 6,
+    background: 'var(--pc-input-bg)',
+    color: 'var(--pc-text)',
     pointerEvents: 'all',
   }
 
@@ -533,7 +547,11 @@ function InspectorView({ shape }) {
       <DetailView
         selected={selected}
         detail={ready ? detail : null}
-        onBack={() => setSelected(null)}
+        onBack={() => {
+          setSelected(null)
+          sendInput(id, { action: 'detail', key: null }) // stop live updates
+        }}
+        onRefresh={() => sendInput(id, { action: 'detail', key: selected })}
         controlStyle={controlStyle}
       />
     )
@@ -615,11 +633,11 @@ function InspectorView({ shape }) {
                   style={{
                     textAlign: 'left',
                     padding: '2px 6px',
-                    borderBottom: '1px solid #ddd',
-                    color: '#666',
+                    borderBottom: '1px solid var(--pc-border-mid)',
+                    color: 'var(--pc-muted)',
                     position: 'sticky',
                     top: 0,
-                    background: '#fff',
+                    background: 'var(--pc-bg)',
                   }}
                 >
                   {c}
@@ -640,7 +658,7 @@ function InspectorView({ shape }) {
                     key={c}
                     style={{
                       padding: '2px 6px',
-                      borderBottom: '1px solid #f0f0f0',
+                      borderBottom: '1px solid var(--pc-border-soft)',
                       fontFamily: c === 'value' ? 'ui-monospace, monospace' : 'inherit',
                     }}
                   >
@@ -657,7 +675,7 @@ function InspectorView({ shape }) {
 }
 
 // Drill-down: an object's type/repr header plus a field/type/value table.
-function DetailView({ selected, detail, onBack, controlStyle }) {
+function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
   const fields = detail && Array.isArray(detail.fields) ? detail.fields : []
   return (
     <>
@@ -670,6 +688,8 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
         </button>
         <span
           style={{
+            flex: 1,
+            minWidth: 0,
             fontSize: 13,
             fontWeight: 600,
             overflow: 'hidden',
@@ -678,19 +698,22 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
           }}
         >
           {selected}
+          {detail && (
+            <span style={{ fontWeight: 400, color: 'var(--pc-faint)' }}> : {detail.type}</span>
+          )}
         </span>
-        {detail && (
-          <span style={{ fontSize: 12, color: '#888' }}>: {detail.type}</span>
-        )}
+        <button style={{ ...controlStyle, cursor: 'pointer' }} onClick={onRefresh}>
+          Refresh
+        </button>
       </div>
       <div
         style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
         onPointerDown={(e) => e.stopPropagation()}
       >
         {!detail ? (
-          <div style={{ fontSize: 12, color: '#999', padding: 6 }}>loading…</div>
+          <div style={{ fontSize: 12, color: 'var(--pc-faint2)', padding: 6 }}>loading…</div>
         ) : detail.missing ? (
-          <div style={{ fontSize: 12, color: '#999', padding: 6 }}>
+          <div style={{ fontSize: 12, color: 'var(--pc-faint2)', padding: 6 }}>
             no longer available
           </div>
         ) : (
@@ -699,9 +722,9 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
               style={{
                 fontSize: 12,
                 fontFamily: 'ui-monospace, monospace',
-                color: '#444',
-                background: '#f7f7f7',
-                border: '1px solid #eee',
+                color: 'var(--pc-detail-text)',
+                background: 'var(--pc-detail-bg)',
+                border: '1px solid var(--pc-detail-border)',
                 borderRadius: 4,
                 padding: '4px 6px',
                 marginBottom: 6,
@@ -719,11 +742,11 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
                       style={{
                         textAlign: 'left',
                         padding: '2px 6px',
-                        borderBottom: '1px solid #ddd',
-                        color: '#666',
+                        borderBottom: '1px solid var(--pc-border-mid)',
+                        color: 'var(--pc-muted)',
                         position: 'sticky',
                         top: 0,
-                        background: '#fff',
+                        background: 'var(--pc-bg)',
                       }}
                     >
                       {c}
@@ -736,7 +759,7 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
                   <tr>
                     <td
                       colSpan={3}
-                      style={{ padding: 6, color: '#999', fontStyle: 'italic' }}
+                      style={{ padding: 6, color: 'var(--pc-faint2)', fontStyle: 'italic' }}
                     >
                       no fields — see repr above
                     </td>
@@ -744,14 +767,14 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
                 ) : (
                   fields.map((f, i) => (
                     <tr key={i}>
-                      <td style={{ padding: '2px 6px', borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '2px 6px', borderBottom: '1px solid var(--pc-border-soft)' }}>
                         {f.field}
                       </td>
                       <td
                         style={{
                           padding: '2px 6px',
-                          borderBottom: '1px solid #f0f0f0',
-                          color: '#888',
+                          borderBottom: '1px solid var(--pc-border-soft)',
+                          color: 'var(--pc-faint)',
                         }}
                       >
                         {f.type}
@@ -759,7 +782,7 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
                       <td
                         style={{
                           padding: '2px 6px',
-                          borderBottom: '1px solid #f0f0f0',
+                          borderBottom: '1px solid var(--pc-border-soft)',
                           fontFamily: 'ui-monospace, monospace',
                         }}
                       >

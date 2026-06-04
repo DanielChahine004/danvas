@@ -33,11 +33,20 @@ _GLOBALS_COLS = ["name", "type", "value"]
 
 
 def _short(value, limit=80):
-    """A safe, length-capped repr for a cell in the table."""
+    """A safe, length-capped repr for a cell in the table.
+
+    Sized containers (list/tuple/set/dict) are prefixed with their length, e.g.
+    ``(3) [1, 2, 3]`` -- useful at a glance even when the repr is truncated.
+    """
     try:
         text = repr(value)
     except Exception as exc:  # a component's repr should never break the table
         text = f"<repr error: {exc!r}>"
+    if isinstance(value, (list, tuple, set, frozenset, dict)):
+        try:
+            text = f"({len(value)}) {text}"
+        except Exception:
+            pass
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -114,14 +123,25 @@ class Inspector(BaseComponent):
         # Stable row-key -> object map, rebuilt each _build; the frontend sends a
         # row's `key` back to request its detail view (handles unnamed panels).
         self._row_targets = {}
+        # Key of the row currently drilled into in the browser (or None). Tracked
+        # so refresh -- manual or the auto ticker -- also re-pushes that object's
+        # detail, keeping the open field view live as the object changes.
+        self._open_detail_key = None
 
     def register_props(self):
         self._props["rows"] = self._build()
         return dict(self._props)
 
     def refresh(self):
-        """Rebuild the table from current state and push it, live."""
-        self._send_update({"rows": self._build()})
+        """Rebuild the table from current state and push it, live.
+
+        If a row is currently drilled into, its detail view is rebuilt and
+        pushed in the same update so the open fields stay current too.
+        """
+        payload = {"rows": self._build()}
+        if self._open_detail_key:
+            payload["detail"] = self._build_detail(self._open_detail_key)
+        self._send_update(payload)
 
     # -- auto-refresh ticker (started/stopped via Canvas attach hooks) --------
     def _on_attached(self):
@@ -158,7 +178,10 @@ class Inspector(BaseComponent):
         elif action == "source":
             self._set_source(payload.get("source"))
         elif action == "detail":
+            # key=None means the browser closed the detail view (hit back); stop
+            # tracking it so the ticker no longer rebuilds a hidden detail.
             key = payload.get("key")
+            self._open_detail_key = key or None
             if key:
                 self._send_update({"detail": self._build_detail(key)})
 
@@ -171,6 +194,7 @@ class Inspector(BaseComponent):
         if source not in ("components", "globals") or source == self._source:
             return
         self._source = source
+        self._open_detail_key = None
         self._props["source"] = source
         cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
         self._props["cols"] = json.dumps(cols)

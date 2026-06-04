@@ -1,0 +1,53 @@
+/* PyCanvas panel theming.
+ *
+ * Every custom component's inline styles reference these CSS variables instead
+ * of hardcoded colors, so panels follow tldraw's own light/dark theme with no
+ * per-component JavaScript. tldraw puts `tl-theme__dark` on its container in
+ * dark mode (toggle it from tldraw's menu -> Preferences -> Dark mode); the
+ * dark block below overrides the variables whenever that class is present.
+ *
+ * Defaults live on `.tl-container` (always matches) and the dark block has
+ * equal specificity but comes later, so it wins when dark mode is on. */
+.tl-container {
+  --pc-bg: #ffffff;
+  --pc-border: #e2e2e2;
+  --pc-border-mid: #dddddd;
+  --pc-border-soft: #f0f0f0;
+  --pc-text: #222222;
+  --pc-muted: #666666;
+  --pc-faint: #888888;
+  --pc-faint2: #999999;
+  --pc-code-bg: #f6f6f6;
+  --pc-detail-bg: #f7f7f7;
+  --pc-detail-text: #444444;
+  --pc-detail-border: #eeeeee;
+  --pc-accent: #2563eb;
+  --pc-accent-text: #ffffff;
+  --pc-off-bg: #eeeeee;
+  --pc-off-text: #333333;
+  --pc-input-bg: #ffffff;
+  --pc-shadow: rgba(0, 0, 0, 0.08);
+  --pc-video-bg: #111111;
+}
+
+.tl-container.tl-theme__dark {
+  --pc-bg: #27272b;
+  --pc-border: #3a3a40;
+  --pc-border-mid: #444444;
+  --pc-border-soft: #333333;
+  --pc-text: #e6e6e6;
+  --pc-muted: #aaaaaa;
+  --pc-faint: #999999;
+  --pc-faint2: #888888;
+  --pc-code-bg: #1e1e22;
+  --pc-detail-bg: #1e1e22;
+  --pc-detail-text: #cfcfcf;
+  --pc-detail-border: #3a3a40;
+  --pc-accent: #3b82f6;
+  --pc-accent-text: #ffffff;
+  --pc-off-bg: #3a3a40;
+  --pc-off-text: #dddddd;
+  --pc-input-bg: #1e1e22;
+  --pc-shadow: rgba(0, 0, 0, 0.45);
+  --pc-video-bg: #000000;
+}
