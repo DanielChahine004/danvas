@@ -1,0 +1,175 @@
+"""Base class shared by all PyCanvas components."""
+
+import math
+import threading
+import traceback
+
+
+class BaseComponent:
+    """A bidirectional canvas component.
+
+    Subclasses set ``component`` (the type string sent to the browser) and
+    implement :meth:`update`. State (``_value``) is written by the asyncio
+    WebSocket handler thread and read from user threads, so access is guarded
+    by a per-component lock.
+    """
+
+    component = "Base"
+
+    # Default panel size in pixels, mirroring the frontend's getDefaultProps so
+    # ``comp.w``/``comp.h`` always read a real number (and can be incremented)
+    # even when size isn't given to ``insert``. Override per component.
+    default_w = 240
+    default_h = 96
+
+    def __init__(self, label=None, **props):
+        self.id = None
+        self._props = dict(props)
+        if label is not None:
+            self._props["label"] = label
+        # Ensure size is always present so w/h read/increment without surprises.
+        self._props.setdefault("w", self.default_w)
+        self._props.setdefault("h", self.default_h)
+        self._value = None
+        self._callbacks = []
+        self._bridge = None
+        self._lock = threading.Lock()
+        # Optional canvas placement (x, y) in canvas coordinates; None = let the
+        # frontend auto-cascade. Set by Canvas.insert. Width/height are passed
+        # through register_props instead (they are real shape props).
+        self._position = None
+        # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
+        # read and incremented. Like position, it is a top-level shape field.
+        self._rotation = 0
+
+    # -- wiring (called by Canvas.insert) ------------------------------------
+    def _bind(self, component_id, bridge):
+        self.id = component_id
+        self._bridge = bridge
+
+    # -- read ----------------------------------------------------------------
+    @property
+    def value(self):
+        with self._lock:
+            return self._value
+
+    # -- layout (read public state; writes move/resize live) -----------------
+    @property
+    def x(self):
+        return self._position[0] if self._position else None
+
+    @x.setter
+    def x(self, value):
+        self.set_layout(x=value)
+
+    @property
+    def y(self):
+        return self._position[1] if self._position else None
+
+    @y.setter
+    def y(self, value):
+        self.set_layout(y=value)
+
+    @property
+    def w(self):
+        return self._props.get("w")
+
+    @w.setter
+    def w(self, value):
+        self.set_layout(w=value)
+
+    @property
+    def h(self):
+        return self._props.get("h")
+
+    @h.setter
+    def h(self, value):
+        self.set_layout(h=value)
+
+    @property
+    def rotation(self):
+        """Rotation in degrees (clockwise); 0 if unrotated."""
+        return self._rotation
+
+    @rotation.setter
+    def rotation(self, value):
+        self.set_layout(rotation=value)
+
+    # -- registration / initial sync ----------------------------------------
+    def register_props(self):
+        """Props sent in the ``register`` message to build the shape."""
+        return dict(self._props)
+
+    def state_payload(self):
+        """Current state pushed right after register (None = nothing)."""
+        return None
+
+    # -- write (Python -> browser) -------------------------------------------
+    def update(self, *args, **kwargs):  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def _send_update(self, payload):
+        if self._bridge is not None:
+            self._bridge.broadcast(
+                {"type": "update", "id": self.id, "payload": payload}
+            )
+
+    # -- live layout (Python -> browser) -------------------------------------
+    def move(self, x, y):
+        """Move this panel to ``(x, y)`` in canvas coordinates, live."""
+        self.set_layout(x=x, y=y)
+
+    def resize(self, w=None, h=None):
+        """Resize this panel, live. Either dimension may be omitted."""
+        self.set_layout(w=w, h=h)
+
+    def rotate(self, degrees):
+        """Rotate this panel to ``degrees`` (clockwise), live."""
+        self.set_layout(rotation=degrees)
+
+    def set_layout(self, x=None, y=None, w=None, h=None, rotation=None):
+        """Update position, size and/or rotation in one live message.
+
+        Any argument left as ``None`` is unchanged. Stored state is updated so a
+        reconnecting client replays the new layout. ``x``/``y`` travel as the
+        panel's canvas position and ``rotation`` (degrees) as its angle; both are
+        top-level shape fields. ``w``/``h`` are shape props.
+        """
+        payload = {}
+        if x is not None:
+            payload["x"] = x
+        if y is not None:
+            payload["y"] = y
+        if x is not None or y is not None:
+            prev_x, prev_y = self._position or (None, None)
+            new_x = x if x is not None else prev_x
+            new_y = y if y is not None else prev_y
+            if new_x is not None and new_y is not None:
+                self._position = (new_x, new_y)
+        if w is not None:
+            self._props["w"] = w
+            payload["w"] = w
+        if h is not None:
+            self._props["h"] = h
+            payload["h"] = h
+        if rotation is not None:
+            self._rotation = rotation
+            payload["rotation"] = math.radians(rotation)  # tldraw uses radians
+        if payload:
+            self._send_update(payload)
+
+    # -- input (browser -> Python) -------------------------------------------
+    def on_change(self, fn):
+        """Decorator: register a callback fired on input from the browser."""
+        self._callbacks.append(fn)
+        return fn
+
+    def _handle_input(self, payload):
+        if "value" in payload:
+            with self._lock:
+                self._value = payload["value"]
+        for cb in self._callbacks:
+            try:
+                cb(self.value)
+            except Exception:
+                traceback.print_exc()

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Python build output (root only — the committed frontend bundle at
+# pycanvas/frontend/dist/ is intentionally kept and must NOT be ignored).
+/build/
+/dist/
+
+# Frontend toolchain (the built bundle is committed; its deps are not)
+node_modules/
+pycanvas/frontend/.vite/
+
+# Editor / OS / local agent state
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
