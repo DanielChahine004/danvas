@@ -144,6 +144,28 @@ full walkthrough.
 > Note: a `Canvas` is single-process — one Python process owns the port and all
 > components. Two separate scripts can't add to the same canvas/port.
 
+## Sharing on your network
+
+By default the server binds to `127.0.0.1` (this machine only). To let other
+devices on the same network open and interact with the canvas, bind to all
+interfaces:
+
+```python
+canvas.serve(port=8000, host="0.0.0.0")
+# or: canvas.serve_background(port=8000, host="0.0.0.0")
+```
+
+Then on another device's browser, go to `http://<this-machine-ip>:8000`
+(find the IP with `ipconfig` on Windows / `ip addr` on Linux/macOS, e.g.
+`http://192.168.1.42:8000`). Everyone connected sees the same canvas and shares
+control in real time.
+
+Caveats:
+- Your OS firewall may prompt to allow Python through on first run — accept it
+  for private networks.
+- There's **no authentication** — anyone who can reach the port can interact.
+  Use only on networks you trust.
+
 ## Examples
 
 ```bash

@@ -78,21 +78,29 @@ class Canvas:
     def __getitem__(self, name):
         return self._named[name]
 
-    def serve(self, port=8000, open_browser=True):
-        """Start the server, open the browser, and block until shutdown."""
-        self._serving = True
-        server.run(self._bridge, port=port, open_browser=open_browser)
+    def serve(self, port=8000, open_browser=True, host="127.0.0.1"):
+        """Start the server, open the browser, and block until shutdown.
 
-    def serve_background(self, port=8000, open_browser=True, wait=True):
+        ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
+        pass ``"0.0.0.0"`` to let other devices on your network connect at
+        ``http://<this-machine-ip>:<port>``.
+        """
+        self._serving = True
+        server.run(self._bridge, port=port, open_browser=open_browser, host=host)
+
+    def serve_background(self, port=8000, open_browser=True, wait=True, host="127.0.0.1"):
         """Start the server without blocking; return ``self`` for chaining.
 
         Intended for interactive sessions (e.g. Jupyter): the call returns so
         further ``insert`` calls push panels onto the live canvas. When
         ``wait`` is true, block briefly until the server's event loop is ready
         so the first post-serve insert is guaranteed to broadcast.
+
+        ``host`` is the bind address; pass ``"0.0.0.0"`` for LAN access (see
+        ``serve``).
         """
         self._server = server.run_background(
-            self._bridge, port=port, open_browser=open_browser
+            self._bridge, port=port, open_browser=open_browser, host=host
         )
         if wait:
             self._wait_until_ready()

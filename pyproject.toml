@@ -16,6 +16,10 @@ classifiers = [
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
+
+[project.urls]
+Homepage = "https://github.com/DanielChahine004/pycanvas"
+Repository = "https://github.com/DanielChahine004/pycanvas"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
