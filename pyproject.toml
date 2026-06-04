@@ -1,7 +1,3 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "pycanvas"
 version = "0.1.0"
@@ -10,6 +6,12 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "Daniel Chahine", email = "daniel.chahine004@gmail.com" }]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -20,19 +22,3 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/DanielChahine004/pycanvas"
 Repository = "https://github.com/DanielChahine004/pycanvas"
-dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
-    "opencv-python>=4.8",
-    "numpy>=1.24",
-]
-
-[project.optional-dependencies]
-dev = ["pytest", "websockets"]
-
-[tool.setuptools.packages.find]
-include = ["pycanvas*"]
-
-[tool.setuptools.package-data]
-# Ship the pre-built frontend so users never run Node/npm.
-pycanvas = ["frontend/dist/**/*"]
