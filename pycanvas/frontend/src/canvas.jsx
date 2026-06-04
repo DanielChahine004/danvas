@@ -20,7 +20,30 @@ function cardStyle(shape) {
     boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
     fontFamily: 'system-ui, sans-serif',
     overflow: 'hidden',
+    // Anchors the lock overlay (see Card) to the card's own box.
+    position: 'relative',
   }
+}
+
+// Card chrome shared by every panel. When the shape is fully locked (isLocked),
+// it lays a transparent overlay over the content that swallows pointer events,
+// so the panel's controls stop responding to interaction. tldraw's isLocked
+// only blocks its own select/move/resize gestures — pointer events still reach
+// inner HTML (our controls set pointerEvents:'all'), so without this a locked
+// slider would keep firing value changes. Pinned panels (movable/resizable
+// false) deliberately stay interactive and get no overlay.
+function Card({ shape, children }) {
+  return (
+    <HTMLContainer style={cardStyle(shape)}>
+      {children}
+      {shape.isLocked && (
+        <div
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'default' }}
+          onPointerDown={(e) => e.stopPropagation()}
+        />
+      )}
+    </HTMLContainer>
+  )
 }
 
 const labelStyle = {
@@ -32,8 +55,35 @@ const labelStyle = {
   marginBottom: 6,
 }
 
+// Shared base for every PyCanvas panel. It reads two per-shape flags from the
+// shape's `meta` to support interaction-preserving locks (set from Python via
+// `movable` / `resizable`):
+//   meta.lockMove   -> the user can't drag the panel (onTranslate pins x/y)
+//   meta.lockResize -> the user can't resize it (no resize, handles hidden)
+// These only gate *user* gestures; programmatic editor.updateShape calls (the
+// Python move()/resize() path) bypass them, and the panel's own controls keep
+// working since their pointerdown handlers stopPropagation. For a full lock
+// that also blocks interaction, use the shape's top-level `isLocked` instead.
+class PcShapeUtil extends BaseBoxShapeUtil {
+  canResize(shape) {
+    return !shape.meta?.lockResize
+  }
+
+  hideResizeHandles(shape) {
+    return !!shape.meta?.lockResize
+  }
+
+  onTranslate(initial, current) {
+    if (initial.meta?.lockMove) {
+      // Override the dragged position back to the original each frame so the
+      // panel stays put while still being selectable and interactive.
+      return { id: initial.id, type: initial.type, x: initial.x, y: initial.y }
+    }
+  }
+}
+
 // --- Slider -----------------------------------------------------------------
-export class SliderShapeUtil extends BaseBoxShapeUtil {
+export class SliderShapeUtil extends PcShapeUtil {
   static type = 'pcSlider'
   static props = {
     w: T.number,
@@ -52,7 +102,7 @@ export class SliderShapeUtil extends BaseBoxShapeUtil {
     const { label, min, max, value } = shape.props
     const id = componentIdOf(shape.id)
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
         <input
           type="range"
@@ -76,7 +126,7 @@ export class SliderShapeUtil extends BaseBoxShapeUtil {
         <div style={{ fontSize: 16, fontWeight: 600, color: '#222', marginTop: 4 }}>
           {value}
         </div>
-      </HTMLContainer>
+      </Card>
     )
   }
 
@@ -86,7 +136,7 @@ export class SliderShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- Label ------------------------------------------------------------------
-export class LabelShapeUtil extends BaseBoxShapeUtil {
+export class LabelShapeUtil extends PcShapeUtil {
   static type = 'pcLabel'
   static props = {
     w: T.number,
@@ -102,10 +152,10 @@ export class LabelShapeUtil extends BaseBoxShapeUtil {
   component(shape) {
     const { label, value } = shape.props
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
         <div style={{ fontSize: 20, fontWeight: 600, color: '#222' }}>{value}</div>
-      </HTMLContainer>
+      </Card>
     )
   }
 
@@ -115,7 +165,7 @@ export class LabelShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- VideoFeed --------------------------------------------------------------
-export class VideoShapeUtil extends BaseBoxShapeUtil {
+export class VideoShapeUtil extends PcShapeUtil {
   static type = 'pcVideo'
   static props = {
     w: T.number,
@@ -131,7 +181,7 @@ export class VideoShapeUtil extends BaseBoxShapeUtil {
   component(shape) {
     const { label, src } = shape.props
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
         <div
           style={{
@@ -159,7 +209,7 @@ export class VideoShapeUtil extends BaseBoxShapeUtil {
             <span style={{ color: '#666', fontSize: 13 }}>no signal</span>
           )}
         </div>
-      </HTMLContainer>
+      </Card>
     )
   }
 
@@ -169,7 +219,7 @@ export class VideoShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- Custom (arbitrary HTML in a sandboxed iframe) --------------------------
-export class HtmlShapeUtil extends BaseBoxShapeUtil {
+export class HtmlShapeUtil extends PcShapeUtil {
   static type = 'pcHtml'
   static props = {
     w: T.number,
@@ -185,7 +235,7 @@ export class HtmlShapeUtil extends BaseBoxShapeUtil {
   component(shape) {
     const { label, html } = shape.props
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <div style={labelStyle}>{label}</div>
         <iframe
@@ -205,7 +255,7 @@ export class HtmlShapeUtil extends BaseBoxShapeUtil {
           // Keep tldraw from hijacking drags/zoom meant for the iframe content.
           onPointerDown={(e) => e.stopPropagation()}
         />
-      </HTMLContainer>
+      </Card>
     )
   }
 
@@ -215,7 +265,7 @@ export class HtmlShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- Toggle (pick one of N options) -----------------------------------------
-export class ToggleShapeUtil extends BaseBoxShapeUtil {
+export class ToggleShapeUtil extends PcShapeUtil {
   static type = 'pcToggle'
   static props = {
     w: T.number,
@@ -233,7 +283,7 @@ export class ToggleShapeUtil extends BaseBoxShapeUtil {
     const { label, options, value } = shape.props
     const id = componentIdOf(shape.id)
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {options.map((opt) => {
@@ -269,7 +319,7 @@ export class ToggleShapeUtil extends BaseBoxShapeUtil {
             )
           })}
         </div>
-      </HTMLContainer>
+      </Card>
     )
   }
 
@@ -315,7 +365,7 @@ function LivePlotView({ shape }) {
   )
 }
 
-export class LivePlotShapeUtil extends BaseBoxShapeUtil {
+export class LivePlotShapeUtil extends PcShapeUtil {
   static type = 'pcLivePlot'
   static props = { w: T.number, h: T.number, label: T.string }
 
@@ -325,10 +375,10 @@ export class LivePlotShapeUtil extends BaseBoxShapeUtil {
 
   component(shape) {
     return (
-      <HTMLContainer style={cardStyle(shape)}>
+      <Card shape={shape}>
         <div style={labelStyle}>{shape.props.label}</div>
         <LivePlotView shape={shape} />
-      </HTMLContainer>
+      </Card>
     )
   }
 

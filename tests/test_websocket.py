@@ -1,5 +1,6 @@
 """End-to-end WebSocket protocol test using FastAPI's TestClient."""
 
+import threading
 import time
 
 from fastapi.testclient import TestClient
@@ -49,3 +50,53 @@ def test_input_message_updates_python_value():
 
     assert slider.value == 150
     assert fired == [150]
+
+
+def test_layout_message_syncs_python_geometry():
+    canvas, slider, label, app = build_client()
+    seen = []
+    slider.on_layout(lambda c: seen.append((c.x, c.y, c.w, c.h)))
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            for _ in range(4):
+                ws.receive_json()
+            # User dragged/resized the panel in the browser.
+            ws.send_json(
+                {"type": "layout", "id": slider.id,
+                 "x": 300, "y": 150, "w": 320, "h": 120, "rotation": 0}
+            )
+            for _ in range(50):
+                if slider.x == 300:
+                    break
+                time.sleep(0.02)
+
+    assert (slider.x, slider.y, slider.w, slider.h) == (300, 150, 320, 120)
+    assert seen and seen[-1] == (300, 150, 320, 120)
+
+
+def test_snapshot_request_response():
+    canvas, slider, label, app = build_client()
+    fake_doc = {"document": {"store": {}}, "session": {}}
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            for _ in range(4):
+                ws.receive_json()
+
+            # request_snapshot blocks the caller, so run it off-thread and
+            # answer the get_snapshot request from this (the client) thread.
+            result = {}
+            t = threading.Thread(
+                target=lambda: result.update(
+                    data=canvas._bridge.request_snapshot(timeout=3)
+                )
+            )
+            t.start()
+
+            req = ws.receive_json()
+            assert req["type"] == "get_snapshot" and "reqId" in req
+            ws.send_json({"type": "snapshot", "reqId": req["reqId"], "data": fake_doc})
+            t.join(timeout=3)
+
+    assert result["data"] == fake_doc

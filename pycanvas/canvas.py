@@ -1,5 +1,6 @@
 """Canvas: the public entry point. Holds components and serves the app."""
 
+import json
 import time
 import uuid
 
@@ -7,20 +8,149 @@ from . import server
 from .bridge import Bridge
 
 
+# Friendly snake_case names mapped onto tldraw's arrow shape prop names.
+# ``label`` is the conventional caption (tldraw stores it in the ``text`` prop).
+_ARROW_PROP_ALIASES = {
+    "label": "text",
+    "arrowhead_start": "arrowheadStart",
+    "arrowhead_end": "arrowheadEnd",
+    "label_color": "labelColor",
+}
+
+
+def _arrow_props(props):
+    """Translate snake_case kwargs to tldraw arrow prop names."""
+    return {_ARROW_PROP_ALIASES.get(k, k): v for k, v in props.items()}
+
+
+class Arrow:
+    """A connector between two panels, managed much like a component.
+
+    Returned by :meth:`Canvas.connect`. The arrow binds to each panel in tldraw,
+    so it reroutes automatically as the panels move or resize. Like a component
+    it takes a ``label`` (shown on the arrow, and used for ``canvas.<label>``
+    lookup), and it is bound to the canvas bridge so its appearance can be
+    changed live::
+
+        a = canvas.connect(src, dst, label="flow", color="blue")
+        a.color = "red"               # or a.update(color="red")
+        a.update(dash="dashed", label="x2")
+
+    Valid tldraw values: ``color`` one of black/grey/violet/light-violet/blue/
+    light-blue/yellow/orange/green/light-green/light-red/red/white; ``dash`` one
+    of draw/solid/dashed/dotted; ``size`` one of s/m/l/xl; ``arrowhead_start`` /
+    ``arrowhead_end`` one of none/arrow/triangle/square/dot/pipe/diamond/
+    inverted/bar; ``bend`` a number.
+
+    Pass it (or its ``label``) to :meth:`Canvas.disconnect` to remove it.
+    """
+
+    def __init__(self, arrow_id, start, end, bridge, props=None, label=None, name=None):
+        self.id = arrow_id
+        self.start = start
+        self.end = end
+        self.name = name
+        self._bridge = bridge
+        self._props = dict(props or {})
+        if label is not None:
+            self._props.setdefault("text", label)
+
+    def register_message(self):
+        """Build the ``arrow`` register message (current props included)."""
+        return {
+            "type": "arrow",
+            "id": self.id,
+            "start": self.start.id,
+            "end": self.end.id,
+            "props": dict(self._props),
+        }
+
+    def update(self, **props):
+        """Change arrow properties live (color, text, dash, size, bend, ...).
+
+        Accepts the friendly names in the class docstring. Stored so a
+        reconnecting client replays the new appearance.
+        """
+        props = _arrow_props(props)
+        self._props.update(props)
+        if self._bridge is not None:
+            self._bridge.broadcast(
+                {"type": "update", "id": self.id, "payload": props}
+            )
+        return self
+
+    # -- convenience accessors for the common props --------------------------
+    @property
+    def color(self):
+        return self._props.get("color")
+
+    @color.setter
+    def color(self, value):
+        self.update(color=value)
+
+    @property
+    def label(self):
+        """The text shown on the arrow (tldraw's ``text`` prop)."""
+        return self._props.get("text")
+
+    @label.setter
+    def label(self, value):
+        self.update(text=value)
+
+    @property
+    def dash(self):
+        return self._props.get("dash")
+
+    @dash.setter
+    def dash(self, value):
+        self.update(dash=value)
+
+    @property
+    def size(self):
+        return self._props.get("size")
+
+    @size.setter
+    def size(self, value):
+        self.update(size=value)
+
+    @property
+    def bend(self):
+        return self._props.get("bend")
+
+    @bend.setter
+    def bend(self, value):
+        self.update(bend=value)
+
+
 class Canvas:
     def __init__(self):
         self._bridge = Bridge()
         self._components = []
+        self._arrows = []
         self._named = {}  # name -> component, for canvas.<name> / canvas["<name>"]
         self._serving = False
         self._server = None
 
-    def insert(self, component, x=None, y=None, w=None, h=None, rotation=None, name=None):
+    def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
+               locked=False, movable=True, resizable=True, name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
         let the frontend auto-cascade. ``w``/``h`` set its size in pixels;
         omit them to use the component's default size.
+
+        Three independent lock controls:
+
+        - ``locked=True`` fully locks the panel — no move, resize, or
+          interaction (toggle later with ``component.lock()`` / ``unlock()``).
+        - ``movable=False`` stops the user dragging the panel but keeps its
+          controls interactive (toggle with ``component.movable``).
+        - ``resizable=False`` stops the user resizing it, controls still work
+          (toggle with ``component.resizable``).
+
+        Use ``movable=False, resizable=False`` (or ``component.pin()``) to pin an
+        interactive panel in place. Python ``move()``/``resize()`` still work
+        regardless of these — they only gate user gestures.
 
         ``name`` (or the component's label, if a valid identifier) exposes the
         component as ``canvas.<name>`` and ``canvas["<name>"]``.
@@ -43,6 +173,12 @@ class Canvas:
             component._props["h"] = h
         if rotation is not None:
             component._rotation = rotation
+        if locked:
+            component._locked = True
+        if not movable:
+            component._movable = False
+        if not resizable:
+            component._resizable = False
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -66,6 +202,160 @@ class Canvas:
         self._bridge.remove_component(component.id)
         component._bridge = None
         return component
+
+    def connect(self, start, end, label=None, name=None, **props):
+        """Draw an arrow from panel ``start`` to panel ``end`` and return it.
+
+        Both arguments are components previously passed to :meth:`insert`. The
+        arrow binds to each panel in tldraw, so it follows them as they move or
+        resize. Like a component, ``label`` captions the arrow and (when a valid
+        identifier) exposes it as ``canvas.<label>`` / ``canvas["<label>"]``;
+        ``name`` overrides that lookup key. Extra keyword args set its appearance
+        (``color``, ``dash``, ``size``, ``bend``, ``arrowhead_start`` /
+        ``arrowhead_end``; see :class:`Arrow`). Works live while serving.
+        """
+        if start.id is None or end.id is None:
+            raise ValueError("both panels must be inserted before connecting them")
+        if name is None and isinstance(label, str) and label.isidentifier():
+            name = label
+        arrow_id = uuid.uuid4().hex
+        arrow = Arrow(
+            arrow_id, start, end, self._bridge,
+            props=_arrow_props(props), label=label, name=name,
+        )
+        self._arrows.append(arrow)
+        if name is not None:
+            self._named[name] = arrow
+        self._bridge.add_arrow(arrow)
+        return arrow
+
+    def disconnect(self, arrow):
+        """Remove an arrow returned by :meth:`connect`, by object or by name.
+
+        Works live while serving. Safe to call with an arrow (or name) that was
+        already removed or never created; then it is a no-op.
+        """
+        if isinstance(arrow, str):
+            arrow = self._named.get(arrow)
+        if arrow is None or arrow not in self._arrows:
+            return
+        self._arrows.remove(arrow)
+        for nm, obj in list(self._named.items()):
+            if obj is arrow:
+                del self._named[nm]
+        self._bridge.remove_arrow(arrow.id)
+        arrow._bridge = None
+        return arrow
+
+    # -- save / load ----------------------------------------------------------
+    def save(self, path, timeout=5.0):
+        """Save the canvas to one JSON file: panel formation + user drawings.
+
+        Two things are written together:
+
+        - ``layout`` — every panel's geometry and lock state (read from Python,
+          which tracks the user's live drags/resizes). Panels are code, so only
+          their *placement* is saved, never their behaviour.
+        - ``drawings`` — the free-form shapes/text/arrows the user added in the
+          UI, which have no Python counterpart. Captured from a connected
+          browser (the source of truth), so an open page is needed for these;
+          with no browser open the formation is still saved on its own.
+
+        Reload it with :meth:`load`.
+        """
+        data = {"layout": self._layout()}
+        try:
+            drawings = self._bridge.request_snapshot(timeout=timeout)
+        except RuntimeError:
+            drawings = None  # no browser connected — save the formation only
+        if drawings is not None:
+            data["drawings"] = drawings
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return self
+
+    def load(self, source, formation=True):
+        """Restore a canvas saved by :meth:`save` (a dict or path to JSON).
+
+        Recreate your panels in code first, then call this: it snaps them back
+        into their saved formation (matched by id, then by label across runs)
+        and lays the saved drawings on top. Bound arrows follow their panels
+        automatically. Applies live and replays to clients that connect/reload.
+
+        Pass ``formation=False`` to load only the user-made drawings and leave
+        your panels wherever your code placed them (the saved formation is
+        ignored).
+        """
+        data = source if isinstance(source, dict) else self._read_json(source)
+        if formation and data.get("layout"):
+            self._restore_layout(data["layout"])
+        if data.get("drawings"):
+            self._bridge.load_snapshot(data["drawings"])
+        return self
+
+    def _layout(self):
+        """Build the formation dict: each panel's geometry and lock state."""
+        components = [
+            {
+                "label": c._props.get("label"),
+                "id": c.id,
+                "x": c.x,
+                "y": c.y,
+                "w": c.w,
+                "h": c.h,
+                "rotation": c.rotation,
+                "locked": c.locked,
+                "movable": c.movable,
+                "resizable": c.resizable,
+            }
+            for c in self._components
+        ]
+        arrows = [
+            {
+                "label": a.label,
+                "start": a.start._props.get("label"),
+                "end": a.end._props.get("label"),
+                "props": dict(a._props),
+            }
+            for a in self._arrows
+        ]
+        return {"components": components, "arrows": arrows}
+
+    def _restore_layout(self, data):
+        """Apply a formation dict (from :meth:`_layout`) onto live panels."""
+        by_id = {c.id: c for c in self._components}
+        by_label = {c._props.get("label"): c for c in self._components}
+        for item in data.get("components", []):
+            comp = by_id.get(item.get("id")) or by_label.get(item.get("label"))
+            if comp is None:
+                continue
+            comp.set_layout(
+                x=item.get("x"),
+                y=item.get("y"),
+                w=item.get("w"),
+                h=item.get("h"),
+                rotation=item.get("rotation"),
+                locked=item.get("locked"),
+                movable=item.get("movable"),
+                resizable=item.get("resizable"),
+            )
+
+    @staticmethod
+    def _read_json(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def wait_for_client(self, timeout=10.0):
+        """Block until at least one browser is connected, or ``timeout`` elapses.
+
+        Useful before :meth:`load_canvas`, which pushes to connected clients —
+        give the freshly opened page a moment to connect first. Returns ``True``
+        if a client connected.
+        """
+        deadline = time.monotonic() + timeout
+        while not self._bridge._connections and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return bool(self._bridge._connections)
 
     def __getattr__(self, name):
         # Only reached when normal attribute lookup fails. _named is set in

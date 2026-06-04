@@ -32,6 +32,7 @@ class BaseComponent:
         self._props.setdefault("h", self.default_h)
         self._value = None
         self._callbacks = []
+        self._layout_callbacks = []
         self._bridge = None
         self._lock = threading.Lock()
         # Optional canvas placement (x, y) in canvas coordinates; None = let the
@@ -41,6 +42,15 @@ class BaseComponent:
         # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
         # read and incremented. Like position, it is a top-level shape field.
         self._rotation = 0
+        # When True the panel is fully locked in tldraw (isLocked): it can't be
+        # moved, resized, rotated, selected, OR interacted with. Top-level field.
+        self._locked = False
+        # Finer-grained, interaction-preserving locks. With these the panel's
+        # controls (sliders, buttons) still work; only the drag-to-move and
+        # resize-handle gestures are disabled. Carried in the shape's tldraw
+        # ``meta`` and enforced by the frontend's onTranslate / canResize hooks.
+        self._movable = True
+        self._resizable = True
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -95,6 +105,33 @@ class BaseComponent:
     def rotation(self, value):
         self.set_layout(rotation=value)
 
+    @property
+    def locked(self):
+        """Whether the panel is fully locked (no move/resize/interaction)."""
+        return self._locked
+
+    @locked.setter
+    def locked(self, value):
+        self.set_layout(locked=bool(value))
+
+    @property
+    def movable(self):
+        """Whether the user can drag the panel. Interaction is unaffected."""
+        return self._movable
+
+    @movable.setter
+    def movable(self, value):
+        self.set_layout(movable=bool(value))
+
+    @property
+    def resizable(self):
+        """Whether the user can resize the panel. Interaction is unaffected."""
+        return self._resizable
+
+    @resizable.setter
+    def resizable(self, value):
+        self.set_layout(resizable=bool(value))
+
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
         """Props sent in the ``register`` message to build the shape."""
@@ -127,13 +164,36 @@ class BaseComponent:
         """Rotate this panel to ``degrees`` (clockwise), live."""
         self.set_layout(rotation=degrees)
 
-    def set_layout(self, x=None, y=None, w=None, h=None, rotation=None):
-        """Update position, size and/or rotation in one live message.
+    def lock(self):
+        """Fully lock the panel (no move, resize, or interaction), live."""
+        self.set_layout(locked=True)
+
+    def unlock(self):
+        """Release a full lock so the panel responds normally again, live."""
+        self.set_layout(locked=False)
+
+    def pin(self):
+        """Pin in place and fix size, but keep controls interactive, live.
+
+        Shorthand for ``set_layout(movable=False, resizable=False)`` — unlike
+        :meth:`lock`, sliders and buttons on the panel still work.
+        """
+        self.set_layout(movable=False, resizable=False)
+
+    def unpin(self):
+        """Allow dragging and resizing again, live."""
+        self.set_layout(movable=True, resizable=True)
+
+    def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
+                   locked=None, movable=None, resizable=None):
+        """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
         reconnecting client replays the new layout. ``x``/``y`` travel as the
-        panel's canvas position and ``rotation`` (degrees) as its angle; both are
-        top-level shape fields. ``w``/``h`` are shape props.
+        panel's canvas position, ``rotation`` (degrees) as its angle. ``locked``
+        is a full lock (also blocks interaction); ``movable``/``resizable`` are
+        interaction-preserving locks carried in the shape's tldraw ``meta``.
+        ``w``/``h`` are shape props.
         """
         payload = {}
         if x is not None:
@@ -155,8 +215,50 @@ class BaseComponent:
         if rotation is not None:
             self._rotation = rotation
             payload["rotation"] = math.radians(rotation)  # tldraw uses radians
+        if locked is not None:
+            self._locked = bool(locked)
+            payload["locked"] = self._locked
+        if movable is not None:
+            self._movable = bool(movable)
+            payload["movable"] = self._movable
+        if resizable is not None:
+            self._resizable = bool(resizable)
+            payload["resizable"] = self._resizable
         if payload:
             self._send_update(payload)
+
+    # -- layout read-back (browser -> Python) --------------------------------
+    def on_layout(self, fn):
+        """Decorator: callback fired when the user moves/resizes this panel.
+
+        Called with the component after its stored geometry has been updated
+        from the browser. Use it to react to (or persist) hand-arranged layouts.
+        """
+        self._layout_callbacks.append(fn)
+        return fn
+
+    def _apply_remote_layout(self, msg):
+        """Update stored geometry from a user drag/resize in the browser.
+
+        Does not broadcast back (the change originated there). ``rotation``
+        arrives in radians (tldraw) and is stored as degrees, matching the rest
+        of the Python API.
+        """
+        x = msg.get("x")
+        y = msg.get("y")
+        if x is not None and y is not None:
+            self._position = (x, y)
+        if msg.get("w") is not None:
+            self._props["w"] = msg["w"]
+        if msg.get("h") is not None:
+            self._props["h"] = msg["h"]
+        if msg.get("rotation") is not None:
+            self._rotation = math.degrees(msg["rotation"])
+        for cb in self._layout_callbacks:
+            try:
+                cb(self)
+            except Exception:
+                traceback.print_exc()
 
     # -- input (browser -> Python) -------------------------------------------
     def on_change(self, fn):

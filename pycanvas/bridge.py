@@ -8,7 +8,9 @@ schedules the actual send onto the server's asyncio event loop.
 import asyncio
 import json
 import math
+import threading
 import traceback
+import uuid
 
 from fastapi import WebSocketDisconnect
 
@@ -16,8 +18,11 @@ from fastapi import WebSocketDisconnect
 class Bridge:
     def __init__(self):
         self._components = {}  # id -> BaseComponent
+        self._arrows = {}  # id -> Arrow
         self._connections = set()
         self._loop = None
+        self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
+        self._loaded_doc = None  # last full document loaded, replayed on connect
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -27,6 +32,20 @@ class Bridge:
         """Forget a component and tell connected clients to drop its panel."""
         self._components.pop(component_id, None)
         self.broadcast({"type": "remove", "id": component_id})
+
+    def add_arrow(self, arrow):
+        """Store an ``Arrow`` and broadcast its register message to live clients.
+
+        The object (not a snapshot) is kept so reconnecting clients replay the
+        arrow with its current props after their panels are recreated.
+        """
+        self._arrows[arrow.id] = arrow
+        self.broadcast(arrow.register_message())
+
+    def remove_arrow(self, arrow_id):
+        """Forget an arrow and tell connected clients to drop it."""
+        self._arrows.pop(arrow_id, None)
+        self.broadcast({"type": "remove", "id": arrow_id})
 
     def set_loop(self, loop):
         self._loop = loop
@@ -45,6 +64,12 @@ class Bridge:
         rot = getattr(component, "_rotation", None)
         if rot is not None:
             msg["rotation"] = math.radians(rot)
+        if getattr(component, "_locked", False):
+            msg["locked"] = True
+        if not getattr(component, "_movable", True):
+            msg["movable"] = False
+        if not getattr(component, "_resizable", True):
+            msg["resizable"] = False
         return msg
 
     def register_live(self, component):
@@ -74,6 +99,15 @@ class Bridge:
                     await self._send(
                         ws, {"type": "update", "id": comp.id, "payload": state}
                     )
+            # Arrows bind to panels, so replay them after every panel exists.
+            for arrow in self._arrows.values():
+                await self._send(ws, arrow.register_message())
+            # If a full canvas was loaded, replay it last so reloads keep it
+            # (it replaces the document, incl. any user drawings it contained).
+            if self._loaded_doc is not None:
+                await self._send(
+                    ws, {"type": "load_snapshot", "data": self._loaded_doc}
+                )
 
             while True:
                 raw = await ws.receive_text()
@@ -90,10 +124,22 @@ class Bridge:
             msg = json.loads(raw)
         except (ValueError, TypeError):
             return
-        if msg.get("type") == "input":
+        kind = msg.get("type")
+        if kind == "input":
             comp = self._components.get(msg.get("id"))
             if comp is not None:
                 comp._handle_input(msg.get("payload") or {})
+        elif kind == "layout":
+            # User moved/resized a panel in the browser; sync Python's state.
+            comp = self._components.get(msg.get("id"))
+            if comp is not None:
+                comp._apply_remote_layout(msg)
+        elif kind == "snapshot":
+            # Reply to a request_snapshot; hand the document to the waiter.
+            waiter = self._snapshot_waiters.get(msg.get("reqId"))
+            if waiter is not None:
+                waiter["data"] = msg.get("data")
+                waiter["event"].set()
 
     async def _send(self, ws, msg):
         await ws.send_text(json.dumps(msg))
@@ -111,3 +157,52 @@ class Bridge:
             await ws.send_text(json.dumps(msg))
         except Exception:
             self._connections.discard(ws)
+
+    def _panel_shape_ids(self):
+        """tldraw shape ids of every pycanvas-managed panel and arrow.
+
+        The frontend keys shapes as ``shape:<component id>``; these are the
+        shapes we own (panels + connector arrows) and want to exclude from a
+        saved canvas, leaving only the user's free-form drawings.
+        """
+        return [f"shape:{cid}" for cid in self._components] + \
+               [f"shape:{aid}" for aid in self._arrows]
+
+    # -- user-drawing snapshot (request/response with the browser) ------------
+    def request_snapshot(self, timeout=5.0):
+        """Ask a connected browser for the user's free-form drawings.
+
+        Returns tldraw "content" (shapes/bindings/assets) for everything on the
+        canvas *except* the pycanvas panels and connector arrows — those are
+        recreated from Python code, not persisted. The browser is the source of
+        truth for free-form drawings, so this round-trips over the socket and
+        blocks the calling thread until a reply arrives (or ``timeout`` elapses).
+        Requires at least one open client.
+        """
+        if not self._connections:
+            raise RuntimeError("no connected browser to read the canvas from")
+        req_id = uuid.uuid4().hex
+        waiter = {"event": threading.Event(), "data": None}
+        self._snapshot_waiters[req_id] = waiter
+        try:
+            self.broadcast({
+                "type": "get_snapshot",
+                "reqId": req_id,
+                "panelIds": self._panel_shape_ids(),
+            })
+            if not waiter["event"].wait(timeout):
+                raise TimeoutError("timed out waiting for the canvas snapshot")
+            return waiter["data"]
+        finally:
+            self._snapshot_waiters.pop(req_id, None)
+
+    def load_snapshot(self, data):
+        """Push saved user drawings to connected browsers (merged onto the page).
+
+        The content is *added* to the live canvas, so the code-created panels
+        stay put and the drawings reappear on top of them. Remembered so a
+        client that connects (or reloads) later is sent the same drawings,
+        making them survive page reloads.
+        """
+        self._loaded_doc = data
+        self.broadcast({"type": "load_snapshot", "data": data})

@@ -116,9 +116,26 @@ canvas.servo.rotation = 45          # same object as the `servo` variable
 canvas["servo"].update(120)
 ```
 
-> Layout values reflect what Python last set. Dragging or resizing a panel in
-> the browser is **not** reported back to Python (so `x`/`y` stay `None` until
-> you place a panel from Python).
+> Layout values reflect both what Python last set **and** the user's drags,
+> resizes and rotations in the browser — those are reported back, so `x`/`y`/
+> `w`/`h`/`rotation` stay in sync (register `@panel.on_layout` to react to them).
+> A panel's `x`/`y` are `None` only until it's first placed — by Python or a drag.
+
+## Saving & loading
+
+Persist the whole board — the panel formation **and** the user's freehand
+drawings — to one JSON file, then bring it back:
+
+```python
+canvas.save("board.json")                    # browser must be open to capture drawings
+# next run, recreate the panels in code first (same labels), then:
+canvas.load("board.json")                    # snaps panels into place + restores drawings
+canvas.load("board.json", formation=False)   # drawings only; leave panels where code put them
+```
+
+Panels are Python objects, so only their **placement** is saved, never their
+behaviour — recreate them in code and `load()` repositions them and merges the
+saved drawings on top. See the [GUIDE](GUIDE.md) for details.
 
 ## Interactive use (Jupyter / notebooks)
 

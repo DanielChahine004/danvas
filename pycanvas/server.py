@@ -13,6 +13,22 @@ from fastapi.staticfiles import StaticFiles
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 
+class _FrontendStatic(StaticFiles):
+    """Serve the built frontend, but never let the browser cache index.html.
+
+    The JS/CSS bundles are content-hashed (safe to cache forever), but the HTML
+    that points at them changes every rebuild. Without this, a browser holding a
+    stale index.html requests a bundle hash that no longer exists -> blank/grey
+    page after a rebuild. Forcing revalidation of the HTML avoids that.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path in (".", "", "index.html") or path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+
 def create_app(bridge, port=8000, open_browser=True):
     @asynccontextmanager
     async def lifespan(app):
@@ -37,7 +53,7 @@ def create_app(bridge, port=8000, open_browser=True):
 
     # Mount the built frontend last so /ws keeps priority over the catch-all.
     if os.path.isdir(DIST_DIR):
-        app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="static")
+        app.mount("/", _FrontendStatic(directory=DIST_DIR, html=True), name="static")
 
     return app
 
