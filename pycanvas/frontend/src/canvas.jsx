@@ -601,7 +601,11 @@ function InspectorView({ shape }) {
           Refresh
         </button>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}>
+      <div
+        style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
+        // Keep tldraw from treating a row click as a panel drag.
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -679,7 +683,10 @@ function DetailView({ selected, detail, onBack, controlStyle }) {
           <span style={{ fontSize: 12, color: '#888' }}>: {detail.type}</span>
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}>
+      <div
+        style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         {!detail ? (
           <div style={{ fontSize: 12, color: '#999', padding: 6 }}>loading…</div>
         ) : detail.missing ? (
