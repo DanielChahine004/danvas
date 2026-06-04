@@ -34,8 +34,19 @@ def on_servo(value):
     status.update(f"servo at {value}")
 
 
-canvas.insert(pycanvas.Inspector(label="vars", refresh=1.0), x=420, y=80)
-canvas.insert(pycanvas.Repl(label="poke"), x=420, y=440)
+# Some plain variables for the globals inspector to show.
+gain = 1.5
+mode = "auto"
+waypoints = [(0, 0), (10, 5), (20, 0)]
+
+# Two inspectors: the canvas panels, and the shared REPL namespace (this file's
+# globals). Both have a name-search box and a type filter.
+canvas.insert(pycanvas.Inspector(label="panels", refresh=1.0), x=420, y=80)
+canvas.insert(
+    pycanvas.Inspector(label="globals", source="globals", refresh=1.0),
+    x=420, y=440,
+)
+canvas.insert(pycanvas.Repl(label="poke"), x=80, y=320)
 
 print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 print("Try in the REPL panel:  canvas.servo.x   or   servo.update(45)")

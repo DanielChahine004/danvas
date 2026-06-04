@@ -211,10 +211,12 @@ class Canvas:
         self._components.append(component)
         # Wire the execution/introspection components to canvas-level resources.
         # Duck-typed so the common components stay untouched: a Repl exposes a
-        # ``_kernel`` slot (shared kernel + namespace); an Inspector a ``_canvas``
-        # slot (to read live component state).
+        # ``_kernel`` slot (shared kernel), components that read the shared REPL
+        # namespace a ``_namespace`` slot (Repl, globals-mode Inspector), and an
+        # Inspector a ``_canvas`` slot (to read live component state).
         if getattr(component, "_kernel", "missing") is None:
             component._kernel = self._kernel
+        if getattr(component, "_namespace", "missing") is None:
             component._namespace = self._namespace
         if getattr(component, "_canvas", "missing") is None:
             component._canvas = self

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
 import Plotly from 'plotly.js-basic-dist-min'
 import { sendInput, componentIdOf, registerLive, unregisterLive } from './bridge'
@@ -489,87 +489,147 @@ export class ReplShapeUtil extends PcShapeUtil {
   }
 }
 
-// --- Inspector (live table of the canvas's components) ----------------------
+// --- Inspector (live table of canvas components or kernel globals) ----------
 const INSPECTOR_COLS = ['name', 'type', 'value', 'x', 'y', 'w', 'h']
 
-export class InspectorShapeUtil extends PcShapeUtil {
-  static type = 'pcInspector'
-  static props = { w: T.number, h: T.number, label: T.string, rows: T.string }
+// The body is a component so the search box / type filter can hold local state
+// (they filter the already-sent rows client-side, so typing is instant).
+function InspectorView({ shape }) {
+  const id = componentIdOf(shape.id)
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
 
-  getDefaultProps() {
-    return { w: 520, h: 320, label: 'inspector', rows: '[]' }
+  let rows = []
+  try {
+    rows = JSON.parse(shape.props.rows) || []
+  } catch {
+    rows = []
+  }
+  let cols = INSPECTOR_COLS
+  try {
+    const parsed = JSON.parse(shape.props.cols)
+    if (Array.isArray(parsed) && parsed.length) cols = parsed
+  } catch {
+    // keep default
   }
 
-  component(shape) {
-    const id = componentIdOf(shape.id)
-    let rows = []
-    try {
-      rows = JSON.parse(shape.props.rows) || []
-    } catch {
-      rows = []
-    }
-    return (
-      <Card shape={shape}>
-        <div style={labelStyle}>{shape.props.label}</div>
+  const types = ['all', ...Array.from(new Set(rows.map((r) => r.type))).sort()]
+  const q = query.toLowerCase()
+  const shown = rows.filter(
+    (r) =>
+      (typeFilter === 'all' || r.type === typeFilter) &&
+      (!q || String(r.name ?? '').toLowerCase().includes(q))
+  )
+
+  const controlStyle = {
+    fontSize: 12,
+    padding: '3px 6px',
+    border: '1px solid #ddd',
+    borderRadius: 6,
+    pointerEvents: 'all',
+  }
+
+  return (
+    <>
+      <div
+        style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <input
+          placeholder="search name…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ ...controlStyle, flex: 1, minWidth: 0 }}
+        />
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          style={controlStyle}
+        >
+          {types.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
         <button
-          style={{
-            alignSelf: 'flex-start',
-            marginBottom: 6,
-            padding: '4px 10px',
-            border: '1px solid #ddd',
-            borderRadius: 6,
-            fontSize: 13,
-            cursor: 'pointer',
-            pointerEvents: 'all',
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
+          style={{ ...controlStyle, cursor: 'pointer' }}
           onClick={() => sendInput(id, { action: 'refresh' })}
         >
           Refresh
         </button>
-        <div
-          style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {INSPECTOR_COLS.map((c) => (
-                  <th
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {cols.map((c) => (
+                <th
+                  key={c}
+                  style={{
+                    textAlign: 'left',
+                    padding: '2px 6px',
+                    borderBottom: '1px solid #ddd',
+                    color: '#666',
+                    position: 'sticky',
+                    top: 0,
+                    background: '#fff',
+                  }}
+                >
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r, i) => (
+              <tr key={i}>
+                {cols.map((c) => (
+                  <td
                     key={c}
                     style={{
-                      textAlign: 'left',
                       padding: '2px 6px',
-                      borderBottom: '1px solid #ddd',
-                      color: '#666',
+                      borderBottom: '1px solid #f0f0f0',
+                      fontFamily: c === 'value' ? 'ui-monospace, monospace' : 'inherit',
                     }}
                   >
-                    {c}
-                  </th>
+                    {String(r[c] ?? '')}
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
-                  {INSPECTOR_COLS.map((c) => (
-                    <td
-                      key={c}
-                      style={{
-                        padding: '2px 6px',
-                        borderBottom: '1px solid #f0f0f0',
-                        fontFamily:
-                          c === 'value' ? 'ui-monospace, monospace' : 'inherit',
-                      }}
-                    >
-                      {String(r[c] ?? '')}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+export class InspectorShapeUtil extends PcShapeUtil {
+  static type = 'pcInspector'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    rows: T.string,
+    cols: T.string,
+  }
+
+  getDefaultProps() {
+    return {
+      w: 520,
+      h: 320,
+      label: 'inspector',
+      rows: '[]',
+      cols: JSON.stringify(INSPECTOR_COLS),
+    }
+  }
+
+  component(shape) {
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{shape.props.label}</div>
+        <InspectorView shape={shape} />
       </Card>
     )
   }
