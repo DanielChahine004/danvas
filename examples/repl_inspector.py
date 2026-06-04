@@ -34,7 +34,7 @@ def on_servo(value):
     status.update(f"servo at {value}")
 
 
-canvas.insert(pycanvas.Inspector(label="vars"), x=420, y=80)
+canvas.insert(pycanvas.Inspector(label="vars", refresh=1.0), x=420, y=80)
 canvas.insert(pycanvas.Repl(label="poke"), x=420, y=440)
 
 print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")

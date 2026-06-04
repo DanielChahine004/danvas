@@ -7,6 +7,8 @@ Refresh from the panel's button or from Python via :meth:`refresh`.
 """
 
 import json
+import threading
+import traceback
 
 from .base import BaseComponent
 
@@ -25,9 +27,16 @@ class Inspector(BaseComponent):
     default_w = 520
     default_h = 320
 
-    def __init__(self, label="inspector"):
+    def __init__(self, label="inspector", refresh=None):
+        """``refresh`` is the auto-refresh period in seconds (``None`` = manual
+        only, via the panel's button or :meth:`refresh`). With a period set, a
+        daemon thread rebuilds the table on that cadence while the canvas is
+        serving and at least one browser is connected."""
         super().__init__(label=label, rows="[]")
         self._canvas = None  # injected by Canvas.insert
+        self._refresh_interval = refresh
+        self._ticker = None
+        self._ticker_stop = threading.Event()
 
     def register_props(self):
         self._props["rows"] = self._build()
@@ -36,6 +45,34 @@ class Inspector(BaseComponent):
     def refresh(self):
         """Rebuild the table from current component state and push it, live."""
         self._send_update({"rows": self._build()})
+
+    # -- auto-refresh ticker (started/stopped via Canvas attach hooks) --------
+    def _on_attached(self):
+        """Start the ticker once the canvas reference is wired (if enabled)."""
+        if self._refresh_interval and self._ticker is None:
+            self._ticker = threading.Thread(target=self._tick_loop, daemon=True)
+            self._ticker.start()
+
+    def _on_removed(self):
+        """Stop the ticker when the panel is pulled off the canvas."""
+        self._ticker_stop.set()
+
+    def _tick_loop(self):
+        # wait() returns True the moment _on_removed sets the event, so removal
+        # ends the loop promptly instead of after a full interval.
+        while not self._ticker_stop.wait(self._refresh_interval):
+            canvas = self._canvas
+            if canvas is None:
+                continue
+            # Skip work when nobody's watching: no server, or no open browser.
+            if not getattr(canvas, "_serving", False):
+                continue
+            if not canvas._bridge._connections:
+                continue
+            try:
+                self.refresh()
+            except Exception:
+                traceback.print_exc()
 
     def _handle_input(self, payload):
         if payload.get("action") == "refresh":

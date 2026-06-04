@@ -218,6 +218,11 @@ class Canvas:
             component._namespace = self._namespace
         if getattr(component, "_canvas", "missing") is None:
             component._canvas = self
+        # Optional lifecycle hook: fired once the component is fully wired (id,
+        # bridge, kernel/canvas). Inspector uses it to start its refresh ticker.
+        on_attached = getattr(component, "_on_attached", None)
+        if callable(on_attached):
+            on_attached()
         if self._serving:
             self._bridge.register_live(component)
         return component
@@ -236,6 +241,9 @@ class Canvas:
                 del self._named[nm]
         self._bridge.remove_component(component.id)
         component._bridge = None
+        on_removed = getattr(component, "_on_removed", None)
+        if callable(on_removed):
+            on_removed()
         return component
 
     def connect(self, start, end, label=None, name=None, **props):
