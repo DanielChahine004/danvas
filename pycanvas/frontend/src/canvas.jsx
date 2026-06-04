@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { BaseBoxShapeUtil, HTMLContainer, T } from 'tldraw'
 import Plotly from 'plotly.js-basic-dist-min'
 import { sendInput, componentIdOf, registerLive, unregisterLive } from './bridge'
+
+// Monaco is heavy, so the Repl editor is code-split into its own chunk that
+// only loads when a Repl panel is shown (see MonacoRepl.jsx).
+const MonacoRepl = lazy(() => import('./MonacoRepl'))
 
 // Shared card styling for all PyCanvas component shapes. The card is pinned to
 // the shape's exact w/h (not 100% of an ancestor) so it tracks resizing
@@ -406,42 +410,34 @@ export class ReplShapeUtil extends PcShapeUtil {
   component(shape) {
     const { label, code, output, result } = shape.props
     const id = componentIdOf(shape.id)
-    // Send the current editor text (kept in the `code` prop) to Python to run.
-    const run = () => sendInput(id, { code: shape.props.code })
+    // Run the given text (from the editor), falling back to the stored prop.
+    const run = (text) =>
+      sendInput(id, { code: text != null ? text : shape.props.code })
+    const setCode = (v) =>
+      this.editor.updateShape({ id: shape.id, type: shape.type, props: { code: v } })
     return (
       <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
-        <textarea
-          value={code}
-          spellCheck={false}
-          style={{
-            flex: 1,
-            width: '100%',
-            minHeight: 0,
-            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-            fontSize: 13,
-            border: '1px solid #e2e2e2',
-            borderRadius: 4,
-            padding: 6,
-            resize: 'none',
-            pointerEvents: 'all',
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) =>
-            this.editor.updateShape({
-              id: shape.id,
-              type: shape.type,
-              props: { code: e.target.value },
-            })
+        <Suspense
+          fallback={
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#888',
+                fontSize: 13,
+                border: '1px solid #e2e2e2',
+                borderRadius: 4,
+              }}
+            >
+              loading editor…
+            </div>
           }
-          // Ctrl/Cmd+Enter runs the cell, like a notebook.
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault()
-              run()
-            }
-          }}
-        />
+        >
+          <MonacoRepl value={code} onChange={setCode} onRun={run} />
+        </Suspense>
         <button
           style={{
             alignSelf: 'flex-start',
@@ -457,7 +453,7 @@ export class ReplShapeUtil extends PcShapeUtil {
             pointerEvents: 'all',
           }}
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={run}
+          onClick={() => run()}
         >
           Run (⌘/Ctrl+Enter)
         </button>

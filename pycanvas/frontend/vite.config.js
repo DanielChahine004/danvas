@@ -10,6 +10,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Keep Monaco (large, lazy-loaded by the Repl) in its own chunk so it
+        // doesn't bloat the initial app bundle and only downloads on demand.
+        manualChunks(id) {
+          if (id.includes('monaco-editor') || id.includes('@monaco-editor')) {
+            return 'monaco'
+          }
+        },
+      },
+    },
   },
   server: {
     port: 5173,
