@@ -18,6 +18,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Canvas",
+    "Merge",
     "Slider",
     "Label",
     "VideoFeed",
@@ -29,3 +30,12 @@ __all__ = [
     "Inspector",
     "BaseComponent",
 ]
+
+
+def __getattr__(name):
+    # Lazily expose ``pycanvas.Merge`` so importing the package doesn't pull in
+    # the websocket *client* stack (only the merge aggregator needs it).
+    if name == "Merge":
+        from .merge import Merge
+        return Merge
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

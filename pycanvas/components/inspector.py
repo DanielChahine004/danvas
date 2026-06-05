@@ -233,6 +233,27 @@ class Inspector(BaseComponent):
                 "h": c.h,
                 "locked": c.locked,
             })
+        # Arrows are canvas objects too, but connectors rather than panels: they
+        # have a label and endpoints, no geometry. List them after the panels so
+        # the table is a complete picture, with their value showing what they
+        # link (``start -> end``) and the geometry columns left blank.
+        for i, a in enumerate(self._canvas._arrows):
+            name = name_of.get(id(a), "")
+            key = name or f"Arrow-{i}"
+            self._row_targets[key] = a
+            rows.append({
+                "key": key,
+                "name": name,
+                "type": "Arrow",
+                "value": _short(f"{a.label or '?'}: "
+                                f"{a.start._props.get('label') or a.start.id} → "
+                                f"{a.end._props.get('label') or a.end.id}"),
+                "x": "",
+                "y": "",
+                "w": "",
+                "h": "",
+                "locked": "",
+            })
         return json.dumps(rows)
 
     def _build_globals(self):
@@ -299,10 +320,21 @@ class Inspector(BaseComponent):
         })
 
     def _resolve_namespace(self):
-        """The namespace for globals mode: explicit/injected, else IPython's."""
+        """The namespace for globals mode: explicit/injected, else IPython's.
+
+        Resolve IPython via ``from IPython import get_ipython`` rather than the
+        bare ``get_ipython`` builtin. That builtin only exists *while a cell is
+        executing*, so the auto-refresh ticker thread or a websocket handler
+        running under ``serve_background`` -- both off the main thread and
+        outside cell execution -- would not see it, and globals mode would come
+        up empty. The imported function returns the live shell singleton from
+        any thread, at any time.
+        """
         if self._namespace is not None:
             return self._namespace
         try:
-            return get_ipython().user_ns  # type: ignore[name-defined]  # noqa: F821
-        except NameError:
+            from IPython import get_ipython
+        except ImportError:
             return None
+        ip = get_ipython()
+        return ip.user_ns if ip is not None else None

@@ -159,7 +159,8 @@ See [`examples/notebook_dynamic.ipynb`](examples/notebook_dynamic.ipynb) for a
 full walkthrough.
 
 > Note: a `Canvas` is single-process — one Python process owns the port and all
-> components. Two separate scripts can't add to the same canvas/port.
+> components. Two separate scripts can't add to the same canvas/port, but you can
+> composite several separate canvases onto one view — see [Merging canvases](#merging-canvases).
 
 ## Sharing on your network
 
@@ -183,6 +184,45 @@ Caveats:
 - There's **no authentication** — anyone who can reach the port can interact.
   Use only on networks you trust.
 
+## Merging canvases
+
+A `Canvas` is single-process, but you can still build **one shared surface from
+several independently-hosted canvases**. Everyone keeps running their own canvas
+on their own port; a *merge host* connects to each of them (as a client, like a
+browser does), composites their panels onto a single new port, and routes
+interactions back to whichever canvas owns each panel.
+
+The payoff: computation stays sharded. Sarah's buttons compute in Sarah's
+process, Josef's in his — only the *view and the input routing* are unified.
+
+```bash
+# unify three running canvases onto http://localhost:8080
+python -m pycanvas.merge :8001 :8002 host3:8003 --port 8080
+```
+
+```python
+from pycanvas import Merge
+
+Merge([8001, 8002]).serve(port=8080)            # blocks, opens the browser
+# or in a notebook:
+m = Merge([8001, 8002]).serve_background(port=8080)
+m.stop()
+```
+
+By default the canvases are **overlaid**, each panel keeping its real
+coordinates. Pass `region_width` (or `--region-width`) to instead spread the
+sources side-by-side, each in its own region that many pixels wide. A source's
+panels go inert and drop from the view while it's disconnected, and reappear
+when it reconnects.
+
+Caveats / v1 scope:
+- Free-form drawings aren't composited — only code-driven panels and arrows are.
+- Rearranging panels in the merged view is local to the merge host; it isn't
+  pushed back to the source canvases (control interactions *are* routed back).
+- A `Repl` panel is **not** drivable from the merged view unless you pass
+  `--allow-remote-exec` / `allow_remote_exec=True` — driving one runs arbitrary
+  code in the source's process (same gate as `Canvas`).
+
 ## Examples
 
 ```bash
@@ -195,10 +235,11 @@ python examples/robot_control.py      # everything: sliders, toggle, plot, video
 python examples/repl_inspector.py     # on-canvas Python REPL + component/globals inspectors
 ```
 
-The notebook example opens in Jupyter:
+The notebook examples open in Jupyter:
 
 ```bash
 jupyter notebook examples/notebook_dynamic.ipynb   # live add/move/remove panels
+jupyter notebook examples/merge_canvases.ipynb     # two canvases composited onto one merge host
 ```
 
 > The matplotlib/plotly examples need extra libs: `pip install matplotlib plotly`

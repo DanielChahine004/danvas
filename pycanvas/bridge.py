@@ -129,11 +129,31 @@ class Bridge:
             comp = self._components.get(msg.get("id"))
             if comp is not None:
                 comp._handle_input(msg.get("payload") or {})
+                # Echo the resulting state to every client so other open views
+                # stay in sync with a browser-driven change (a second browser on
+                # this canvas, or a merge host aggregating it). Output-only
+                # components return None here and are left alone. The originating
+                # browser already shows the value, so the echo is idempotent.
+                state = comp.state_payload()
+                if state:
+                    self.broadcast(
+                        {"type": "update", "id": comp.id, "payload": state}
+                    )
         elif kind == "layout":
             # User moved/resized a panel in the browser; sync Python's state.
             comp = self._components.get(msg.get("id"))
             if comp is not None:
                 comp._apply_remote_layout(msg)
+                # Echo the new geometry to every client (a second browser, or a
+                # merge host) as an ``update`` -- the server->browser form the
+                # frontend applies. The fields already carry the wire units the
+                # frontend expects (canvas x/y, radian rotation).
+                geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
+                        if msg.get(k) is not None}
+                if geom:
+                    self.broadcast(
+                        {"type": "update", "id": comp.id, "payload": geom}
+                    )
         elif kind == "snapshot":
             # Reply to a request_snapshot; hand the document to the waiter.
             waiter = self._snapshot_waiters.get(msg.get("reqId"))

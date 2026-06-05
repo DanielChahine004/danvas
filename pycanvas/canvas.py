@@ -3,6 +3,7 @@
 import json
 import time
 import uuid
+import warnings
 
 from . import server
 from .bridge import Bridge
@@ -149,10 +150,16 @@ class Canvas:
         local-only serving unless ``serve(..., allow_remote_exec=True)``.
         """
         if namespace is None:
+            # Import get_ipython rather than relying on the bare builtin, which
+            # IPython only installs while a cell is executing -- the imported
+            # function returns the live shell from any context. Falls back to an
+            # empty namespace when not running under IPython.
             try:
-                namespace = get_ipython().user_ns  # type: ignore[name-defined]  # noqa: F821
-            except NameError:
-                namespace = {}
+                from IPython import get_ipython
+                ip = get_ipython()
+            except ImportError:
+                ip = None
+            namespace = ip.user_ns if ip is not None else {}
         namespace.setdefault("canvas", self)
         self._namespace = namespace
         return self
@@ -190,6 +197,23 @@ class Canvas:
             if isinstance(label, str) and label.isidentifier():
                 name = label
         if name is not None:
+            # Names are unique handles. If something else already holds this
+            # name (a prior component, or this component in an earlier state),
+            # pull it off the canvas first so the stale panel disappears from
+            # the UI instead of lingering unreferenced. The newcomer then takes
+            # over the name and is the only panel rendered for it.
+            old = self._named.get(name)
+            if old is not None and old is not component:
+                warnings.warn(
+                    f"name {name!r} already used by a "
+                    f"{old.__class__.__name__}; removing it and rebinding the "
+                    f"name to the new {component.__class__.__name__}",
+                    stacklevel=2,
+                )
+                if old in self._components:
+                    self.remove(old)
+                elif old in self._arrows:
+                    self.disconnect(old)
             self._named[name] = component
         if x is not None and y is not None:
             component._position = (x, y)
@@ -270,6 +294,20 @@ class Canvas:
         )
         self._arrows.append(arrow)
         if name is not None:
+            # Same unique-name rule as insert: evict whatever currently holds
+            # this name so the stale shape leaves the UI before the new arrow.
+            old = self._named.get(name)
+            if old is not None and old is not arrow:
+                warnings.warn(
+                    f"name {name!r} already used by a "
+                    f"{old.__class__.__name__}; removing it and rebinding the "
+                    f"name to the new Arrow",
+                    stacklevel=2,
+                )
+                if old in self._arrows:
+                    self.disconnect(old)
+                elif old in self._components:
+                    self.remove(old)
             self._named[name] = arrow
         self._bridge.add_arrow(arrow)
         return arrow
