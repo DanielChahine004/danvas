@@ -705,6 +705,10 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
 
   const allFields = detail && Array.isArray(detail.fields) ? detail.fields : []
   const types = ['all', ...Array.from(new Set(allFields.map((f) => f.type))).sort()]
+  // tldraw sets `user-select: none` on shape bodies (so dragging never starts a
+  // text selection). Re-enable selection on the read-only detail cells/repr so
+  // their field names and values can be highlighted and copied.
+  const selectable = { userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text' }
   const q = query.toLowerCase()
   const fields = allFields.filter(
     (f) =>
@@ -788,6 +792,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                 padding: '4px 6px',
                 marginBottom: 6,
                 wordBreak: 'break-all',
+                ...selectable,
               }}
             >
               {detail.repr}
@@ -826,7 +831,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                 ) : (
                   fields.map((f, i) => (
                     <tr key={i}>
-                      <td style={{ padding: '2px 6px', borderBottom: '1px solid var(--pc-border-soft)' }}>
+                      <td style={{ padding: '2px 6px', borderBottom: '1px solid var(--pc-border-soft)', ...selectable }}>
                         {f.field}
                       </td>
                       <td
@@ -843,6 +848,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                           padding: '2px 6px',
                           borderBottom: '1px solid var(--pc-border-soft)',
                           fontFamily: 'ui-monospace, monospace',
+                          ...selectable,
                         }}
                       >
                         {f.value}
