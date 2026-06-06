@@ -253,28 +253,11 @@ export class HtmlShapeUtil extends PcShapeUtil {
   }
 
   component(shape) {
-    const { label, html } = shape.props
     return (
       <Card shape={shape}>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <div style={labelStyle}>{label}</div>
-        <iframe
-          title={label}
-          srcDoc={html}
-          // allow-scripts lets interactive content (e.g. Plotly) run.
-          // No allow-same-origin keeps the user HTML sandboxed from the app.
-          sandbox="allow-scripts allow-popups allow-forms"
-          style={{
-            flex: 1,
-            width: '100%',
-            border: 'none',
-            borderRadius: 4,
-            background: 'var(--pc-bg)',
-            pointerEvents: 'all',
-          }}
-          // Keep tldraw from hijacking drags/zoom meant for the iframe content.
-          onPointerDown={(e) => e.stopPropagation()}
-        />
+        <div style={labelStyle}>{shape.props.label}</div>
+        <CustomView shape={shape} />
       </Card>
     )
   }
@@ -282,6 +265,49 @@ export class HtmlShapeUtil extends PcShapeUtil {
   indicator(shape) {
     return <rect width={shape.props.w} height={shape.props.h} rx={8} />
   }
+}
+
+// The sandboxed iframe that hosts a Custom panel's HTML. Beyond rendering the
+// HTML, it subscribes to the bridge's live-data channel: Python ``push()`` calls
+// arrive here and are forwarded into the iframe via postMessage (as a `message`
+// event whose `data.__pycanvas` is the payload), so live data can stream in
+// *without* replacing srcDoc and reloading the frame. That keeps the iframe's
+// focus and listeners intact — essential for streaming + interactive panels.
+function CustomView({ shape }) {
+  const ref = useRef(null)
+  const id = componentIdOf(shape.id)
+
+  useEffect(() => {
+    const post = (data) => {
+      const el = ref.current
+      if (el && el.contentWindow) {
+        el.contentWindow.postMessage({ __pycanvas: data }, '*')
+      }
+    }
+    registerLive(id, post)
+    return () => unregisterLive(id)
+  }, [id])
+
+  return (
+    <iframe
+      ref={ref}
+      title={shape.props.label}
+      srcDoc={shape.props.html}
+      // allow-scripts lets interactive content (e.g. Plotly) run.
+      // No allow-same-origin keeps the user HTML sandboxed from the app.
+      sandbox="allow-scripts allow-popups allow-forms"
+      style={{
+        flex: 1,
+        width: '100%',
+        border: 'none',
+        borderRadius: 4,
+        background: 'var(--pc-bg)',
+        pointerEvents: 'all',
+      }}
+      // Keep tldraw from hijacking drags/zoom meant for the iframe content.
+      onPointerDown={(e) => e.stopPropagation()}
+    />
+  )
 }
 
 // --- Toggle (pick one of N options) -----------------------------------------

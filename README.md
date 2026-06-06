@@ -108,6 +108,14 @@ def handle(data):
     print(data)   # -> {'hi': 1}
 ```
 
+`panel.update(html)` swaps the whole HTML (reloads the iframe). To stream live
+data **without** reloading — keeping the iframe's focus, listeners and scroll —
+use `panel.push(data)`; it arrives as a `message` event in the iframe
+(`e.data.__pycanvas` is your `data`). That's what powers
+[`examples/remote_control.py`](examples/remote_control.py), which streams the
+host's screen into one panel and replays the browser's mouse/keyboard back onto
+the machine (a tiny LAN remote desktop — read its security note first).
+
 Because it's just HTML in an iframe, anything that renders to HTML works:
 
 - **matplotlib** — `fig.savefig(buf, 'png')` → base64 `<img>` → `panel.update(html)`
@@ -338,6 +346,7 @@ python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
 python examples/repl_inspector.py     # on-canvas Python REPL + component/globals inspectors
+python examples/remote_control.py     # ⚠ stream this PC's screen + control it remotely (Windows)
 ```
 
 The notebook examples open in Jupyter:

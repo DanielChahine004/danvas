@@ -38,9 +38,26 @@ class Custom(BaseComponent):
         return props
 
     def update(self, html):
-        """Replace the panel's HTML content."""
+        """Replace the panel's HTML content (reloads the iframe)."""
         self._html = html
         self._send_update({"html": self._wrap(html)})
+
+    def push(self, data):
+        """Stream live data into the panel's iframe *without* reloading it.
+
+        The iframe receives a ``message`` event whose ``data.__pycanvas`` is
+        ``data`` (any JSON-serializable value). Unlike :meth:`update`, this keeps
+        the iframe — and its focus, listeners, and scroll position — intact, so
+        it suits high-rate streaming (e.g. video frames) and live two-way panels.
+        Listen for it in your HTML::
+
+            window.addEventListener('message', (e) => {
+                if (e.data && e.data.__pycanvas !== undefined) {
+                    handle(e.data.__pycanvas)
+                }
+            })
+        """
+        self._send_update({"post": data})
 
     # Custom panels deliver structured data, not a single ``value``.
     def on_message(self, fn):

@@ -85,7 +85,7 @@ canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 | **VideoFeed** | `VideoFeed(name, quality=70, label=None)` | out | `update(frame)` — OpenCV BGR numpy array | — |
 | **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
 | **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
-| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320)` | both | `update(html)` | `.value` (last message) |
+| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320)` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `.value` (last message) |
 
 Every component takes `name` (its unique identity) first, then an optional
 `label` caption; the input components (Slider/Toggle/Label/VideoFeed) **require**
@@ -117,7 +117,25 @@ def handle(data):
 ```
 
 Load from a file with `Custom(path="dashboard.html")`. Replace content live with
-`panel.update(new_html)`.
+`panel.update(new_html)` (this reloads the iframe).
+
+To stream live data **without** reloading — keeping the iframe's focus,
+listeners and scroll intact — use `panel.push(data)`. It arrives as a `message`
+event inside the iframe (`e.data.__pycanvas` holds your `data`), so the page can
+update in place. This suits high-rate feeds and two-way interactive panels:
+
+```python
+panel.push(frame_b64)      # Python -> iframe, no reload
+```
+```js
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.__pycanvas !== undefined) render(e.data.__pycanvas)
+})
+```
+
+`examples/remote_control.py` uses exactly this to stream the machine's screen
+into a panel while capturing the browser's mouse/keyboard to drive the host (a
+small LAN remote desktop — note its security warning).
 
 ### Writing your own
 

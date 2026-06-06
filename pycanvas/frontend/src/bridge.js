@@ -290,6 +290,15 @@ function updateComponent(id, payload) {
     return
   }
 
+  // Custom panels: `push()` data is forwarded straight into the iframe (see
+  // CustomView) instead of touching shape props, so streaming doesn't reload the
+  // frame. Dropped if the panel isn't mounted yet (the next push will land).
+  if (payload && payload.post !== undefined) {
+    const handler = liveHandlers.get(id)
+    if (handler) handler(payload.post)
+    return
+  }
+
   const shapeId = createShapeId(id)
   const shape = editor.getShape(shapeId)
   if (!shape) return
