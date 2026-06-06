@@ -405,6 +405,7 @@ python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
 python examples/repl_inspector.py     # on-canvas Python REPL + component/globals inspectors
+python examples/public_tunnel.py      # share a canvas worldwide via a public HTTPS tunnel
 python examples/remote_control.py     # ⚠ stream this PC's screen + control it remotely (Windows)
 ```
 
