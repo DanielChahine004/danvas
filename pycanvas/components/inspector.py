@@ -67,6 +67,18 @@ def _object_fields(obj):
     props = getattr(obj, "_props", None)
     if isinstance(props, dict):
         for k, v in props.items():
+            # `_props` is the registration-time snapshot, so a value it shares
+            # with a live attribute can go stale -- e.g. a Slider keeps its
+            # current position in the `.value` property while `_props["value"]`
+            # stays the initial default. Prefer the live attribute when one
+            # exists so the detail view tracks changes instead of freezing.
+            if not k.startswith("_"):
+                try:
+                    live = getattr(obj, k)
+                    if not callable(live):
+                        v = live
+                except Exception:
+                    pass
             fields.append((k, v))
             seen.add(k)
     for k in dir(obj):
