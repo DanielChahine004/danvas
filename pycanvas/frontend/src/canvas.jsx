@@ -691,7 +691,27 @@ function InspectorView({ shape }) {
 
 // Drill-down: an object's type/repr header plus a field/type/value table.
 function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
-  const fields = detail && Array.isArray(detail.fields) ? detail.fields : []
+  // Field-level search + type filter, mirroring the table view. Both filter the
+  // already-sent fields client-side, so typing stays instant and live updates
+  // keep flowing underneath the filter.
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  // Reset the filters whenever we drill into a different object -- its field
+  // names and the set of types are unrelated to the previous one's.
+  useEffect(() => {
+    setQuery('')
+    setTypeFilter('all')
+  }, [selected])
+
+  const allFields = detail && Array.isArray(detail.fields) ? detail.fields : []
+  const types = ['all', ...Array.from(new Set(allFields.map((f) => f.type))).sort()]
+  const q = query.toLowerCase()
+  const fields = allFields.filter(
+    (f) =>
+      (typeFilter === 'all' || f.type === typeFilter) &&
+      (!q || String(f.field ?? '').toLowerCase().includes(q))
+  )
+  const filtered = q !== '' || typeFilter !== 'all'
   return (
     <>
       <div
@@ -721,6 +741,30 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
           Refresh
         </button>
       </div>
+      {detail && !detail.missing && allFields.length > 0 && (
+        <div
+          style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <input
+            placeholder="search field…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ ...controlStyle, flex: 1, minWidth: 0 }}
+          />
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            style={controlStyle}
+          >
+            {types.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div
         style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
         onPointerDown={(e) => e.stopPropagation()}
@@ -776,7 +820,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                       colSpan={3}
                       style={{ padding: 6, color: 'var(--pc-faint2)', fontStyle: 'italic' }}
                     >
-                      no fields — see repr above
+                      {filtered ? 'no matching fields' : 'no fields — see repr above'}
                     </td>
                   </tr>
                 ) : (

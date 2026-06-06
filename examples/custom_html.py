@@ -47,8 +47,8 @@ PANEL_HTML = """
 </html>
 """
 
-panel = canvas.insert(pycanvas.Custom(html=PANEL_HTML, label="my_panel", width=420, height=240))
-reply = canvas.insert(pycanvas.Label(label="python received", value="(waiting for input)"))
+panel = canvas.custom(html=PANEL_HTML, label="my_panel", width=420, height=240)
+reply = canvas.label(label="python received", value="(waiting for input)")
 
 
 @panel.on_message
