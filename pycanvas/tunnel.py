@@ -31,14 +31,36 @@ def _lt_cmd(binary, port):
     return [binary, "--port", str(port)]
 
 
+def _pycloudflared_binary():
+    """Path to a cloudflared binary managed by the optional ``pycloudflared``.
+
+    Installed via the ``pycanvas[tunnel]`` extra, ``pycloudflared`` downloads and
+    caches the cloudflared binary, so ``tunnel=True`` needs no manual install.
+    Returns the cached path (downloading it on first use), or ``None`` if the
+    package isn't installed. Errors during download are swallowed so resolution
+    falls through to the not-found message.
+    """
+    try:
+        from pycloudflared.util import download, get_info
+    except ImportError:
+        return None
+    try:
+        info = get_info()
+        if os.path.isfile(info.executable):
+            return info.executable
+        return download(info)  # ~20 MB, first use only; shows a progress bar
+    except Exception:
+        return None
+
+
 def _resolve_binary(spec):
     """Locate a provider's executable, falling back past a stale PATH.
 
-    Tries ``shutil.which`` first (the normal case). If that fails — common right
-    after installing on Windows, where an already-open shell hasn't picked up the
-    machine PATH the installer updated — probe the installer's default locations
-    so ``tunnel=True`` still works without reopening the terminal. Returns the
-    full path, or ``None`` if nothing is found.
+    In order: ``shutil.which`` (the normal case); the installer's default
+    locations — covering a shell open since before a Windows install updated the
+    machine PATH; then an optional ``acquire`` hook (e.g. ``pycloudflared`` from
+    the ``pycanvas[tunnel]`` extra, which downloads the binary on demand).
+    Returns the full path, or ``None`` if nothing resolves.
     """
     for name in spec["binaries"]:
         found = shutil.which(name)
@@ -48,7 +70,8 @@ def _resolve_binary(spec):
         expanded = os.path.expandvars(path)
         if os.path.isfile(expanded):
             return expanded
-    return None
+    acquire = spec.get("acquire")
+    return acquire() if acquire else None
 
 # One entry per provider: which executables can drive it, how to build the
 # command for a port, and the regex that matches the public URL it prints.
@@ -63,7 +86,10 @@ _PROVIDERS = {
             r"%ProgramFiles(x86)%\cloudflared\cloudflared.exe",
             r"%ProgramFiles%\cloudflared\cloudflared.exe",
         ),
-        "install": "install cloudflared (brew install cloudflared, "
+        # Last resort: let the optional pycloudflared package fetch the binary.
+        "acquire": _pycloudflared_binary,
+        "install": "pip install 'pycanvas[tunnel]' (auto-downloads cloudflared), "
+                   "or install it yourself (brew install cloudflared, "
                    "winget install --id Cloudflare.cloudflared, or see "
                    "https://developers.cloudflare.com/cloudflare-one/connections/"
                    "connect-networks/downloads/)",

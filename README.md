@@ -319,11 +319,20 @@ everything (including video and live plots over `wss`) works through the tunnel
 with no extra setup. The tunnel closes automatically when the server stops.
 
 **Backends.** The default is **cloudflared** — no signup, no visitor warning
-page. Install it once (`brew install cloudflared`,
+page. The easiest way to get it is the optional extra, which downloads and
+caches the binary for you on first use (no manual install, no PATH fuss):
+
+```bash
+pip install -e ".[tunnel]"     # pulls pycloudflared; tunnel=True then just works
+```
+
+Or install cloudflared yourself (`brew install cloudflared`,
 `winget install --id Cloudflare.cloudflared`, or
-[download](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)).
-**localtunnel** is also supported (`pip`-free, needs Node: `npm i -g localtunnel`,
-or `npx`), but it shows first-time visitors an IP-password reminder page:
+[download](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)) —
+PyCanvas finds a system install on `PATH` (or in the installer's default
+location) too. **localtunnel** is also supported (needs Node: `npm i -g
+localtunnel`, or `npx`), but it shows first-time visitors an IP-password
+reminder page:
 
 ```python
 canvas.serve(port=8000, tunnel=True, tunnel_provider="localtunnel")
