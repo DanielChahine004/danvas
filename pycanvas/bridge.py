@@ -70,6 +70,8 @@ class Bridge:
             msg["movable"] = False
         if not getattr(component, "_resizable", True):
             msg["resizable"] = False
+        if not getattr(component, "_interactive", True):
+            msg["interactive"] = False
         return msg
 
     def register_live(self, component):

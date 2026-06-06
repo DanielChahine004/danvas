@@ -325,7 +325,7 @@ class Inspector(BaseComponent):
         Resolve IPython via ``from IPython import get_ipython`` rather than the
         bare ``get_ipython`` builtin. That builtin only exists *while a cell is
         executing*, so the auto-refresh ticker thread or a websocket handler
-        running under ``serve_background`` -- both off the main thread and
+        running under ``serve(block=False)`` -- both off the main thread and
         outside cell execution -- would not see it, and globals mode would come
         up empty. The imported function returns the live shell singleton from
         any thread, at any time.

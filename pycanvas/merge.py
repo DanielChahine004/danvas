@@ -290,16 +290,19 @@ class Merge:
         )
         self._server = None
 
-    def serve(self, port=8080, open_browser=True, host="127.0.0.1"):
-        """Start the merge host and block until shutdown."""
-        server.run(self._bridge, port=port, open_browser=open_browser, host=host)
+    def serve(self, port=8080, open_browser=True, host="127.0.0.1", block=True):
+        """Start the merge host.
 
-    def serve_background(self, port=8080, open_browser=True, host="127.0.0.1"):
-        """Start the merge host without blocking; return ``self`` for chaining."""
-        self._server = server.run_background(
-            self._bridge, port=port, open_browser=open_browser, host=host
-        )
-        return self
+        With ``block=True`` (default) this blocks until shutdown. With
+        ``block=False`` it starts the host in the background and returns ``self``
+        for chaining (use in a notebook, then call :meth:`stop`).
+        """
+        if not block:
+            self._server = server.run_background(
+                self._bridge, port=port, open_browser=open_browser, host=host
+            )
+            return self
+        server.run(self._bridge, port=port, open_browser=open_browser, host=host)
 
     def stop(self):
         """Signal the background merge host to shut down."""

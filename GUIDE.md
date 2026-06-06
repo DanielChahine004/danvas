@@ -49,9 +49,9 @@ canvas = pycanvas.Canvas()
 | `remove(component)` | Pull a panel off the canvas (live). |
 | `connect(start, end, label=, name=, **props)` | Draw an arrow between two panels; returns an `Arrow`. |
 | `disconnect(arrow_or_label)` | Remove an arrow by object or label. |
-| `serve(port=8000, open_browser=True, host="127.0.0.1")` | Start server and **block**. |
-| `serve_background(port=8000, open_browser=True, wait=True, host=...)` | Start server, **return immediately** (Jupyter). |
-| `stop()` | Shut down a background server. |
+| `serve(port=8000, open_browser=True, host="127.0.0.1", block=True, wait=True)` | Start server; **block** (default) or, with `block=False`, **return immediately** (Jupyter). |
+| `stop()` | Shut down a background server (started with `block=False`). |
+| `wait()` | Park the main thread until a background server shuts down (`Ctrl+C`) — keeps a *script* alive after `serve(block=False)`. |
 
 **Named lookup.** If a component/arrow `label` is a valid Python identifier it
 becomes an attribute and key on the canvas (override with `name=`):
@@ -276,12 +276,12 @@ canvas.serve(port=8000)                 # opens browser, blocks until Ctrl+C
 ### Background (Jupyter / interactive)
 
 ```python
-canvas.serve_background(port=8000)      # returns immediately
-canvas.insert(pycanvas.Slider(label="late"))   # appears live on the open page
+canvas.serve(port=8000, block=False)    # returns immediately
+canvas.slider("late")                   # appears live on the open page
 canvas.stop()                           # shut it down
 ```
 
-After `serve_background`, every later `insert` / `connect` / `update` is pushed
+After `serve(block=False)`, every later `insert` / `connect` / `update` is pushed
 to the already-open page. This is the notebook workflow: serve once, then keep
 adding and driving panels from new cells.
 

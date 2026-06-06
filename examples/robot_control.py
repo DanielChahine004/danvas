@@ -15,6 +15,11 @@ import pycanvas
 
 canvas = pycanvas.Canvas()
 
+# This example uses the explicit two-step form: pycanvas.X(...) builds the panel
+# object, canvas.insert(...) places it. Reach for this when you want to construct
+# a panel up front and insert it later (or into a different canvas). For the
+# common build-and-place-now case, the canvas.<component>(...) factories are
+# shorter -- see hello_world.py and sensor_dashboard.py.
 servo_1 = canvas.insert(pycanvas.Slider(label="servo_1", min=0, max=180, default=90))
 servo_2 = canvas.insert(pycanvas.Slider(label="servo_2", min=0, max=180, default=45))
 mode = canvas.insert(pycanvas.Toggle(label="mode", options=["manual", "vision"]))
@@ -44,6 +49,13 @@ def on_s2(value):
 def on_mode(value):
     print("mode switched to:", value)
     status.update(f"mode: {value}")
+    # In vision mode the worker drives the servos, so make the sliders inert to
+    # the user while their thumbs keep tracking the pushed values. `interactive`
+    # blocks UI input without locking the shape -- unlike lock(), which would
+    # also freeze the programmatic updates and stop the thumb moving.
+    drive = value == "vision"
+    servo_1.interactive = not drive
+    servo_2.interactive = not drive
 
 
 def worker():

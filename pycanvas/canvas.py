@@ -7,7 +7,23 @@ import warnings
 
 from . import server
 from .bridge import Bridge
+from .components import (
+    Custom,
+    Inspector,
+    Label,
+    LivePlot,
+    Plot,
+    Repl,
+    Slider,
+    Toggle,
+    VideoFeed,
+)
 from .kernel import Kernel
+
+# Keyword names consumed by ``Canvas.insert`` itself. A factory method splits
+# these off and forwards everything else to the component constructor.
+_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "movable",
+                "resizable", "interactive", "name")
 
 
 # Friendly snake_case names mapped onto tldraw's arrow shape prop names.
@@ -165,7 +181,8 @@ class Canvas:
         return self
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
-               locked=False, movable=True, resizable=True, name=None):
+               locked=False, movable=True, resizable=True, interactive=True,
+               name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -188,7 +205,7 @@ class Canvas:
         ``name`` (or the component's label, if a valid identifier) exposes the
         component as ``canvas.<name>`` and ``canvas["<name>"]``.
 
-        When called after the server is already running (``serve_background``),
+        When called after the server is already running (``serve(block=False)``),
         the component is pushed live to connected clients instead of only
         appearing on the next page load.
         """
@@ -229,6 +246,8 @@ class Canvas:
             component._movable = False
         if not resizable:
             component._resizable = False
+        if not interactive:
+            component._interactive = False
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -252,6 +271,63 @@ class Canvas:
         if self._serving:
             self._bridge.register_live(component)
         return component
+
+    # -- component factories --------------------------------------------------
+    # Shorthand for ``insert(SomeComponent(...))``. Each forwards its arguments
+    # to the component constructor and the placement/lock/name options (see
+    # ``_INSERT_KEYS``) to :meth:`insert`, returning the inserted component.
+    # ``insert`` remains the full path for hand-built or exotic components.
+    def _make(self, cls, *args, **kw):
+        place = {k: kw.pop(k) for k in _INSERT_KEYS if k in kw}
+        return self.insert(cls(*args, **kw), **place)
+
+    def slider(self, label, min=0, max=100, default=None, **place):
+        """Insert a :class:`~pycanvas.Slider`. See :meth:`insert` for ``place``."""
+        return self._make(Slider, label, min=min, max=max, default=default, **place)
+
+    def toggle(self, label, options, default=None, **place):
+        """Insert a :class:`~pycanvas.Toggle`. See :meth:`insert` for ``place``."""
+        return self._make(Toggle, label, options, default=default, **place)
+
+    def label(self, label, value="", **place):
+        """Insert a :class:`~pycanvas.Label`. See :meth:`insert` for ``place``."""
+        return self._make(Label, label, value=value, **place)
+
+    def video(self, label, quality=70, **place):
+        """Insert a :class:`~pycanvas.VideoFeed`. See :meth:`insert` for ``place``."""
+        return self._make(VideoFeed, label, quality=quality, **place)
+
+    def custom(self, html=None, path=None, label="custom", width=380, height=320,
+               **place):
+        """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``."""
+        return self._make(Custom, html=html, path=path, label=label,
+                          width=width, height=height, **place)
+
+    def plot(self, label="plot", width=560, height=420, **place):
+        """Insert a :class:`~pycanvas.Plot`. See :meth:`insert` for ``place``."""
+        return self._make(Plot, label=label, width=width, height=height, **place)
+
+    def live_plot(self, label="live plot", **kw):
+        """Insert a :class:`~pycanvas.LivePlot`.
+
+        Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,
+        ``width``, ``height``) and :meth:`insert` placement options both go in
+        ``kw``; they don't overlap.
+        """
+        return self._make(LivePlot, label=label, **kw)
+
+    def repl(self, label="repl", **place):
+        """Insert a :class:`~pycanvas.Repl`. See :meth:`insert` for ``place``.
+
+        Call :meth:`enable_repl` first to bind the namespace cells run against.
+        """
+        return self._make(Repl, label=label, **place)
+
+    def inspector(self, label="inspector", refresh=None, source="components",
+                  namespace=None, **place):
+        """Insert an :class:`~pycanvas.Inspector`. See :meth:`insert` for ``place``."""
+        return self._make(Inspector, label=label, refresh=refresh, source=source,
+                          namespace=namespace, **place)
 
     def remove(self, component):
         """Pull a panel off the canvas. Works live while serving.
@@ -469,8 +545,22 @@ class Canvas:
             )
 
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
-              allow_remote_exec=False):
-        """Start the server, open the browser, and block until shutdown.
+              allow_remote_exec=False, block=True, wait=True):
+        """Start the server and open the browser.
+
+        With ``block=True`` (the default) this runs the server and blocks until
+        shutdown — the usual end-of-script call. With ``block=False`` it starts
+        the server in the background and returns ``self`` immediately, so further
+        ``insert`` calls push panels onto the live canvas (intended for
+        interactive sessions, e.g. Jupyter). In background mode, ``wait`` blocks
+        briefly until the event loop is ready so the first post-serve insert is
+        guaranteed to broadcast.
+
+        Note: the background server runs in a *daemon* thread, so with
+        ``block=False`` you are responsible for keeping the process alive. That
+        is automatic in a notebook/REPL (the kernel lives on), but a plain script
+        that ends right after ``serve(block=False)`` will exit and tear the
+        server down — call :meth:`wait` to park the main thread there instead.
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
@@ -479,35 +569,38 @@ class Canvas:
         unauthenticated remote code execution).
         """
         self._check_remote_exec(host, allow_remote_exec)
+        if not block:
+            self._server = server.run_background(
+                self._bridge, port=port, open_browser=open_browser, host=host
+            )
+            if wait:
+                self._wait_until_ready()
+            self._serving = True
+            return self
         self._serving = True
         server.run(self._bridge, port=port, open_browser=open_browser, host=host)
-
-    def serve_background(self, port=8000, open_browser=True, wait=True, host="127.0.0.1",
-                         allow_remote_exec=False):
-        """Start the server without blocking; return ``self`` for chaining.
-
-        Intended for interactive sessions (e.g. Jupyter): the call returns so
-        further ``insert`` calls push panels onto the live canvas. When
-        ``wait`` is true, block briefly until the server's event loop is ready
-        so the first post-serve insert is guaranteed to broadcast.
-
-        ``host`` is the bind address; pass ``"0.0.0.0"`` for LAN access (see
-        ``serve``). A ``Repl`` on the canvas blocks non-local serving unless
-        ``allow_remote_exec=True``.
-        """
-        self._check_remote_exec(host, allow_remote_exec)
-        self._server = server.run_background(
-            self._bridge, port=port, open_browser=open_browser, host=host
-        )
-        if wait:
-            self._wait_until_ready()
-        self._serving = True
-        return self
 
     def stop(self):
         """Signal the background server to shut down."""
         if self._server is not None:
             self._server.should_exit = True
+
+    def wait(self):
+        """Block the calling thread until the background server shuts down.
+
+        Use this at the end of a *script* that started the server with
+        ``serve(block=False)`` (and then, say, spun up worker threads): without
+        it the script would fall off the end and exit, killing the daemon server
+        thread. ``Ctrl+C`` triggers a clean shutdown. A no-op if the server isn't
+        running in the background (nothing to wait on).
+        """
+        if self._server is None:
+            return
+        try:
+            while not self._server.should_exit:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            self.stop()
 
     def _wait_until_ready(self, timeout=5.0):
         deadline = time.monotonic() + timeout

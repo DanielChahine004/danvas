@@ -10,9 +10,9 @@ import pycanvas
 
 canvas = pycanvas.Canvas()
 
-gain = canvas.insert(pycanvas.Slider(label="gain", min=1, max=10, default=3))
-reading = canvas.insert(pycanvas.Label(label="reading", value="0.0"))
-feed = canvas.insert(pycanvas.VideoFeed(label="synthetic camera"))
+gain = canvas.slider("gain", min=1, max=10, default=3)
+reading = canvas.label("reading", "0.0")
+feed = canvas.video("synthetic camera")
 
 
 def worker():

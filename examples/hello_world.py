@@ -4,8 +4,9 @@ import pycanvas
 
 canvas = pycanvas.Canvas()
 
-servo = canvas.insert(pycanvas.Slider(label="servo_1", min=0, max=180, default=90))
-status = canvas.insert(pycanvas.Label(label="status", value="idle"))
+# Factory shorthand: canvas.<component>(...) builds and inserts in one call.
+servo = canvas.slider(label="servo_1", min=0, max=180, default=90)
+status = canvas.label(label="status", value="idle")
 
 
 @servo.on_change

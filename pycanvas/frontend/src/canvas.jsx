@@ -30,21 +30,36 @@ function cardStyle(shape) {
   }
 }
 
-// Card chrome shared by every panel. When the shape is fully locked (isLocked),
-// it lays a transparent overlay over the content that swallows pointer events,
-// so the panel's controls stop responding to interaction. tldraw's isLocked
-// only blocks its own select/move/resize gestures — pointer events still reach
-// inner HTML (our controls set pointerEvents:'all'), so without this a locked
-// slider would keep firing value changes. Pinned panels (movable/resizable
-// false) deliberately stay interactive and get no overlay.
+// Card chrome shared by every panel. When the shape is fully locked (isLocked)
+// or input-locked (meta.lockInput), it lays a transparent overlay over the
+// content. The overlay sits on top with pointerEvents:'all', so it — not the
+// inner controls — receives the pointer, making the contents inert (tldraw's
+// isLocked only blocks its own gestures; pointer events still reach inner HTML,
+// which sets pointerEvents:'all', so without this a locked slider would keep
+// firing value changes).
+//
+// The two locks differ in what they do with that pointer, keeping *content
+// interactivity* separate from *move/resize/select permission*:
+//   - isLocked (full lock): the overlay swallows the event (stopPropagation) so
+//     nothing reaches tldraw — no interaction at all.
+//   - meta.lockInput only: the overlay lets the event bubble to tldraw, so the
+//     panel can still be selected/moved/resized exactly as its movable /
+//     resizable / locked permissions allow — only the inner controls are inert.
+//     The shape stays unlocked, so Python value updates still render and a
+//     slider thumb keeps tracking them while the user can't drag it.
+// Pinned panels (movable/resizable false) stay fully interactive: no overlay.
 function Card({ shape, children }) {
+  const fullyLocked = shape.isLocked
+  const blockInput = fullyLocked || shape.meta?.lockInput
   return (
     <HTMLContainer style={cardStyle(shape)}>
       {children}
-      {shape.isLocked && (
+      {blockInput && (
         <div
           style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'default' }}
-          onPointerDown={(e) => e.stopPropagation()}
+          // Full lock swallows the event; input-only lock lets it bubble so
+          // tldraw's move/select/resize still obey the panel's own permissions.
+          onPointerDown={fullyLocked ? (e) => e.stopPropagation() : undefined}
         />
       )}
     </HTMLContainer>

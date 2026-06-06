@@ -22,7 +22,7 @@ Notes
   until the page replies — that's why we drive it from the main thread here (not
   from inside a callback, which runs on the server's event loop and would
   deadlock).
-* `serve_background()` returns immediately so this console loop can run while the
+* `serve(block=False)` returns immediately so this console loop can run while the
   server keeps serving.
 """
 
@@ -58,7 +58,7 @@ for panel in (speed, gain):
     panel.on_layout(report)
 
 
-canvas.serve_background(port=8000)
+canvas.serve(port=8000, block=False)
 
 print("\nServing at http://127.0.0.1:8000")
 print("Drag / resize the panels in the browser — edits print here.")

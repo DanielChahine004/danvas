@@ -20,8 +20,8 @@ pip install -e .
 import pycanvas
 
 canvas = pycanvas.Canvas()
-servo = canvas.insert(pycanvas.Slider(label="servo_1", min=0, max=180, default=90))
-status = canvas.insert(pycanvas.Label(label="status", value="idle"))
+servo = canvas.slider("servo_1", min=0, max=180, default=90)
+status = canvas.label("status", "idle")
 
 @servo.on_change
 def handle(value):
@@ -38,6 +38,33 @@ python examples/hello_world.py
 
 Drag the slider in the browser → `servo.value` updates in Python and the
 label mirrors it. Resize and drag the cards freely on the canvas.
+
+## Two ways to add a panel
+
+`canvas.<component>(...)` builds a panel **and** places it in one call — the
+concise default. Every component has a factory: `slider`, `toggle`, `label`,
+`video`, `plot`, `live_plot`, `custom`, `repl`, `inspector`.
+
+```python
+servo = canvas.slider("servo_1", min=0, max=180, default=90)
+feed  = canvas.video("camera")
+plot  = canvas.live_plot(label="servos", traces=["s1", "s2"])
+```
+
+Factories also forward `insert`'s placement and lock options, so a fully-specified
+panel still fits on one line:
+
+```python
+servo = canvas.slider("servo_1", min=0, max=180, default=90, x=80, y=80, name="servo")
+```
+
+The explicit two-step form is still available for when you want to **build a
+panel now and insert it later** (or into a different canvas):
+
+```python
+s = pycanvas.Slider(label="servo_1", min=0, max=180, default=90)  # not on a canvas yet
+canvas.insert(s, x=80, y=80)                                      # place it when ready
+```
 
 ## Components
 
@@ -121,6 +148,47 @@ canvas["servo"].update(120)
 > `w`/`h`/`rotation` stay in sync (register `@panel.on_layout` to react to them).
 > A panel's `x`/`y` are `None` only until it's first placed — by Python or a drag.
 
+## Locking & interactivity
+
+Four **independent** controls gate how a panel responds to the user. Set any of
+them on `insert` (or a factory), or flip them live as a property — each write is
+pushed to the browser immediately. Because they're separate axes you can mix them
+freely (e.g. pin a panel in place while keeping its slider live).
+
+| Control             | User can move? | User can resize? | Controls interactive? | Python `update()` renders? |
+|---------------------|----------------|------------------|-----------------------|----------------------------|
+| *(default)*         | yes            | yes              | yes                   | yes                        |
+| `movable=False`     | **no**         | yes              | yes                   | yes                        |
+| `resizable=False`   | yes            | **no**           | yes                   | yes                        |
+| `interactive=False` | yes            | yes              | **no**                | yes                        |
+| `locked=True`       | **no**         | **no**           | **no**                | **no** (frozen)            |
+
+```python
+servo = canvas.slider("servo_1", min=0, max=180, default=90)
+
+servo.movable = False        # user can't drag the panel; the slider still works
+servo.resizable = False      # user can't resize it; the slider still works
+servo.interactive = False    # user can't operate the slider, but your update()s
+                             #   still move the thumb — and the panel stays
+                             #   movable/resizable (those axes are unaffected)
+servo.locked = True          # full lock: no move, resize, or interaction — AND
+                             #   programmatic update()s stop rendering too
+```
+
+Two helpers wrap the common combinations:
+
+```python
+servo.pin();  servo.unpin()    # movable=False + resizable=False (controls stay live)
+servo.lock(); servo.unlock()   # full lock on / off
+```
+
+The key distinction is **`interactive` vs `locked`**: `interactive=False` blocks
+the *user* from operating the control while your code keeps driving it — a slider
+whose thumb tracks an automatic value the user mustn't drag. `lock()` freezes
+everything *including* your own `update()` calls, so the thumb would stop moving.
+See [`examples/robot_control.py`](examples/robot_control.py) — vision mode makes
+the servo sliders inert (`interactive=False`) while they sweep on their own.
+
 ## Saving & loading
 
 Persist the whole board — the panel formation **and** the user's freehand
@@ -139,17 +207,16 @@ saved drawings on top. See the [GUIDE](GUIDE.md) for details.
 
 ## Interactive use (Jupyter / notebooks)
 
-`serve()` blocks, which is fine for scripts. In a notebook use
-`serve_background()` instead: it starts the server in a thread and returns, so
-later cells can keep adding, moving, and removing panels on the **already-open**
-canvas.
+`serve()` blocks, which is fine for scripts. In a notebook pass `block=False`
+instead: it starts the server in a thread and returns, so later cells can keep
+adding, moving, and removing panels on the **already-open** canvas.
 
 ```python
 import pycanvas
-canvas = pycanvas.Canvas().serve_background(port=8000)   # returns immediately
+canvas = pycanvas.Canvas().serve(port=8000, block=False)   # returns immediately
 
 # ...any later cell — appears live on the open page...
-servo = canvas.insert(pycanvas.Slider(label="servo_1", min=0, max=180, default=90))
+servo = canvas.slider("servo_1", min=0, max=180, default=90)
 
 canvas.remove(servo)   # pull a panel off the canvas
 canvas.stop()          # shut the background server down
@@ -157,6 +224,12 @@ canvas.stop()          # shut the background server down
 
 See [`examples/notebook_dynamic.ipynb`](examples/notebook_dynamic.ipynb) for a
 full walkthrough.
+
+> The background server runs in a daemon thread, so `block=False` only stays up
+> while the process does. A notebook kernel keeps living, but a plain **script**
+> that ends right after `serve(block=False)` would exit and tear the server down
+> — call `canvas.wait()` at the end to park the main thread until `Ctrl+C` (handy
+> when you serve in the background and then start your own worker threads).
 
 > Note: a `Canvas` is single-process — one Python process owns the port and all
 > components. Two separate scripts can't add to the same canvas/port, but you can
@@ -170,7 +243,7 @@ interfaces:
 
 ```python
 canvas.serve(port=8000, host="0.0.0.0")
-# or: canvas.serve_background(port=8000, host="0.0.0.0")
+# or non-blocking: canvas.serve(port=8000, host="0.0.0.0", block=False)
 ```
 
 Then on another device's browser, go to `http://<this-machine-ip>:8000`
@@ -205,7 +278,7 @@ from pycanvas import Merge
 
 Merge([8001, 8002]).serve(port=8080)            # blocks, opens the browser
 # or in a notebook:
-m = Merge([8001, 8002]).serve_background(port=8080)
+m = Merge([8001, 8002]).serve(port=8080, block=False)
 m.stop()
 ```
 
@@ -269,7 +342,11 @@ All JSON over a single connection at `ws://localhost:{port}/ws`:
 ```
 
 `register` carries optional `x`/`y`/`rotation` (top-level shape placement;
-`rotation` in radians). `update` payloads may include `value`/component props as
-well as live layout changes (`x`, `y`, `w`, `h`, `rotation`). `remove` deletes a
+`rotation` in radians) plus optional lock flags (`locked`, `movable`,
+`resizable`, `interactive`). `update` payloads may include `value`/component
+props as well as live layout changes (`x`, `y`, `w`, `h`, `rotation`) and those
+same lock flags. `locked` maps to tldraw's `isLocked`; `movable`/`resizable`/
+`interactive` ride in the shape's `meta` (`lockMove`/`lockResize`/`lockInput`) so
+they gate user gestures without freezing programmatic updates. `remove` deletes a
 panel from connected clients. Server → browser: `register`, `update`, `remove`;
 browser → server: `input`.

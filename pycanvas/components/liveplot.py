@@ -64,6 +64,13 @@ class LivePlot(BaseComponent):
             payload = self._payload()
         self._send_update({"plot": payload})
 
+    # Alias: every other component sends data via ``update()``. LivePlot's
+    # natural verb is ``push`` (append one sample), but accept ``update`` too so
+    # the API reads consistently across components.
+    def update(self, sample, x=None):
+        """Alias for :meth:`push` — append one sample per trace."""
+        return self.push(sample, x)
+
     def clear(self):
         with self._lock:
             for name in self._traces:

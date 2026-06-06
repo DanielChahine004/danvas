@@ -51,6 +51,14 @@ class BaseComponent:
         # ``meta`` and enforced by the frontend's onTranslate / canResize hooks.
         self._movable = True
         self._resizable = True
+        # Another interaction-preserving flag, but the inverse emphasis: when
+        # False the user can't operate the panel's controls (a transparent
+        # overlay swallows pointer events on the frontend), yet the panel stays
+        # *unlocked* so Python ``update()`` calls still render — e.g. a slider
+        # whose thumb tracks an automatic value the user mustn't drag. Carried in
+        # the shape's tldraw ``meta`` (lockInput). Contrast ``locked``, which
+        # also freezes programmatic updates.
+        self._interactive = True
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -132,6 +140,21 @@ class BaseComponent:
     def resizable(self, value):
         self.set_layout(resizable=bool(value))
 
+    @property
+    def interactive(self):
+        """Whether the user can operate the panel's controls from the UI.
+
+        Set to ``False`` to make the controls inert to the user while the panel
+        stays unlocked, so Python ``update()`` calls still render live (e.g. a
+        slider thumb that tracks an automatic value the user mustn't drag). The
+        panel can still be moved/selected; use ``locked`` to freeze everything.
+        """
+        return self._interactive
+
+    @interactive.setter
+    def interactive(self, value):
+        self.set_layout(interactive=bool(value))
+
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
         """Props sent in the ``register`` message to build the shape."""
@@ -185,14 +208,16 @@ class BaseComponent:
         self.set_layout(movable=True, resizable=True)
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
-                   locked=None, movable=None, resizable=None):
+                   locked=None, movable=None, resizable=None, interactive=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
         reconnecting client replays the new layout. ``x``/``y`` travel as the
         panel's canvas position, ``rotation`` (degrees) as its angle. ``locked``
-        is a full lock (also blocks interaction); ``movable``/``resizable`` are
-        interaction-preserving locks carried in the shape's tldraw ``meta``.
+        is a full lock (also blocks interaction *and* programmatic updates);
+        ``movable``/``resizable``/``interactive`` are interaction-preserving
+        locks carried in the shape's tldraw ``meta`` (``interactive=False`` makes
+        controls inert to the user while value updates keep rendering).
         ``w``/``h`` are shape props.
         """
         payload = {}
@@ -224,6 +249,9 @@ class BaseComponent:
         if resizable is not None:
             self._resizable = bool(resizable)
             payload["resizable"] = self._resizable
+        if interactive is not None:
+            self._interactive = bool(interactive)
+            payload["interactive"] = self._interactive
         if payload:
             self._send_update(payload)
 
