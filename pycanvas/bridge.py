@@ -173,9 +173,15 @@ class Bridge:
 
     async def _send(self, ws, msg):
         """Send one frame, serialized against any other send to this socket."""
+        if ws not in self._connections:
+            return  # connection already torn down
+        # Lazily create the per-connection lock so any code path that registers a
+        # connection (incl. subclasses overriding handle_connection, e.g. the
+        # merge host) gets serialized sends without having to know about it. Safe
+        # without a guard: there's no await between get and setdefault.
         lock = self._send_locks.get(ws)
-        if lock is None:  # connection already torn down
-            return
+        if lock is None:
+            lock = self._send_locks.setdefault(ws, asyncio.Lock())
         async with lock:
             await ws.send_text(json.dumps(msg))
 

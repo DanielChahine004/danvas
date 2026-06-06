@@ -216,6 +216,8 @@ class MergeBridge(Bridge):
     async def handle_connection(self, ws):
         await ws.accept()
         self._connections.add(ws)
+        # The base ``_send`` serializes per connection via a lock keyed on the
+        # socket; it creates one lazily, but we still drop it on disconnect.
         try:
             for cid, reg in self._registers.items():
                 await self._send(ws, reg)
@@ -233,6 +235,7 @@ class MergeBridge(Bridge):
             pass
         finally:
             self._connections.discard(ws)
+            self._send_locks.pop(ws, None)
 
     async def _route_from_browser(self, raw):
         """Send a browser interaction back to the source that owns the panel."""
