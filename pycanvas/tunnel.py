@@ -30,6 +30,26 @@ def _lt_cmd(binary, port):
         return [binary, "localtunnel", "--port", str(port)]
     return [binary, "--port", str(port)]
 
+
+def _resolve_binary(spec):
+    """Locate a provider's executable, falling back past a stale PATH.
+
+    Tries ``shutil.which`` first (the normal case). If that fails — common right
+    after installing on Windows, where an already-open shell hasn't picked up the
+    machine PATH the installer updated — probe the installer's default locations
+    so ``tunnel=True`` still works without reopening the terminal. Returns the
+    full path, or ``None`` if nothing is found.
+    """
+    for name in spec["binaries"]:
+        found = shutil.which(name)
+        if found:
+            return found
+    for path in spec.get("fallback_paths", ()):
+        expanded = os.path.expandvars(path)
+        if os.path.isfile(expanded):
+            return expanded
+    return None
+
 # One entry per provider: which executables can drive it, how to build the
 # command for a port, and the regex that matches the public URL it prints.
 _PROVIDERS = {
@@ -37,6 +57,12 @@ _PROVIDERS = {
         "binaries": ["cloudflared"],
         "cmd": lambda b, port: [b, "tunnel", "--url", f"http://localhost:{port}"],
         "pattern": re.compile(r"https://[-\w]+\.trycloudflare\.com"),
+        # Default install dirs, probed when PATH lookup fails (e.g. a shell open
+        # since before the installer ran). The winget/MSI build lands here.
+        "fallback_paths": (
+            r"%ProgramFiles(x86)%\cloudflared\cloudflared.exe",
+            r"%ProgramFiles%\cloudflared\cloudflared.exe",
+        ),
         "install": "install cloudflared (brew install cloudflared, "
                    "winget install --id Cloudflare.cloudflared, or see "
                    "https://developers.cloudflare.com/cloudflare-one/connections/"
@@ -89,12 +115,12 @@ def open_tunnel(port, provider="cloudflared", timeout=30):
             f"unknown tunnel provider {provider!r}; choose from "
             f"{', '.join(sorted(_PROVIDERS))}"
         )
-    binary = next((p for p in (shutil.which(b) for b in spec["binaries"]) if p),
-                  None)
+    binary = _resolve_binary(spec)
     if binary is None:
         raise RuntimeError(
             f"tunnel provider {provider!r} needs one of {spec['binaries']} on "
-            f"PATH — {spec['install']}"
+            f"PATH — {spec['install']}. If you just installed it, open a new "
+            f"terminal so PATH refreshes."
         )
     proc = subprocess.Popen(
         spec["cmd"](binary, port),
