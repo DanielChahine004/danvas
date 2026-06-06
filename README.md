@@ -291,11 +291,52 @@ Caveats:
 - **Firewall** — your OS may block inbound connections; accept the prompt on first
   run, or allow the port (Windows admin shell:
   `New-NetFirewallRule -DisplayName "PyCanvas 8000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000 -Profile Any`).
-- **No IP / across networks** — to share without IPs or firewall changes, keep the
-  default local bind and tunnel the port: VS Code **Ports** panel → *Forward a
-  Port*, or `ngrok http 8000` / `cloudflared tunnel --url http://localhost:8000`.
+- **No IP / across networks** — LAN sharing only reaches the same network. To
+  share with anyone, anywhere, use a tunnel — built in, see
+  [Sharing across the internet](#sharing-across-the-internet-tunnels) below.
 - **No authentication** — anyone who can reach the port can interact. Use only on
   networks you trust (and note the `Repl` remote-exec guard).
+
+## Sharing across the internet (tunnels)
+
+LAN sharing only reaches devices on the same network. To let anyone — on any
+network, anywhere — open the canvas, pass `tunnel=True`. PyCanvas keeps the
+server bound to `127.0.0.1` and opens a public HTTPS tunnel to it, printing a
+shareable `https://…` URL:
+
+```python
+canvas.serve(port=8000, tunnel=True)
+# or non-blocking: canvas.serve(port=8000, tunnel=True, block=False)
+```
+
+```
+PyCanvas serving at http://127.0.0.1:8000  (Ctrl+C to stop)
+PyCanvas public URL: https://timely-exceed-charts-graphic.trycloudflare.com   <- share this with anyone, anywhere
+```
+
+Send anyone that URL — the frontend dials its WebSocket from the page origin, so
+everything (including video and live plots over `wss`) works through the tunnel
+with no extra setup. The tunnel closes automatically when the server stops.
+
+**Backends.** The default is **cloudflared** — no signup, no visitor warning
+page. Install it once (`brew install cloudflared`,
+`winget install --id Cloudflare.cloudflared`, or
+[download](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)).
+**localtunnel** is also supported (`pip`-free, needs Node: `npm i -g localtunnel`,
+or `npx`), but it shows first-time visitors an IP-password reminder page:
+
+```python
+canvas.serve(port=8000, tunnel=True, tunnel_provider="localtunnel")
+```
+
+Caveats:
+- **Public, unauthenticated** — the URL is reachable by anyone who has it. A
+  tunnel exposes the loopback bind to the whole internet, so a canvas containing
+  a `Repl` is refused unless you pass `allow_remote_exec=True` (a `Repl` is
+  unauthenticated remote code execution — same gate as a public `host=` bind).
+- **Quick-tunnel URLs are random and ephemeral** — a new `https://…` name each
+  run. That's expected for cloudflared quick tunnels; named tunnels (a Cloudflare
+  account) are out of scope here.
 
 ## Merging canvases
 
@@ -327,6 +368,24 @@ coordinates. Pass `region_width` (or `--region-width`) to instead spread the
 sources side-by-side, each in its own region that many pixels wide. A source's
 panels go inert and drop from the view while it's disconnected, and reappear
 when it reconnects.
+
+**Across networks.** Sources aren't limited to `host:port` on your LAN — a source
+may also be the public URL of a [tunneled](#sharing-across-the-internet-tunnels)
+canvas, so a merge host can composite peers anywhere on the internet. And the
+merged view itself can be tunneled (`tunnel=True` / `--tunnel`) so collaborators
+on any network can open it:
+
+```bash
+# merge two remote (tunneled) canvases and expose the result publicly too
+python -m pycanvas.merge https://a.trycloudflare.com https://b.loca.lt --tunnel
+```
+
+```python
+Merge(["https://a.trycloudflare.com", ":8002"]).serve(port=8080, tunnel=True)
+```
+
+`http(s)://` URLs are mapped to `ws(s)://…/ws` automatically; bare ports and
+`host:port` keep using `ws://` as before.
 
 Caveats / v1 scope:
 - Free-form drawings aren't composited — only code-driven panels and arrows are.

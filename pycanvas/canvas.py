@@ -162,6 +162,7 @@ class Canvas:
         self._named = {}  # name -> component, for canvas.<name> / canvas["<name>"]
         self._serving = False
         self._server = None
+        self._tunnel = None
         # Shared by all Repl cells: one kernel thread runs their code serially
         # against one namespace (set by enable_repl). None until enable_repl.
         self._kernel = Kernel()
@@ -597,7 +598,8 @@ class Canvas:
             )
 
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
-              allow_remote_exec=False, block=True, wait=True):
+              allow_remote_exec=False, block=True, wait=True,
+              tunnel=False, tunnel_provider="cloudflared"):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -619,8 +621,20 @@ class Canvas:
         ``http://<this-machine-ip>:<port>``. If any ``Repl`` is on the canvas,
         non-local serving is refused unless ``allow_remote_exec=True`` (a REPL is
         unauthenticated remote code execution).
+
+        Pass ``tunnel=True`` to also expose the canvas on the public internet
+        through a tunnel, so anyone — not just devices on your LAN — can open the
+        printed ``https://…`` URL. ``tunnel_provider`` selects the backend
+        (``"cloudflared"`` by default, needs no signup and no visitor
+        interstitial; ``"localtunnel"`` is also supported). A tunnel exposes the
+        loopback bind to the whole internet, so it is gated for ``Repl`` exactly
+        like a public bind: refused unless ``allow_remote_exec=True``. The tunnel
+        is torn down when the server stops (or via :meth:`stop`).
         """
-        self._check_remote_exec(host, allow_remote_exec)
+        # A tunnel publishes the loopback bind to the entire internet, so the
+        # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
+        # as if binding publicly.
+        self._check_remote_exec("0.0.0.0" if tunnel else host, allow_remote_exec)
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host
@@ -628,14 +642,35 @@ class Canvas:
             if wait:
                 self._wait_until_ready()
             self._serving = True
+            if tunnel:
+                self._start_tunnel(port, tunnel_provider)
             return self
         self._serving = True
-        server.run(self._bridge, port=port, open_browser=open_browser, host=host)
+        if tunnel:
+            self._start_tunnel(port, tunnel_provider)
+        try:
+            server.run(self._bridge, port=port, open_browser=open_browser,
+                       host=host)
+        finally:
+            self._stop_tunnel()
+
+    def _start_tunnel(self, port, provider):
+        """Open a public tunnel to ``port`` and announce the URL."""
+        from .tunnel import open_tunnel
+        self._tunnel = open_tunnel(port, provider=provider)
+        print(f"PyCanvas public URL: {self._tunnel.url}"
+              "   <- share this with anyone, anywhere")
+
+    def _stop_tunnel(self):
+        if self._tunnel is not None:
+            self._tunnel.stop()
+            self._tunnel = None
 
     def stop(self):
-        """Signal the background server to shut down."""
+        """Signal the background server to shut down and close any tunnel."""
         if self._server is not None:
             self._server.should_exit = True
+        self._stop_tunnel()
 
     def wait(self):
         """Block the calling thread until the background server shuts down.

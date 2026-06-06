@@ -8,6 +8,9 @@ single surface, and re-serves the union on a new port::
     # CLI -- unify three running canvases onto http://localhost:8080
     python -m pycanvas.merge :8001 :8002 host3:8003 --port 8080
 
+    # sources may also be tunnel URLs, and the merged view can itself be tunneled
+    python -m pycanvas.merge https://a.loca.lt https://b.loca.lt --tunnel
+
     # or from Python
     from pycanvas.merge import Merge
     Merge([8001, 8002]).serve(port=8080)
@@ -39,13 +42,28 @@ from .bridge import Bridge
 
 
 def _parse_source(spec):
-    """Normalise a source spec to ``(host, port)``.
+    """Normalise a source spec to ``(ws_uri, label)``.
 
-    Accepts ``8001`` / ``"8001"`` / ``":8001"`` (localhost) or ``"host:port"``.
+    Accepts:
+
+    - a bare port — ``8001`` / ``"8001"`` / ``":8001"`` (localhost) — or a
+      ``"host:port"``: connected over ``ws://`` on the same/another LAN, as before.
+    - a full URL — ``"https://x.loca.lt"`` / ``"wss://host/ws"`` — so a canvas
+      exposed through a tunnel (see :meth:`pycanvas.Canvas.serve` ``tunnel=True``)
+      can be merged from anywhere. ``http``→``ws`` and ``https``→``wss``, and the
+      ``/ws`` endpoint path is appended when missing.
     """
     if isinstance(spec, int):
-        return "localhost", spec
+        return f"ws://localhost:{spec}/ws", f"localhost:{spec}"
     text = str(spec).strip()
+    if "://" in text:
+        scheme, _, rest = text.partition("://")
+        scheme = {"http": "ws", "https": "wss"}.get(scheme.lower(), scheme.lower())
+        rest = rest.rstrip("/")
+        label = rest.split("/", 1)[0]
+        if not rest.endswith("/ws"):
+            rest += "/ws"
+        return f"{scheme}://{rest}", label
     if text.startswith(":"):
         text = "localhost" + text
     if ":" in text:
@@ -53,11 +71,11 @@ def _parse_source(spec):
         host = host or "localhost"
     else:
         host, port = "localhost", text
-    return host, int(port)
+    return f"ws://{host}:{int(port)}/ws", f"{host}:{port}"
 
 
 class _Source:
-    """One upstream canvas: its address, its layout offset, and its live socket.
+    """One upstream canvas: its endpoint, its layout offset, and its live socket.
 
     The socket (``_ws``) is set while connected so the merge host can route a
     browser's interaction back to this canvas; it is ``None`` when the source is
@@ -65,12 +83,10 @@ class _Source:
     ``_cascade``.
     """
 
-    def __init__(self, host, port, offset_x, offset_y, label=None):
-        self.host = host
-        self.port = port
+    def __init__(self, uri, offset_x, offset_y, label=None):
+        self.uri = uri
         self.offset = (offset_x, offset_y)
-        self.label = label or f"{host}:{port}"
-        self.uri = f"ws://{host}:{port}/ws"
+        self.label = label or uri
         self._ws = None
         self._cascade = 0
 
@@ -286,31 +302,61 @@ class Merge:
     def __init__(self, sources, region_width=0, allow_remote_exec=False):
         parsed = []
         for i, spec in enumerate(sources):
-            host, port = _parse_source(spec)
-            parsed.append(_Source(host, port, offset_x=i * region_width, offset_y=0))
+            uri, label = _parse_source(spec)
+            parsed.append(_Source(uri, offset_x=i * region_width, offset_y=0,
+                                  label=label))
         self._bridge = MergeBridge(
             parsed, region_width=region_width, allow_remote_exec=allow_remote_exec
         )
         self._server = None
+        self._tunnel = None
 
-    def serve(self, port=8080, open_browser=True, host="127.0.0.1", block=True):
+    def serve(self, port=8080, open_browser=True, host="127.0.0.1", block=True,
+              tunnel=False, tunnel_provider="cloudflared"):
         """Start the merge host.
 
         With ``block=True`` (default) this blocks until shutdown. With
         ``block=False`` it starts the host in the background and returns ``self``
         for chaining (use in a notebook, then call :meth:`stop`).
+
+        Pass ``tunnel=True`` to expose the merged view on the public internet
+        through a tunnel (``tunnel_provider`` selects the backend, default
+        ``"cloudflared"``), so collaborators on any network can open the printed
+        ``https://…`` URL. The merge host runs no component code itself, so this
+        adds no remote-execution surface beyond the per-source ``Repl`` gate
+        (``allow_remote_exec``). The tunnel is closed when the host stops.
         """
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host
             )
+            if tunnel:
+                self._start_tunnel(port, tunnel_provider)
             return self
-        server.run(self._bridge, port=port, open_browser=open_browser, host=host)
+        if tunnel:
+            self._start_tunnel(port, tunnel_provider)
+        try:
+            server.run(self._bridge, port=port, open_browser=open_browser,
+                       host=host)
+        finally:
+            self._stop_tunnel()
+
+    def _start_tunnel(self, port, provider):
+        from .tunnel import open_tunnel
+        self._tunnel = open_tunnel(port, provider=provider)
+        print(f"[merge] public URL: {self._tunnel.url}"
+              "   <- share this with anyone, anywhere")
+
+    def _stop_tunnel(self):
+        if self._tunnel is not None:
+            self._tunnel.stop()
+            self._tunnel = None
 
     def stop(self):
-        """Signal the background merge host to shut down."""
+        """Signal the background merge host to shut down and close any tunnel."""
         if self._server is not None:
             self._server.should_exit = True
+        self._stop_tunnel()
 
 
 def main(argv=None):
@@ -320,7 +366,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "sources", nargs="+",
-        help="source canvases as PORT, :PORT, or HOST:PORT (e.g. :8001 host:8002)",
+        help="source canvases as PORT, :PORT, HOST:PORT, or a full tunnel URL "
+             "(e.g. :8001 host:8002 https://x.loca.lt)",
     )
     parser.add_argument("--port", type=int, default=8080, help="port to serve on")
     parser.add_argument("--host", default="127.0.0.1", help="bind address")
@@ -330,12 +377,18 @@ def main(argv=None):
                              "(0 = overlay, preserving real coordinates)")
     parser.add_argument("--allow-remote-exec", action="store_true",
                         help="let browsers drive Repl panels (remote code exec)")
+    parser.add_argument("--tunnel", action="store_true",
+                        help="expose the merged view on the public internet")
+    parser.add_argument("--tunnel-provider", default="cloudflared",
+                        choices=["cloudflared", "localtunnel"],
+                        help="tunnel backend for --tunnel (default cloudflared)")
     args = parser.parse_args(argv)
     Merge(
         args.sources,
         region_width=args.region_width,
         allow_remote_exec=args.allow_remote_exec,
-    ).serve(port=args.port, open_browser=not args.no_open, host=args.host)
+    ).serve(port=args.port, open_browser=not args.no_open, host=args.host,
+            tunnel=args.tunnel, tunnel_provider=args.tunnel_provider)
 
 
 if __name__ == "__main__":
