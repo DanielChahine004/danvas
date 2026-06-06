@@ -35,12 +35,12 @@ CANVAS_FILE = os.path.join(HERE, "saved_canvas.json")
 
 canvas = pycanvas.Canvas()
 
-speed = canvas.insert(pycanvas.Slider(label="speed", min=0, max=100, default=30),
+speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100, default=30),
                       x=80, y=80)
-gain = canvas.insert(pycanvas.Slider(label="gain", min=1, max=10, default=2),
+gain = canvas.insert(pycanvas.Slider("gain", min=1, max=10, default=2),
                      x=80, y=220)
 # This label echoes the most recent UI edit so read-back is visible on-canvas too.
-moved = canvas.insert(pycanvas.Label(label="last_moved", value="drag a panel…"),
+moved = canvas.insert(pycanvas.Label("last_moved", value="drag a panel…"),
                       x=420, y=80, w=300)
 
 
@@ -60,7 +60,6 @@ for panel in (speed, gain):
 
 canvas.serve(port=8000, block=False)
 
-print("\nServing at http://127.0.0.1:8000")
 print("Drag / resize the panels in the browser — edits print here.")
 print("Commands:  s = save canvas   q = quit")
 print("(to load a saved canvas, run load_canvas.py)\n")

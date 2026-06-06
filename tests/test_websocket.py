@@ -11,8 +11,8 @@ from pycanvas import server
 
 def build_client():
     canvas = pycanvas.Canvas()
-    slider = canvas.insert(pycanvas.Slider(label="servo", min=0, max=180, default=90))
-    label = canvas.insert(pycanvas.Label(label="status", value="idle"))
+    slider = canvas.insert(pycanvas.Slider("servo", min=0, max=180, default=90))
+    label = canvas.insert(pycanvas.Label("status", value="idle"))
     app = server.create_app(canvas._bridge, open_browser=False)
     return canvas, slider, label, app
 

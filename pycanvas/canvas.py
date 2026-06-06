@@ -22,14 +22,16 @@ from .kernel import Kernel
 
 # Keyword names consumed by ``Canvas.insert`` itself. A factory method splits
 # these off and forwards everything else to the component constructor.
+# ``name`` is intentionally absent: it is the component's identity and travels on
+# the component itself (set in its constructor), not a placement option.
 _INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "movable",
-                "resizable", "interactive", "name")
+                "resizable", "interactive")
 
 
-# Friendly snake_case names mapped onto tldraw's arrow shape prop names.
-# ``label`` is the conventional caption (tldraw stores it in the ``text`` prop).
+# Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
+# arrow's ``name`` (its identity / eviction key) is handled separately and never
+# sent as a shape prop; ``text`` is the caption tldraw actually draws.
 _ARROW_PROP_ALIASES = {
-    "label": "text",
     "arrowhead_start": "arrowheadStart",
     "arrowhead_end": "arrowheadEnd",
     "label_color": "labelColor",
@@ -45,14 +47,23 @@ class Arrow:
     """A connector between two panels, managed much like a component.
 
     Returned by :meth:`Canvas.connect`. The arrow binds to each panel in tldraw,
-    so it reroutes automatically as the panels move or resize. Like a component
-    it takes a ``label`` (shown on the arrow, and used for ``canvas.<label>``
-    lookup), and it is bound to the canvas bridge so its appearance can be
-    changed live::
+    so it reroutes automatically as the panels move or resize. It is bound to the
+    canvas bridge so its appearance can be changed live::
 
-        a = canvas.connect(src, dst, label="flow", color="blue")
+        a = canvas.connect(src, dst, name="flow", text="x1", color="blue")
         a.color = "red"               # or a.update(color="red")
-        a.update(dash="dashed", label="x2")
+        a.text = "x2"                 # change the visible caption live
+        a.update(dash="dashed", text="x3")
+
+    ``name`` is the arrow's **identity**: the ``canvas.<name>`` handle and the
+    eviction key, so connecting again under the same ``name`` destroys the
+    previous arrow and makes the new one the reference. Omit it and the name is
+    derived from the endpoints (``"<start.name>-><end.name>"``), so re-connecting
+    the same two panels replaces the old arrow rather than duplicating it.
+    ``text`` is the
+    **caption** drawn on the arrow; it is purely cosmetic and may change freely
+    without affecting identity. When ``text`` is omitted the arrow shows no
+    caption (the identity is never drawn).
 
     Valid tldraw values: ``color`` one of black/grey/violet/light-violet/blue/
     light-blue/yellow/orange/green/light-green/light-red/red/white; ``dash`` one
@@ -60,18 +71,21 @@ class Arrow:
     ``arrowhead_end`` one of none/arrow/triangle/square/dot/pipe/diamond/
     inverted/bar; ``bend`` a number.
 
-    Pass it (or its ``label``) to :meth:`Canvas.disconnect` to remove it.
+    Pass it (or its ``name``) to :meth:`Canvas.disconnect` to remove it.
     """
 
-    def __init__(self, arrow_id, start, end, bridge, props=None, label=None, name=None):
+    def __init__(self, arrow_id, start, end, bridge, props=None,
+                 name=None, text=None):
         self.id = arrow_id
         self.start = start
         self.end = end
-        self.name = name
+        self.name = name    # unique identity / canvas.<name> handle / eviction key
         self._bridge = bridge
         self._props = dict(props or {})
-        if label is not None:
-            self._props.setdefault("text", label)
+        # ``text`` is the visible caption, kept distinct from the identity. When
+        # omitted the arrow shows no caption (the identity is never drawn).
+        if text is not None:
+            self._props["text"] = text
 
     def register_message(self):
         """Build the ``arrow`` register message (current props included)."""
@@ -107,12 +121,12 @@ class Arrow:
         self.update(color=value)
 
     @property
-    def label(self):
-        """The text shown on the arrow (tldraw's ``text`` prop)."""
+    def text(self):
+        """The caption drawn on the arrow (tldraw's ``text`` prop)."""
         return self._props.get("text")
 
-    @label.setter
-    def label(self, value):
+    @text.setter
+    def text(self, value):
         self.update(text=value)
 
     @property
@@ -202,36 +216,48 @@ class Canvas:
         interactive panel in place. Python ``move()``/``resize()`` still work
         regardless of these — they only gate user gestures.
 
-        ``name`` (or the component's label, if a valid identifier) exposes the
-        component as ``canvas.<name>`` and ``canvas["<name>"]``.
+        ``name`` is the component's unique identity — the handle that exposes it
+        as ``canvas.<name>`` / ``canvas["<name>"]`` and the key that makes a later
+        insert under the same name replace this one (so re-running a cell swaps
+        the panel rather than stacking a duplicate). It normally comes from the
+        component's own ``name`` (required on the input components); passing
+        ``name`` here overrides that. The component's ``label`` is purely the
+        displayed caption and defaults to the name.
 
         When called after the server is already running (``serve(block=False)``),
         the component is pushed live to connected clients instead of only
         appearing on the next page load.
         """
+        # ``name`` is the component's unique identity: the ``canvas.<name>`` /
+        # ``canvas["<name>"]`` handle and the eviction key. It normally rides on
+        # the component (set in its constructor); the ``name`` arg here overrides
+        # that, and a label/auto fallback covers hand-built components that set
+        # neither.
+        if name is None:
+            name = component.name
         if name is None:
             label = component._props.get("label")
-            if isinstance(label, str) and label.isidentifier():
-                name = label
-        if name is not None:
-            # Names are unique handles. If something else already holds this
-            # name (a prior component, or this component in an earlier state),
-            # pull it off the canvas first so the stale panel disappears from
-            # the UI instead of lingering unreferenced. The newcomer then takes
-            # over the name and is the only panel rendered for it.
-            old = self._named.get(name)
-            if old is not None and old is not component:
-                warnings.warn(
-                    f"name {name!r} already used by a "
-                    f"{old.__class__.__name__}; removing it and rebinding the "
-                    f"name to the new {component.__class__.__name__}",
-                    stacklevel=2,
-                )
-                if old in self._components:
-                    self.remove(old)
-                elif old in self._arrows:
-                    self.disconnect(old)
-            self._named[name] = component
+            name = label if isinstance(label, str) and label else self._auto_name(
+                component.component)
+        # Names are unique handles. If something else already holds this name (a
+        # prior component, or this component in an earlier state), pull it off the
+        # canvas first so the stale panel disappears from the UI instead of
+        # lingering unreferenced. The newcomer then takes over the name and is the
+        # only panel rendered for it.
+        old = self._named.get(name)
+        if old is not None and old is not component:
+            warnings.warn(
+                f"name {name!r} already used by a "
+                f"{old.__class__.__name__}; removing it and rebinding the "
+                f"name to the new {component.__class__.__name__}",
+                stacklevel=2,
+            )
+            if old in self._components:
+                self.remove(old)
+            elif old in self._arrows:
+                self.disconnect(old)
+        component.name = name
+        self._named[name] = component
         if x is not None and y is not None:
             component._position = (x, y)
         if w is not None:
@@ -272,6 +298,19 @@ class Canvas:
             self._bridge.register_live(component)
         return component
 
+    def _auto_name(self, kind):
+        """Return a unique fallback handle (e.g. ``slider1``) for an unnamed item.
+
+        Used when nothing supplies a name — so every component and arrow still
+        gets a distinct ``canvas[...]`` handle. ``kind`` is the type string
+        (``component.component`` for panels, ``"arrow"`` for connectors).
+        """
+        base = kind.lower()
+        i = 1
+        while f"{base}{i}" in self._named:
+            i += 1
+        return f"{base}{i}"
+
     # -- component factories --------------------------------------------------
     # Shorthand for ``insert(SomeComponent(...))``. Each forwards its arguments
     # to the component constructor and the placement/lock/name options (see
@@ -281,53 +320,56 @@ class Canvas:
         place = {k: kw.pop(k) for k in _INSERT_KEYS if k in kw}
         return self.insert(cls(*args, **kw), **place)
 
-    def slider(self, label, min=0, max=100, default=None, **place):
+    def slider(self, name, min=0, max=100, default=None, label=None, **place):
         """Insert a :class:`~pycanvas.Slider`. See :meth:`insert` for ``place``."""
-        return self._make(Slider, label, min=min, max=max, default=default, **place)
+        return self._make(Slider, name, min=min, max=max, default=default,
+                          label=label, **place)
 
-    def toggle(self, label, options, default=None, **place):
+    def toggle(self, name, options, default=None, label=None, **place):
         """Insert a :class:`~pycanvas.Toggle`. See :meth:`insert` for ``place``."""
-        return self._make(Toggle, label, options, default=default, **place)
+        return self._make(Toggle, name, options, default=default, label=label,
+                          **place)
 
-    def label(self, label, value="", **place):
+    def label(self, name, value="", label=None, **place):
         """Insert a :class:`~pycanvas.Label`. See :meth:`insert` for ``place``."""
-        return self._make(Label, label, value=value, **place)
+        return self._make(Label, name, value=value, label=label, **place)
 
-    def video(self, label, quality=70, **place):
+    def video(self, name, quality=70, label=None, **place):
         """Insert a :class:`~pycanvas.VideoFeed`. See :meth:`insert` for ``place``."""
-        return self._make(VideoFeed, label, quality=quality, **place)
+        return self._make(VideoFeed, name, quality=quality, label=label, **place)
 
-    def custom(self, html=None, path=None, label="custom", width=380, height=320,
-               **place):
+    def custom(self, html=None, path=None, name="custom", label=None, width=380,
+               height=320, **place):
         """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``."""
-        return self._make(Custom, html=html, path=path, label=label,
+        return self._make(Custom, html=html, path=path, name=name, label=label,
                           width=width, height=height, **place)
 
-    def plot(self, label="plot", width=560, height=420, **place):
+    def plot(self, name="plot", label=None, width=560, height=420, **place):
         """Insert a :class:`~pycanvas.Plot`. See :meth:`insert` for ``place``."""
-        return self._make(Plot, label=label, width=width, height=height, **place)
+        return self._make(Plot, name=name, label=label, width=width,
+                          height=height, **place)
 
-    def live_plot(self, label="live plot", **kw):
+    def live_plot(self, name="live plot", **kw):
         """Insert a :class:`~pycanvas.LivePlot`.
 
         Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,
-        ``width``, ``height``) and :meth:`insert` placement options both go in
-        ``kw``; they don't overlap.
+        ``width``, ``height``, ``label``) and :meth:`insert` placement options
+        both go in ``kw``; they don't overlap.
         """
-        return self._make(LivePlot, label=label, **kw)
+        return self._make(LivePlot, name=name, **kw)
 
-    def repl(self, label="repl", **place):
+    def repl(self, name="repl", label=None, **place):
         """Insert a :class:`~pycanvas.Repl`. See :meth:`insert` for ``place``.
 
         Call :meth:`enable_repl` first to bind the namespace cells run against.
         """
-        return self._make(Repl, label=label, **place)
+        return self._make(Repl, name=name, label=label, **place)
 
-    def inspector(self, label="inspector", refresh=None, source="components",
-                  namespace=None, **place):
+    def inspector(self, name="inspector", refresh=None, source="components",
+                  namespace=None, label=None, **place):
         """Insert an :class:`~pycanvas.Inspector`. See :meth:`insert` for ``place``."""
-        return self._make(Inspector, label=label, refresh=refresh, source=source,
-                          namespace=namespace, **place)
+        return self._make(Inspector, name=name, refresh=refresh, source=source,
+                          namespace=namespace, label=label, **place)
 
     def remove(self, component):
         """Pull a panel off the canvas. Works live while serving.
@@ -348,43 +390,53 @@ class Canvas:
             on_removed()
         return component
 
-    def connect(self, start, end, label=None, name=None, **props):
+    def connect(self, start, end, name=None, text=None, **props):
         """Draw an arrow from panel ``start`` to panel ``end`` and return it.
 
         Both arguments are components previously passed to :meth:`insert`. The
         arrow binds to each panel in tldraw, so it follows them as they move or
-        resize. Like a component, ``label`` captions the arrow and (when a valid
-        identifier) exposes it as ``canvas.<label>`` / ``canvas["<label>"]``;
-        ``name`` overrides that lookup key. Extra keyword args set its appearance
-        (``color``, ``dash``, ``size``, ``bend``, ``arrowhead_start`` /
-        ``arrowhead_end``; see :class:`Arrow`). Works live while serving.
+        resize. ``name`` is the arrow's unique identity — the ``canvas.<name>`` /
+        ``canvas["<name>"]`` handle and the eviction key, so re-connecting under
+        the same ``name`` destroys the previous arrow rather than stacking a
+        duplicate (mirroring how re-inserting a panel supersedes the old one).
+        When omitted it defaults to ``"<start.name>-><end.name>"``, so a second
+        unnamed arrow between the same two panels replaces the first. ``text`` is
+        the caption drawn on the arrow (none is shown when omitted); change it
+        freely with
+        ``arrow.text = ...`` / ``arrow.update(text=...)`` without disturbing
+        identity. Extra keyword args set its appearance (``color``, ``dash``,
+        ``size``, ``bend``, ``arrowhead_start`` / ``arrowhead_end``; see
+        :class:`Arrow`). Works live while serving.
         """
         if start.id is None or end.id is None:
             raise ValueError("both panels must be inserted before connecting them")
-        if name is None and isinstance(label, str) and label.isidentifier():
-            name = label
+        if name is None:
+            # Derive identity from the endpoints so an unnamed arrow between the
+            # same two panels reuses the handle — re-connecting them destroys the
+            # previous arrow instead of stacking a duplicate, no naming required.
+            name = f"{start.name}->{end.name}"
         arrow_id = uuid.uuid4().hex
         arrow = Arrow(
             arrow_id, start, end, self._bridge,
-            props=_arrow_props(props), label=label, name=name,
+            props=_arrow_props(props), name=name, text=text,
         )
         self._arrows.append(arrow)
-        if name is not None:
-            # Same unique-name rule as insert: evict whatever currently holds
-            # this name so the stale shape leaves the UI before the new arrow.
-            old = self._named.get(name)
-            if old is not None and old is not arrow:
-                warnings.warn(
-                    f"name {name!r} already used by a "
-                    f"{old.__class__.__name__}; removing it and rebinding the "
-                    f"name to the new Arrow",
-                    stacklevel=2,
-                )
-                if old in self._arrows:
-                    self.disconnect(old)
-                elif old in self._components:
-                    self.remove(old)
-            self._named[name] = arrow
+        # Same unique-name rule as insert: evict whatever currently holds this
+        # name (an earlier arrow, or a panel of another type) so the stale shape
+        # leaves the UI before the new arrow takes the name over.
+        old = self._named.get(name)
+        if old is not None and old is not arrow:
+            warnings.warn(
+                f"name {name!r} already used by a "
+                f"{old.__class__.__name__}; removing it and rebinding the "
+                f"name to the new Arrow",
+                stacklevel=2,
+            )
+            if old in self._arrows:
+                self.disconnect(old)
+            elif old in self._components:
+                self.remove(old)
+        self._named[name] = arrow
         self._bridge.add_arrow(arrow)
         return arrow
 
@@ -437,7 +489,7 @@ class Canvas:
         """Restore a canvas saved by :meth:`save` (a dict or path to JSON).
 
         Recreate your panels in code first, then call this: it snaps them back
-        into their saved formation (matched by id, then by label across runs)
+        into their saved formation (matched by id, then by name across runs)
         and lays the saved drawings on top. Bound arrows follow their panels
         automatically. Applies live and replays to clients that connect/reload.
 
@@ -456,7 +508,7 @@ class Canvas:
         """Build the formation dict: each panel's geometry and lock state."""
         components = [
             {
-                "label": c._props.get("label"),
+                "name": c.name,
                 "id": c.id,
                 "x": c.x,
                 "y": c.y,
@@ -471,9 +523,9 @@ class Canvas:
         ]
         arrows = [
             {
-                "label": a.label,
-                "start": a.start._props.get("label"),
-                "end": a.end._props.get("label"),
+                "name": a.name,
+                "start": a.start.name,
+                "end": a.end.name,
                 "props": dict(a._props),
             }
             for a in self._arrows
@@ -483,9 +535,9 @@ class Canvas:
     def _restore_layout(self, data):
         """Apply a formation dict (from :meth:`_layout`) onto live panels."""
         by_id = {c.id: c for c in self._components}
-        by_label = {c._props.get("label"): c for c in self._components}
+        by_name = {c.name: c for c in self._components}
         for item in data.get("components", []):
-            comp = by_id.get(item.get("id")) or by_label.get(item.get("label"))
+            comp = by_id.get(item.get("id")) or by_name.get(item.get("name"))
             if comp is None:
                 continue
             comp.set_layout(

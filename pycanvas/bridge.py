@@ -20,6 +20,12 @@ class Bridge:
         self._components = {}  # id -> BaseComponent
         self._arrows = {}  # id -> Arrow
         self._connections = set()
+        # One asyncio.Lock per live connection. The websockets legacy protocol
+        # forbids concurrent writes (its drain() has no internal lock — two
+        # coroutines draining a flow-control-paused socket trip an assertion), so
+        # every send to a given socket is serialized through its lock. Without
+        # this, a high-rate feed (e.g. 30fps video) overlaps sends and crashes.
+        self._send_locks = {}  # ws -> asyncio.Lock
         self._loop = None
         self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
         self._loaded_doc = None  # last full document loaded, replayed on connect
@@ -92,6 +98,7 @@ class Bridge:
     async def handle_connection(self, ws):
         await ws.accept()
         self._connections.add(ws)
+        self._send_locks[ws] = asyncio.Lock()
         try:
             # Replay full state to the freshly connected client.
             for comp in self._components.values():
@@ -120,6 +127,7 @@ class Bridge:
             traceback.print_exc()
         finally:
             self._connections.discard(ws)
+            self._send_locks.pop(ws, None)
 
     def _on_message(self, raw):
         try:
@@ -164,7 +172,12 @@ class Bridge:
                 waiter["event"].set()
 
     async def _send(self, ws, msg):
-        await ws.send_text(json.dumps(msg))
+        """Send one frame, serialized against any other send to this socket."""
+        lock = self._send_locks.get(ws)
+        if lock is None:  # connection already torn down
+            return
+        async with lock:
+            await ws.send_text(json.dumps(msg))
 
     # -- outbound (thread-safe) ----------------------------------------------
     def broadcast(self, msg):
@@ -176,9 +189,10 @@ class Bridge:
 
     async def _safe_send(self, ws, msg):
         try:
-            await ws.send_text(json.dumps(msg))
+            await self._send(ws, msg)
         except Exception:
             self._connections.discard(ws)
+            self._send_locks.pop(ws, None)
 
     def _panel_shape_ids(self):
         """tldraw shape ids of every pycanvas-managed panel and arrow.

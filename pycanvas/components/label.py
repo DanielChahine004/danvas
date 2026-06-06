@@ -8,8 +8,8 @@ class Label(BaseComponent):
     default_w = 240
     default_h = 84
 
-    def __init__(self, label, value=""):
-        super().__init__(label=label, value=str(value))
+    def __init__(self, name, value="", label=None):
+        super().__init__(name=name, label=label, value=str(value))
         self._value = value
 
     def update(self, value):

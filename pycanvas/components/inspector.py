@@ -111,8 +111,8 @@ class Inspector(BaseComponent):
     default_w = 520
     default_h = 320
 
-    def __init__(self, label="inspector", refresh=None, source="components",
-                 namespace=None):
+    def __init__(self, name="inspector", refresh=None, source="components",
+                 namespace=None, label=None):
         """``source`` is the *initial* view -- ``"components"`` (canvas panels) or
         ``"globals"`` (the shared REPL namespace); either way the panel's header
         dropdown switches between them live. ``namespace`` overrides the
@@ -124,7 +124,7 @@ class Inspector(BaseComponent):
         if source not in ("components", "globals"):
             raise ValueError("source must be 'components' or 'globals'")
         cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
-        super().__init__(label=label, rows="[]", cols=json.dumps(cols),
+        super().__init__(name=name, label=label, rows="[]", cols=json.dumps(cols),
                          detail="", source=source)
         self._source = source
         self._canvas = None  # injected by Canvas.insert
@@ -257,7 +257,7 @@ class Inspector(BaseComponent):
                 "key": key,
                 "name": name,
                 "type": "Arrow",
-                "value": _short(f"{a.label or '?'}: "
+                "value": _short(f"{a.text or '?'}: "
                                 f"{a.start._props.get('label') or a.start.id} → "
                                 f"{a.end._props.get('label') or a.end.id}"),
                 "x": "",

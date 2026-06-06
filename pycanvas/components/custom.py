@@ -13,8 +13,9 @@ from .base import BaseComponent
 class Custom(BaseComponent):
     component = "Custom"
 
-    def __init__(self, html=None, path=None, label="custom", width=380, height=320):
-        super().__init__(label=label, w=width, h=height)
+    def __init__(self, html=None, path=None, name="custom", label=None, width=380,
+                 height=320):
+        super().__init__(name=name, label=label, w=width, h=height)
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 html = f.read()

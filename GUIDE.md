@@ -8,8 +8,8 @@ live over a WebSocket. No frontend code required.
 import pycanvas
 
 canvas = pycanvas.Canvas()
-speed = canvas.insert(pycanvas.Slider(label="speed", min=0, max=100))
-out   = canvas.insert(pycanvas.Label(label="readout"))
+speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100))
+out   = canvas.insert(pycanvas.Label("readout"))
 
 @speed.on_change
 def _(v):
@@ -47,19 +47,28 @@ canvas = pycanvas.Canvas()
 |---|---|
 | `insert(component, x=, y=, w=, h=, rotation=, locked=, movable=, resizable=, name=)` | Register a panel, place it, and return it. |
 | `remove(component)` | Pull a panel off the canvas (live). |
-| `connect(start, end, label=, name=, **props)` | Draw an arrow between two panels; returns an `Arrow`. |
-| `disconnect(arrow_or_label)` | Remove an arrow by object or label. |
+| `connect(start, end, name=, text=, **props)` | Draw an arrow between two panels; returns an `Arrow`. `name` is identity, `text` is the caption. |
+| `disconnect(arrow_or_name)` | Remove an arrow by object or name. |
 | `serve(port=8000, open_browser=True, host="127.0.0.1", block=True, wait=True)` | Start server; **block** (default) or, with `block=False`, **return immediately** (Jupyter). |
 | `stop()` | Shut down a background server (started with `block=False`). |
 | `wait()` | Park the main thread until a background server shuts down (`Ctrl+C`) — keeps a *script* alive after `serve(block=False)`. |
 
-**Named lookup.** If a component/arrow `label` is a valid Python identifier it
-becomes an attribute and key on the canvas (override with `name=`):
+**Identity vs. caption.** Every component and arrow has a unique **`name`** — the
+backend identity that becomes its `canvas.<name>` attribute / `canvas["<name>"]`
+key and the eviction key (inserting again under the same name replaces the old
+one). `name` is **required** when you build a component (it's the first argument);
+the utility panels — `Plot`, `LivePlot`, `Repl`, `Inspector`, `Custom` — default
+it to their type word. A component's **`label`** (and an arrow's **`text`**) is
+purely the caption shown in the UI and is optional — it defaults to the `name`.
+`canvas.<name>` works as an attribute when the name is a valid identifier
+(otherwise use `canvas["<name>"]`).
 
 ```python
-canvas.insert(pycanvas.Slider(label="speed"))
-canvas.speed            # the component
+canvas.slider("speed", label="Speed")   # name="speed", caption "Speed"
+canvas.speed            # the component (by name)
 canvas["speed"]         # same
+
+canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 ```
 
 ---
@@ -70,13 +79,18 @@ canvas["speed"]         # same
 
 | Component | Construct | Direction | Drive it with | Read |
 |---|---|---|---|---|
-| **Slider** | `Slider(label, min=0, max=100, default=None)` | both | `update(value)` | `.value` (number) |
-| **Toggle** | `Toggle(label, options, default=None)` | both | `update(option)` | `.value` (chosen string) |
-| **Label** | `Label(label, value="")` | out | `update(value)` | — |
-| **VideoFeed** | `VideoFeed(label, quality=70)` | out | `update(frame)` — OpenCV BGR numpy array | — |
-| **Plot** | `Plot(label, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
-| **LivePlot** | `LivePlot(label, traces=None, max_points=300, mode="lines", layout=None, ...)` | out | `push({"trace": y, ...})`, `clear()` | — |
-| **Custom** | `Custom(html=None, path=None, label=..., width=380, height=320)` | both | `update(html)` | `.value` (last message) |
+| **Slider** | `Slider(name, min=0, max=100, default=None, label=None)` | both | `update(value)` | `.value` (number) |
+| **Toggle** | `Toggle(name, options, default=None, label=None)` | both | `update(option)` | `.value` (chosen string) |
+| **Label** | `Label(name, value="", label=None)` | out | `update(value)` | — |
+| **VideoFeed** | `VideoFeed(name, quality=70, label=None)` | out | `update(frame)` — OpenCV BGR numpy array | — |
+| **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
+| **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
+| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320)` | both | `update(html)` | `.value` (last message) |
+
+Every component takes `name` (its unique identity) first, then an optional
+`label` caption; the input components (Slider/Toggle/Label/VideoFeed) **require**
+`name`, the utility panels default it. `canvas.<component>(...)` factory methods
+take the same arguments.
 
 Notes:
 - **Slider / Toggle** are bidirectional — moving them in the browser fires your
@@ -184,18 +198,24 @@ Arrows are first-class, managed like components. They bind to the two panels and
 reroute automatically as those panels move or resize.
 
 ```python
-a = canvas.connect(src, dst, label="flow", color="blue")
+a = canvas.connect(src, dst, name="flow", text="x1", color="blue")
 
-canvas.flow              # lookup by label (like components)
+canvas.flow              # lookup by name (like components)
 a.color = "red"          # live property change
 a.update(dash="dashed", size="l", bend=40)
-a.label = "boosted"      # change the caption
+a.text = "boosted"       # change the visible caption (identity unchanged)
 
-canvas.disconnect("flow")    # remove by label (or pass the Arrow)
+canvas.disconnect("flow")    # remove by name (or pass the Arrow)
 ```
 
-`label` captions the arrow and (if a valid identifier) becomes the
-`canvas.<label>` lookup key — same convention as components.
+`name` is the arrow's **identity**: the `canvas.<name>` lookup key — same
+convention as components — and is unique, so connecting again under the same
+`name` destroys the old arrow and the new one becomes the reference. Omit it and
+the name is derived from the endpoints (`"<start.name>-><end.name>"`), so a
+second unnamed arrow between the same two panels replaces the first. `text` is
+the **caption** drawn on the
+arrow (no caption is shown when omitted); change it freely via `a.text = ...` /
+`a.update(text=...)` without disturbing identity.
 
 **Arrow properties** (`connect(..., **props)` or `arrow.update(...)`):
 
@@ -206,7 +226,7 @@ canvas.disconnect("flow")    # remove by label (or pass the Arrow)
 | `size` | s, m, l, xl |
 | `arrowhead_start`, `arrowhead_end` | none, arrow, triangle, square, dot, pipe, diamond, inverted, bar |
 | `bend` | number |
-| `label` | caption string |
+| `text` | caption string (the visible label on the arrow) |
 
 Invalid enum values make tldraw reject the shape (it won't render) — stick to
 the lists above.
@@ -241,7 +261,7 @@ The file holds two things:
 
 - **`layout`** — every panel's geometry and lock state (accurate thanks to
   read-back). Panels are *code*, so only their placement is saved, never their
-  behaviour. On load they're matched by id (same run), then by label (across
+  behaviour. On load they're matched by id (same run), then by name (across
   runs).
 - **`drawings`** — the free-form shapes, text and arrows the user drew in the
   UI, which have no Python counterpart. These come from a connected browser
@@ -254,7 +274,7 @@ top of them (bound arrows follow their panels automatically):
 
 ```python
 canvas = pycanvas.Canvas()
-speed = canvas.insert(pycanvas.Slider(label="speed"), ...)   # same labels as when saved
+speed = canvas.insert(pycanvas.Slider("speed"), ...)   # same names as when saved
 # ... insert the rest of your panels ...
 canvas.load("board.json")     # formation + drawings, in one call
 canvas.serve()
@@ -287,14 +307,37 @@ adding and driving panels from new cells.
 
 ### LAN / sharing
 
-`host` is the bind address:
+`host` is the **bind address** — which interfaces the server listens on:
 
 ```python
-canvas.serve(host="0.0.0.0")            # reachable at http://<your-ip>:8000
+canvas.serve(host="0.0.0.0")            # reachable from other devices on the LAN
 ```
 
-Default `127.0.0.1` is local-only. Use `0.0.0.0` to let other devices on your
-network connect.
+Default `127.0.0.1` is local-only. Use `"0.0.0.0"` (or `""`, same thing) to let
+other devices on your Wi‑Fi connect. When you bind non-locally, `serve()` prints
+the exact address to open elsewhere:
+
+```
+PyCanvas serving  (Ctrl+C to stop):
+  local:   http://127.0.0.1:8000
+  network: http://192.168.1.42:8000   <- open this on another device on the same Wi-Fi
+```
+
+Open that **network** URL on the other device (the phone/laptop uses *this*
+machine's IP, not its own). Two gotchas if it won't connect:
+
+- **Firewall** — your OS may block inbound connections to the port. On Windows,
+  allow it once: `New-NetFirewallRule -DisplayName "PyCanvas 8000" -Direction
+  Inbound -Action Allow -Protocol TCP -LocalPort 8000 -Profile Any` (admin shell).
+- **Different network / no IP wanted** — to share without dealing with IPs or
+  firewalls, or across networks, keep the default local bind and run a tunnel:
+  in VS Code open the **Ports** panel → **Forward a Port** → `8000` for a public
+  `https://…` URL; or `ngrok http 8000` / `cloudflared tunnel --url
+  http://localhost:8000`.
+
+If a `Repl` is on the canvas, non-local serving is refused unless
+`serve(..., allow_remote_exec=True)` — a REPL is unauthenticated remote code
+execution, so only enable that on a trusted network.
 
 ### Reconnection
 
@@ -327,9 +370,9 @@ them all in a loop (this is just your data — the canvas isn't iterated):
 ```python
 # You build this dict: component -> (x, y) position on the canvas.
 layout = {
-    pycanvas.Slider(label="speed"): (80, 80),
-    pycanvas.Toggle(label="mode", options=["a", "b"]): (80, 220),
-    pycanvas.Label(label="status"): (380, 80),
+    pycanvas.Slider("speed"): (80, 80),
+    pycanvas.Toggle("mode", options=["a", "b"]): (80, 220),
+    pycanvas.Label("status"): (380, 80),
 }
 
 for comp, (x, y) in layout.items():

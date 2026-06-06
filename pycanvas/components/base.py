@@ -22,11 +22,16 @@ class BaseComponent:
     default_w = 240
     default_h = 96
 
-    def __init__(self, label=None, **props):
+    def __init__(self, name=None, label=None, **props):
         self.id = None
+        # ``name`` is the unique identity / ``canvas.<name>`` handle (Canvas.insert
+        # may still override it). ``label`` is only the caption shown on the panel
+        # and defaults to the name, so naming a component is enough to caption it.
+        self.name = name
         self._props = dict(props)
-        if label is not None:
-            self._props["label"] = label
+        caption = label if label is not None else name
+        if caption is not None:
+            self._props["label"] = caption
         # Ensure size is always present so w/h read/increment without surprises.
         self._props.setdefault("w", self.default_w)
         self._props.setdefault("h", self.default_h)

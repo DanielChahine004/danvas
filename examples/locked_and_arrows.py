@@ -22,32 +22,32 @@ canvas = pycanvas.Canvas()
 
 # Stage panels at fixed positions: pinned (no move/resize) but still interactive.
 source = canvas.insert(
-    pycanvas.Slider(label="input", min=0, max=100, default=20),
+    pycanvas.Slider("input", min=0, max=100, default=20),
     x=80, y=80, movable=False, resizable=False,
 )
 gain = canvas.insert(
-    pycanvas.Slider(label="gain", min=1, max=10, default=2),
+    pycanvas.Slider("gain", min=1, max=10, default=2),
     x=420, y=80, movable=False, resizable=False,
 )
 output = canvas.insert(
-    pycanvas.Label(label="output", value="0"),
+    pycanvas.Label("output", value="0"),
     x=760, y=80, movable=False, resizable=False,
 )
 status = canvas.insert(
-    pycanvas.Label(label="status", value="idle"),
+    pycanvas.Label("status", value="idle"),
     x=420, y=300, movable=False, resizable=False,
 )
 
 # Wire the panels together. Arrows bind to the panels and reroute on their own.
-# Like components they take a `label` (shown on the arrow and used for
-# canvas.<label> lookup) plus tldraw arrow props like color.
-canvas.connect(source, gain, label="scale", color="blue")
-canvas.connect(gain, output, label="result", color="green", bend=-180)
-canvas.connect(gain, status, label="monitor", dash="dashed")
+# `name` is each arrow's identity (canvas.<name> lookup, unique); pass `text=`
+# to caption the arrow (none shown otherwise), plus tldraw props like color.
+canvas.connect(source, gain, name="scale", text="scale", color="blue")
+canvas.connect(gain, output, name="result", text="result", color="green", bend=-180)
+canvas.connect(gain, status, name="monitor", text="monitor", dash="dashed")
 
 # A control panel that stays draggable, plus a toggle to lock/unlock the stages.
 lock = canvas.insert(
-    pycanvas.Toggle(label="lock", options=["locked", "unlocked"]),
+    pycanvas.Toggle("lock", options=["locked", "unlocked"]),
     x=80, y=300, movable=False, resizable=False,
 )
 
@@ -56,7 +56,7 @@ def recompute():
     result = source.value * gain.value if source.value is not None else 0
     output.update(str(round(result, 1)))
     status.update(f"{source.value} x {gain.value} = {round(result, 1)}")
-    # Recolor an arrow live, by label, to flag a high result.
+    # Recolor an arrow live, by name, to flag a high result.
     canvas["monitor"].color = "red" if result > 500 else "grey"
 
 
@@ -80,7 +80,6 @@ def on_lock(value):
     print("stages", "pinned" if pinned else "free")
 
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 print("Move the sliders to push values down the arrows.")
 print("Flip the 'lock' toggle to 'unlocked' to rearrange the diagram.")
-canvas.serve(port=8000)
+canvas.serve(port=8000, host="0.0.0.0")

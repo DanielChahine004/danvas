@@ -10,7 +10,7 @@ class FakeBridge:
 
 
 def test_slider_register_props():
-    s = pycanvas.Slider(label="servo", min=0, max=180, default=90)
+    s = pycanvas.Slider("servo", min=0, max=180, default=90)
     s._bind("abc", FakeBridge())
     props = s.register_props()
     # Size defaults are always present so comp.w/h read real numbers.
@@ -26,7 +26,7 @@ def test_slider_register_props():
 
 
 def test_slider_input_updates_value_and_fires_callback():
-    s = pycanvas.Slider(label="servo", min=0, max=180)
+    s = pycanvas.Slider("servo", min=0, max=180)
     s._bind("abc", FakeBridge())
 
     seen = []
@@ -39,7 +39,7 @@ def test_slider_input_updates_value_and_fires_callback():
 
 def test_slider_update_broadcasts():
     bridge = FakeBridge()
-    s = pycanvas.Slider(label="servo", min=0, max=180, default=10)
+    s = pycanvas.Slider("servo", min=0, max=180, default=10)
     s._bind("abc", bridge)
 
     s.update(55)

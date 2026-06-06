@@ -12,8 +12,8 @@ class VideoFeed(BaseComponent):
     default_w = 340
     default_h = 280
 
-    def __init__(self, label, quality=70):
-        super().__init__(label=label)
+    def __init__(self, name, quality=70, label=None):
+        super().__init__(name=name, label=label)
         self._quality = int(quality)
 
     def update(self, frame):

@@ -44,5 +44,4 @@ def worker():
 
 threading.Thread(target=worker, daemon=True).start()
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
-canvas.serve(port=8000)
+canvas.serve(port=8000, host="")

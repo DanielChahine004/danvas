@@ -39,9 +39,9 @@ def render_plot(freq):
 
 canvas = pycanvas.Canvas()
 
-freq = canvas.insert(pycanvas.Slider(label="frequency", min=1, max=10, default=3))
+freq = canvas.insert(pycanvas.Slider("frequency", min=1, max=10, default=3))
 plot = canvas.insert(
-    pycanvas.Custom(html=render_plot(3), label="matplotlib", width=460, height=380)
+    pycanvas.Custom(html=render_plot(3), name="matplotlib", width=460, height=380)
 )
 
 
@@ -50,6 +50,5 @@ def on_freq(value):
     plot.update(render_plot(int(value)))
 
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 print("Drag the 'frequency' slider to re-render the matplotlib plot.")
 canvas.serve(port=8000)

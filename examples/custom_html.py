@@ -47,8 +47,8 @@ PANEL_HTML = """
 </html>
 """
 
-panel = canvas.custom(html=PANEL_HTML, label="my_panel", width=420, height=240)
-reply = canvas.label(label="python received", value="(waiting for input)")
+panel = canvas.custom(html=PANEL_HTML, name="my_panel", width=420, height=240)
+reply = canvas.label("python received", value="(waiting for input)")
 
 
 @panel.on_message
@@ -63,5 +63,4 @@ def handle(data):
         reply.update(f"you said: {data.get('text', '')}")
 
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 canvas.serve(port=8000)

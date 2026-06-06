@@ -3,7 +3,7 @@
 Companion to ``readback_and_save.py``. Panels are Python objects with real
 behaviour (callbacks, live data), so they are *not* saved — instead we recreate
 them here in code, then ``load()`` snaps them back into their saved formation
-(matched by label) and lays the saved freehand drawings on top.
+(matched by name) and lays the saved freehand drawings on top.
 
 ``load()`` merges the drawings onto the live panels rather than replacing the
 document, so the panels keep working. It's recorded on the server and replayed
@@ -27,11 +27,11 @@ canvas = pycanvas.Canvas()
 
 # Recreate the panels in code — same labels as readback_and_save.py so the saved
 # formation can be matched back onto them.
-speed = canvas.insert(pycanvas.Slider(label="speed", min=0, max=100, default=30),
+speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100, default=30),
                       x=80, y=80)
-gain = canvas.insert(pycanvas.Slider(label="gain", min=1, max=10, default=2),
+gain = canvas.insert(pycanvas.Slider("gain", min=1, max=10, default=2),
                      x=80, y=220)
-moved = canvas.insert(pycanvas.Label(label="last_moved", value="drag a panel…"),
+moved = canvas.insert(pycanvas.Label("last_moved", value="drag a panel…"),
                       x=420, y=80, w=300)
 
 # One call restores both the panel formation and the freehand drawings.

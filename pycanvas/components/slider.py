@@ -6,10 +6,10 @@ from .base import BaseComponent
 class Slider(BaseComponent):
     component = "Slider"
 
-    def __init__(self, label, min=0, max=100, default=None):
+    def __init__(self, name, min=0, max=100, default=None, label=None):
         if default is None:
             default = min
-        super().__init__(label=label, min=min, max=max, value=default)
+        super().__init__(name=name, label=label, min=min, max=max, value=default)
         self._value = default
 
     def update(self, value):

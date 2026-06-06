@@ -20,19 +20,19 @@ canvas = pycanvas.Canvas()
 # a panel up front and insert it later (or into a different canvas). For the
 # common build-and-place-now case, the canvas.<component>(...) factories are
 # shorter -- see hello_world.py and sensor_dashboard.py.
-servo_1 = canvas.insert(pycanvas.Slider(label="servo_1", min=0, max=180, default=90))
-servo_2 = canvas.insert(pycanvas.Slider(label="servo_2", min=0, max=180, default=45))
-mode = canvas.insert(pycanvas.Toggle(label="mode", options=["manual", "vision"]))
-status = canvas.insert(pycanvas.Label(label="status", value="idle"))
+servo_1 = canvas.insert(pycanvas.Slider("servo_1", min=0, max=180, default=90))
+servo_2 = canvas.insert(pycanvas.Slider("servo_2", min=0, max=180, default=45))
+mode = canvas.insert(pycanvas.Toggle("mode", options=["manual", "vision"]))
+status = canvas.insert(pycanvas.Label("status", value="idle"))
 plot = canvas.insert(
     pycanvas.LivePlot(
-        label="servo history",
+        name="servo history",
         traces=["servo_1", "servo_2"],
         max_points=200,
         layout={"yaxis": {"range": [0, 180]}},
     )
 )
-feed = canvas.insert(pycanvas.VideoFeed(label="camera"))
+feed = canvas.insert(pycanvas.VideoFeed("camera"))
 
 
 @servo_1.on_change
@@ -84,6 +84,5 @@ def worker():
 
 threading.Thread(target=worker, daemon=True).start()
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 print("Toggle 'vision' to let the robot drive its own servos.")
 canvas.serve(port=8000)

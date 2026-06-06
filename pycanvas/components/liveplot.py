@@ -4,7 +4,7 @@ Unlike ``Plot`` (which reloads a Plotly iframe per update), ``LivePlot`` keeps a
 rolling buffer of samples and pushes just the data arrays; the frontend applies
 them with ``Plotly.react`` on a chart that stays mounted — smooth at high rates.
 
-    plot = canvas.insert(pycanvas.LivePlot(label="servos", traces=["s1", "s2"]))
+    plot = canvas.insert(pycanvas.LivePlot("servos", traces=["s1", "s2"]))
     plot.push({"s1": 90, "s2": 45})   # call repeatedly from your loop
 """
 
@@ -24,15 +24,16 @@ class LivePlot(BaseComponent):
 
     def __init__(
         self,
-        label="live plot",
+        name="live plot",
         traces=None,
         max_points=300,
         mode="lines",
         layout=None,
         width=560,
         height=380,
+        label=None,
     ):
-        super().__init__(label=label, w=width, h=height)
+        super().__init__(name=name, label=label, w=width, h=height)
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}

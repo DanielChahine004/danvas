@@ -48,22 +48,23 @@ concise default. Every component has a factory: `slider`, `toggle`, `label`,
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
 feed  = canvas.video("camera")
-plot  = canvas.live_plot(label="servos", traces=["s1", "s2"])
+plot  = canvas.live_plot("servos", traces=["s1", "s2"])
 ```
 
-Factories also forward `insert`'s placement and lock options, so a fully-specified
-panel still fits on one line:
+The first argument is the component's `name` (its unique `canvas.<name>` handle);
+an optional `label=` sets a different on-screen caption. Factories also forward
+`insert`'s placement and lock options, so a fully-specified panel fits on one line:
 
 ```python
-servo = canvas.slider("servo_1", min=0, max=180, default=90, x=80, y=80, name="servo")
+servo = canvas.slider("servo", min=0, max=180, default=90, label="Servo 1", x=80, y=80)
 ```
 
 The explicit two-step form is still available for when you want to **build a
 panel now and insert it later** (or into a different canvas):
 
 ```python
-s = pycanvas.Slider(label="servo_1", min=0, max=180, default=90)  # not on a canvas yet
-canvas.insert(s, x=80, y=80)                                      # place it when ready
+s = pycanvas.Slider("servo_1", min=0, max=180, default=90)  # not on a canvas yet
+canvas.insert(s, x=80, y=80)                                # place it when ready
 ```
 
 ## Components
@@ -88,7 +89,7 @@ canvas.insert(s, x=80, y=80)                                      # place it whe
   the canvas store, so it's smooth even at 10+ Hz.
 
 ```python
-plot = canvas.insert(pycanvas.LivePlot(label="servos", traces=["s1", "s2"], max_points=300))
+plot = canvas.insert(pycanvas.LivePlot("servos", traces=["s1", "s2"], max_points=300))
 # in your loop:
 plot.push({"s1": servo_1.value, "s2": servo_2.value})
 ```
@@ -122,7 +123,7 @@ component's default size.
 
 ```python
 servo = canvas.insert(
-    pycanvas.Slider(label="servo_1", min=0, max=180, default=90),
+    pycanvas.Slider("servo_1", min=0, max=180, default=90),
     x=80, y=80, w=320, h=110, rotation=0, name="servo",
 )
 
@@ -135,18 +136,39 @@ servo.resize(w=500, h=160)
 servo.set_layout(x=120, y=90, rotation=30)   # any combination in one message
 ```
 
-Components are also reachable by name off the canvas — `name=` on `insert`, or
-the component's `label` if it's a valid identifier:
+Every component has a unique **`name`** — its first constructor argument (pass
+`name=` to `insert` to override). That `name` is the component's identity: the
+`canvas.<name>` / `canvas["<name>"]` handle, and the key that makes a later
+insert under the same name replace the old panel. The `label` is purely the
+on-screen caption and is optional — it defaults to the `name`:
 
 ```python
 canvas.servo.rotation = 45          # same object as the `servo` variable
-canvas["servo"].update(120)
+canvas["servo"].update(120)         # canvas["..."] also works for non-identifier names
 ```
 
 > Layout values reflect both what Python last set **and** the user's drags,
 > resizes and rotations in the browser — those are reported back, so `x`/`y`/
 > `w`/`h`/`rotation` stay in sync (register `@panel.on_layout` to react to them).
 > A panel's `x`/`y` are `None` only until it's first placed — by Python or a drag.
+
+## Arrows
+
+`connect` draws an arrow between two panels; it binds to them and reroutes as they
+move or resize.
+
+```python
+a = canvas.connect(servo, status, text="x2", color="blue")  # caption "x2"
+a.text = "x3"                       # change the caption live (identity unchanged)
+a.update(dash="dashed", bend=40)    # color/dash/size/bend/arrowhead_* ...
+canvas.disconnect(a)                # or canvas.disconnect("<name>")
+```
+
+Like components, an arrow's identity is its **`name`** (the `canvas.<name>` handle
+and eviction key) — but unlike components arrows take **no `label`**; their caption
+is **`text`** (nothing is drawn if you omit it). If you don't pass `name=`, it
+defaults to `"<start.name>-><end.name>"`, so re-connecting the same two panels
+replaces the old arrow instead of stacking a duplicate.
 
 ## Locking & interactivity
 
@@ -196,7 +218,7 @@ drawings — to one JSON file, then bring it back:
 
 ```python
 canvas.save("board.json")                    # browser must be open to capture drawings
-# next run, recreate the panels in code first (same labels), then:
+# next run, recreate the panels in code first (same names), then:
 canvas.load("board.json")                    # snaps panels into place + restores drawings
 canvas.load("board.json", formation=False)   # drawings only; leave panels where code put them
 ```
@@ -242,20 +264,30 @@ devices on the same network open and interact with the canvas, bind to all
 interfaces:
 
 ```python
-canvas.serve(port=8000, host="0.0.0.0")
+canvas.serve(port=8000, host="0.0.0.0")   # ""/"0.0.0.0" = all interfaces
 # or non-blocking: canvas.serve(port=8000, host="0.0.0.0", block=False)
 ```
 
-Then on another device's browser, go to `http://<this-machine-ip>:8000`
-(find the IP with `ipconfig` on Windows / `ip addr` on Linux/macOS, e.g.
-`http://192.168.1.42:8000`). Everyone connected sees the same canvas and shares
-control in real time.
+When you bind non-locally, `serve()` prints the address to use elsewhere:
+
+```
+PyCanvas serving  (Ctrl+C to stop):
+  local:   http://127.0.0.1:8000
+  network: http://192.168.1.42:8000   <- open this on another device on the same Wi-Fi
+```
+
+Open that **network** URL on the other device — it uses *this* machine's IP, not
+its own. Everyone connected sees the same canvas and shares control in real time.
 
 Caveats:
-- Your OS firewall may prompt to allow Python through on first run — accept it
-  for private networks.
-- There's **no authentication** — anyone who can reach the port can interact.
-  Use only on networks you trust.
+- **Firewall** — your OS may block inbound connections; accept the prompt on first
+  run, or allow the port (Windows admin shell:
+  `New-NetFirewallRule -DisplayName "PyCanvas 8000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000 -Profile Any`).
+- **No IP / across networks** — to share without IPs or firewall changes, keep the
+  default local bind and tunnel the port: VS Code **Ports** panel → *Forward a
+  Port*, or `ngrok http 8000` / `cloudflared tunnel --url http://localhost:8000`.
+- **No authentication** — anyone who can reach the port can interact. Use only on
+  networks you trust (and note the `Repl` remote-exec guard).
 
 ## Merging canvases
 

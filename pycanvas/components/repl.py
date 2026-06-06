@@ -55,8 +55,8 @@ class Repl(BaseComponent):
     default_w = 460
     default_h = 260
 
-    def __init__(self, label="repl"):
-        super().__init__(label=label, code="", output="", result="")
+    def __init__(self, name="repl", label=None):
+        super().__init__(name=name, label=label, code="", output="", result="")
         # Both injected by Canvas.insert (see its wiring).
         self._kernel = None
         self._namespace = None

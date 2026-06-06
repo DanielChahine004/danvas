@@ -29,10 +29,10 @@ def render_chart(points):
 canvas = pycanvas.Canvas()
 
 resolution = canvas.insert(
-    pycanvas.Slider(label="resolution", min=10, max=400, default=120)
+    pycanvas.Slider("resolution", min=10, max=400, default=120)
 )
 chart = canvas.insert(
-    pycanvas.Custom(html=render_chart(120), label="plotly", width=560, height=420)
+    pycanvas.Custom(html=render_chart(120), name="plotly", width=560, height=420)
 )
 
 
@@ -41,6 +41,5 @@ def on_res(value):
     chart.update(render_chart(value))
 
 
-print("Opening canvas at http://127.0.0.1:8000  (Ctrl+C to stop)")
 print("Hover / zoom / pan the chart directly; drag the slider to rebuild it.")
 canvas.serve(port=8000)

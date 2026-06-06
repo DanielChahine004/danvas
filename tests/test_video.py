@@ -13,7 +13,7 @@ class FakeBridge:
 
 def test_video_update_encodes_base64_jpeg():
     bridge = FakeBridge()
-    feed = pycanvas.VideoFeed(label="cam")
+    feed = pycanvas.VideoFeed("cam")
     feed._bind("v1", bridge)
 
     frame = np.zeros((48, 64, 3), dtype=np.uint8)

@@ -8,13 +8,13 @@ class Toggle(BaseComponent):
     default_w = 260
     default_h = 84
 
-    def __init__(self, label, options, default=None):
+    def __init__(self, name, options, default=None, label=None):
         options = list(options)
         if not options:
             raise ValueError("Toggle requires at least one option")
         if default is None:
             default = options[0]
-        super().__init__(label=label, options=options, value=default)
+        super().__init__(name=name, label=label, options=options, value=default)
         self._value = default
 
     def update(self, value):
