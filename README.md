@@ -43,7 +43,7 @@ label mirrors it. Resize and drag the cards freely on the canvas.
 
 `canvas.<component>(...)` builds a panel **and** places it in one call — the
 concise default. Every component has a factory: `slider`, `toggle`, `label`,
-`video`, `plot`, `live_plot`, `custom`, `repl`, `inspector`.
+`video`, `audio`, `plot`, `live_plot`, `custom`, `chat`, `repl`, `inspector`.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -75,9 +75,11 @@ canvas.insert(s, x=80, y=80)                                # place it when read
 | `Toggle`    | bidirectional  | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
 | `Label`     | output         | `.update(text)` |
 | `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → base64 JPEG) |
+| `AudioFeed` | output         | `.update(pcm_chunk)` (PCM → Web Audio playback) |
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
 | `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `.update(html)`, `@on_message` |
+| `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 
 ### Plot vs LivePlot
 
@@ -121,6 +123,38 @@ Because it's just HTML in an iframe, anything that renders to HTML works:
 - **matplotlib** — `fig.savefig(buf, 'png')` → base64 `<img>` → `panel.update(html)`
 - **Plotly** — `fig.to_html(include_plotlyjs='cdn')` → `panel.update(html)`; the
   chart stays fully interactive (zoom / pan / hover) inside the sandbox.
+
+### Audio
+
+`AudioFeed` streams PCM audio to the browser, played back-to-back through the
+Web Audio API — the audio analogue of `VideoFeed`. Capture however you like
+(e.g. `sounddevice`) and push chunks:
+
+```python
+mic = canvas.audio("mic", sample_rate=16000)
+mic.update(chunk)   # NumPy float32/int16 or raw int16 bytes
+```
+
+Mic capture needs the optional extra (`pip install -e ".[audio]"`); playback
+needs nothing. Browsers block autoplay, so each viewer clicks **Enable audio** on
+the panel once. See [`examples/webcam_feed.py`](examples/webcam_feed.py) for video
++ audio together.
+
+### Chat & viewers
+
+`Chat` is a shared room for everyone viewing the canvas — the server relays each
+line stamped with the sender's identity, and every viewer edits their own
+display name in the panel. Python can join in too:
+
+```python
+chat = canvas.chat("chat")
+chat.post("welcome 👋")        # post as the host
+@chat.on_message
+def log(entry): print(entry["name"], entry["text"])
+```
+
+A small badge at the top of the canvas shows the live viewer count. See
+[`examples/chat_room.py`](examples/chat_room.py).
 
 ## Layout: position, size, rotation
 
@@ -414,6 +448,7 @@ python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
 python examples/repl_inspector.py     # on-canvas Python REPL + component/globals inspectors
+python examples/chat_room.py          # shared chat room with editable viewer names
 python examples/public_tunnel.py      # share a canvas worldwide via a public HTTPS tunnel
 python examples/remote_control.py     # ⚠ stream this PC's screen + control it remotely (Windows)
 ```
