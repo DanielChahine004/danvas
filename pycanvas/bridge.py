@@ -8,11 +8,27 @@ schedules the actual send onto the server's asyncio event loop.
 import asyncio
 import json
 import math
+import random
 import threading
+import time
 import traceback
 import uuid
+from collections import deque
 
 from fastapi import WebSocketDisconnect
+
+# Friendly auto-generated identities for connecting viewers (editable in the UI).
+_VIEWER_ANIMALS = ["Fox", "Owl", "Bear", "Wolf", "Hawk", "Lynx", "Otter",
+                   "Crane", "Seal", "Moth", "Newt", "Wren", "Stoat", "Vole"]
+_VIEWER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6",
+                  "#ec4899", "#14b8a6", "#f97316"]
+
+# An idle browser sends a heartbeat every ~10s (see frontend bridge.js). A
+# connection silent for longer than this is treated as dead and reaped, so the
+# viewer count can't stay inflated by a hard-dropped tab (the WS keepalive ping
+# is disabled server-side; see server.py).
+_HEARTBEAT_TIMEOUT = 30.0
+_REAP_INTERVAL = 10.0
 
 
 class Bridge:
@@ -29,6 +45,20 @@ class Bridge:
         self._loop = None
         self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
         self._loaded_doc = None  # last full document loaded, replayed on connect
+        # Live free-form drawings (tldraw records the *user* draws, not pycanvas
+        # panels) keyed by record id. Browsers relay their changes as `draw`
+        # diffs; we accumulate the canonical set here, fan it out to the other
+        # browsers, and replay it to anyone who connects later.
+        self._drawings = {}  # record id -> tldraw record
+        # Per-connection viewer identity (id / display name / color) for the
+        # presence roster and chat. ``_last_seen`` tracks each socket's most
+        # recent inbound message so the reaper can drop silent (dead) ones.
+        self._viewers = {}     # ws -> {"id", "name", "color"}
+        self._last_seen = {}   # ws -> monotonic timestamp of last message
+        self._chat_seq = 0     # monotonic id for chat messages
+        self._chat_history = deque(maxlen=100)  # recent chat, replayed on join
+        # Components that want to observe chat (the Chat panel's Python handle).
+        self._chat_sinks = []
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -55,6 +85,7 @@ class Bridge:
 
     def set_loop(self, loop):
         self._loop = loop
+        loop.create_task(self._reap_loop())
 
     def register_message(self, component):
         """Build the ``register`` message for a component, including placement."""
@@ -99,7 +130,17 @@ class Bridge:
         await ws.accept()
         self._connections.add(ws)
         self._send_locks[ws] = asyncio.Lock()
+        self._last_seen[ws] = time.monotonic()
+        viewer = self._make_viewer()
+        self._viewers[ws] = viewer
+        self._broadcast_roster()  # tell everyone a viewer joined
         try:
+            # Tell this client who it is, so it can label its own chat messages
+            # and prefill the editable name field.
+            await self._send(ws, {"type": "welcome", "you": viewer})
+            # Replay recent chat so a fresh viewer sees the conversation so far.
+            for entry in self._chat_history:
+                await self._send(ws, entry)
             # Replay full state to the freshly connected client.
             for comp in self._components.values():
                 await self._send(ws, self.register_message(comp))
@@ -111,6 +152,13 @@ class Bridge:
             # Arrows bind to panels, so replay them after every panel exists.
             for arrow in self._arrows.values():
                 await self._send(ws, arrow.register_message())
+            # Replay the live free-form drawings as a single "added" diff so a
+            # fresh (or reloaded) browser sees what others have drawn.
+            if self._drawings:
+                await self._send(ws, {
+                    "type": "draw",
+                    "diff": {"added": self._drawings, "updated": {}, "removed": {}},
+                })
             # If a full canvas was loaded, replay it last so reloads keep it
             # (it replaces the document, incl. any user drawings it contained).
             if self._loaded_doc is not None:
@@ -120,7 +168,7 @@ class Bridge:
 
             while True:
                 raw = await ws.receive_text()
-                self._on_message(raw)
+                self._on_message(ws, raw)
         except WebSocketDisconnect:
             pass
         except Exception:
@@ -128,13 +176,151 @@ class Bridge:
         finally:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+            self._viewers.pop(ws, None)
+            self._last_seen.pop(ws, None)
+            self._broadcast_roster()  # tell everyone a viewer left
 
-    def _on_message(self, raw):
+    def _make_viewer(self):
+        """Mint a fresh viewer identity (id + friendly editable name + color)."""
+        existing = {v["name"] for v in self._viewers.values()}
+        animal = random.choice(_VIEWER_ANIMALS)
+        name = animal
+        n = 2
+        while name in existing:  # keep auto-names distinct; user can rename
+            name = f"{animal} {n}"
+            n += 1
+        color = random.choice(_VIEWER_COLORS)
+        return {"id": uuid.uuid4().hex[:8], "name": name, "color": color}
+
+    def _broadcast_roster(self):
+        """Push the live-viewer roster (and count) to every connected browser.
+
+        Carries the full list of viewers (id / name / color) so the UI can show
+        who's here and the chat can colour names; ``count`` is kept for the
+        presence badge. Sent on every join/leave/rename. Safe before the loop
+        exists (broadcast no-ops then).
+        """
+        viewers = list(self._viewers.values())
+        self.broadcast({"type": "presence", "count": len(viewers),
+                        "viewers": viewers})
+
+    # Backwards-compatible alias (older call sites / the merge host).
+    _broadcast_presence = _broadcast_roster
+
+    # -- chat / identity (browser <-> browser, relayed through the server) ----
+    def _rename_viewer(self, ws, name):
+        """Apply a viewer's editable display name, then re-broadcast the roster."""
+        viewer = self._viewers.get(ws)
+        if viewer is None:
+            return
+        clean = (name or "").strip()[:24]
+        if not clean:
+            return
+        viewer["name"] = clean
+        self._broadcast_roster()
+
+    def _handle_chat(self, ws, text):
+        """Stamp a chat line with the sender's identity and fan it out to all.
+
+        The identity is taken from the server's record of the socket (not the
+        client's claim), so a name can't be spoofed. The message is appended to
+        the replay history and also delivered to any Python ``Chat`` sinks.
+        """
+        viewer = self._viewers.get(ws)
+        if viewer is None:
+            return
+        body = (text or "").strip()
+        if not body:
+            return
+        self._chat_seq += 1
+        entry = {
+            "type": "chat",
+            "msgId": self._chat_seq,
+            "id": viewer["id"],
+            "name": viewer["name"],
+            "color": viewer["color"],
+            "text": body[:2000],
+            "ts": time.time(),
+        }
+        self._chat_history.append(entry)
+        self.broadcast(entry)
+        for sink in self._chat_sinks:
+            try:
+                sink(entry)
+            except Exception:
+                traceback.print_exc()
+
+    def post_chat(self, text, name="host", color="#64748b"):
+        """Inject a chat message from Python (e.g. a system/host announcement)."""
+        body = (text or "").strip()
+        if not body:
+            return
+        self._chat_seq += 1
+        entry = {
+            "type": "chat", "msgId": self._chat_seq, "id": "host",
+            "name": name, "color": color, "text": body[:2000], "ts": time.time(),
+        }
+        self._chat_history.append(entry)
+        self.broadcast(entry)
+        for sink in self._chat_sinks:
+            try:
+                sink(entry)
+            except Exception:
+                traceback.print_exc()
+
+    def add_chat_sink(self, fn):
+        """Register a callback fired with every chat entry (Chat panel handle)."""
+        self._chat_sinks.append(fn)
+
+    def remove_chat_sink(self, fn):
+        if fn in self._chat_sinks:
+            self._chat_sinks.remove(fn)
+
+    async def _reap_loop(self):
+        """Drop connections that have gone silent past the heartbeat deadline.
+
+        Browsers send a periodic heartbeat; one that stops (a hard-closed or
+        network-dropped tab) is closed here so the viewer count and roster don't
+        stay inflated — the WS keepalive ping is disabled (see server.py), so
+        without this a dead socket lingers until the next failed send.
+        """
+        while True:
+            await asyncio.sleep(_REAP_INTERVAL)
+            try:
+                now = time.monotonic()
+                dead = [ws for ws in list(self._connections)
+                        if now - self._last_seen.get(ws, now) > _HEARTBEAT_TIMEOUT]
+                for ws in dead:
+                    try:
+                        await ws.close(code=1001)
+                    except Exception:
+                        pass
+                    # handle_connection's finally normally cleans up, but force
+                    # it here too in case the receive loop is wedged.
+                    self._connections.discard(ws)
+                    self._send_locks.pop(ws, None)
+                    if self._viewers.pop(ws, None) is not None:
+                        self._last_seen.pop(ws, None)
+                        self._broadcast_roster()
+            except Exception:
+                traceback.print_exc()
+
+    def _on_message(self, ws, raw):
         try:
             msg = json.loads(raw)
         except (ValueError, TypeError):
             return
+        # Any inbound frame proves the socket is alive — refresh its deadline.
+        self._last_seen[ws] = time.monotonic()
         kind = msg.get("type")
+        if kind == "heartbeat":
+            return  # liveness only; timestamp already refreshed above
+        if kind == "set_name":
+            self._rename_viewer(ws, msg.get("name"))
+            return
+        if kind == "chat":
+            self._handle_chat(ws, msg.get("text"))
+            return
         if kind == "input":
             comp = self._components.get(msg.get("id"))
             if comp is not None:
@@ -164,6 +350,13 @@ class Bridge:
                     self.broadcast(
                         {"type": "update", "id": comp.id, "payload": geom}
                     )
+        elif kind == "draw":
+            # A browser relayed a free-form drawing change. Fold it into the
+            # canonical record set and echo it to the other browsers so every
+            # open view converges (re-applying its own diff is idempotent).
+            diff = msg.get("diff") or {}
+            self._apply_draw(diff)
+            self.broadcast({"type": "draw", "diff": diff})
         elif kind == "snapshot":
             # Reply to a request_snapshot; hand the document to the waiter.
             waiter = self._snapshot_waiters.get(msg.get("reqId"))
@@ -199,6 +392,22 @@ class Bridge:
         except Exception:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+
+    def _apply_draw(self, diff):
+        """Fold a tldraw store diff into the canonical free-form record set.
+
+        ``added``/``updated`` carry full records (``updated`` as ``[from, to]``
+        pairs, of which we keep the new value); ``removed`` carries the dropped
+        records by id. This mirrors :meth:`tldraw Store.applyDiff` on the wire so
+        the server's cache stays in step with every browser.
+        """
+        for rid, rec in (diff.get("added") or {}).items():
+            self._drawings[rid] = rec
+        for rid, pair in (diff.get("updated") or {}).items():
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                self._drawings[rid] = pair[1]
+        for rid in (diff.get("removed") or {}):
+            self._drawings.pop(rid, None)
 
     def _panel_shape_ids(self):
         """tldraw shape ids of every pycanvas-managed panel and arrow.

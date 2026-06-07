@@ -1,7 +1,18 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue } from 'tldraw'
 import Plotly from 'plotly.js-basic-dist-min'
-import { sendInput, componentIdOf, registerLive, unregisterLive, requestCompletions } from './bridge'
+import {
+  sendInput,
+  componentIdOf,
+  registerLive,
+  unregisterLive,
+  requestCompletions,
+  subscribeIdentity,
+  subscribeChat,
+  getChatLog,
+  sendChat,
+  setMyName,
+} from './bridge'
 
 // Monaco is heavy, so the Repl editor is code-split into its own chunk that
 // only loads when a Repl panel is shown (see MonacoRepl.jsx).
@@ -424,6 +435,322 @@ export class LivePlotShapeUtil extends PcShapeUtil {
       <Card shape={shape}>
         <div style={labelStyle}>{shape.props.label}</div>
         <LivePlotView shape={shape} />
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
+// --- AudioFeed (streaming PCM played through the Web Audio API) -------------
+// Python pushes base64 int16 PCM chunks over the live-data channel; we decode
+// each into an AudioBuffer and schedule it back-to-back on the AudioContext
+// clock so they play as one continuous stream. The browser autoplay policy
+// blocks sound until a user gesture, so playback only starts once the listener
+// clicks Enable (which creates/resumes the context).
+function decodeChunk(ctx, b64, sampleRate, channels) {
+  const bin = atob(b64)
+  let n = bin.length
+  n -= n % 2 // int16 samples are 2 bytes; ignore a stray trailing byte
+  const bytes = new Uint8Array(n)
+  for (let i = 0; i < n; i++) bytes[i] = bin.charCodeAt(i)
+  const pcm = new Int16Array(bytes.buffer)
+  const frames = Math.floor(pcm.length / channels)
+  if (frames === 0) return null
+  // Carry the source sample rate on the buffer; the context resamples on
+  // playback if its own rate differs, so capture rate need not match hardware.
+  const buf = ctx.createBuffer(channels, frames, sampleRate)
+  for (let ch = 0; ch < channels; ch++) {
+    const out = buf.getChannelData(ch)
+    for (let i = 0; i < frames; i++) out[i] = pcm[i * channels + ch] / 32768
+  }
+  return buf
+}
+
+function AudioView({ shape }) {
+  const id = componentIdOf(shape.id)
+  const sampleRate = shape.props.sampleRate || 16000
+  const channels = shape.props.channels || 1
+  const [on, setOn] = useState(false)
+  const ctxRef = useRef(null)
+  const nextRef = useRef(0) // AudioContext-time the next chunk should start at
+  // Read the latest on/off inside the (stable) live handler without
+  // resubscribing each toggle.
+  const onRef = useRef(false)
+  useEffect(() => {
+    onRef.current = on
+  }, [on])
+
+  useEffect(() => {
+    // Small scheduling lead so chunks queue slightly ahead of the play head,
+    // absorbing network jitter; if we ever fall behind, reprime from now.
+    const LEAD = 0.12
+    const play = (b64) => {
+      const ctx = ctxRef.current
+      if (!onRef.current || !ctx) return
+      let buf
+      try {
+        buf = decodeChunk(ctx, b64, sampleRate, channels)
+      } catch {
+        return
+      }
+      if (!buf) return
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      src.connect(ctx.destination)
+      const now = ctx.currentTime
+      let start = nextRef.current
+      if (start < now + 0.01) start = now + LEAD
+      src.start(start)
+      nextRef.current = start + buf.duration
+    }
+    registerLive(id, play)
+    return () => unregisterLive(id)
+  }, [id, sampleRate, channels])
+
+  // Stop the context when the panel goes away so it doesn't leak.
+  useEffect(() => {
+    return () => {
+      const ctx = ctxRef.current
+      if (ctx) ctx.close().catch(() => {})
+      ctxRef.current = null
+    }
+  }, [])
+
+  const toggle = async () => {
+    if (!on) {
+      let ctx = ctxRef.current
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext
+        ctx = new AC({ sampleRate })
+        ctxRef.current = ctx
+      }
+      try {
+        await ctx.resume()
+      } catch {
+        // ignore — resume can reject if no gesture, but this is one
+      }
+      nextRef.current = ctx.currentTime + 0.12
+      setOn(true)
+    } else {
+      setOn(false)
+      const ctx = ctxRef.current
+      if (ctx) ctx.suspend().catch(() => {})
+    }
+  }
+
+  return (
+    <div
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={toggle}
+        style={{
+          alignSelf: 'flex-start',
+          padding: '6px 12px',
+          border: 'none',
+          borderRadius: 6,
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: 'pointer',
+          background: on ? 'var(--pc-accent)' : 'var(--pc-off-bg)',
+          color: on ? 'var(--pc-accent-text)' : 'var(--pc-off-text)',
+          pointerEvents: 'all',
+        }}
+      >
+        {on ? '🔊 Audio on' : '🔈 Enable audio'}
+      </button>
+      <div style={{ fontSize: 12, color: 'var(--pc-muted)' }}>
+        {sampleRate} Hz · {channels === 1 ? 'mono' : `${channels} ch`}
+      </div>
+    </div>
+  )
+}
+
+export class AudioShapeUtil extends PcShapeUtil {
+  static type = 'pcAudio'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    sampleRate: T.number,
+    channels: T.number,
+  }
+
+  getDefaultProps() {
+    return { w: 260, h: 120, label: 'audio', sampleRate: 16000, channels: 1 }
+  }
+
+  component(shape) {
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{shape.props.label}</div>
+        <AudioView shape={shape} />
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
+// --- Chat (shared room for everyone viewing the canvas) ---------------------
+// Chat isn't Python state: the server relays lines between viewers and stamps
+// each with the sender's identity. This panel is a window onto that room, so it
+// subscribes to the bridge's global chat/identity channels rather than to
+// component updates. Every Chat panel shows the same conversation.
+function ChatView({ shape }) {
+  const [me, setMe] = useState(null)
+  const [messages, setMessages] = useState(() => [...getChatLog()])
+  const [draft, setDraft] = useState('')
+  const [nameDraft, setNameDraft] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const listRef = useRef(null)
+
+  useEffect(() => subscribeIdentity(setMe), [])
+
+  // Backfill from the retained log, then append each new line (deduped by id so
+  // the snapshot/subscribe gap can't double-post).
+  useEffect(() => {
+    setMessages([...getChatLog()])
+    return subscribeChat((entry) =>
+      setMessages((m) => (m.some((x) => x.msgId === entry.msgId) ? m : [...m, entry]))
+    )
+  }, [])
+
+  // While not actively editing, keep the name field showing our current name.
+  useEffect(() => {
+    if (me && !editingName) setNameDraft(me.name)
+  }, [me, editingName])
+
+  // Keep the newest message in view.
+  useEffect(() => {
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages])
+
+  const send = () => {
+    const t = draft.trim()
+    if (!t) return
+    sendChat(t)
+    setDraft('')
+  }
+
+  const commitName = () => {
+    setEditingName(false)
+    const n = nameDraft.trim()
+    if (n && me && n !== me.name) setMyName(n)
+    else if (me) setNameDraft(me.name)
+  }
+
+  const fieldStyle = {
+    fontSize: 13,
+    padding: '5px 8px',
+    border: '1px solid var(--pc-border-mid)',
+    borderRadius: 6,
+    background: 'var(--pc-input-bg)',
+    color: 'var(--pc-text)',
+    pointerEvents: 'all',
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 6 }}>
+      <div
+        ref={listRef}
+        style={{ flex: 1, minHeight: 0, overflow: 'auto', pointerEvents: 'all' }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {messages.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--pc-faint2)', fontStyle: 'italic', padding: 4 }}>
+            no messages yet — say hello
+          </div>
+        ) : (
+          messages.map((m) => (
+            <div key={m.msgId} style={{ fontSize: 13, lineHeight: 1.4, marginBottom: 3, wordBreak: 'break-word' }}>
+              <span style={{ fontWeight: 700, color: m.color || 'var(--pc-text)' }}>
+                {m.name}
+                {me && m.id === me.id ? ' (you)' : ''}:
+              </span>{' '}
+              <span style={{ color: 'var(--pc-text)' }}>{m.text}</span>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div
+        style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span style={{ fontSize: 11, color: 'var(--pc-muted)' }}>name</span>
+        <input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onFocus={() => setEditingName(true)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+          maxLength={24}
+          style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
+          title="your display name — edit and press Enter"
+        />
+      </div>
+
+      <div
+        style={{ display: 'flex', gap: 6 }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send()
+          }}
+          placeholder="message…"
+          style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
+        />
+        <button
+          onClick={send}
+          style={{
+            padding: '5px 12px',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            background: 'var(--pc-accent)',
+            color: 'var(--pc-accent-text)',
+            pointerEvents: 'all',
+          }}
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export class ChatShapeUtil extends PcShapeUtil {
+  static type = 'pcChat'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+  }
+
+  getDefaultProps() {
+    return { w: 320, h: 400, label: 'chat' }
+  }
+
+  component(shape) {
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{shape.props.label}</div>
+        <ChatView shape={shape} />
       </Card>
     )
   }
@@ -934,6 +1261,8 @@ export const COMPONENT_TO_SHAPE = {
   Slider: 'pcSlider',
   Label: 'pcLabel',
   VideoFeed: 'pcVideo',
+  AudioFeed: 'pcAudio',
+  Chat: 'pcChat',
   Custom: 'pcHtml',
   Toggle: 'pcToggle',
   LivePlot: 'pcLivePlot',
@@ -945,6 +1274,8 @@ export const shapeUtils = [
   SliderShapeUtil,
   LabelShapeUtil,
   VideoShapeUtil,
+  AudioShapeUtil,
+  ChatShapeUtil,
   HtmlShapeUtil,
   ToggleShapeUtil,
   LivePlotShapeUtil,

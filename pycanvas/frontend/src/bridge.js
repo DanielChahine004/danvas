@@ -23,6 +23,7 @@ export function componentIdOf(shapeId) {
 export function setEditor(e) {
   editor = e
   setupGeometrySync(e)
+  setupDrawSync(e)
   connect()
 }
 
@@ -45,6 +46,11 @@ function sendRaw(msg) {
 let PANEL_TYPES = null
 const dirtyShapes = new Set()
 let flushTimer = null
+
+// tldraw shape ids (`shape:<id>`) of every pycanvas-managed panel and connector
+// arrow. These are recreated from Python code, so they're excluded from the
+// free-form drawing sync below — only the user's own shapes are relayed.
+const managedIds = new Set()
 
 function setupGeometrySync(ed) {
   PANEL_TYPES = new Set(Object.values(COMPONENT_TO_SHAPE))
@@ -84,10 +90,84 @@ function flushGeometry() {
   dirtyShapes.clear()
 }
 
+// --- free-form drawing sync: relay user shapes to the other browsers ---------
+// pycanvas panels/arrows travel as register/update/arrow messages; everything
+// *else* the user draws (pen, geo, text, notes, their own arrows, ...) is synced
+// here as tldraw store diffs so every browser on this canvas sees the same ink.
+// Only document-scope, user-originated records are watched; our own remote
+// applies (mergeRemoteChanges) and pycanvas-managed shapes are filtered out, so
+// neither echoes back into a loop.
+const DRAW_TYPES = new Set(['shape', 'binding', 'asset'])
+
+function isManaged(record) {
+  if (record.typeName === 'shape') {
+    // Panels match by type; pycanvas arrows are plain `arrow` shapes, so they
+    // only match by id — hence the managedIds set rather than a type check.
+    return managedIds.has(record.id) || (PANEL_TYPES && PANEL_TYPES.has(record.type))
+  }
+  if (record.typeName === 'binding') {
+    // A binding belongs to pycanvas if either end is one of our shapes (this is
+    // how connector-arrow bindings are recognised without tracking their ids).
+    return managedIds.has(record.fromId) || managedIds.has(record.toId)
+  }
+  return false
+}
+
+// Keep only the non-managed records of a store diff; null if nothing is left.
+function filterDiff(changes) {
+  const added = {}
+  const updated = {}
+  const removed = {}
+  let any = false
+  for (const [id, rec] of Object.entries(changes.added || {})) {
+    if (DRAW_TYPES.has(rec.typeName) && !isManaged(rec)) { added[id] = rec; any = true }
+  }
+  for (const [id, pair] of Object.entries(changes.updated || {})) {
+    const next = pair[1]
+    if (DRAW_TYPES.has(next.typeName) && !isManaged(next)) { updated[id] = pair; any = true }
+  }
+  for (const [id, rec] of Object.entries(changes.removed || {})) {
+    if (DRAW_TYPES.has(rec.typeName) && !isManaged(rec)) { removed[id] = rec; any = true }
+  }
+  return any ? { added, updated, removed } : null
+}
+
+function setupDrawSync(ed) {
+  ed.store.listen(
+    ({ changes }) => {
+      const diff = filterDiff(changes)
+      if (diff) sendRaw({ type: 'draw', diff })
+    },
+    { source: 'user', scope: 'document' }
+  )
+}
+
+// Apply a peer's (or the server replay's) free-form diff. Wrapped in
+// mergeRemoteChanges so it's tagged `remote` and our own listener above doesn't
+// rebroadcast it.
+function applyDraw(diff) {
+  if (!diff) return
+  try {
+    applyRemote(() => editor.store.applyDiff(diff))
+  } catch (err) {
+    console.error('[pycanvas] failed to apply remote drawing', err)
+  }
+}
+
+let heartbeatTimer = null
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/ws`
   ws = new WebSocket(url)
+
+  ws.onopen = () => {
+    // Periodic heartbeat so the server can tell a live (but idle) viewer from a
+    // dead tab and keep the viewer count/roster accurate (the WS keepalive ping
+    // is disabled server-side). 10s is comfortably under the server's timeout.
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = setInterval(() => sendRaw({ type: 'heartbeat' }), 10000)
+  }
 
   ws.onmessage = (ev) => {
     let msg
@@ -102,6 +182,10 @@ function connect() {
   ws.onclose = () => {
     // Server gone or restarting — retry so a reloaded backend reconnects.
     ws = null
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
     setTimeout(connect, 1000)
   }
 
@@ -130,6 +214,15 @@ function handle(msg) {
     sendRaw({ type: 'snapshot', reqId: msg.reqId, data: userContent(msg.panelIds || []) })
   } else if (msg.type === 'load_snapshot') {
     loadSnapshot(msg.data)
+  } else if (msg.type === 'draw') {
+    applyDraw(msg.diff)
+  } else if (msg.type === 'presence') {
+    setPresence(msg.count || 0)
+    setRoster(msg.viewers || [])
+  } else if (msg.type === 'welcome') {
+    setIdentity(msg.you || null)
+  } else if (msg.type === 'chat') {
+    pushChat(msg)
   } else if (msg.type === 'complete_result') {
     resolveCompletion(msg.reqId, msg.completions)
   }
@@ -205,6 +298,7 @@ function removeComponent(id) {
   liveHandlers.delete(id)
   liveBuffer.delete(id)
   const shapeId = createShapeId(id)
+  managedIds.delete(shapeId)
   if (editor.getShape(shapeId)) applyRemote(() => editor.deleteShape(shapeId))
 }
 
@@ -226,6 +320,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   if (!shapeType) return
 
   const shapeId = createShapeId(id)
+  managedIds.add(shapeId) // exclude from free-form drawing sync
   if (editor.getShape(shapeId)) return // already on canvas (reconnect)
 
   // Use the position Python supplied; cascade only the axes left unspecified.
@@ -259,6 +354,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
 // later changes arrive as normal `update` messages and patch these props.
 function createArrow({ id, start, end, props = {} }) {
   const arrowId = createShapeId(id)
+  managedIds.add(arrowId) // exclude from free-form drawing sync
   if (editor.getShape(arrowId)) return // already on canvas (reconnect)
   applyRemote(() => {
     editor.createShape({ id: arrowId, type: 'arrow', props: { ...props } })
@@ -299,6 +395,16 @@ function updateComponent(id, payload) {
     return
   }
 
+  // AudioFeed chunks ride the same live channel straight to the Web Audio
+  // scheduler (see AudioView). Not buffered: stale audio must never replay, so a
+  // chunk that arrives before the panel mounts (or while muted) is simply
+  // dropped rather than stored like plot/post data.
+  if (payload && payload.audio !== undefined) {
+    const handler = liveHandlers.get(id)
+    if (handler) handler(payload.audio)
+    return
+  }
+
   const shapeId = createShapeId(id)
   const shape = editor.getShape(shapeId)
   if (!shape) return
@@ -334,6 +440,88 @@ export function unregisterLive(id) {
 // Browser -> Python: user input from a component (slider move, etc.).
 export function sendInput(id, payload) {
   sendRaw({ type: 'input', id, payload })
+}
+
+// --- presence: how many browsers are connected to this canvas ---------------
+// The server broadcasts a `presence` count on every join/leave; UI subscribes
+// here so the live-viewer badge updates without prop-drilling through tldraw.
+let presenceCount = 0
+const presenceListeners = new Set()
+
+function setPresence(n) {
+  presenceCount = n
+  for (const cb of presenceListeners) cb(n)
+}
+
+export function subscribePresence(cb) {
+  presenceListeners.add(cb)
+  cb(presenceCount) // prime with the latest known count
+  return () => presenceListeners.delete(cb)
+}
+
+// --- viewer identity, roster, and chat --------------------------------------
+// The server assigns each connection an identity (id/name/color), keeps a live
+// roster, and relays chat. Components subscribe here; chat history that arrives
+// before a Chat panel mounts is retained in `chatLog` so the panel can backfill.
+let myViewer = null
+let roster = []
+const chatLog = []
+const identityListeners = new Set()
+const rosterListeners = new Set()
+const chatListeners = new Set()
+
+function setIdentity(v) {
+  myViewer = v
+  for (const cb of identityListeners) cb(v)
+}
+
+function setRoster(vs) {
+  roster = vs
+  // Keep our own identity in step with the server's record (e.g. after a
+  // rename), since `welcome` is only sent once at connect.
+  if (myViewer) {
+    const mine = vs.find((v) => v.id === myViewer.id)
+    if (mine && (mine.name !== myViewer.name || mine.color !== myViewer.color)) {
+      setIdentity({ ...myViewer, ...mine })
+    }
+  }
+  for (const cb of rosterListeners) cb(vs)
+}
+
+function pushChat(entry) {
+  chatLog.push(entry)
+  if (chatLog.length > 300) chatLog.shift()
+  for (const cb of chatListeners) cb(entry)
+}
+
+export function subscribeIdentity(cb) {
+  identityListeners.add(cb)
+  cb(myViewer)
+  return () => identityListeners.delete(cb)
+}
+
+export function subscribeRoster(cb) {
+  rosterListeners.add(cb)
+  cb(roster)
+  return () => rosterListeners.delete(cb)
+}
+
+// New chat entries only (after subscription). Use getChatLog() to backfill.
+export function subscribeChat(cb) {
+  chatListeners.add(cb)
+  return () => chatListeners.delete(cb)
+}
+
+export function getChatLog() {
+  return chatLog
+}
+
+export function sendChat(text) {
+  sendRaw({ type: 'chat', text })
+}
+
+export function setMyName(name) {
+  sendRaw({ type: 'set_name', name })
 }
 
 // Global helper available on the top-level page (non-iframe Custom usage).

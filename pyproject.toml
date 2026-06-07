@@ -25,6 +25,10 @@ classifiers = [
 # and caches the cloudflared binary on first use, so no manual install is needed.
 # Optional: tunnelling also works with a system-installed cloudflared/localtunnel.
 tunnel = ["pycloudflared>=0.2"]
+# Microphone capture for AudioFeed examples (Canvas.audio). The AudioFeed
+# component itself needs nothing extra — only *capturing* mic input does. The
+# browser plays the streamed PCM through the Web Audio API.
+audio = ["sounddevice>=0.4"]
 
 [project.urls]
 Homepage = "https://github.com/DanielChahine004/pycanvas"

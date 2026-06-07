@@ -32,6 +32,7 @@ disconnected, and reappear when it reconnects.
 import argparse
 import asyncio
 import json
+import time
 import traceback
 
 from websockets.asyncio.client import connect
@@ -232,9 +233,16 @@ class MergeBridge(Bridge):
     async def handle_connection(self, ws):
         await ws.accept()
         self._connections.add(ws)
+        self._last_seen[ws] = time.monotonic()
+        viewer = self._make_viewer()
+        self._viewers[ws] = viewer
+        self._broadcast_roster()  # viewer joined the merged view
         # The base ``_send`` serializes per connection via a lock keyed on the
         # socket; it creates one lazily, but we still drop it on disconnect.
         try:
+            await self._send(ws, {"type": "welcome", "you": viewer})
+            for entry in self._chat_history:
+                await self._send(ws, entry)
             for cid, reg in self._registers.items():
                 await self._send(ws, reg)
                 payload = self._updates.get(cid)
@@ -246,20 +254,34 @@ class MergeBridge(Bridge):
                 await self._send(ws, msg)
             while True:
                 raw = await ws.receive_text()
-                await self._route_from_browser(raw)
+                await self._route_from_browser(ws, raw)
         except Exception:
             pass
         finally:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+            self._viewers.pop(ws, None)
+            self._last_seen.pop(ws, None)
+            self._broadcast_roster()  # viewer left the merged view
 
-    async def _route_from_browser(self, raw):
+    async def _route_from_browser(self, ws, raw):
         """Send a browser interaction back to the source that owns the panel."""
         try:
             msg = json.loads(raw)
         except (ValueError, TypeError):
             return
+        self._last_seen[ws] = time.monotonic()
         kind = msg.get("type")
+        # Presence/chat are mediated by the merge host itself, not routed to a
+        # source — viewers on the merged view see each other and can chat.
+        if kind == "heartbeat":
+            return
+        if kind == "set_name":
+            self._rename_viewer(ws, msg.get("name"))
+            return
+        if kind == "chat":
+            self._handle_chat(ws, msg.get("text"))
+            return
         cid = msg.get("id")
         src = self._id_source.get(cid)
         if src is None:

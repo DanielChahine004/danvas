@@ -2,6 +2,8 @@ from .base import BaseComponent
 from .slider import Slider
 from .label import Label
 from .video import VideoFeed
+from .audio import AudioFeed
+from .chat import Chat
 from .custom import Custom
 from .toggle import Toggle
 from .plot import Plot
@@ -14,6 +16,8 @@ __all__ = [
     "Slider",
     "Label",
     "VideoFeed",
+    "AudioFeed",
+    "Chat",
     "Custom",
     "Toggle",
     "Plot",

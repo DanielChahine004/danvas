@@ -8,6 +8,8 @@ import warnings
 from . import server
 from .bridge import Bridge
 from .components import (
+    AudioFeed,
+    Chat,
     Custom,
     Inspector,
     Label,
@@ -338,6 +340,15 @@ class Canvas:
     def video(self, name, quality=70, label=None, **place):
         """Insert a :class:`~pycanvas.VideoFeed`. See :meth:`insert` for ``place``."""
         return self._make(VideoFeed, name, quality=quality, label=label, **place)
+
+    def audio(self, name, sample_rate=16000, channels=1, label=None, **place):
+        """Insert an :class:`~pycanvas.AudioFeed`. See :meth:`insert` for ``place``."""
+        return self._make(AudioFeed, name, sample_rate=sample_rate,
+                          channels=channels, label=label, **place)
+
+    def chat(self, name="chat", label=None, **place):
+        """Insert a :class:`~pycanvas.Chat` panel. See :meth:`insert` for ``place``."""
+        return self._make(Chat, name=name, label=label, **place)
 
     def custom(self, html=None, path=None, name="custom", label=None, width=380,
                height=320, **place):

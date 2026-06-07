@@ -2,7 +2,9 @@
 
 from .canvas import Canvas
 from .components import (
+    AudioFeed,
     BaseComponent,
+    Chat,
     Custom,
     Inspector,
     Label,
@@ -22,6 +24,8 @@ __all__ = [
     "Slider",
     "Label",
     "VideoFeed",
+    "AudioFeed",
+    "Chat",
     "Custom",
     "Toggle",
     "Plot",
