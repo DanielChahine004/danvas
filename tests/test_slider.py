@@ -18,11 +18,20 @@ def test_slider_register_props():
         "label": "servo",
         "min": 0,
         "max": 180,
+        "step": 1,
         "value": 90,
         "w": 240,
         "h": 96,
     }
     assert s.value == 90
+
+
+def test_slider_float_step_in_props():
+    s = pycanvas.Slider("gain", min=0, max=1, default=0.5, step=0.1)
+    s._bind("abc", FakeBridge())
+    props = s.register_props()
+    assert props["step"] == 0.1
+    assert props["value"] == 0.5
 
 
 def test_slider_input_updates_value_and_fires_callback():

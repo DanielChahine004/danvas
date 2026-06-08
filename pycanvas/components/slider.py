@@ -6,10 +6,15 @@ from .base import BaseComponent
 class Slider(BaseComponent):
     component = "Slider"
 
-    def __init__(self, name, min=0, max=100, default=None, label=None):
+    def __init__(self, name, min=0, max=100, default=None, step=1, label=None):
         if default is None:
             default = min
-        super().__init__(name=name, label=label, min=min, max=max, value=default)
+        # ``step`` controls the slider's granularity *and* signals an int vs.
+        # float slider: an integer step keeps values ints (e.g. servo angles),
+        # while a fractional step like ``0.1`` makes it a float slider. It also
+        # drives the precision of the manual number-entry box in the browser.
+        super().__init__(name=name, label=label, min=min, max=max, step=step,
+                         value=default)
         self._value = default
 
     def update(self, value):

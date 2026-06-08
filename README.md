@@ -68,6 +68,14 @@ s = pycanvas.Slider("servo_1", min=0, max=180, default=90)  # not on a canvas ye
 canvas.insert(s, x=80, y=80)                                # place it when ready
 ```
 
+Sliders take an optional `step` (default `1`). A fractional step makes it a
+**float slider** and sets the precision of the manual number-entry box shown
+beneath the track — type a value (clamped to `[min, max]`) instead of dragging:
+
+```python
+gain = canvas.slider("gain", min=0, max=1, default=0.5, step=0.1)  # float slider
+```
+
 ## Components
 
 | Component   | Direction      | API |

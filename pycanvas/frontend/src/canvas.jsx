@@ -114,6 +114,49 @@ class PcShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- Slider -----------------------------------------------------------------
+// A manual number-entry box that mirrors the slider value. It keeps a local
+// draft while typing (so partial entries like "-" or "1." aren't fought by the
+// controlled value) and commits a clamped, step-rounded number on blur/Enter.
+function SliderNumberEntry({ value, min, max, step, onCommit }) {
+  const [draft, setDraft] = useState(null)
+  const text = draft !== null ? draft : String(value)
+  const commit = () => {
+    if (draft === null) return
+    const v = Number(draft)
+    if (Number.isFinite(v) && draft.trim() !== '') {
+      onCommit(Math.min(max, Math.max(min, v)))
+    }
+    setDraft(null) // fall back to the shape's value (rejects bad input)
+  }
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      style={{
+        width: 72,
+        marginTop: 4,
+        fontSize: 16,
+        fontWeight: 600,
+        color: 'var(--pc-text)',
+        background: 'var(--pc-bg)',
+        border: '1px solid var(--pc-border, #ccc)',
+        borderRadius: 4,
+        padding: '2px 4px',
+        pointerEvents: 'all',
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.target.blur()
+      }}
+    />
+  )
+}
+
 export class SliderShapeUtil extends PcShapeUtil {
   static type = 'pcSlider'
   static props = {
@@ -122,16 +165,26 @@ export class SliderShapeUtil extends PcShapeUtil {
     label: T.string,
     min: T.number,
     max: T.number,
+    step: T.number,
     value: T.number,
   }
 
   getDefaultProps() {
-    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, value: 50 }
+    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, step: 1, value: 50 }
   }
 
   component(shape) {
-    const { label, min, max, value } = shape.props
+    const { label, min, max, step, value } = shape.props
     const id = componentIdOf(shape.id)
+    // Shared updater for both the range thumb and the manual entry box.
+    const apply = (v) => {
+      this.editor.updateShape({
+        id: shape.id,
+        type: shape.type,
+        props: { value: v },
+      })
+      sendInput(id, { value: v })
+    }
     return (
       <Card shape={shape}>
         <div style={labelStyle}>{label}</div>
@@ -139,24 +192,21 @@ export class SliderShapeUtil extends PcShapeUtil {
           type="range"
           min={min}
           max={max}
+          step={step}
           value={value}
           // pointerEvents:'all' lets the input receive clicks; stopPropagation
           // on pointerdown keeps tldraw from starting a drag on the shape.
           style={{ width: '100%', pointerEvents: 'all', cursor: 'pointer' }}
           onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const v = Number(e.target.value)
-            this.editor.updateShape({
-              id: shape.id,
-              type: shape.type,
-              props: { value: v },
-            })
-            sendInput(id, { value: v })
-          }}
+          onChange={(e) => apply(Number(e.target.value))}
         />
-        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--pc-text)', marginTop: 4 }}>
-          {value}
-        </div>
+        <SliderNumberEntry
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onCommit={apply}
+        />
       </Card>
     )
   }
