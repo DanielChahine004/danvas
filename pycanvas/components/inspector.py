@@ -4,7 +4,9 @@ One spatial "variable explorer" with a source dropdown in its header to switch
 between two views live:
 
 - ``"components"`` (the default) lists every panel on the canvas with its name,
-  type, current value and geometry. Reads state pycanvas already tracks, so
+  label (its displayed caption — same as the name unless one was set
+  separately), type, current value and geometry. Reads state pycanvas already
+  tracks, so
   building the table is cheap and safe on the event-loop thread (no kernel).
 - ``"globals"`` lists the variables in the shared REPL namespace (the one from
   :meth:`Canvas.enable_repl`), name/type/value -- a notebook-style variable
@@ -28,7 +30,7 @@ import types
 from .base import BaseComponent
 
 # Column sets sent to the frontend per source; the table renders exactly these.
-_COMPONENT_COLS = ["name", "type", "value", "x", "y", "w", "h"]
+_COMPONENT_COLS = ["name", "label", "type", "value", "x", "y", "w", "h"]
 _GLOBALS_COLS = ["name", "type", "value"]
 
 
@@ -237,6 +239,9 @@ class Inspector(BaseComponent):
             rows.append({
                 "key": key,
                 "name": name,
+                # The displayed caption. Defaults to the name, so the two columns
+                # match unless a distinct ``label`` was given.
+                "label": c._props.get("label", ""),
                 "type": c.component,
                 "value": _short(c.value),
                 "x": c.x,
@@ -256,6 +261,8 @@ class Inspector(BaseComponent):
             rows.append({
                 "key": key,
                 "name": name,
+                # Arrows have no label prop; their caption is the drawn ``text``.
+                "label": a.text or "",
                 "type": "Arrow",
                 "value": _short(f"{a.text or '?'}: "
                                 f"{a.start._props.get('label') or a.start.id} → "
