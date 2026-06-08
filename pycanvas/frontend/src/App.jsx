@@ -3,12 +3,13 @@ import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
-import { setEditor, subscribePresence } from './bridge'
+import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector } from './bridge'
 
 export default function App() {
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <PresenceBadge />
+      <InspectorButton />
       <Tldraw
         shapeUtils={shapeUtils}
         onMount={(editor) => {
@@ -84,6 +85,47 @@ function PresenceBadge() {
       />
       {count} {count === 1 ? 'viewer' : 'viewers'}
     </div>
+  )
+}
+
+// A floating toolbar button to spawn/remove an ephemeral Inspector panel, for
+// poking at panel state (or kernel globals) on demand without writing code.
+// Only shown when the server permits it (local bind by default; see
+// Canvas.serve ui_inspector). Sits bottom-left, above tldraw's zoom menu, and
+// highlights while an inspector is open. Rendered as a sibling outside tldraw's
+// container, so it uses self-contained colors rather than the --pc-* theme vars.
+function InspectorButton() {
+  const [state, setState] = useState({ enabled: false, open: false })
+  useEffect(() => subscribeUiInspector(setState), [])
+  if (!state.enabled) return null
+  return (
+    <button
+      onClick={toggleUiInspector}
+      title={state.open ? 'Remove the inspector panel' : 'Add an inspector panel to query the canvas'}
+      style={{
+        position: 'absolute',
+        bottom: 54,
+        left: 8,
+        zIndex: 300,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 12px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: state.open ? '#2563eb' : 'rgba(20, 20, 22, 0.82)',
+        color: '#fff',
+        border: '1px solid rgba(255, 255, 255, 0.18)',
+        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: 12,
+        fontWeight: 600,
+        userSelect: 'none',
+      }}
+    >
+      <span style={{ fontSize: 14, lineHeight: 1 }}>🔍</span>
+      {state.open ? 'Inspector ✕' : 'Inspector'}
+    </button>
   )
 }
 

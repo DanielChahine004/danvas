@@ -159,6 +159,9 @@ class Arrow:
 class Canvas:
     def __init__(self):
         self._bridge = Bridge()
+        # Let the bridge call back into the canvas for native-UI actions (the
+        # toolbar Inspector toggle); harmless until serve() enables the feature.
+        self._bridge._canvas = self
         self._components = []
         self._arrows = []
         self._named = {}  # name -> component, for canvas.<name> / canvas["<name>"]
@@ -242,6 +245,26 @@ class Canvas:
             self._cell_capture.stop()
             self._cell_capture = None
         return self
+
+    def _toggle_ui_inspector(self):
+        """Spawn (or remove) the native-UI ephemeral Inspector. Toggles.
+
+        Called by the bridge when a browser hits the toolbar Inspector button
+        (only when :meth:`serve` enabled it). The panel is a normal
+        :class:`~pycanvas.Inspector` under a reserved name, so re-toggling
+        removes it and it broadcasts to every open view like any other panel.
+        Returns the inspector when spawned, ``None`` when removed.
+        """
+        name = "__ui_inspector__"
+        existing = self._named.get(name)
+        if existing is not None:
+            self.remove(existing)
+            return None
+        return self.insert(
+            Inspector(name=name, refresh=1.0, source="components",
+                      label="inspector"),
+            x=120, y=120,
+        )
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, movable=True, resizable=True, interactive=True,
@@ -656,7 +679,7 @@ class Canvas:
 
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
               allow_remote_exec=False, block=True, wait=True,
-              tunnel=False, tunnel_provider="cloudflared"):
+              tunnel=False, tunnel_provider="cloudflared", ui_inspector=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -687,11 +710,26 @@ class Canvas:
         loopback bind to the whole internet, so it is gated for ``Repl`` exactly
         like a public bind: refused unless ``allow_remote_exec=True``. The tunnel
         is torn down when the server stops (or via :meth:`stop`).
+
+        ``ui_inspector`` controls the native toolbar button that lets a viewer
+        spawn an ephemeral :class:`~pycanvas.Inspector` from the browser. It can
+        expose your component state (and, via its globals view, kernel variable
+        values) to *every* connected browser, so by default it is offered only on
+        a local bind (``127.0.0.1``) with no tunnel. Pass ``ui_inspector=True``
+        to force it on for a shared/tunneled canvas, or ``False`` to hide it
+        entirely.
         """
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
         self._check_remote_exec("0.0.0.0" if tunnel else host, allow_remote_exec)
+        # The UI Inspector exposes state to every viewer; default it on only for
+        # a private, non-tunneled bind. An explicit ui_inspector overrides that.
+        local = host in ("127.0.0.1", "localhost")
+        self._bridge._ui_inspector = (
+            bool(ui_inspector) if ui_inspector is not None
+            else (local and not tunnel)
+        )
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host

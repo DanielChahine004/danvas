@@ -59,6 +59,12 @@ class Bridge:
         self._chat_history = deque(maxlen=100)  # recent chat, replayed on join
         # Components that want to observe chat (the Chat panel's Python handle).
         self._chat_sinks = []
+        # Back-reference to the owning Canvas and whether the native UI may spawn
+        # an ephemeral Inspector. Set by Canvas (``_canvas`` in __init__,
+        # ``_ui_inspector`` in serve); the flag is advertised to each browser in
+        # the welcome frame so the button only shows where it's allowed.
+        self._canvas = None
+        self._ui_inspector = False
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -137,7 +143,8 @@ class Bridge:
         try:
             # Tell this client who it is, so it can label its own chat messages
             # and prefill the editable name field.
-            await self._send(ws, {"type": "welcome", "you": viewer})
+            await self._send(ws, {"type": "welcome", "you": viewer,
+                                  "uiInspector": self._ui_inspector})
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)
@@ -320,6 +327,17 @@ class Bridge:
             return
         if kind == "chat":
             self._handle_chat(ws, msg.get("text"))
+            return
+        if kind == "ui":
+            # Native-UI request (e.g. the toolbar Inspector toggle). Gated by the
+            # same flag advertised in `welcome`, and only ever touches the canvas
+            # when one is attached (the merge host has none and ignores it).
+            if self._ui_inspector and self._canvas is not None:
+                if msg.get("action") == "toggle_inspector":
+                    try:
+                        self._canvas._toggle_ui_inspector()
+                    except Exception:
+                        traceback.print_exc()
             return
         if kind == "input":
             comp = self._components.get(msg.get("id"))

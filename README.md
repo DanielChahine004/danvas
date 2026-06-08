@@ -156,6 +156,26 @@ def log(entry): print(entry["name"], entry["text"])
 A small badge at the top of the canvas shows the live viewer count. See
 [`examples/chat_room.py`](examples/chat_room.py).
 
+### Inspector from the toolbar
+
+You don't have to add an `Inspector` in code to peek at the canvas. A toolbar
+button (bottom-left of the canvas) spawns an ephemeral `Inspector` panel on
+demand — click it to drop one in, click again to remove it. From there you can
+browse every panel's live name/type/value/geometry, switch its header dropdown
+to the kernel **globals** view, and click any row to drill into an object's
+fields. It's the same `Inspector` component, just summoned from the UI instead
+of `canvas.inspector(...)`.
+
+Because that panel can surface your component state (and, in globals mode, your
+kernel variables) to **everyone** connected, the button is offered only on a
+local bind (`127.0.0.1`) by default. On a LAN or tunneled canvas it's hidden
+unless you opt in:
+
+```python
+canvas.serve(host="0.0.0.0", ui_inspector=True)   # offer it to LAN viewers too
+canvas.serve(ui_inspector=False)                   # hide it even locally
+```
+
 ## Layout: position, size, rotation
 
 Pass placement to `insert`, or change it live at any time. `x`/`y` are canvas

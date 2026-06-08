@@ -39,6 +39,11 @@ function sendRaw(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
+// Reserved component id Python uses for the native-UI ephemeral Inspector
+// (see Canvas._toggle_ui_inspector). The toolbar button tracks this shape's
+// presence to reflect its open/closed state.
+export const UI_INSPECTOR_ID = '__ui_inspector__'
+
 // --- read-back: report user move/resize/rotate of panels to Python ----------
 // Built at mount time (not module load) to avoid a temporal-dead-zone error:
 // bridge.js and canvas.js import each other, so COMPONENT_TO_SHAPE isn't yet
@@ -221,6 +226,7 @@ function handle(msg) {
     setRoster(msg.viewers || [])
   } else if (msg.type === 'welcome') {
     setIdentity(msg.you || null)
+    setUiInspectorEnabled(!!msg.uiInspector)
   } else if (msg.type === 'chat') {
     pushChat(msg)
   } else if (msg.type === 'complete_result') {
@@ -294,6 +300,7 @@ function loadSnapshot(data) {
 }
 
 function removeComponent(id) {
+  if (id === UI_INSPECTOR_ID) setUiInspectorOpen(false)
   // Drop any live-data wiring (LivePlot) so its buffer doesn't leak.
   liveHandlers.delete(id)
   liveBuffer.delete(id)
@@ -319,6 +326,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   const shapeType = COMPONENT_TO_SHAPE[component]
   if (!shapeType) return
 
+  if (id === UI_INSPECTOR_ID) setUiInspectorOpen(true)
   const shapeId = createShapeId(id)
   managedIds.add(shapeId) // exclude from free-form drawing sync
   if (editor.getShape(shapeId)) return // already on canvas (reconnect)
@@ -457,6 +465,36 @@ export function subscribePresence(cb) {
   presenceListeners.add(cb)
   cb(presenceCount) // prime with the latest known count
   return () => presenceListeners.delete(cb)
+}
+
+// --- native UI Inspector toggle ---------------------------------------------
+// The server advertises (in `welcome`) whether this canvas permits spawning an
+// ephemeral Inspector from the toolbar; `open` tracks whether one is currently
+// on the canvas (by watching register/remove of UI_INSPECTOR_ID). The button
+// subscribes here and calls toggleUiInspector() to flip it.
+let uiInspector = { enabled: false, open: false }
+const uiInspectorListeners = new Set()
+
+function emitUiInspector() {
+  for (const cb of uiInspectorListeners) cb(uiInspector)
+}
+function setUiInspectorEnabled(enabled) {
+  uiInspector = { ...uiInspector, enabled }
+  emitUiInspector()
+}
+function setUiInspectorOpen(open) {
+  uiInspector = { ...uiInspector, open }
+  emitUiInspector()
+}
+
+export function subscribeUiInspector(cb) {
+  uiInspectorListeners.add(cb)
+  cb(uiInspector) // prime with the latest known state
+  return () => uiInspectorListeners.delete(cb)
+}
+
+export function toggleUiInspector() {
+  sendRaw({ type: 'ui', action: 'toggle_inspector' })
 }
 
 // --- viewer identity, roster, and chat --------------------------------------
