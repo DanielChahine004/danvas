@@ -51,7 +51,7 @@ class CellCapture:
     """
 
     def __init__(self, canvas, cols=3, slot_w=520, slot_h=420, gap=40,
-                 origin=(0, 0), include_source=True):
+                 origin=(0, 0), include_source=True, auto=True):
         self.canvas = canvas
         self.cols = cols
         self.slot_w = slot_w
@@ -59,6 +59,10 @@ class CellCapture:
         self.gap = gap
         self.origin = origin
         self.include_source = include_source
+        # auto=True mirrors every expression cell (except `# pycanvas: skip`);
+        # auto=False is opt-in — a cell appears only if it carries a
+        # `# pycanvas:` directive (e.g. a bare `show`, or any placement option).
+        self.auto = auto
         self._ip = None
         # Maps a cell's stable id -> the grid slot it claimed, so re-running a
         # cell lands its refreshed panel back in the same spot. ``_next_slot`` is
@@ -102,8 +106,11 @@ class CellCapture:
             if out is None:
                 return  # statement cell (assignment/print/loop): nothing to show
             directive = _parse_directive(result.info.raw_cell)
-            if directive.get("skip"):
+            if directive.pop("skip", False):
                 return  # cell opted out of the canvas with `# pycanvas: skip`
+            if not self.auto and not directive:
+                return  # opt-in mode: only directive-bearing cells appear
+            directive.pop("show", None)  # opt-in marker, not an insert kwarg
             name = directive.pop("name", None) or self._panel_name(result)
             label = directive.pop("label", None)
             comp = self._build(out, name, result, label=label)
@@ -320,11 +327,12 @@ def _coerce(value):
 def _parse_directive(raw_cell):
     """Extract per-cell overrides from a ``# pycanvas:`` line in the source.
 
-    Returns a dict of recognised options (``{}`` when there's no directive). A
-    bare ``skip`` token maps to ``{"skip": True}`` so the cell is left off the
-    canvas. Recognised keys: ``x y w h rotation`` (numbers), ``locked movable
-    resizable interactive`` (true/false), and ``name``/``label`` (strings).
-    Pairs are space- or comma-separated, e.g.::
+    Returns a dict of recognised options (``{}`` when there's no directive). The
+    bare tokens ``skip`` and ``show`` map to ``{"skip": True}`` / ``{"show":
+    True}`` — ``skip`` leaves the cell off the canvas, ``show`` opts a cell in
+    under ``capture_cells(auto=False)``. Recognised keys: ``x y w h rotation``
+    (numbers), ``locked movable resizable interactive`` (true/false), and
+    ``name``/``label`` (strings). Pairs are space- or comma-separated, e.g.::
 
         # pycanvas: x=40 y=80 w=600 h=400 movable=false
         # pycanvas: skip
@@ -339,8 +347,9 @@ def _parse_directive(raw_cell):
     for token in re.split(r"[,\s]+", m.group(1).strip()):
         if not token:
             continue
-        if token.lower() == "skip":
-            out["skip"] = True
+        low = token.lower()
+        if low in ("skip", "show"):
+            out[low] = True
             continue
         key, sep, value = token.partition("=")
         key = key.strip().lower()
@@ -357,8 +366,8 @@ def _parse_directive(raw_cell):
 
 
 def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
-              include_source=True):
-    """Mirror every subsequent notebook cell's output onto ``canvas``.
+              include_source=True, auto=True):
+    """Mirror subsequent notebook cell outputs onto ``canvas``.
 
     Registers an IPython ``post_run_cell`` hook so each cell that ends in an
     expression gets its own panel, auto-arranged in a grid. Re-running a cell
@@ -371,6 +380,11 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     coordinate of the grid. ``include_source=False`` drops the source-line
     caption from each panel.
 
+    ``auto=True`` (default) mirrors every expression cell, except those tagged
+    ``# pycanvas: skip``. ``auto=False`` flips to opt-in: nothing is mirrored
+    unless a cell carries a ``# pycanvas:`` directive (a bare ``show`` to use the
+    default grid, or any placement option like ``x=… y=…``).
+
     Idempotent: calling it again on the same canvas returns the existing
     capture rather than registering a second hook.
     """
@@ -378,7 +392,8 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     if existing is not None:
         return existing
     capture = CellCapture(canvas, cols=cols, slot_w=slot_w, slot_h=slot_h,
-                          gap=gap, origin=origin, include_source=include_source)
+                          gap=gap, origin=origin, include_source=include_source,
+                          auto=auto)
     capture.start()
     canvas._cell_capture = capture
     return capture

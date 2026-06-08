@@ -329,10 +329,26 @@ secret_value              # not mirrored to the canvas at all
 ```
 
 Recognised keys: `x y w h rotation` (numbers), `locked movable resizable
-interactive` (true/false), `name`/`label` (strings), and a bare `skip`. A
-directive field is authoritative — e.g. a pinned `x`/`y` snaps back to the
-coded position on every re-run — so omit the fields you'd rather leave to the
-grid or to the user's own dragging.
+interactive` (true/false), `name`/`label` (strings), and the bare tokens `skip`
+/ `show`. A directive field is authoritative — e.g. a pinned `x`/`y` snaps back
+to the coded position on every re-run — so omit the fields you'd rather leave to
+the grid or to the user's own dragging.
+
+**Opt-in instead of opt-out.** By default every expression cell appears (use
+`skip` to exclude one). Pass `auto=False` to flip it into an allowlist — then
+*nothing* is mirrored unless a cell carries a `# pycanvas:` directive:
+
+```python
+canvas.capture_cells(auto=False)   # mirror only cells I explicitly mark
+
+2 + 2                  # no directive -> stays off the canvas
+
+# pycanvas: show
+df                     # marked -> appears, using the default grid placement
+
+# pycanvas: x=40 y=80  # any placement directive also opts the cell in
+fig
+```
 
 See [`examples/notebook_autopanel.ipynb`](examples/notebook_autopanel.ipynb).
 

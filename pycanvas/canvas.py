@@ -201,8 +201,8 @@ class Canvas:
         return self
 
     def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
-                      origin=(0, 0), include_source=True):
-        """Mirror every subsequent notebook cell's output onto this canvas.
+                      origin=(0, 0), include_source=True, auto=True):
+        """Mirror subsequent notebook cell outputs onto this canvas.
 
         Registers an IPython ``post_run_cell`` hook so each cell ending in an
         expression gets (or refreshes) its own panel, auto-arranged in a grid —
@@ -212,12 +212,18 @@ class Canvas:
         so panels broadcast live. See :func:`pycanvas.autopanel` for the
         arguments; returns the capture controller. Idempotent.
 
+        Per cell, a ``# pycanvas:`` directive line overrides placement (or opts
+        out with ``skip``). Pass ``auto=False`` to invert the default: mirror
+        *nothing* unless a cell carries such a directive (e.g. a bare
+        ``# pycanvas: show``) — an explicit allowlist instead of a blocklist.
+
         Stop with :meth:`stop_capturing_cells`.
         """
         from .autopanel import autopanel
 
         return autopanel(self, cols=cols, slot_w=slot_w, slot_h=slot_h,
-                         gap=gap, origin=origin, include_source=include_source)
+                         gap=gap, origin=origin, include_source=include_source,
+                         auto=auto)
 
     def stop_capturing_cells(self):
         """Stop mirroring cell outputs (unregister the ``post_run_cell`` hook).
