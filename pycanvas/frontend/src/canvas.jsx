@@ -321,6 +321,58 @@ function CustomView({ shape }) {
   )
 }
 
+// --- WebView (an external URL in a same-origin iframe) ----------------------
+// Distinct from Custom: it loads a real URL via `src` (not srcDoc) and grants
+// `allow-same-origin`, so embeds that need their own origin to run — YouTube's
+// player, maps, web apps — work instead of rendering blank. Safe because the
+// frame loads a third-party site at its own origin, not app-authored HTML, so
+// same-origin gives it access to *itself*, not to this app.
+export class WebViewShapeUtil extends PcShapeUtil {
+  static type = 'pcWebView'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    url: T.string,
+  }
+
+  getDefaultProps() {
+    return { w: 800, h: 600, label: 'web', url: '' }
+  }
+
+  component(shape) {
+    return (
+      <Card shape={shape}>
+        {/* Header has no pointerEvents, so dragging it moves the panel. */}
+        <div style={labelStyle}>{shape.props.label}</div>
+        <iframe
+          title={shape.props.label}
+          src={shape.props.url}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"
+          allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+          // Match YouTube's own oembed iframe: VEVO/music videos check the
+          // referrer and show "Video unavailable" if none is sent.
+          referrerPolicy="strict-origin-when-cross-origin"
+          style={{
+            flex: 1,
+            width: '100%',
+            border: 'none',
+            borderRadius: 4,
+            background: 'var(--pc-bg)',
+            pointerEvents: 'all',
+          }}
+          // Keep tldraw from hijacking drags/zoom meant for the iframe content.
+          onPointerDown={(e) => e.stopPropagation()}
+        />
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
 // --- Toggle (pick one of N options) -----------------------------------------
 export class ToggleShapeUtil extends PcShapeUtil {
   static type = 'pcToggle'
@@ -1264,6 +1316,7 @@ export const COMPONENT_TO_SHAPE = {
   AudioFeed: 'pcAudio',
   Chat: 'pcChat',
   Custom: 'pcHtml',
+  WebView: 'pcWebView',
   Toggle: 'pcToggle',
   LivePlot: 'pcLivePlot',
   Repl: 'pcRepl',
@@ -1277,6 +1330,7 @@ export const shapeUtils = [
   AudioShapeUtil,
   ChatShapeUtil,
   HtmlShapeUtil,
+  WebViewShapeUtil,
   ToggleShapeUtil,
   LivePlotShapeUtil,
   ReplShapeUtil,

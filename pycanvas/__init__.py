@@ -15,6 +15,7 @@ from .components import (
     Slider,
     Toggle,
     VideoFeed,
+    WebView,
 )
 
 __version__ = "0.1.0"
@@ -34,6 +35,7 @@ __all__ = [
     "LivePlot",
     "Repl",
     "Inspector",
+    "WebView",
     "BaseComponent",
 ]
 

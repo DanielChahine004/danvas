@@ -10,6 +10,7 @@ from .plot import Plot
 from .liveplot import LivePlot
 from .repl import Repl
 from .inspector import Inspector
+from .webview import WebView
 
 __all__ = [
     "BaseComponent",
@@ -24,4 +25,5 @@ __all__ = [
     "LivePlot",
     "Repl",
     "Inspector",
+    "WebView",
 ]

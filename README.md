@@ -43,7 +43,8 @@ label mirrors it. Resize and drag the cards freely on the canvas.
 
 `canvas.<component>(...)` builds a panel **and** places it in one call — the
 concise default. Every component has a factory: `slider`, `toggle`, `label`,
-`video`, `audio`, `plot`, `live_plot`, `custom`, `chat`, `repl`, `inspector`.
+`video`, `audio`, `plot`, `live_plot`, `custom`, `webview`, `chat`, `repl`,
+`inspector`.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -79,6 +80,7 @@ canvas.insert(s, x=80, y=80)                                # place it when read
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
 | `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `.update(html)`, `@on_message` |
+| `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 
 ### Plot vs LivePlot
@@ -123,6 +125,26 @@ Because it's just HTML in an iframe, anything that renders to HTML works:
 - **matplotlib** — `fig.savefig(buf, 'png')` → base64 `<img>` → `panel.update(html)`
 - **Plotly** — `fig.to_html(include_plotlyjs='cdn')` → `panel.update(html)`; the
   chart stays fully interactive (zoom / pan / hover) inside the sandbox.
+
+### Web pages (WebView)
+
+`WebView` embeds a live website by URL in its own iframe — handy for dashboards,
+docs, maps, or videos alongside your panels:
+
+```python
+web = canvas.webview("https://en.wikipedia.org/wiki/Robot")
+web.navigate("https://example.com")   # point it elsewhere, live
+```
+
+Unlike `Custom` (which sandboxes app-authored HTML away from its origin),
+`WebView` loads a real third-party site with `allow-same-origin`, so interactive
+embeds that need their own origin to run (YouTube's player, maps, web apps) work
+instead of rendering blank. YouTube `watch?v=`/`youtu.be` links are rewritten to
+their embeddable `/embed/` form automatically.
+
+Embedding only works for sites that permit being framed. Pages that send
+`X-Frame-Options: DENY` or a CSP `frame-ancestors` rule (Google, X, GitHub, most
+banks) refuse to load — that's a browser security rule, not a PyCanvas limit.
 
 ### Audio
 

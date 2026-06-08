@@ -19,6 +19,7 @@ from .components import (
     Slider,
     Toggle,
     VideoFeed,
+    WebView,
 )
 from .kernel import Kernel
 
@@ -324,6 +325,17 @@ class Canvas:
                 f"name to the new {component.__class__.__name__}",
                 stacklevel=2,
             )
+            # Swap-in-place: inherit the displaced panel's live position/rotation
+            # when the caller didn't pin one, so re-inserting under the same name
+            # (e.g. re-running a `canvas.webview(...)` cell) keeps where the user
+            # dragged it instead of snapping back to auto-cascade. Size stays the
+            # caller's (it's usually passed explicitly); only geometry the user
+            # hand-adjusts is carried over.
+            if x is None and y is None and component._position is None \
+                    and old._position is not None:
+                x, y = old._position
+            if rotation is None and component._rotation == 0 and old._rotation:
+                rotation = old._rotation
             if old in self._components:
                 self.remove(old)
             elif old in self._arrows:
@@ -424,6 +436,11 @@ class Canvas:
         """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``."""
         return self._make(Custom, html=html, path=path, name=name, label=label,
                           width=width, height=height, **place)
+
+    def webview(self, url, name="web", label=None, width=800, height=600, **place):
+        """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""
+        return self._make(WebView, url, name=name, label=label, width=width,
+                          height=height, **place)
 
     def plot(self, name="plot", label=None, width=560, height=420, **place):
         """Insert a :class:`~pycanvas.Plot`. See :meth:`insert` for ``place``."""
