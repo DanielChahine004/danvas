@@ -78,6 +78,8 @@ class CellCapture:
         # Never let a rendering hiccup surface as a cell error — the user's code
         # already ran; this is a best-effort mirror.
         try:
+            if not self._is_user_cell(result):
+                return  # tooling probe (e.g. VS Code's variable viewer), not a cell
             out = result.result
             if out is None:
                 return  # statement cell (assignment/print/loop): nothing to show
@@ -98,6 +100,25 @@ class CellCapture:
             import traceback
 
             traceback.print_exc()
+
+    @staticmethod
+    def _is_user_cell(result):
+        """Whether this execution is a real notebook cell the user ran.
+
+        IDE tooling (VS Code's variable viewer / Data Wrangler, completion
+        probes, etc.) runs introspection code through the same kernel, firing
+        ``post_run_cell`` just like a real cell. Those are flagged
+        ``store_history=False`` (and usually ``silent=True``) — they don't get an
+        ``In[n]``/``Out[n]`` slot — whereas a cell the user actually executed is
+        recorded in history. Mirror only the latter so probe outputs (e.g. the
+        ``__DW_SCOPE__[...]`` panels) don't litter the canvas.
+        """
+        info = result.info
+        if getattr(info, "silent", False):
+            return False
+        # store_history defaults to True when absent (older IPython / odd hosts),
+        # so a missing attribute is treated as a genuine user cell.
+        return getattr(info, "store_history", True)
 
     # -- layout --------------------------------------------------------------
     def _place(self, result):
