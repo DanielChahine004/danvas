@@ -201,7 +201,9 @@ class Canvas:
         return self
 
     def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
-                      origin=(0, 0), include_source=True, auto=True):
+                      origin=(0, 0), include_source=True, auto=True,
+                      movable=True, resizable=True, locked=False,
+                      interactive=True):
         """Mirror subsequent notebook cell outputs onto this canvas.
 
         Registers an IPython ``post_run_cell`` hook so each cell ending in an
@@ -217,13 +219,18 @@ class Canvas:
         *nothing* unless a cell carries such a directive (e.g. a bare
         ``# pycanvas: show``) — an explicit allowlist instead of a blocklist.
 
+        ``movable``/``resizable``/``locked``/``interactive`` set the default lock
+        state for every panel (e.g. ``movable=False`` to pin them all); a
+        per-cell directive overrides them.
+
         Stop with :meth:`stop_capturing_cells`.
         """
         from .autopanel import autopanel
 
         return autopanel(self, cols=cols, slot_w=slot_w, slot_h=slot_h,
                          gap=gap, origin=origin, include_source=include_source,
-                         auto=auto)
+                         auto=auto, movable=movable, resizable=resizable,
+                         locked=locked, interactive=interactive)
 
     def stop_capturing_cells(self):
         """Stop mirroring cell outputs (unregister the ``post_run_cell`` hook).

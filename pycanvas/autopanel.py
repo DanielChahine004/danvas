@@ -51,7 +51,8 @@ class CellCapture:
     """
 
     def __init__(self, canvas, cols=3, slot_w=520, slot_h=420, gap=40,
-                 origin=(0, 0), include_source=True, auto=True):
+                 origin=(0, 0), include_source=True, auto=True,
+                 movable=True, resizable=True, locked=False, interactive=True):
         self.canvas = canvas
         self.cols = cols
         self.slot_w = slot_w
@@ -63,6 +64,10 @@ class CellCapture:
         # auto=False is opt-in — a cell appears only if it carries a
         # `# pycanvas:` directive (e.g. a bare `show`, or any placement option).
         self.auto = auto
+        # Default lock/interaction state stamped on every panel's first
+        # appearance (a per-cell `# pycanvas:` directive still overrides these).
+        self._lock_defaults = {"movable": movable, "resizable": resizable,
+                               "locked": locked, "interactive": interactive}
         self._ip = None
         # Maps a cell's stable id -> the grid slot it claimed, so re-running a
         # cell lands its refreshed panel back in the same spot. ``_next_slot`` is
@@ -155,9 +160,10 @@ class CellCapture:
         Precedence, per field: an explicit ``# pycanvas:`` directive wins; else
         the panel's current live geometry is reused (so a re-run keeps where the
         user dragged/resized/locked it); else, on a panel's first appearance, the
-        auto-grid slot and default size. A directive that fully pins position
-        (``x`` and ``y``) doesn't consume a grid slot, so auto-placed cells don't
-        leave a gap for it.
+        capture-level defaults — the auto-grid slot, the default size
+        (``slot_w``/``slot_h``), and the default lock/interaction flags. A
+        directive that fully pins position (``x`` and ``y``) doesn't consume a
+        grid slot, so auto-placed cells don't leave a gap for it.
         """
         place = {}
         prev = self.canvas._named.get(name)
@@ -168,12 +174,13 @@ class CellCapture:
                          rotation=prev.rotation, locked=prev.locked,
                          movable=prev.movable, resizable=prev.resizable,
                          interactive=prev.interactive)
-        elif not pins_position:
-            # First appearance, no explicit position: take the next grid slot.
-            x, y = self._place(result)
-            place.update(x=x, y=y, w=self.slot_w, h=self.slot_h)
         else:
-            place.update(w=self.slot_w, h=self.slot_h)
+            # First appearance: capture-level default size + lock/interaction
+            # state, and the next grid slot unless the directive pins position.
+            place.update(w=self.slot_w, h=self.slot_h, **self._lock_defaults)
+            if not pins_position:
+                x, y = self._place(result)
+                place.update(x=x, y=y)
         place.update(directive)  # explicit code directive overrides everything
         return place
 
@@ -366,7 +373,8 @@ def _parse_directive(raw_cell):
 
 
 def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
-              include_source=True, auto=True):
+              include_source=True, auto=True, movable=True, resizable=True,
+              locked=False, interactive=True):
     """Mirror subsequent notebook cell outputs onto ``canvas``.
 
     Registers an IPython ``post_run_cell`` hook so each cell that ends in an
@@ -385,6 +393,11 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     unless a cell carries a ``# pycanvas:`` directive (a bare ``show`` to use the
     default grid, or any placement option like ``x=… y=…``).
 
+    ``movable``/``resizable``/``locked``/``interactive`` set the default
+    lock state stamped on every panel (e.g. ``movable=False, resizable=False``
+    to pin them all in place); a per-cell ``# pycanvas:`` directive overrides
+    these for that cell.
+
     Idempotent: calling it again on the same canvas returns the existing
     capture rather than registering a second hook.
     """
@@ -393,7 +406,8 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
         return existing
     capture = CellCapture(canvas, cols=cols, slot_w=slot_w, slot_h=slot_h,
                           gap=gap, origin=origin, include_source=include_source,
-                          auto=auto)
+                          auto=auto, movable=movable, resizable=resizable,
+                          locked=locked, interactive=interactive)
     capture.start()
     canvas._cell_capture = capture
     return capture

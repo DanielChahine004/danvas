@@ -334,6 +334,20 @@ interactive` (true/false), `name`/`label` (strings), and the bare tokens `skip`
 to the coded position on every re-run — so omit the fields you'd rather leave to
 the grid or to the user's own dragging.
 
+**Defaults for every panel.** Anything you'd otherwise repeat per cell can be
+set once on the `capture_cells(...)` call — panel size (`slot_w`/`slot_h`), grid
+shape (`cols`, `gap`, `origin`), captions (`include_source`), and the default
+lock state (`movable`, `resizable`, `locked`, `interactive`). A per-cell
+directive still overrides these:
+
+```python
+# pin and shrink every panel; cells can still opt back in individually
+canvas.capture_cells(slot_w=380, slot_h=260, movable=False, resizable=False)
+
+# pycanvas: movable=true
+fig          # this one stays draggable despite the capture-level default
+```
+
 **Opt-in instead of opt-out.** By default every expression cell appears (use
 `skip` to exclude one). Pass `auto=False` to flip it into an allowlist — then
 *nothing* is mirrored unless a cell carries a `# pycanvas:` directive:
