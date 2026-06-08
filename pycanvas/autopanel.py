@@ -107,7 +107,16 @@ class CellCapture:
             name = directive.pop("name", None) or self._panel_name(result)
             label = directive.pop("label", None)
             comp = self._build(out, name, result, label=label)
-            self.canvas.insert(comp, **self._placement(result, name, directive))
+            place = self._placement(result, name, directive)
+            # Re-running a cell intentionally replaces its panel. Pull the old one
+            # off first so insert() doesn't fire its "name already used" collision
+            # warning (that guard is for accidental clashes in the manual API; an
+            # autopanel re-run is a deliberate swap). _placement already captured
+            # the old panel's live geometry above, so removing it loses nothing.
+            prev = self.canvas._named.get(name)
+            if prev is not None:
+                self.canvas.remove(prev)
+            self.canvas.insert(comp, **place)
         except Exception:
             import traceback
 
