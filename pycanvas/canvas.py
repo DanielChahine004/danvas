@@ -169,6 +169,9 @@ class Canvas:
         # against one namespace (set by enable_repl). None until enable_repl.
         self._kernel = Kernel()
         self._namespace = None
+        # Set by capture_cells()/autopanel() to the active CellCapture, so a
+        # second call is idempotent and stop_capturing_cells() can find it.
+        self._cell_capture = None
 
     def enable_repl(self, namespace=None):
         """Bind the namespace that ``Repl`` cells execute against.
@@ -195,6 +198,36 @@ class Canvas:
             namespace = ip.user_ns if ip is not None else {}
         namespace.setdefault("canvas", self)
         self._namespace = namespace
+        return self
+
+    def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
+                      origin=(0, 0), include_source=True):
+        """Mirror every subsequent notebook cell's output onto this canvas.
+
+        Registers an IPython ``post_run_cell`` hook so each cell ending in an
+        expression gets (or refreshes) its own panel, auto-arranged in a grid —
+        no manual :meth:`insert` per cell. Cells ending in a statement
+        (assignment, ``print``, loop) produce no value and are skipped. Re-running
+        a cell swaps its panel in place. Best paired with ``serve(block=False)``
+        so panels broadcast live. See :func:`pycanvas.autopanel` for the
+        arguments; returns the capture controller. Idempotent.
+
+        Stop with :meth:`stop_capturing_cells`.
+        """
+        from .autopanel import autopanel
+
+        return autopanel(self, cols=cols, slot_w=slot_w, slot_h=slot_h,
+                         gap=gap, origin=origin, include_source=include_source)
+
+    def stop_capturing_cells(self):
+        """Stop mirroring cell outputs (unregister the ``post_run_cell`` hook).
+
+        A no-op if :meth:`capture_cells` was never called. Existing panels stay
+        on the canvas.
+        """
+        if self._cell_capture is not None:
+            self._cell_capture.stop()
+            self._cell_capture = None
         return self
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,

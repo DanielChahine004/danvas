@@ -289,6 +289,31 @@ canvas.stop()          # shut the background server down
 See [`examples/notebook_dynamic.ipynb`](examples/notebook_dynamic.ipynb) for a
 full walkthrough.
 
+### Mirror every cell's output automatically
+
+Don't want to wrap each cell's output in a component by hand? Call
+`canvas.capture_cells()` (alias `pycanvas.autopanel(canvas)`) once: it registers
+an IPython `post_run_cell` hook so **every cell ending in an expression** gets
+its own panel, auto-arranged in a grid. Outputs render through Jupyter's own
+display machinery, so DataFrames, matplotlib/Plotly figures, and any
+`_repr_html_` object look as they do inline. Re-running a cell swaps its panel
+in place — and if you'd moved, resized, or rotated that panel in the browser,
+the refreshed panel keeps the geometry you left it at instead of snapping back
+to the grid. Cells ending in a statement (assignment, `print`, loop) produce no
+value and are skipped.
+
+```python
+import pycanvas
+canvas = pycanvas.Canvas().serve(port=8000, block=False)
+canvas.capture_cells(cols=2)   # every later cell now mirrors its output
+
+pd.DataFrame({"x": range(5)})  # -> appears as its own panel, no insert needed
+
+canvas.stop_capturing_cells()  # stop (existing panels stay)
+```
+
+See [`examples/notebook_autopanel.ipynb`](examples/notebook_autopanel.ipynb).
+
 > The background server runs in a daemon thread, so `block=False` only stays up
 > while the process does. A notebook kernel keeps living, but a plain **script**
 > that ends right after `serve(block=False)` would exit and tear the server down

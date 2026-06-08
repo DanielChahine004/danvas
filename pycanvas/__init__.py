@@ -1,5 +1,6 @@
 """PyCanvas: a browser-based spatial canvas driven entirely from Python."""
 
+from .autopanel import autopanel
 from .canvas import Canvas
 from .components import (
     AudioFeed,
@@ -20,6 +21,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Canvas",
+    "autopanel",
     "Merge",
     "Slider",
     "Label",
