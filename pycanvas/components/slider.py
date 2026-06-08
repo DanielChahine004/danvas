@@ -7,7 +7,7 @@ class Slider(BaseComponent):
     component = "Slider"
 
     def __init__(self, name, min=0, max=100, default=None, step=1,
-                 debounce=0, label=None):
+                 on_release=False, label=None):
         if default is None:
             default = min
         # ``step`` controls the slider's granularity *and* signals an int vs.
@@ -15,12 +15,12 @@ class Slider(BaseComponent):
         # while a fractional step like ``0.1`` makes it a float slider. It also
         # drives the precision of the manual number-entry box in the browser.
         #
-        # ``debounce`` (milliseconds) rate-limits how often a *drag* reports back
-        # to Python: the thumb still moves live in the browser, but ``on_change``
-        # fires at most once per window (plus a final settled value), so a frantic
-        # drag can't flood the socket. 0 (default) reports every change.
+        # ``on_release``: when False (default) the thumb reports every change as
+        # it's dragged; when True the drag stays silent and ``on_change`` fires
+        # once, with the settled value, when the user lets go — so a frantic drag
+        # can't flood a slow handler. The thumb tracks the cursor live either way.
         super().__init__(name=name, label=label, min=min, max=max, step=step,
-                         debounce=debounce, value=default)
+                         on_release=on_release, value=default)
         self._value = default
 
     def update(self, value):

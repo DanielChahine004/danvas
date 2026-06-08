@@ -76,13 +76,13 @@ beneath the track — type a value (clamped to `[min, max]`) instead of dragging
 gain = canvas.slider("gain", min=0, max=1, default=0.5, step=0.1)  # float slider
 ```
 
-Pass `debounce=<ms>` to rate-limit a *drag*: the thumb still moves live in the
-browser, but `@on_change` fires at most once per window (plus the final settled
-value), so a frantic drag can't flood a slow `on_change` handler. `0` (default)
-reports every change.
+Pass `on_release=True` so a *drag* reports only when the user lets go: the thumb
+still tracks the cursor live, but `@on_change` fires once, with the settled
+value, instead of streaming every intermediate value — handy for a slow handler.
+The default (`False`) reports every change as you drag.
 
 ```python
-gain = canvas.slider("gain", min=0, max=1, step=0.1, debounce=50)  # ≤20 updates/s
+gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 ```
 
 ## Components

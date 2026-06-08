@@ -158,56 +158,36 @@ function SliderNumberEntry({ value, min, max, step, onCommit }) {
 }
 
 // The interactive body of a slider panel: the range thumb + the manual entry
-// box. A drag fires onChange dozens of times a second; `debounce` (ms) caps how
-// often the value is *sent to Python* without slowing the thumb — the shape's
-// value is always updated locally so the thumb and number box track the cursor,
-// while sendInput is rate-limited and the final settled value is always
-// delivered (trailing send). debounce=0 sends every change (the old behaviour).
-function SliderControl({ shape, editor, debounce }) {
+// box. The shape's value is always updated locally as the thumb moves, so it
+// tracks the cursor live regardless of mode. `onRelease` only governs *when
+// Python hears about it*: when false (default) every change is sent; when true
+// the drag stays silent and a single value is sent once the gesture ends
+// (pointer release, key release, or blur), so a frantic drag can't flood a slow
+// on_change handler.
+function SliderControl({ shape, editor, onRelease }) {
   const { min, max, step, value } = shape.props
   const id = componentIdOf(shape.id)
-  const timer = useRef(null)
-  const lastSent = useRef(0)
-  const pending = useRef(null)
+  const pending = useRef(null) // value awaiting an on-release commit
 
   // Reflect a value on the panel immediately (responsive thumb + number box).
   const setLocal = (v) =>
     editor.updateShape({ id: shape.id, type: shape.type, props: { value: v } })
 
-  const flush = () => {
-    timer.current = null
+  // Send the value held back during an on-release drag (no-op otherwise).
+  const commit = () => {
     if (pending.current === null) return
     sendInput(id, { value: pending.current })
     pending.current = null
-    lastSent.current = Date.now()
   }
 
-  // Rate-limited notify: send now if we're outside the window, else coalesce
-  // into a single trailing send so Python always receives the last value.
-  const notify = (v) => {
-    if (!debounce) {
-      sendInput(id, { value: v })
-      return
-    }
-    pending.current = v
-    if (timer.current) return
-    const wait = Math.max(0, debounce - (Date.now() - lastSent.current))
-    timer.current = setTimeout(flush, wait)
-  }
-
-  // Update locally *and* notify Python (rate-limited for the drag case).
   const apply = (v) => {
     setLocal(v)
-    notify(v)
+    if (onRelease) pending.current = v
+    else sendInput(id, { value: v })
   }
 
-  // Don't strand a pending trailing value if the panel unmounts mid-drag.
-  useEffect(() => () => {
-    if (timer.current) {
-      clearTimeout(timer.current)
-      flush()
-    }
-  }, [])
+  // Don't strand an un-committed value if the panel unmounts mid-drag.
+  useEffect(() => commit, [])
 
   return (
     <>
@@ -222,9 +202,11 @@ function SliderControl({ shape, editor, debounce }) {
         style={{ width: '100%', pointerEvents: 'all', cursor: 'pointer' }}
         onPointerDown={(e) => e.stopPropagation()}
         onChange={(e) => apply(Number(e.target.value))}
-        // A throttled drag may leave the last value un-sent; force it out when
-        // the gesture ends (and immediately, since the window has now elapsed).
-        onPointerUp={() => { if (timer.current) { clearTimeout(timer.current); flush() } }}
+        // In on-release mode the value is sent only when the gesture ends —
+        // covering mouse/touch (pointerUp), keyboard (keyUp), and focus loss.
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
       />
       <SliderNumberEntry
         value={value}
@@ -247,19 +229,19 @@ export class SliderShapeUtil extends PcShapeUtil {
     min: T.number,
     max: T.number,
     step: T.number,
-    debounce: T.number,
+    on_release: T.boolean,
     value: T.number,
   }
 
   getDefaultProps() {
-    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, step: 1, debounce: 0, value: 50 }
+    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, step: 1, on_release: false, value: 50 }
   }
 
   component(shape) {
     return (
       <Card shape={shape}>
         <div style={labelStyle}>{shape.props.label}</div>
-        <SliderControl shape={shape} editor={this.editor} debounce={shape.props.debounce} />
+        <SliderControl shape={shape} editor={this.editor} onRelease={shape.props.on_release} />
       </Card>
     )
   }

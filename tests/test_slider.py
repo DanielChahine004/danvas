@@ -19,7 +19,7 @@ def test_slider_register_props():
         "min": 0,
         "max": 180,
         "step": 1,
-        "debounce": 0,
+        "on_release": False,
         "value": 90,
         "w": 240,
         "h": 96,
