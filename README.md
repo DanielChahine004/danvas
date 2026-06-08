@@ -76,6 +76,15 @@ beneath the track — type a value (clamped to `[min, max]`) instead of dragging
 gain = canvas.slider("gain", min=0, max=1, default=0.5, step=0.1)  # float slider
 ```
 
+Pass `debounce=<ms>` to rate-limit a *drag*: the thumb still moves live in the
+browser, but `@on_change` fires at most once per window (plus the final settled
+value), so a frantic drag can't flood a slow `on_change` handler. `0` (default)
+reports every change.
+
+```python
+gain = canvas.slider("gain", min=0, max=1, step=0.1, debounce=50)  # ≤20 updates/s
+```
+
 ## Components
 
 | Component   | Direction      | API |

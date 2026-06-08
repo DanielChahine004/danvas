@@ -343,15 +343,17 @@ class Bridge:
             comp = self._components.get(msg.get("id"))
             if comp is not None:
                 comp._handle_input(msg.get("payload") or {})
-                # Echo the resulting state to every client so other open views
-                # stay in sync with a browser-driven change (a second browser on
-                # this canvas, or a merge host aggregating it). Output-only
-                # components return None here and are left alone. The originating
-                # browser already shows the value, so the echo is idempotent.
+                # Echo the resulting state to the *other* clients so a second
+                # browser on this canvas (or a merge host aggregating it) stays in
+                # sync with a browser-driven change. Output-only components return
+                # None here and are left alone. The originating browser is
+                # excluded: it already shows the value, and echoing back mid-drag
+                # would fight the live thumb with stale values.
                 state = comp.state_payload()
                 if state:
                     self.broadcast(
-                        {"type": "update", "id": comp.id, "payload": state}
+                        {"type": "update", "id": comp.id, "payload": state},
+                        exclude=ws,
                     )
         elif kind == "layout":
             # User moved/resized a panel in the browser; sync Python's state.
@@ -397,11 +399,17 @@ class Bridge:
             await ws.send_text(json.dumps(msg))
 
     # -- outbound (thread-safe) ----------------------------------------------
-    def broadcast(self, msg):
-        """Send ``msg`` to every connected client. Safe to call from any thread."""
+    def broadcast(self, msg, exclude=None):
+        """Send ``msg`` to every connected client. Safe to call from any thread.
+
+        ``exclude`` skips one connection (the originator of a change), used to
+        avoid echoing a browser's own input straight back to it.
+        """
         if self._loop is None:
             return
         for ws in list(self._connections):
+            if ws is exclude:
+                continue
             asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
 
     async def _safe_send(self, ws, msg):

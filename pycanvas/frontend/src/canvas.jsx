@@ -157,6 +157,87 @@ function SliderNumberEntry({ value, min, max, step, onCommit }) {
   )
 }
 
+// The interactive body of a slider panel: the range thumb + the manual entry
+// box. A drag fires onChange dozens of times a second; `debounce` (ms) caps how
+// often the value is *sent to Python* without slowing the thumb — the shape's
+// value is always updated locally so the thumb and number box track the cursor,
+// while sendInput is rate-limited and the final settled value is always
+// delivered (trailing send). debounce=0 sends every change (the old behaviour).
+function SliderControl({ shape, editor, debounce }) {
+  const { min, max, step, value } = shape.props
+  const id = componentIdOf(shape.id)
+  const timer = useRef(null)
+  const lastSent = useRef(0)
+  const pending = useRef(null)
+
+  // Reflect a value on the panel immediately (responsive thumb + number box).
+  const setLocal = (v) =>
+    editor.updateShape({ id: shape.id, type: shape.type, props: { value: v } })
+
+  const flush = () => {
+    timer.current = null
+    if (pending.current === null) return
+    sendInput(id, { value: pending.current })
+    pending.current = null
+    lastSent.current = Date.now()
+  }
+
+  // Rate-limited notify: send now if we're outside the window, else coalesce
+  // into a single trailing send so Python always receives the last value.
+  const notify = (v) => {
+    if (!debounce) {
+      sendInput(id, { value: v })
+      return
+    }
+    pending.current = v
+    if (timer.current) return
+    const wait = Math.max(0, debounce - (Date.now() - lastSent.current))
+    timer.current = setTimeout(flush, wait)
+  }
+
+  // Update locally *and* notify Python (rate-limited for the drag case).
+  const apply = (v) => {
+    setLocal(v)
+    notify(v)
+  }
+
+  // Don't strand a pending trailing value if the panel unmounts mid-drag.
+  useEffect(() => () => {
+    if (timer.current) {
+      clearTimeout(timer.current)
+      flush()
+    }
+  }, [])
+
+  return (
+    <>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        // pointerEvents:'all' lets the input receive clicks; stopPropagation
+        // on pointerdown keeps tldraw from starting a drag on the shape.
+        style={{ width: '100%', pointerEvents: 'all', cursor: 'pointer' }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onChange={(e) => apply(Number(e.target.value))}
+        // A throttled drag may leave the last value un-sent; force it out when
+        // the gesture ends (and immediately, since the window has now elapsed).
+        onPointerUp={() => { if (timer.current) { clearTimeout(timer.current); flush() } }}
+      />
+      <SliderNumberEntry
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        // A typed entry is a single deliberate value — send it straight through.
+        onCommit={(v) => { setLocal(v); sendInput(id, { value: v }) }}
+      />
+    </>
+  )
+}
+
 export class SliderShapeUtil extends PcShapeUtil {
   static type = 'pcSlider'
   static props = {
@@ -166,47 +247,19 @@ export class SliderShapeUtil extends PcShapeUtil {
     min: T.number,
     max: T.number,
     step: T.number,
+    debounce: T.number,
     value: T.number,
   }
 
   getDefaultProps() {
-    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, step: 1, value: 50 }
+    return { w: 240, h: 96, label: 'slider', min: 0, max: 100, step: 1, debounce: 0, value: 50 }
   }
 
   component(shape) {
-    const { label, min, max, step, value } = shape.props
-    const id = componentIdOf(shape.id)
-    // Shared updater for both the range thumb and the manual entry box.
-    const apply = (v) => {
-      this.editor.updateShape({
-        id: shape.id,
-        type: shape.type,
-        props: { value: v },
-      })
-      sendInput(id, { value: v })
-    }
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{label}</div>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          // pointerEvents:'all' lets the input receive clicks; stopPropagation
-          // on pointerdown keeps tldraw from starting a drag on the shape.
-          style={{ width: '100%', pointerEvents: 'all', cursor: 'pointer' }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => apply(Number(e.target.value))}
-        />
-        <SliderNumberEntry
-          value={value}
-          min={min}
-          max={max}
-          step={step}
-          onCommit={apply}
-        />
+        <div style={labelStyle}>{shape.props.label}</div>
+        <SliderControl shape={shape} editor={this.editor} debounce={shape.props.debounce} />
       </Card>
     )
   }
