@@ -17,9 +17,27 @@ Typical use::
 Re-running a cell swaps its panel in place (keyed on the notebook's stable
 cell id) rather than stacking a duplicate. Cells that end in a statement
 (an assignment, a ``print``, a loop) produce no output value and are skipped.
+
+A cell may override its own panel with a ``# pycanvas:`` directive line — to
+pin a position/size, lock it, rename it, or opt out entirely::
+
+    # pycanvas: x=40 y=80 w=600 h=400 movable=false
+    fig
+
+    # pycanvas: name=metrics label="Live metrics" locked=true
+    df
+
+    # pycanvas: skip
+    secret  # not mirrored to the canvas
+
+Recognised keys: ``x y w h rotation`` (numbers), ``locked movable resizable
+interactive`` (true/false), ``name``/``label`` (strings), and a bare ``skip``.
+Anything unspecified falls back to the auto-grid (or, on a re-run, to wherever
+the user dragged/resized the panel).
 """
 
-import html as _html
+import re
+import warnings
 
 from .components import Custom, Label, Plot
 
@@ -83,19 +101,13 @@ class CellCapture:
             out = result.result
             if out is None:
                 return  # statement cell (assignment/print/loop): nothing to show
-            name = self._panel_name(result)
-            comp = self._build(out, name, result)
-            # If a panel for this cell is already on the canvas, the user may have
-            # dragged/resized it (their gestures are synced back into the live
-            # component's geometry). Re-running the cell should land the refreshed
-            # panel exactly where they left it, not snap it back to the grid slot.
-            prev = self.canvas._named.get(name)
-            if prev is not None and prev.x is not None:
-                self.canvas.insert(comp, x=prev.x, y=prev.y, w=prev.w, h=prev.h,
-                                   rotation=prev.rotation)
-            else:
-                x, y = self._place(result)
-                self.canvas.insert(comp, x=x, y=y, w=self.slot_w, h=self.slot_h)
+            directive = _parse_directive(result.info.raw_cell)
+            if directive.get("skip"):
+                return  # cell opted out of the canvas with `# pycanvas: skip`
+            name = directive.pop("name", None) or self._panel_name(result)
+            label = directive.pop("label", None)
+            comp = self._build(out, name, result, label=label)
+            self.canvas.insert(comp, **self._placement(result, name, directive))
         except Exception:
             import traceback
 
@@ -121,6 +133,34 @@ class CellCapture:
         return getattr(info, "store_history", True)
 
     # -- layout --------------------------------------------------------------
+    def _placement(self, result, name, directive):
+        """Resolve the ``insert`` placement kwargs for a cell's panel.
+
+        Precedence, per field: an explicit ``# pycanvas:`` directive wins; else
+        the panel's current live geometry is reused (so a re-run keeps where the
+        user dragged/resized/locked it); else, on a panel's first appearance, the
+        auto-grid slot and default size. A directive that fully pins position
+        (``x`` and ``y``) doesn't consume a grid slot, so auto-placed cells don't
+        leave a gap for it.
+        """
+        place = {}
+        prev = self.canvas._named.get(name)
+        pins_position = "x" in directive and "y" in directive
+        if prev is not None and prev.x is not None:
+            # Re-run: start from the panel's live geometry (user moves included).
+            place.update(x=prev.x, y=prev.y, w=prev.w, h=prev.h,
+                         rotation=prev.rotation, locked=prev.locked,
+                         movable=prev.movable, resizable=prev.resizable,
+                         interactive=prev.interactive)
+        elif not pins_position:
+            # First appearance, no explicit position: take the next grid slot.
+            x, y = self._place(result)
+            place.update(x=x, y=y, w=self.slot_w, h=self.slot_h)
+        else:
+            place.update(w=self.slot_w, h=self.slot_h)
+        place.update(directive)  # explicit code directive overrides everything
+        return place
+
     def _place(self, result):
         """Return the (x, y) for this cell, reusing its slot across re-runs."""
         key = self._cell_key(result)
@@ -151,9 +191,13 @@ class CellCapture:
         return f"src:{hash(info.raw_cell)}"
 
     # -- rendering -----------------------------------------------------------
-    def _build(self, out, name, result):
-        """Pick and construct the panel component for a cell output value."""
-        caption = self._caption(result)
+    def _build(self, out, name, result, label=None):
+        """Pick and construct the panel component for a cell output value.
+
+        ``label`` overrides the default source-line caption (from a
+        ``# pycanvas: label=...`` directive); ``None`` keeps the default.
+        """
+        caption = label if label is not None else self._caption(result)
 
         # Plotly figures: route through the existing Plot wrapper (interactive).
         if _is_plotly(out):
@@ -199,11 +243,15 @@ class CellCapture:
         """A short panel caption derived from the cell's source (or its id)."""
         if not self.include_source:
             return None
-        src = (result.info.raw_cell or "").strip()
-        if not src:
-            return None
-        first = src.splitlines()[0].strip()
-        return first[:60] + ("…" if len(first) > 60 else "")
+        src = result.info.raw_cell or ""
+        # Caption from the first real line of code, skipping blanks and the
+        # ``# pycanvas:`` directive line (it's configuration, not the output).
+        for line in src.splitlines():
+            stripped = line.strip()
+            if not stripped or _DIRECTIVE_RE.match(line):
+                continue
+            return stripped[:60] + ("…" if len(stripped) > 60 else "")
+        return None
 
 
 # -- module helpers ----------------------------------------------------------
@@ -231,6 +279,72 @@ def _short_repr(obj, limit=2000):
     if len(text) > limit:
         text = text[:limit] + " …"
     return text
+
+
+# A ``# pycanvas: ...`` line anywhere in the cell carries per-cell overrides.
+_DIRECTIVE_RE = re.compile(r"^[ \t]*#\s*pycanvas:[ \t]*(.*?)[ \t]*$",
+                           re.IGNORECASE | re.MULTILINE)
+# Placement/lock keys forwarded straight to ``Canvas.insert`` (numbers/bools),
+# plus ``name``/``label`` (strings) which the caller pulls off first.
+_NUMERIC_KEYS = {"x", "y", "w", "h", "rotation"}
+_BOOL_KEYS = {"locked", "movable", "resizable", "interactive"}
+_STR_KEYS = {"name", "label"}
+_DIRECTIVE_KEYS = _NUMERIC_KEYS | _BOOL_KEYS | _STR_KEYS
+
+
+def _coerce(value):
+    """Parse a directive value into a number, bool, or stripped string."""
+    low = value.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value.strip("'\"")
+
+
+def _parse_directive(raw_cell):
+    """Extract per-cell overrides from a ``# pycanvas:`` line in the source.
+
+    Returns a dict of recognised options (``{}`` when there's no directive). A
+    bare ``skip`` token maps to ``{"skip": True}`` so the cell is left off the
+    canvas. Recognised keys: ``x y w h rotation`` (numbers), ``locked movable
+    resizable interactive`` (true/false), and ``name``/``label`` (strings).
+    Pairs are space- or comma-separated, e.g.::
+
+        # pycanvas: x=40 y=80 w=600 h=400 movable=false
+        # pycanvas: skip
+        # pycanvas: name=metrics, label="Live metrics", locked=true
+    """
+    if not raw_cell:
+        return {}
+    m = _DIRECTIVE_RE.search(raw_cell)
+    if not m:
+        return {}
+    out = {}
+    for token in re.split(r"[,\s]+", m.group(1).strip()):
+        if not token:
+            continue
+        if token.lower() == "skip":
+            out["skip"] = True
+            continue
+        key, sep, value = token.partition("=")
+        key = key.strip().lower()
+        if not sep:
+            warnings.warn(f"pycanvas directive: ignoring bare token {token!r} "
+                          f"(expected key=value)", stacklevel=3)
+            continue
+        if key not in _DIRECTIVE_KEYS:
+            warnings.warn(f"pycanvas directive: unknown option {key!r}",
+                          stacklevel=3)
+            continue
+        out[key] = _coerce(value)
+    return out
 
 
 def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),

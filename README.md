@@ -312,6 +312,28 @@ pd.DataFrame({"x": range(5)})  # -> appears as its own panel, no insert needed
 canvas.stop_capturing_cells()  # stop (existing panels stay)
 ```
 
+**Customising an individual cell.** Auto-placement is just the default — any
+cell can override its own panel with a `# pycanvas:` directive line, while
+everything you don't specify still falls back to the grid (or to wherever you'd
+dragged the panel on a re-run):
+
+```python
+# pycanvas: x=40 y=80 w=600 h=400 movable=false
+fig                       # this panel is pinned at (40, 80), 600×400, undraggable
+
+# pycanvas: name=metrics label="Live metrics" locked=true
+df                        # named (canvas["metrics"]), captioned, fully locked
+
+# pycanvas: skip
+secret_value              # not mirrored to the canvas at all
+```
+
+Recognised keys: `x y w h rotation` (numbers), `locked movable resizable
+interactive` (true/false), `name`/`label` (strings), and a bare `skip`. A
+directive field is authoritative — e.g. a pinned `x`/`y` snaps back to the
+coded position on every re-run — so omit the fields you'd rather leave to the
+grid or to the user's own dragging.
+
 See [`examples/notebook_autopanel.ipynb`](examples/notebook_autopanel.ipynb).
 
 > The background server runs in a daemon thread, so `block=False` only stays up
