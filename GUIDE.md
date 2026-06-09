@@ -99,7 +99,8 @@ Notes:
   good for occasional figures). `LivePlot` keeps a mounted chart and streams
   only data arrays — smooth at high rates; call `push()` every loop.
 - **VideoFeed** expects OpenCV BGR frames (`cv2`); they're JPEG-encoded and sent
-  as base64.
+  as binary WebSocket frames (no base64/JSON). **AudioFeed** streams int16 PCM
+  the same way.
 
 ### Custom panels (arbitrary HTML)
 

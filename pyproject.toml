@@ -29,6 +29,10 @@ tunnel = ["pycloudflared>=0.2"]
 # component itself needs nothing extra — only *capturing* mic input does. The
 # browser plays the streamed PCM through the Web Audio API.
 audio = ["sounddevice>=0.4"]
+# Packaging a canvas into a standalone desktop app (Canvas.bake / python -m
+# pycanvas.bake). pywebview shows the canvas in a native window; PyInstaller
+# bundles everything into a self-contained executable.
+desktop = ["pywebview>=4", "pyinstaller>=6"]
 
 [project.urls]
 Homepage = "https://github.com/DanielChahine004/pycanvas"

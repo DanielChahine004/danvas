@@ -24,6 +24,9 @@ export function setEditor(e) {
   editor = e
   setupGeometrySync(e)
   setupDrawSync(e)
+  // The view config usually arrives (in `welcome`) just after mount, but if it
+  // was already known before this editor instance existed, apply it now.
+  if (viewConfig) setViewConfig(viewConfig)
   connect()
 }
 
@@ -165,6 +168,9 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/ws`
   ws = new WebSocket(url)
+  // High-rate media (video) arrives as binary frames; take them as ArrayBuffers
+  // so payloads go straight into a Blob with no base64/text decode.
+  ws.binaryType = 'arraybuffer'
 
   ws.onopen = () => {
     // Periodic heartbeat so the server can tell a live (but idle) viewer from a
@@ -175,6 +181,10 @@ function connect() {
   }
 
   ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      handleBinary(ev.data)
+      return
+    }
     let msg
     try {
       msg = JSON.parse(ev.data)
@@ -203,6 +213,31 @@ function connect() {
   }
 }
 
+// Binary-frame type codes (must match the server's bridge.py).
+const BIN_VIDEO = 1
+const BIN_AUDIO = 2
+const frameDecoder = new TextDecoder()
+
+// Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its
+// raw payload (an ArrayBuffer) to the matching component's live handler, the
+// same channel LivePlot/Custom use. Dropped if the panel isn't mounted. Video
+// (JPEG) and audio (int16 PCM) share this path; the handler interprets the bytes.
+function handleBinary(buf) {
+  // Guard against a truncated/malformed frame so a bad packet can't throw out
+  // of onmessage: need the 2-byte header plus the declared id length.
+  if (buf.byteLength < 2) return
+  const head = new Uint8Array(buf, 0, 2)
+  const type = head[0]
+  const idLen = head[1]
+  if (buf.byteLength < 2 + idLen) return
+  const id = frameDecoder.decode(new Uint8Array(buf, 2, idLen))
+  const payload = buf.slice(2 + idLen) // ArrayBuffer of the media bytes
+  if (type === BIN_VIDEO || type === BIN_AUDIO) {
+    const handler = liveHandlers.get(id)
+    if (handler) handler(payload)
+  }
+}
+
 function handle(msg) {
   if (!editor || !msg || !msg.type) return
   if (msg.type === 'register') {
@@ -224,9 +259,12 @@ function handle(msg) {
   } else if (msg.type === 'presence') {
     setPresence(msg.count || 0)
     setRoster(msg.viewers || [])
+  } else if (msg.type === 'view') {
+    applyLiveView(msg.view || {})
   } else if (msg.type === 'welcome') {
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
+    setViewConfig(msg.view || null)
   } else if (msg.type === 'chat') {
     pushChat(msg)
   } else if (msg.type === 'complete_result') {
@@ -403,15 +441,8 @@ function updateComponent(id, payload) {
     return
   }
 
-  // AudioFeed chunks ride the same live channel straight to the Web Audio
-  // scheduler (see AudioView). Not buffered: stale audio must never replay, so a
-  // chunk that arrives before the panel mounts (or while muted) is simply
-  // dropped rather than stored like plot/post data.
-  if (payload && payload.audio !== undefined) {
-    const handler = liveHandlers.get(id)
-    if (handler) handler(payload.audio)
-    return
-  }
+  // AudioFeed chunks no longer travel here — they ride a binary frame straight
+  // to the Web Audio scheduler (see handleBinary / AudioView).
 
   const shapeId = createShapeId(id)
   const shape = editor.getShape(shapeId)
@@ -495,6 +526,97 @@ export function subscribeUiInspector(cb) {
 
 export function toggleUiInspector() {
   sendRaw({ type: 'ui', action: 'toggle_inspector' })
+}
+
+// --- viewport / navigation config (set from Python via serve(view=...)) ------
+// The server sends a `view` dict in `welcome`: initial camera, zoom limits,
+// pan/zoom lock, and UI-chrome/grid/read-only flags. Camera + instance state are
+// applied straight to the editor here; App subscribes for the `ui` flag (which
+// is a <Tldraw hideUi> prop, set before render, not on the editor). The initial
+// camera is applied only once per page so a viewer who pans away isn't yanked
+// back when the same config replays on a reconnect.
+let viewConfig = null
+let initialCameraApplied = false
+const viewConfigListeners = new Set()
+
+// Initial config from `welcome`: replace what we know, notify subscribers (the
+// `ui` flag), apply the non-camera options, and place the camera once. The
+// once-guard is module-level so a reconnect's `welcome` replay doesn't yank a
+// viewer who has since panned away back to the configured start.
+function setViewConfig(view) {
+  viewConfig = view
+  for (const cb of viewConfigListeners) cb(view)
+  if (!editor || !viewConfig) return
+  applyViewOptions()
+  if (!initialCameraApplied) {
+    applyCameraFrom(viewConfig)
+    initialCameraApplied = true
+  }
+}
+
+// A live `view` change from Python (Canvas.set_view): merge the delta over the
+// current config, notify, re-apply options, and move the camera *only* if the
+// delta carried x/y/zoom — so toggling, say, `ui` or `grid` live never disturbs
+// where the viewer is looking.
+function applyLiveView(delta) {
+  viewConfig = { ...(viewConfig || {}), ...delta }
+  for (const cb of viewConfigListeners) cb(viewConfig)
+  if (!editor) return
+  applyViewOptions()
+  applyCameraFrom(delta)
+}
+
+export function subscribeViewConfig(cb) {
+  viewConfigListeners.add(cb)
+  cb(viewConfig) // prime with the latest known config
+  return () => viewConfigListeners.delete(cb)
+}
+
+// Apply zoom limits + pan/zoom lock + grid/read-only from the merged config.
+// Idempotent, so it's safe to call on first load and on every live change.
+function applyViewOptions() {
+  const v = viewConfig
+  if (!v) return
+  // zoomSteps' first/last bound the zoom range, so weave any caller min/max
+  // around tldraw's default stops. Partial<options>: unspecified fields keep
+  // their defaults.
+  const opts = {}
+  if (typeof v.locked === 'boolean') opts.isLocked = v.locked
+  if (typeof v.min_zoom === 'number' || typeof v.max_zoom === 'number') {
+    const min = typeof v.min_zoom === 'number' ? v.min_zoom : 0.1
+    const max = typeof v.max_zoom === 'number' ? v.max_zoom : 8
+    const mids = [0.25, 0.5, 1, 2, 4].filter((z) => z > min && z < max)
+    opts.zoomSteps = [min, ...mids, max]
+  }
+  if (Object.keys(opts).length) editor.setCameraOptions(opts)
+
+  // Read-only / grid are instance state, not camera options.
+  const inst = {}
+  if (typeof v.read_only === 'boolean') inst.isReadonly = v.read_only
+  if (typeof v.grid === 'boolean') inst.isGridMode = v.grid
+  if (Object.keys(inst).length) editor.updateInstanceState(inst)
+}
+
+// Centre the view on a canvas point at a given zoom, taking each of x/y/zoom
+// from `src` and leaving the rest at the current camera. No-op if `src` has none
+// of them. Derived from tldraw's own camera math: the page point at screen
+// centre is `-camera.x + vsb.w/z/2`, so to put (x, y) there we invert that.
+// `force` overrides a locked camera (lock is applied separately), `immediate`
+// skips the animation. setCameraOptions may clamp zoom, so call this after it.
+function applyCameraFrom(src) {
+  const hasX = typeof src.x === 'number'
+  const hasY = typeof src.y === 'number'
+  const hasZ = typeof src.zoom === 'number'
+  if (!(hasX || hasY || hasZ)) return
+  const cur = editor.getViewportPageBounds().center
+  const z = hasZ ? src.zoom : editor.getZoomLevel()
+  const x = hasX ? src.x : cur.x
+  const y = hasY ? src.y : cur.y
+  const vsb = editor.getViewportScreenBounds()
+  editor.setCamera(
+    { x: vsb.w / (2 * z) - x, y: vsb.h / (2 * z) - y, z },
+    { immediate: true, force: true }
+  )
 }
 
 // --- viewer identity, roster, and chat --------------------------------------

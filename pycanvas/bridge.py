@@ -30,6 +30,26 @@ _VIEWER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6",
 _HEARTBEAT_TIMEOUT = 30.0
 _REAP_INTERVAL = 10.0
 
+# Binary-frame type codes (must match the frontend's bridge.js). High-rate media
+# rides a binary WebSocket frame instead of base64-in-JSON: a 2-byte header
+# (``[type][id-length]``) plus the id, then the raw payload, so the browser feeds
+# bytes straight into a Blob/ArrayBuffer with no base64 decode or JSON parse.
+# Control messages (register/update/layout/chat/...) stay JSON: they're low-rate
+# and self-describing, so binary would cost readability for no real throughput.
+BINARY_VIDEO = 1   # payload: JPEG-encoded frame bytes
+BINARY_AUDIO = 2   # payload: little-endian int16 PCM samples (interleaved)
+
+
+def encode_binary_frame(type_code, comp_id, payload):
+    """Pack a component binary frame: ``[type][idLen][id bytes][payload]``.
+
+    ``comp_id`` is ascii-safe (component ids are code-defined names/uuids) and
+    capped at 255 bytes so its length fits one header byte. ``payload`` is raw
+    ``bytes`` (e.g. JPEG-encoded frame data).
+    """
+    cid = comp_id.encode("utf-8")[:255]
+    return bytes((type_code, len(cid))) + cid + payload
+
 
 class Bridge:
     def __init__(self):
@@ -65,6 +85,10 @@ class Bridge:
         # the welcome frame so the button only shows where it's allowed.
         self._canvas = None
         self._ui_inspector = False
+        # Optional viewport/navigation config (initial camera, zoom limits, pan/
+        # zoom lock, UI chrome visibility). Sent to each browser in `welcome` and
+        # applied to tldraw on connect. ``None`` leaves every default in place.
+        self._view = None
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -144,7 +168,8 @@ class Bridge:
             # Tell this client who it is, so it can label its own chat messages
             # and prefill the editable name field.
             await self._send(ws, {"type": "welcome", "you": viewer,
-                                  "uiInspector": self._ui_inspector})
+                                  "uiInspector": self._ui_inspector,
+                                  "view": self._view})
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)
@@ -398,6 +423,18 @@ class Bridge:
         async with lock:
             await ws.send_text(json.dumps(msg))
 
+    async def _send_bytes(self, ws, data):
+        """Send one binary frame, serialized against any other send (text or
+        binary) to this socket — the websockets drain forbids overlapping
+        writes, so binary media must share the same per-connection lock."""
+        if ws not in self._connections:
+            return
+        lock = self._send_locks.get(ws)
+        if lock is None:
+            lock = self._send_locks.setdefault(ws, asyncio.Lock())
+        async with lock:
+            await ws.send_bytes(data)
+
     # -- outbound (thread-safe) ----------------------------------------------
     def broadcast(self, msg, exclude=None):
         """Send ``msg`` to every connected client. Safe to call from any thread.
@@ -415,6 +452,29 @@ class Bridge:
     async def _safe_send(self, ws, msg):
         try:
             await self._send(ws, msg)
+        except Exception:
+            self._connections.discard(ws)
+            self._send_locks.pop(ws, None)
+
+    def broadcast_binary(self, data, exclude=None):
+        """Send a pre-encoded binary frame to every client. Any-thread safe.
+
+        Mirrors :meth:`broadcast` but for ``bytes`` (high-rate media). A client
+        that hasn't mounted the target panel yet simply has no handler for the
+        frame and drops it — the next frame lands once it's ready.
+        """
+        if self._loop is None:
+            return
+        for ws in list(self._connections):
+            if ws is exclude:
+                continue
+            asyncio.run_coroutine_threadsafe(
+                self._safe_send_binary(ws, data), self._loop
+            )
+
+    async def _safe_send_binary(self, ws, data):
+        try:
+            await self._send_bytes(ws, data)
         except Exception:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)

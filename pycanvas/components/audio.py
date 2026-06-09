@@ -13,11 +13,10 @@ A/V sync). Browsers won't start audio until the user clicks the panel's enable
 button, per the browser autoplay policy.
 """
 
-import base64
-
 import numpy as np
 
 from .base import BaseComponent
+from ..bridge import BINARY_AUDIO
 
 
 class AudioFeed(BaseComponent):
@@ -47,11 +46,10 @@ class AudioFeed(BaseComponent):
         pcm = self._to_int16_bytes(chunk)
         if not pcm:
             return
-        b64 = base64.b64encode(pcm).decode("ascii")
-        # Travels on the live-data side channel (payload.audio), bypassing tldraw
-        # shape props so high-rate chunks don't pollute undo history (like
-        # LivePlot's `plot` and Custom's `post`).
-        self._send_update({"audio": b64})
+        # Rides a binary WebSocket frame (no base64, no JSON) straight to the Web
+        # Audio scheduler — like VideoFeed. Bypasses tldraw shape props so
+        # high-rate chunks never touch undo history.
+        self._send_binary(BINARY_AUDIO, pcm)
 
     @staticmethod
     def _to_int16_bytes(chunk):

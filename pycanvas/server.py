@@ -3,6 +3,7 @@
 import asyncio
 import os
 import socket
+import sys
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
@@ -11,7 +12,21 @@ import uvicorn
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+def _dist_dir():
+    """Locate the built frontend, both in-source and inside a baked executable.
+
+    A PyInstaller build bundles the frontend under ``pcframe/dist`` in the
+    extraction dir (``sys._MEIPASS``) — deliberately *not* under ``pycanvas/``,
+    which would shadow the real package as a namespace dir and break
+    ``import pycanvas``. In a normal install it lives next to this module.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "pcframe", "dist")
+    return os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+
+DIST_DIR = _dist_dir()
 
 # Disable uvicorn's WebSocket keepalive ping. The ping is an independent writer
 # the app can't serialize, so under backpressure (e.g. a high-rate video feed

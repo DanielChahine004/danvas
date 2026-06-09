@@ -179,6 +179,19 @@ class BaseComponent:
                 {"type": "update", "id": self.id, "payload": payload}
             )
 
+    def _send_binary(self, type_code, payload):
+        """Push raw bytes to the browser as a binary frame, keyed by this id.
+
+        For high-rate media (e.g. video frames): the payload skips base64/JSON
+        and is fed straight into a Blob/ArrayBuffer on the frontend. ``payload``
+        must be ``bytes``; ``type_code`` selects the frontend handler.
+        """
+        if self._bridge is not None:
+            from ..bridge import encode_binary_frame
+            self._bridge.broadcast_binary(
+                encode_binary_frame(type_code, self.id, payload)
+            )
+
     # -- live layout (Python -> browser) -------------------------------------
     def move(self, x, y):
         """Move this panel to ``(x, y)`` in canvas coordinates, live."""

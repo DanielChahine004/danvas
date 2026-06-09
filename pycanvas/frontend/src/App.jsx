@@ -3,14 +3,25 @@ import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
-import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector } from './bridge'
+import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig } from './bridge'
 
 export default function App() {
+  // `hideUi` is a <Tldraw> prop (decided before/at render), unlike the camera
+  // settings which are applied to the editor in bridge.js. Default to showing
+  // the UI until/unless the server's view config asks to hide it.
+  const [hideUi, setHideUi] = useState(false)
+  useEffect(
+    () => subscribeViewConfig((view) => setHideUi(view?.ui === false)),
+    []
+  )
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <PresenceBadge />
-      <InspectorButton />
+      {/* The Inspector button is part of the app's UI chrome, so a `ui: false`
+          view (chrome-free surface) hides it alongside tldraw's own toolbars. */}
+      {!hideUi && <InspectorButton />}
       <Tldraw
+        hideUi={hideUi}
         shapeUtils={shapeUtils}
         onMount={(editor) => {
           // ?demo seeds sample shapes so the frontend can be checked

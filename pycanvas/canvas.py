@@ -1,6 +1,7 @@
 """Canvas: the public entry point. Holds components and serves the app."""
 
 import json
+import sys
 import time
 import uuid
 import warnings
@@ -694,9 +695,47 @@ class Canvas:
                 f"execution on a trusted network."
             )
 
+    # Keys accepted in a ``view`` config, each paired with the coercion applied
+    # before it is sent to the browser. Unknown keys are rejected so a typo
+    # (e.g. ``zooom``) surfaces immediately rather than being silently ignored.
+    _VIEW_KEYS = {
+        "x": float, "y": float, "zoom": float,
+        "min_zoom": float, "max_zoom": float,
+        "locked": bool, "ui": bool, "grid": bool, "read_only": bool,
+    }
+
+    @classmethod
+    def _normalize_view(cls, view):
+        """Validate/coerce a ``serve(view=...)`` dict into the wire form.
+
+        Returns ``None`` for ``None`` (leave every tldraw default in place) and
+        raises on an unknown key or a non-numeric/zoom value, so configuration
+        mistakes fail loudly at ``serve`` time instead of silently doing nothing.
+        """
+        if view is None:
+            return None
+        if not isinstance(view, dict):
+            raise TypeError("view must be a dict of options, e.g. "
+                            "view={'zoom': 1.5, 'ui': False}")
+        out = {}
+        for key, value in view.items():
+            coerce = cls._VIEW_KEYS.get(key)
+            if coerce is None:
+                raise ValueError(
+                    f"unknown view option {key!r}; valid options are "
+                    f"{', '.join(sorted(cls._VIEW_KEYS))}"
+                )
+            out[key] = coerce(value)
+        if "min_zoom" in out and "max_zoom" in out \
+                and out["min_zoom"] > out["max_zoom"]:
+            raise ValueError("view min_zoom must not exceed max_zoom")
+        return out
+
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
               allow_remote_exec=False, block=True, wait=True,
-              tunnel=False, tunnel_provider="cloudflared", ui_inspector=None):
+              tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
+              view=None, desktop=None, window_title="PyCanvas",
+              window_size=(1200, 800)):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -735,6 +774,30 @@ class Canvas:
         a local bind (``127.0.0.1``) with no tunnel. Pass ``ui_inspector=True``
         to force it on for a shared/tunneled canvas, or ``False`` to hide it
         entirely.
+
+        ``view`` configures how the tldraw canvas is presented and navigated, so
+        the same canvas can be a free creative workspace or a fixed UI. Pass a
+        dict with any of these keys (all optional):
+
+        * ``x`` / ``y`` / ``zoom`` — initial camera: centre the view on canvas
+          point ``(x, y)`` at ``zoom`` (1.0 = 100%). Any subset works; this is
+          applied once on first load so a viewer who pans away isn't snapped back.
+        * ``locked`` — ``True`` freezes pan and zoom entirely (a fixed kiosk view).
+        * ``min_zoom`` / ``max_zoom`` — clamp how far the viewer can zoom.
+        * ``ui`` — ``False`` hides tldraw's toolbars/menus for a chrome-free
+          surface (defaults to shown).
+        * ``grid`` — ``True`` shows the background grid.
+        * ``read_only`` — ``True`` puts tldraw in read-only mode (no drawing).
+
+        ``desktop`` selects a native app window (via pywebview) instead of the
+        system browser. It defaults to ``None`` = auto: on inside a baked
+        executable (``sys.frozen``), off otherwise — so the same script opens a
+        browser in development and a contained window when run as the packaged
+        ``.exe``. Force it either way with ``desktop=True``/``False``.
+        ``window_title``/``window_size`` set that window's caption and pixel
+        size. Desktop mode runs on the main thread and blocks until the window is
+        closed (``block`` doesn't apply); if pywebview isn't installed it warns
+        and falls back to the browser. See :meth:`bake` to build the executable.
         """
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
@@ -747,6 +810,22 @@ class Canvas:
             bool(ui_inspector) if ui_inspector is not None
             else (local and not tunnel)
         )
+        # Merge serve's view onto any config already set via set_view() rather
+        # than clobbering it, so `set_view(ui=False); serve()` (or bake(), which
+        # calls serve with no view) keeps the earlier settings. An explicit
+        # serve(view=...) still wins key-by-key.
+        serve_view = self._normalize_view(view)
+        if serve_view is not None:
+            self._bridge._view = {**(self._bridge._view or {}), **serve_view}
+        # Native-window mode: default to on only inside a baked executable, so a
+        # plain `python script.py` still opens the browser. Blocks on the webview
+        # loop (main thread), so the non-blocking branch below is skipped.
+        use_desktop = bool(getattr(sys, "frozen", False)) if desktop is None \
+            else bool(desktop)
+        if use_desktop:
+            self._serve_desktop(port, host, tunnel, tunnel_provider,
+                                window_title, window_size)
+            return self
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host
@@ -765,6 +844,133 @@ class Canvas:
                        host=host)
         finally:
             self._stop_tunnel()
+
+    def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size):
+        """Serve in the background and show the canvas in a native window.
+
+        Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
+        Falls back to a normal blocking browser serve if pywebview is missing, so
+        a build without the desktop extra still runs — just in the browser.
+        """
+        try:
+            import webview
+        except ImportError:
+            warnings.warn(
+                "pywebview is not installed; opening in the browser instead. "
+                "Install the desktop extra: pip install 'pycanvas[desktop]'"
+            )
+            self._serving = True
+            if tunnel:
+                self._start_tunnel(port, tunnel_provider)
+            try:
+                server.run(self._bridge, port=port, open_browser=True, host=host)
+            finally:
+                self._stop_tunnel()
+            return
+        # Start the server in the background, then drive the window on the main
+        # thread (pywebview requires that). webview.start() blocks until the
+        # window closes; tear the server down afterwards.
+        self._server = server.run_background(
+            self._bridge, port=port, open_browser=False, host=host
+        )
+        self._wait_until_ready()
+        self._serving = True
+        if tunnel:
+            self._start_tunnel(port, tunnel_provider)
+        try:
+            width, height = size
+            webview.create_window(title, f"http://127.0.0.1:{port}",
+                                  width=int(width), height=int(height))
+            webview.start()
+        finally:
+            self.stop()
+
+    def bake(self, name="PyCanvas", *, icon=None, onefile=True, windowed=True,
+             distpath="dist", entry=None, exclude=None, include=None,
+             window_size=(1200, 800), port=8000):
+        """Package this canvas's script into a standalone desktop app.
+
+        Run normally (``python your_script.py``), ``bake`` builds a single
+        self-contained executable from that script with PyInstaller — bundling
+        Python, the pycanvas backend, and the pre-built frontend — and returns
+        the path to it. The built app needs nothing installed: launching it runs
+        your script and shows the canvas in a native window (pywebview), serving
+        on ``127.0.0.1`` exactly as in development.
+
+        The same script is both source and app: inside the built executable
+        ``sys.frozen`` is set, so ``bake`` skips the build and simply runs the
+        canvas in a window (``name``/``window_size``/``port`` configure it).
+        Place it where you'd call :meth:`serve`::
+
+            canvas.bake(name="RobotConsole")   # python -> builds; .exe -> runs
+
+        ``name`` is the executable/window title; ``icon`` is an optional ``.ico``/
+        ``.icns``; ``onefile`` packs everything into one file (``False`` makes a
+        folder, which launches faster); ``windowed`` hides the console window;
+        ``distpath`` is the output directory; ``entry`` overrides the script to
+        package (defaults to the running one). Only the packages your script
+        imports are bundled (not the whole environment); ``include`` force-adds
+        ones the analysis can't see (dynamic/plugin imports), and ``exclude``
+        skips modules — use it when a broken or unused optional dependency would
+        otherwise crash the build (e.g. ``exclude=["torch"]``).
+
+        On a conda environment the MKL DLLs NumPy needs are detected and bundled
+        automatically (a pip/venv NumPy needs nothing). Building requires the
+        desktop extra: ``pip install 'pycanvas[desktop]'``. To build without
+        editing your script, the equivalent CLI is
+        ``python -m pycanvas.bake your_script.py``.
+        """
+        if getattr(sys, "frozen", False):
+            # Inside the built executable: don't rebuild — run the app in a
+            # native window. Same code path the .exe takes on every launch.
+            return self.serve(port=port, desktop=True, window_title=name,
+                              window_size=window_size)
+        from . import bake as _bake
+        if entry is None:
+            import __main__
+            entry = getattr(__main__, "__file__", None)
+            if not entry:
+                raise RuntimeError(
+                    "could not detect the script to package (no __main__ file); "
+                    "pass entry='your_script.py' or use "
+                    "`python -m pycanvas.bake your_script.py`"
+                )
+        out = _bake.build_app(
+            entry, name=name, icon=icon, onefile=onefile,
+            windowed=windowed, distpath=distpath, exclude=exclude,
+            include=include,
+        )
+        print(f"PyCanvas baked: {out}")
+        return out
+
+    def set_view(self, view=None, **opts):
+        """Change viewport/navigation properties live on every open browser.
+
+        Accepts the same options as ``serve(view=...)`` (initial camera, zoom
+        limits, ``locked``, ``ui``, ``grid``, ``read_only``), given as a dict
+        and/or keyword args, and pushes them to all connected canvases at once::
+
+            canvas.set_view(ui=False)            # hide the toolbars now
+            canvas.set_view({"zoom": 2.0})       # zoom every viewer to 200%
+            canvas.set_view(locked=True)         # freeze pan/zoom live
+
+        Only the keys you pass change; the rest keep their current value.
+        Passing ``x``/``y``/``zoom`` re-centres the camera immediately (subject
+        to any lock); omitting them leaves each viewer where they were looking.
+        A viewer who connects later still gets the merged configuration in their
+        welcome frame, so live changes persist for new arrivals. Returns ``self``.
+        """
+        merged_in = dict(view or {})
+        merged_in.update(opts)
+        delta = self._normalize_view(merged_in) or {}
+        if not delta:
+            return self
+        # Remember the merged config so a later-connecting browser starts from it
+        # (the welcome frame), and broadcast just the delta so applying it can
+        # tell whether the camera was meant to move.
+        self._bridge._view = {**(self._bridge._view or {}), **delta}
+        self._bridge.broadcast({"type": "view", "view": delta})
+        return self
 
     def _start_tunnel(self, port, provider):
         """Open a public tunnel to ``port`` and announce the URL."""

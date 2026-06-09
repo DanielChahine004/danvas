@@ -92,7 +92,7 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `Slider`    | bidirectional  | `.value`, `@on_change`, `.update(v)` |
 | `Toggle`    | bidirectional  | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
 | `Label`     | output         | `.update(text)` |
-| `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → base64 JPEG) |
+| `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → binary JPEG over WS) |
 | `AudioFeed` | output         | `.update(pcm_chunk)` (PCM → Web Audio playback) |
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
@@ -215,6 +215,38 @@ canvas.serve(host="0.0.0.0", ui_inspector=True)   # offer it to LAN viewers too
 canvas.serve(ui_inspector=False)                   # hide it even locally
 ```
 
+## Viewport & navigation
+
+Control how the tldraw canvas is framed and navigated, so the same board can be
+a free creative workspace or a fixed, chrome-free UI. Pass a `view` dict to
+`serve` with any of these keys (all optional):
+
+| Key | Effect |
+|-----|--------|
+| `x`, `y`, `zoom` | initial camera: centre on canvas point `(x, y)` at `zoom` (1.0 = 100%) |
+| `locked` | `True` freezes pan and zoom entirely (a fixed kiosk view) |
+| `min_zoom`, `max_zoom` | clamp how far viewers can zoom |
+| `ui` | `False` hides tldraw's toolbars/menus **and** the Inspector button |
+| `grid` | `True` shows the background grid |
+| `read_only` | `True` blocks freehand drawing |
+
+```python
+canvas.serve(view={"x": 200, "y": 160, "zoom": 1.0, "locked": True, "ui": False})
+```
+
+Change any of it **live** on every connected browser with `set_view` — same
+options, given as a dict and/or keywords. Only the keys you pass change; passing
+`x`/`y`/`zoom` re-centres the camera now (subject to any lock), omitting them
+leaves each viewer where they were looking. Late joiners get the merged config:
+
+```python
+canvas.set_view(ui=False)          # hide the chrome now
+canvas.set_view({"zoom": 2.0})     # zoom everyone to 200%
+canvas.set_view(locked=True)       # freeze pan/zoom live
+```
+
+See [`examples/fixed_view.py`](examples/fixed_view.py).
+
 ## Layout: position, size, rotation
 
 Pass placement to `insert`, or change it live at any time. `x`/`y` are canvas
@@ -327,6 +359,54 @@ canvas.load("board.json", formation=False)   # drawings only; leave panels where
 Panels are Python objects, so only their **placement** is saved, never their
 behaviour — recreate them in code and `load()` repositions them and merges the
 saved drawings on top. See the [GUIDE](GUIDE.md) for details.
+
+## Packaging a desktop app (`bake`)
+
+Ship a canvas as a self-contained executable — no Python, browser, or `pip`
+needed on the target machine. `canvas.bake()` bundles your script, the PyCanvas
+backend, and the pre-built frontend into one app (via PyInstaller) that runs the
+canvas in a **native window** (via pywebview), serving locally just as in dev.
+
+The same file is both source and app. Put `bake()` where you'd call `serve()`:
+
+```python
+canvas = pycanvas.Canvas()
+# ...build panels...
+canvas.bake(name="RobotConsole")     # window_size, icon=, onefile=, distpath= ...
+```
+
+- `python your_script.py` → **builds** `dist/RobotConsole(.exe)`.
+- launching that executable → **runs** your script in a window (inside the build
+  `sys.frozen` is set, so `bake()` skips rebuilding and just shows the canvas).
+
+To build **without editing your script**, use the CLI — it packages the file
+without running it, and your existing `serve()` automatically switches to a
+native window when frozen:
+
+```bash
+python -m pycanvas.bake your_script.py --name RobotConsole
+python -m pycanvas.bake your_script.py --onedir --icon app.ico   # folder build, custom icon
+```
+
+Building needs the desktop extra (`pip install -e ".[desktop]"`, which pulls
+`pywebview` + `pyinstaller`). On Windows the window uses the Edge **WebView2**
+runtime (present on current Windows). `serve(desktop=True)` opens the same native
+window in development; if pywebview isn't installed it falls back to the browser.
+See [`examples/bake_app.py`](examples/bake_app.py).
+
+**What gets bundled.** Only the packages your script actually imports are
+included — *not* your whole environment — plus what PyInstaller's hooks add. So
+you normally specify nothing. Two escape hatches when analysis gets it wrong:
+
+```python
+canvas.bake(name="App", include=["my_plugin"])   # force-add a dynamic/plugin import
+canvas.bake(name="App", exclude=["torch"])        # skip a broken/unused dep that crashes the build
+```
+
+On a **conda** environment the MKL DLLs NumPy needs are detected and bundled
+automatically (a pip/venv NumPy bundles its own BLAS, so it needs nothing). If a
+build fails, the error names the culprit dependency and the `exclude` fix. The
+same options exist on the CLI: `--include`, `--exclude` (both repeatable).
 
 ## Interactive use (Jupyter / notebooks)
 
@@ -621,6 +701,14 @@ All JSON over a single connection at `ws://localhost:{port}/ws`:
 { "type": "remove",   "id": "<id>" }
 { "type": "input",    "id": "<id>", "payload": { "value": 120 } }
 ```
+
+High-rate media (`VideoFeed`, `AudioFeed`) skips JSON entirely: each chunk is
+sent as a **binary** WebSocket frame — a 2-byte header `[type][id-length]`, the
+component id, then the raw payload (JPEG bytes for video, little-endian int16 PCM
+for audio). The browser feeds it straight into a `Blob`/`ArrayBuffer` with no
+base64 decode and no JSON parse (~33% fewer bytes than a base64 data-URL).
+Control messages stay JSON — they're low-rate and self-describing, so binary
+would cost readability for no throughput.
 
 `register` carries optional `x`/`y`/`rotation` (top-level shape placement;
 `rotation` in radians) plus optional lock flags (`locked`, `movable`,

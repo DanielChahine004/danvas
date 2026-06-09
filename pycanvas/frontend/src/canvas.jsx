@@ -281,50 +281,85 @@ export class LabelShapeUtil extends PcShapeUtil {
 }
 
 // --- VideoFeed --------------------------------------------------------------
+// Frames arrive as binary WebSocket payloads on the live-data channel (no
+// base64, no shape-prop churn). Each is wrapped in a Blob and shown via an
+// object URL; the previous URL is revoked once the next frame paints so the
+// stream doesn't leak memory.
+function VideoView({ shape }) {
+  const imgRef = useRef(null)
+  const urlRef = useRef(null)
+  const id = componentIdOf(shape.id)
+  const [live, setLive] = useState(false)
+
+  useEffect(() => {
+    const show = (payload) => {
+      const el = imgRef.current
+      if (!el) return
+      const url = URL.createObjectURL(new Blob([payload], { type: 'image/jpeg' }))
+      const prev = urlRef.current
+      // Revoke the prior frame's URL only after the new one has painted.
+      el.onload = () => {
+        if (prev) URL.revokeObjectURL(prev)
+      }
+      urlRef.current = url
+      el.src = url
+      setLive(true) // React bails if already true, so this is cheap per frame
+    }
+    registerLive(id, show)
+    return () => {
+      unregisterLive(id)
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current)
+        urlRef.current = null
+      }
+    }
+  }, [id])
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--pc-video-bg)',
+        borderRadius: 4,
+        overflow: 'hidden',
+      }}
+    >
+      <img
+        ref={imgRef}
+        draggable={false}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          pointerEvents: 'none',
+          display: live ? 'block' : 'none',
+        }}
+      />
+      {!live && <span style={{ color: 'var(--pc-muted)', fontSize: 13 }}>no signal</span>}
+    </div>
+  )
+}
+
 export class VideoShapeUtil extends PcShapeUtil {
   static type = 'pcVideo'
   static props = {
     w: T.number,
     h: T.number,
     label: T.string,
-    src: T.string,
   }
 
   getDefaultProps() {
-    return { w: 340, h: 280, label: 'video', src: '' }
+    return { w: 340, h: 280, label: 'video' }
   }
 
   component(shape) {
-    const { label, src } = shape.props
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{label}</div>
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'var(--pc-video-bg)',
-            borderRadius: 4,
-            overflow: 'hidden',
-          }}
-        >
-          {src ? (
-            <img
-              src={src}
-              draggable={false}
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                pointerEvents: 'none',
-              }}
-            />
-          ) : (
-            <span style={{ color: 'var(--pc-muted)', fontSize: 13 }}>no signal</span>
-          )}
-        </div>
+        <div style={labelStyle}>{shape.props.label}</div>
+        <VideoView shape={shape} />
       </Card>
     )
   }
@@ -587,13 +622,12 @@ export class LivePlotShapeUtil extends PcShapeUtil {
 // clock so they play as one continuous stream. The browser autoplay policy
 // blocks sound until a user gesture, so playback only starts once the listener
 // clicks Enable (which creates/resumes the context).
-function decodeChunk(ctx, b64, sampleRate, channels) {
-  const bin = atob(b64)
-  let n = bin.length
+function decodeChunk(ctx, data, sampleRate, channels) {
+  let n = data.byteLength
   n -= n % 2 // int16 samples are 2 bytes; ignore a stray trailing byte
-  const bytes = new Uint8Array(n)
-  for (let i = 0; i < n; i++) bytes[i] = bin.charCodeAt(i)
-  const pcm = new Int16Array(bytes.buffer)
+  // `data` is a fresh ArrayBuffer sliced at offset 0 (see handleBinary), so it's
+  // 2-byte aligned and can back an Int16Array directly — no copy, no base64.
+  const pcm = new Int16Array(data, 0, n / 2)
   const frames = Math.floor(pcm.length / channels)
   if (frames === 0) return null
   // Carry the source sample rate on the buffer; the context resamples on
@@ -624,12 +658,12 @@ function AudioView({ shape }) {
     // Small scheduling lead so chunks queue slightly ahead of the play head,
     // absorbing network jitter; if we ever fall behind, reprime from now.
     const LEAD = 0.12
-    const play = (b64) => {
+    const play = (payload) => {
       const ctx = ctxRef.current
       if (!onRef.current || !ctx) return
       let buf
       try {
-        buf = decodeChunk(ctx, b64, sampleRate, channels)
+        buf = decodeChunk(ctx, payload, sampleRate, channels)
       } catch {
         return
       }
