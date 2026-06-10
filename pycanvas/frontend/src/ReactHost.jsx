@@ -112,7 +112,14 @@ export default function ReactHost({ shape }) {
   if (entry.error) return <ErrorBox error={entry.error} />
   const Comp = entry.Comp
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    // pointerEvents:'all' + stopPropagation claim the pointer for the hosted
+    // component; without this tldraw treats a press as a move/resize of the
+    // panel and the component never sees the click. The Card header (the label)
+    // keeps no pointerEvents, so it stays the panel's drag handle.
+    <div
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: 'all' }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <Boundary resetKey={Comp}>
         <Comp canvas={canvas} value={streamed} props={userProps} />
       </Boundary>
