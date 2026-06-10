@@ -115,6 +115,39 @@ plot = canvas.insert(pycanvas.LivePlot("servos", traces=["s1", "s2"], max_points
 plot.push({"s1": servo_1.value, "s2": servo_2.value})
 ```
 
+### Streaming performance: queue policy & pre-encoded frames
+
+Two knobs keep pycanvas a thin, fast layer for high-rate feeds (cameras, live
+telemetry) without piling up latency on a slow viewer.
+
+**Queue policy** — how a component's updates behave when they outpace the
+connection. Every component has a `queue` setting (settable as a property, so it
+works on any of them):
+
+- **`"fifo"`** (default) — deliver every update in order, nothing dropped. Right
+  for controls, labels, anything where each value matters.
+- **`"latest"`** — keep only the newest pending value per viewer, dropping stale
+  ones. Right for live video/telemetry, where the current frame is all that
+  matters. Dict updates merge newest-per-key (so partial `set_layout`s aren't
+  lost); binary frames replace wholesale. Bounds the per-viewer backlog to one
+  in-flight send + one pending value, so a fast producer can't lag a slow client.
+
+```python
+cam = canvas.video("door")          # VideoFeed defaults to queue="latest"
+plot = canvas.live_plot("temps")
+plot.queue = "latest"               # drop stale telemetry for slow viewers
+```
+
+**Pre-encoded frames** — `VideoFeed(encode=False)` skips `cv2.imencode` and sends
+the bytes you give it as-is (they must already be **JPEG**). Use it to feed a
+hardware encoder's output (e.g. a Jetson's NVJPG via GStreamer), keeping the CPU
+out of the hot path:
+
+```python
+cam = canvas.video("door", encode=False)
+cam.update(jpeg_bytes)              # already-encoded JPEG, sent straight through
+```
+
 ### Custom HTML panels
 
 `Custom` renders any HTML/CSS/JS string (or a file via `path=`) inside a

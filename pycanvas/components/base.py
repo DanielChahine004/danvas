@@ -22,7 +22,23 @@ class BaseComponent:
     default_w = 240
     default_h = 96
 
-    def __init__(self, name=None, label=None, **props):
+    # Send-queue policy under backpressure (a slow/late browser). Any component
+    # may pass ``queue=`` to choose how its own updates behave when they outpace
+    # the connection:
+    #   "fifo"   -> every update is delivered in order, nothing dropped (default;
+    #               right for controls/labels where each value matters).
+    #   "latest" -> keep only the newest pending value per viewer, dropping stale
+    #               ones (right for live media/telemetry; VideoFeed's default).
+    # Dict updates under "latest" merge newest-per-key so partial updates (e.g.
+    # set_layout) aren't lost; binary frames replace wholesale.
+    _QUEUE_POLICIES = ("fifo", "latest")
+
+    def __init__(self, name=None, label=None, queue="fifo", **props):
+        if queue not in self._QUEUE_POLICIES:
+            raise ValueError(
+                f"queue must be one of {self._QUEUE_POLICIES}, got {queue!r}"
+            )
+        self._queue = queue
         self.id = None
         # ``name`` is the unique identity / ``canvas.<name>`` handle (Canvas.insert
         # may still override it). ``label`` is only the caption shown on the panel
@@ -75,6 +91,24 @@ class BaseComponent:
     def value(self):
         with self._lock:
             return self._value
+
+    @property
+    def queue(self):
+        """This component's send-queue policy (``"fifo"`` or ``"latest"``).
+
+        Settable on any component so its backpressure behaviour can be chosen
+        without a constructor argument, e.g. ``plot.queue = "latest"`` to drop
+        stale telemetry for slow viewers. See the class docstring for semantics.
+        """
+        return self._queue
+
+    @queue.setter
+    def queue(self, policy):
+        if policy not in self._QUEUE_POLICIES:
+            raise ValueError(
+                f"queue must be one of {self._QUEUE_POLICIES}, got {policy!r}"
+            )
+        self._queue = policy
 
     # -- layout (read public state; writes move/resize live) -----------------
     @property
@@ -174,23 +208,32 @@ class BaseComponent:
         raise NotImplementedError
 
     def _send_update(self, payload):
-        if self._bridge is not None:
-            self._bridge.broadcast(
-                {"type": "update", "id": self.id, "payload": payload}
-            )
+        if self._bridge is None:
+            return
+        msg = {"type": "update", "id": self.id, "payload": payload}
+        if self._queue == "latest":
+            # Drop stale pending updates; merge newest-per-key (see bridge).
+            self._bridge.broadcast_conflated(self.id, msg=msg)
+        else:
+            self._bridge.broadcast(msg)
 
     def _send_binary(self, type_code, payload):
         """Push raw bytes to the browser as a binary frame, keyed by this id.
 
         For high-rate media (e.g. video frames): the payload skips base64/JSON
         and is fed straight into a Blob/ArrayBuffer on the frontend. ``payload``
-        must be ``bytes``; ``type_code`` selects the frontend handler.
+        must be ``bytes``; ``type_code`` selects the frontend handler. Under the
+        ``latest`` queue policy a stale pending frame is dropped in favour of the
+        newest, so a fast feed can't back up a slow viewer.
         """
-        if self._bridge is not None:
-            from ..bridge import encode_binary_frame
-            self._bridge.broadcast_binary(
-                encode_binary_frame(type_code, self.id, payload)
-            )
+        if self._bridge is None:
+            return
+        from ..bridge import encode_binary_frame
+        frame = encode_binary_frame(type_code, self.id, payload)
+        if self._queue == "latest":
+            self._bridge.broadcast_conflated(self.id, data=frame)
+        else:
+            self._bridge.broadcast_binary(frame)
 
     # -- live layout (Python -> browser) -------------------------------------
     def move(self, x, y):

@@ -89,6 +89,14 @@ class Bridge:
         # zoom lock, UI chrome visibility). Sent to each browser in `welcome` and
         # applied to tldraw on connect. ``None`` leaves every default in place.
         self._view = None
+        # Conflated ("latest" queue policy) send state. For components that opt
+        # out of FIFO, we keep only the newest pending value per (socket,
+        # component, channel) and a flag marking whether a sender is draining it,
+        # so a fast producer can't pile a backlog onto a slow client. Guarded by a
+        # plain lock since producers are user threads and the sender is the loop.
+        self._conflate_pending = {}   # (ws, comp_id, kind) -> (kind, msg|bytes)
+        self._conflate_active = set()  # (ws, comp_id, kind) with a live sender
+        self._conflate_lock = threading.Lock()
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -208,6 +216,7 @@ class Bridge:
         finally:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+            self._drop_conflate(ws)
             self._viewers.pop(ws, None)
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
@@ -331,6 +340,7 @@ class Bridge:
                     # it here too in case the receive loop is wedged.
                     self._connections.discard(ws)
                     self._send_locks.pop(ws, None)
+                    self._drop_conflate(ws)
                     if self._viewers.pop(ws, None) is not None:
                         self._last_seen.pop(ws, None)
                         self._broadcast_roster()
@@ -478,6 +488,89 @@ class Bridge:
         except Exception:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+
+    @staticmethod
+    def _merge_update(existing, new_msg):
+        """Fold a new update message into a pending one, newest value per key.
+
+        Merging (not replacing) keeps partial updates from being lost: a pending
+        ``set_layout(x=1)`` followed by ``set_layout(w=5)`` ends up carrying both.
+        Top-level fields other than ``payload`` take the newest message's value.
+        """
+        if existing is None:
+            return {**new_msg, "payload": dict(new_msg.get("payload") or {})}
+        existing.setdefault("payload", {}).update(new_msg.get("payload") or {})
+        for k, v in new_msg.items():
+            if k != "payload":
+                existing[k] = v
+        return existing
+
+    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None):
+        """Broadcast an update under the ``latest`` queue policy.
+
+        Keeps only the most recent pending value per viewer for this component,
+        dropping stale ones: dict updates merge newest-per-key (so partial
+        updates survive), binary frames replace wholesale. The per-viewer backlog
+        is bounded to one in-flight send plus one pending value, so a fast
+        producer (e.g. a camera) can't accumulate latency on a slow client.
+
+        Pass exactly one of ``msg`` (a dict to JSON-send) or ``data`` (bytes).
+        """
+        if self._loop is None:
+            return
+        kind = "bin" if data is not None else "msg"
+        for ws in list(self._connections):
+            if ws is exclude:
+                continue
+            key = (ws, comp_id, kind)
+            with self._conflate_lock:
+                if kind == "bin":
+                    self._conflate_pending[key] = ("bin", data)
+                else:
+                    prev = self._conflate_pending.get(key)
+                    merged = self._merge_update(prev[1] if prev else None, msg)
+                    self._conflate_pending[key] = ("msg", merged)
+                if key in self._conflate_active:
+                    continue  # a sender is draining this slot; it'll see the latest
+                self._conflate_active.add(key)
+            asyncio.run_coroutine_threadsafe(
+                self._conflated_sender(key), self._loop
+            )
+
+    async def _conflated_sender(self, key):
+        """Drain a conflated slot until empty, sending only its latest value.
+
+        New values that land while a send is in flight overwrite/merge the slot,
+        so intermediate ones are skipped rather than queued.
+        """
+        ws = key[0]
+        while True:
+            with self._conflate_lock:
+                item = self._conflate_pending.pop(key, None)
+                if item is None:
+                    self._conflate_active.discard(key)
+                    return
+            kind, val = item
+            try:
+                if kind == "bin":
+                    await self._send_bytes(ws, val)
+                else:
+                    await self._send(ws, val)
+            except Exception:
+                self._connections.discard(ws)
+                self._send_locks.pop(ws, None)
+                with self._conflate_lock:
+                    self._conflate_pending.pop(key, None)
+                    self._conflate_active.discard(key)
+                return
+
+    def _drop_conflate(self, ws):
+        """Forget any conflated state for a closed connection."""
+        with self._conflate_lock:
+            for key in [k for k in self._conflate_pending if k[0] is ws]:
+                self._conflate_pending.pop(key, None)
+            for key in [k for k in self._conflate_active if k[0] is ws]:
+                self._conflate_active.discard(key)
 
     def _apply_draw(self, diff):
         """Fold a tldraw store diff into the canonical free-form record set.
