@@ -81,11 +81,12 @@ canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 |---|---|---|---|---|
 | **Slider** | `Slider(name, min=0, max=100, default=None, label=None)` | both | `update(value)` | `.value` (number) |
 | **Toggle** | `Toggle(name, options, default=None, label=None)` | both | `update(option)` | `.value` (chosen string) |
+| **Button** | `Button(name, text=None, label=None)` | in | — | `@on_click`, `.value` (click count) |
 | **Label** | `Label(name, value="", label=None)` | out | `update(value)` | — |
 | **VideoFeed** | `VideoFeed(name, quality=70, label=None)` | out | `update(frame)` — OpenCV BGR numpy array | — |
 | **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
 | **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
-| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320)` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `.value` (last message) |
+| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320, event_key="event")` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `@on(event)` / `@on_message`, `.value` (last message) |
 
 Every component takes `name` (its unique identity) first, then an optional
 `label` caption; the input components (Slider/Toggle/Label/VideoFeed) **require**
@@ -104,34 +105,34 @@ Notes:
 
 ### Custom panels (arbitrary HTML)
 
-`Custom` renders any HTML in a sandboxed iframe. A `canvas.send(data)` helper is
-injected so the panel can push data back to Python:
+`Custom` renders any HTML in a sandboxed iframe with a symmetric `canvas` helper:
+`canvas.send(data)` posts back to Python, `canvas.onPush(fn)` receives data
+Python streams in. Route inbound messages by an `event` field with
+`@panel.on("event")` (or `@panel.on_message` for a catch-all) — no subclass, no
+hand-written dispatcher:
 
 ```python
-panel = canvas.insert(pycanvas.Custom(html="""
-  <button onclick="canvas.send({clicked: true})">Go</button>
-"""))
+panel = canvas.custom(html="""
+  <button onclick="canvas.send({event: 'go'})">Go</button>
+""")
 
-@panel.on_message          # Custom uses on_message, not on_change
-def handle(data):
-    print(data)            # {'clicked': True}
+@panel.on("go")            # fires only for {event: 'go'}
+def handle(msg):
+    print(msg)             # {'event': 'go'}
 ```
 
 Load from a file with `Custom(path="dashboard.html")`. Replace content live with
 `panel.update(new_html)` (this reloads the iframe).
 
 To stream live data **without** reloading — keeping the iframe's focus,
-listeners and scroll intact — use `panel.push(data)`. It arrives as a `message`
-event inside the iframe (`e.data.__pycanvas` holds your `data`), so the page can
-update in place. This suits high-rate feeds and two-way interactive panels:
+listeners and scroll intact — use `panel.push(data)`, received via
+`canvas.onPush(fn)`. This suits high-rate feeds and two-way interactive panels:
 
 ```python
 panel.push(frame_b64)      # Python -> iframe, no reload
 ```
 ```js
-window.addEventListener('message', (e) => {
-  if (e.data && e.data.__pycanvas !== undefined) render(e.data.__pycanvas)
-})
+canvas.onPush((data) => render(data))   // no __pycanvas unwrapping needed
 ```
 
 `examples/remote_control.py` uses exactly this to stream the machine's screen

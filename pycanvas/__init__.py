@@ -5,6 +5,7 @@ from .canvas import Canvas
 from .components import (
     AudioFeed,
     BaseComponent,
+    Button,
     Chat,
     Custom,
     Inspector,
@@ -25,6 +26,7 @@ __all__ = [
     "autopanel",
     "Merge",
     "Slider",
+    "Button",
     "Label",
     "VideoFeed",
     "AudioFeed",

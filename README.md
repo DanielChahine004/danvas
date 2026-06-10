@@ -91,12 +91,13 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 |-------------|----------------|-----|
 | `Slider`    | bidirectional  | `.value`, `@on_change`, `.update(v)` |
 | `Toggle`    | bidirectional  | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
+| `Button`    | input          | momentary action; `@on_click`, `.value` (click count); `text=` |
 | `Label`     | output         | `.update(text)` |
 | `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → binary JPEG over WS) |
 | `AudioFeed` | output         | `.update(pcm_chunk)` (PCM → Web Audio playback) |
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
-| `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `.update(html)`, `@on_message` |
+| `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)`, `.update(html)` |
 | `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 
@@ -151,21 +152,31 @@ cam.update(jpeg_bytes)              # already-encoded JPEG, sent straight throug
 ### Custom HTML panels
 
 `Custom` renders any HTML/CSS/JS string (or a file via `path=`) inside a
-sandboxed iframe. A `canvas.send(data)` helper is injected so the panel can
-post structured data back to Python:
+sandboxed iframe with a **symmetric** two-way channel injected as `canvas`:
+`canvas.send(data)` posts back to Python, and `canvas.onPush(fn)` receives data
+Python streams in — no `__pycanvas` unwrapping or message-guard boilerplate.
+
+On the Python side, route inbound messages by an `event` field with
+`@panel.on("event")` — no subclassing, no hand-written dispatcher. Use
+`@panel.on_message` for a catch-all that sees everything:
 
 ```python
-panel = canvas.insert(pycanvas.Custom(html="<button onclick=\"canvas.send({hi:1})\">go</button>"))
+panel = canvas.custom(html='''
+  <button onclick="canvas.send({event: 'go'})">go</button>
+  <script>canvas.onPush((msg) => document.body.append(msg))</script>
+''')
 
-@panel.on_message
-def handle(data):
-    print(data)   # -> {'hi': 1}
+@panel.on("go")            # fires only for {event: 'go'}
+def handle(msg):
+    panel.push("clicked")  # -> canvas.onPush in the iframe
 ```
+
+(`event_key=` changes the field used for routing if your HTML tags messages
+differently, e.g. `type`.)
 
 `panel.update(html)` swaps the whole HTML (reloads the iframe). To stream live
 data **without** reloading — keeping the iframe's focus, listeners and scroll —
-use `panel.push(data)`; it arrives as a `message` event in the iframe
-(`e.data.__pycanvas` is your `data`). That's what powers
+use `panel.push(data)`, received via `canvas.onPush(fn)`. That's what powers
 [`examples/remote_control.py`](examples/remote_control.py), which streams the
 host's screen into one panel and replays the browser's mouse/keyboard back onto
 the machine (a tiny LAN remote desktop — read its security note first).
@@ -178,54 +189,37 @@ Because it's just HTML in an iframe, anything that renders to HTML works:
 
 ### Packaging a reusable widget (subclass `Custom`)
 
-Subclass `Custom` to turn an HTML panel into a typed, reusable component — no
-package edits, no frontend rebuild needed. Override `_handle_input` to route
-messages by type, add whatever decorator API fits your widget, and override
-`state_payload` to push initial state to every client that connects (including
-late-joining browsers and reconnects):
+For most widgets you don't need a subclass at all — `canvas.custom(html=...)`
+plus `@panel.on("event")` is enough (see the `Dial` in
+[`examples/custom_component.py`](examples/custom_component.py), built with no
+subclass). Subclass `Custom` only when you want to **package** the HTML behind a
+typed constructor, or to override `state_payload` so every connecting client
+(including late-joiners and reconnects) is seeded with the current state on load
+— event routing is already built in:
 
 ```python
 class Dial(pycanvas.Custom):
     def __init__(self, name="dial", **place):
         super().__init__(html=DIAL_HTML, name=name, width=220, height=260, **place)
-        self._routes = {}
         self._angle = 0
 
     # Called automatically for every connecting client — no "ready" handshake needed.
     def state_payload(self):
-        return self._angle          # pushed straight into the iframe's message event
+        return self._angle          # pushed straight into the iframe via canvas.onPush
 
     def set_angle(self, deg):
         self._angle = deg
         self.push(deg)             # push to all currently connected clients
 
-    def on(self, event):
-        """Decorator: @dial.on("rotate") / @dial.on("reset")"""
-        def deco(fn):
-            self._routes.setdefault(event, []).append(fn)
-            return fn
-        return deco
-
-    def _handle_input(self, payload):
-        event = payload.get("event")
-        if event == "rotate":
-            self._angle = payload.get("deg", self._angle)
-        for fn in self._routes.get(event, []):
-            fn(payload)
-```
-
-```python
 dial = canvas.insert(Dial("my_dial"), x=80, y=80)
 
-@dial.on("rotate")
+@dial.on("rotate")                 # routing is inherited from Custom
 def _(msg): print("rotated to", msg["deg"])
 ```
 
 `state_payload` is the key hook: the bridge calls it right after registering the
 panel with each new WebSocket client, so the iframe is always seeded with the
-current value on load — no polling or `{type: "ready"}` retry needed. See
-[`examples/custom_component.py`](examples/custom_component.py) for the full
-working `Dial` example.
+current value on load — no polling or `{type: "ready"}` retry needed.
 
 ### Web pages (WebView)
 

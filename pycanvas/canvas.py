@@ -10,6 +10,7 @@ from . import server
 from .bridge import Bridge
 from .components import (
     AudioFeed,
+    Button,
     Chat,
     Custom,
     Inspector,
@@ -414,6 +415,10 @@ class Canvas:
         """Insert a :class:`~pycanvas.Toggle`. See :meth:`insert` for ``place``."""
         return self._make(Toggle, name, options, default=default, label=label,
                           **place)
+
+    def button(self, name, text=None, label=None, **place):
+        """Insert a :class:`~pycanvas.Button`. See :meth:`insert` for ``place``."""
+        return self._make(Button, name, text=text, label=label, **place)
 
     def label(self, name, value="", label=None, **place):
         """Insert a :class:`~pycanvas.Label`. See :meth:`insert` for ``place``."""

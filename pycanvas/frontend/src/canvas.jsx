@@ -493,6 +493,53 @@ export class WebViewShapeUtil extends PcShapeUtil {
   }
 }
 
+// --- Button (a momentary action trigger) ------------------------------------
+export class ButtonShapeUtil extends PcShapeUtil {
+  static type = 'pcButton'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    text: T.string,
+  }
+
+  getDefaultProps() {
+    return { w: 200, h: 84, label: 'button', text: 'Button' }
+  }
+
+  component(shape) {
+    const { label, text } = shape.props
+    const id = componentIdOf(shape.id)
+    return (
+      <Card shape={shape}>
+        <div style={labelStyle}>{label}</div>
+        <button
+          style={{
+            alignSelf: 'flex-start',
+            padding: '8px 16px',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+            background: 'var(--pc-accent)',
+            color: 'var(--pc-accent-text)',
+            pointerEvents: 'all',
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => sendInput(id, { click: true })}
+        >
+          {text}
+        </button>
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
+}
+
 // --- Toggle (pick one of N options) -----------------------------------------
 export class ToggleShapeUtil extends PcShapeUtil {
   static type = 'pcToggle'
@@ -1437,6 +1484,7 @@ export const COMPONENT_TO_SHAPE = {
   Custom: 'pcHtml',
   WebView: 'pcWebView',
   Toggle: 'pcToggle',
+  Button: 'pcButton',
   LivePlot: 'pcLivePlot',
   Repl: 'pcRepl',
   Inspector: 'pcInspector',
@@ -1451,6 +1499,7 @@ export const shapeUtils = [
   HtmlShapeUtil,
   WebViewShapeUtil,
   ToggleShapeUtil,
+  ButtonShapeUtil,
   LivePlotShapeUtil,
   ReplShapeUtil,
   InspectorShapeUtil,

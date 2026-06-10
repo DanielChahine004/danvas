@@ -1,5 +1,6 @@
 from .base import BaseComponent
 from .slider import Slider
+from .button import Button
 from .label import Label
 from .video import VideoFeed
 from .audio import AudioFeed
@@ -15,6 +16,7 @@ from .webview import WebView
 __all__ = [
     "BaseComponent",
     "Slider",
+    "Button",
     "Label",
     "VideoFeed",
     "AudioFeed",
