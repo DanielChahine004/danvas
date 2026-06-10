@@ -176,6 +176,57 @@ Because it's just HTML in an iframe, anything that renders to HTML works:
 - **Plotly** — `fig.to_html(include_plotlyjs='cdn')` → `panel.update(html)`; the
   chart stays fully interactive (zoom / pan / hover) inside the sandbox.
 
+### Packaging a reusable widget (subclass `Custom`)
+
+Subclass `Custom` to turn an HTML panel into a typed, reusable component — no
+package edits, no frontend rebuild needed. Override `_handle_input` to route
+messages by type, add whatever decorator API fits your widget, and override
+`state_payload` to push initial state to every client that connects (including
+late-joining browsers and reconnects):
+
+```python
+class Dial(pycanvas.Custom):
+    def __init__(self, name="dial", **place):
+        super().__init__(html=DIAL_HTML, name=name, width=220, height=260, **place)
+        self._routes = {}
+        self._angle = 0
+
+    # Called automatically for every connecting client — no "ready" handshake needed.
+    def state_payload(self):
+        return self._angle          # pushed straight into the iframe's message event
+
+    def set_angle(self, deg):
+        self._angle = deg
+        self.push(deg)             # push to all currently connected clients
+
+    def on(self, event):
+        """Decorator: @dial.on("rotate") / @dial.on("reset")"""
+        def deco(fn):
+            self._routes.setdefault(event, []).append(fn)
+            return fn
+        return deco
+
+    def _handle_input(self, payload):
+        event = payload.get("event")
+        if event == "rotate":
+            self._angle = payload.get("deg", self._angle)
+        for fn in self._routes.get(event, []):
+            fn(payload)
+```
+
+```python
+dial = canvas.insert(Dial("my_dial"), x=80, y=80)
+
+@dial.on("rotate")
+def _(msg): print("rotated to", msg["deg"])
+```
+
+`state_payload` is the key hook: the bridge calls it right after registering the
+panel with each new WebSocket client, so the iframe is always seeded with the
+current value on load — no polling or `{type: "ready"}` retry needed. See
+[`examples/custom_component.py`](examples/custom_component.py) for the full
+working `Dial` example.
+
 ### Web pages (WebView)
 
 `WebView` embeds a live website by URL in its own iframe — handy for dashboards,
