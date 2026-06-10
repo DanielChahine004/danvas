@@ -43,8 +43,8 @@ label mirrors it. Resize and drag the cards freely on the canvas.
 
 `canvas.<component>(...)` builds a panel **and** places it in one call — the
 concise default. Every component has a factory: `slider`, `toggle`, `label`,
-`video`, `audio`, `plot`, `live_plot`, `custom`, `webview`, `chat`, `repl`,
-`inspector`.
+`video`, `audio`, `plot`, `live_plot`, `custom`, `file_browser`, `webview`,
+`chat`, `repl`, `inspector`.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -100,6 +100,7 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)`, `.update(html)` |
 | `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
+| `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select` (file path), `@on_navigate`, `.value`, `pattern=` |
 
 ### Plot vs LivePlot
 

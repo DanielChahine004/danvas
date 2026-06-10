@@ -6,6 +6,7 @@ from .video import VideoFeed
 from .audio import AudioFeed
 from .chat import Chat
 from .custom import Custom
+from .filebrowser import FileBrowser
 from .toggle import Toggle
 from .plot import Plot
 from .liveplot import LivePlot
@@ -22,6 +23,7 @@ __all__ = [
     "AudioFeed",
     "Chat",
     "Custom",
+    "FileBrowser",
     "Toggle",
     "Plot",
     "LivePlot",

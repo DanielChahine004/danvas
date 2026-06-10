@@ -13,6 +13,7 @@ from .components import (
     Button,
     Chat,
     Custom,
+    FileBrowser,
     Inspector,
     Label,
     LivePlot,
@@ -442,6 +443,17 @@ class Canvas:
         """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``."""
         return self._make(Custom, html=html, path=path, name=name, label=label,
                           width=width, height=height, **place)
+
+    def file_browser(self, name="files", root=".", label=None, width=320,
+                     height=420, pattern=None, show_hidden=False, **place):
+        """Insert a :class:`~pycanvas.FileBrowser`. See :meth:`insert` for ``place``.
+
+        Navigation is confined to ``root``. ``pattern`` (an fnmatch glob like
+        ``"*.csv"``) filters which files are shown.
+        """
+        return self._make(FileBrowser, name=name, root=root, label=label,
+                          width=width, height=height, pattern=pattern,
+                          show_hidden=show_hidden, **place)
 
     def webview(self, url, name="web", label=None, width=800, height=600, **place):
         """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""

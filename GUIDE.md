@@ -87,6 +87,7 @@ canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 | **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
 | **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
 | **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320, event_key="event")` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `@on(event)` / `@on_message`, `.value` (last message) |
+| **FileBrowser** | `FileBrowser(root=".", name="files", label=None, width=320, height=420, pattern=None, show_hidden=False)` | both | `go(path)`, `refresh()` | `@on_select` (file path), `@on_navigate` (dir), `.value` (last file), `.cwd` |
 
 Every component takes `name` (its unique identity) first, then an optional
 `label` caption; the input components (Slider/Toggle/Label/VideoFeed) **require**
@@ -139,11 +140,65 @@ canvas.onPush((data) => render(data))   // no __pycanvas unwrapping needed
 into a panel while capturing the browser's mouse/keyboard to drive the host (a
 small LAN remote desktop — note its security warning).
 
+### File browser (pick a file, drive a pipeline)
+
+`FileBrowser` lists a directory on the canvas and lets the user navigate folders
+and select a file — the input end of a "choose a file → run something → show the
+result" loop. It's a `Custom` panel under the hood (no frontend build), with the
+directory listing done in Python (the browser can't read the disk):
+
+```python
+files = canvas.file_browser("files", root="./data", pattern="*.csv")
+plot  = canvas.plot("result")
+
+@files.on_select                 # fires with the chosen file's absolute path
+def run(path):
+    plot.update(build_figure(path))   # your pipeline drives another panel
+
+@files.on_navigate               # optional: fires with the new dir on each cd
+def _(cwd): ...
+```
+
+`root` is a **hard sandbox**: every path the browser asks for is resolved with
+`realpath` and rejected if it escapes `root` (symlinks included), so navigating
+"up" stops there and a remote viewer can't walk the rest of your disk — which
+matters once you `serve(host="0.0.0.0")` or tunnel. `pattern` is an fnmatch glob
+that filters *files* (folders always show so the tree stays navigable);
+`show_hidden=False` hides dotfiles. Read the current directory with `.cwd` and the
+last selected file with `.value`; drive it from Python with `go(path)` (navigate)
+and `refresh()` (re-list after files change on disk). See
+[`examples/file_browser.py`](examples/file_browser.py).
+
 ### Writing your own
 
-Subclass `BaseComponent`, set `component` to a frontend shape type, and
-implement `update()`. (Most needs are met by `Custom` — only subclass when you
-add a new tldraw shape on the frontend.)
+**Prefer `Custom` first.** It already gives you a two-way channel, live updates
+without a reload, and event routing — all from user code with **no package edit
+and no `npm` build**. Subclass `BaseComponent` only when you need a genuinely new
+**tldraw shape** on the frontend (a bespoke render that HTML-in-an-iframe can't
+give you).
+
+A subclass wires into the bridge through a handful of `BaseComponent` hooks — all
+the geometry, locking and read-back machinery is inherited, so you only supply the
+data behaviour:
+
+| Hook | Direction | Purpose |
+|---|---|---|
+| `component` (class attr) | — | The frontend shape **type string**; must match a registered tldraw shape util in `pycanvas/frontend`. |
+| `register_props()` | Python → browser | The props sent in the initial `register` message that builds the shape. Default returns your constructor `**props`; override to add fields. |
+| `state_payload()` | Python → browser | State pushed *right after* register (and replayed to every reconnecting client). Return `None` for nothing. |
+| `update(...)` | Python → browser | Your public write method. Call `self._send_update(payload)` (or `self._send_binary(...)` for raw frames) to push to the shape. |
+| `_handle_input(payload)` | browser → Python | Called when the shape posts back. Store into `self._value` (under `self._lock`) and fan out to `self._callbacks` so `@on_change` works. |
+
+The default `_handle_input` already stores `payload["value"]` and fires
+`on_change`, so a simple bidirectional control may not need to override it. See
+[`pycanvas/components/slider.py`](pycanvas/components/slider.py) (minimal) or
+[`pycanvas/components/video.py`](pycanvas/components/video.py) (binary frames) as
+templates.
+
+**The catch:** the matching frontend shape must exist, which means editing the
+React/tldraw frontend and rebuilding it (`npm run build` in
+`pycanvas/frontend`) — the step `Custom` exists to spare you. Only take this path
+when a new shape is truly required.
 
 ---
 
@@ -193,14 +248,20 @@ set.
 |---|---|---|---|---|
 | Stop dragging only | `movable=False` / `comp.movable = False` | ❌ | ✅ | ✅ |
 | Stop resizing only | `resizable=False` / `comp.resizable = False` | ✅ | ❌ | ✅ |
+| Make controls inert, stay placeable | `interactive=False` / `comp.interactive = False` | ✅ | ✅ | ❌ |
 | Pin in place, stay usable | `comp.pin()` (`unpin()`) | ❌ | ❌ | ✅ |
 | Fully lock (static + inert) | `locked=True` / `comp.lock()` (`unlock()`) | ❌ | ❌ | ❌ |
 
 Key distinction:
 - **`movable` / `resizable`** gate only *user gestures*; the panel's sliders and
   buttons keep working. Use `pin()` for an interactive-but-fixed panel.
+- **`interactive=False`** is the inverse: the user can't operate the controls (a
+  transparent overlay swallows pointer events), but the panel stays *unlocked*,
+  so it can still be moved/selected **and** your `update()` calls keep rendering.
+  Use it for a control that tracks an automatic value the user mustn't drag — a
+  slider whose thumb follows a live reading, say.
 - **`locked`** is the hard lock — it also blocks interaction (a locked slider
-  won't emit changes).
+  won't emit changes) *and* freezes programmatic `update()`s.
 - **Python `move()` / `resize()` always work**, regardless of these — they gate
   the user, not you.
 
