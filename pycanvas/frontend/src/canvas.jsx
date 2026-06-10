@@ -63,12 +63,37 @@ function cardStyle(shape) {
 //     The shape stays unlocked, so Python value updates still render and a
 //     slider thumb keeps tracking them while the user can't drag it.
 // Pinned panels (movable/resizable false) stay fully interactive: no overlay.
-function Card({ shape, children }) {
+//
+// ``grab``: panels whose *whole body* is interactive (iframes, plots, chat,
+// repl, inspector, react) would otherwise swallow every click into their content
+// — so tldraw never sees it and the panel can't be selected or dragged by its
+// body, only its thin header. Where panels overlap, that makes the top one hard
+// to grab and the click seems to fall through to the panel underneath. For those
+// panels, while the panel is *unselected* we lay a transparent cover over it: the
+// cover takes the pointer (so the content doesn't) but does **not**
+// stopPropagation, so the event bubbles to tldraw and selects/drags the topmost
+// panel normally. The first click selects it; the cover then lifts and the
+// content becomes interactive. Small-control panels (slider/toggle/button) pass
+// ``grab=false`` and keep single-click interaction.
+function Card({ shape, children, grab = false }) {
+  const editor = useEditor()
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
+  const selected = useValue(
+    'pc-selected',
+    () => editor.getSelectedShapeIds().includes(shape.id),
+    [editor, shape.id]
+  )
   return (
     <HTMLContainer style={cardStyle(shape)}>
       {children}
+      {grab && !selected && !blockInput && (
+        <div
+          // No handler / no stopPropagation: the event bubbles to tldraw, which
+          // selects + (on drag) moves the topmost panel — fixing overlap grabs.
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'grab' }}
+        />
+      )}
       {blockInput && (
         <div
           style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'default' }}
@@ -389,7 +414,7 @@ export class HtmlShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <div style={labelStyle}>{shape.props.label}</div>
         <CustomView shape={shape} />
@@ -467,7 +492,7 @@ export class ReactShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <div style={labelStyle}>{shape.props.label}</div>
         <Suspense
@@ -518,7 +543,7 @@ export class WebViewShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <div style={labelStyle}>{shape.props.label}</div>
         <iframe
@@ -707,7 +732,7 @@ export class LivePlotShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         <div style={labelStyle}>{shape.props.label}</div>
         <LivePlotView shape={shape} />
       </Card>
@@ -1022,7 +1047,7 @@ export class ChatShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         <div style={labelStyle}>{shape.props.label}</div>
         <ChatView shape={shape} />
       </Card>
@@ -1063,7 +1088,7 @@ export class ReplShapeUtil extends PcShapeUtil {
     const setCode = (v) =>
       this.editor.updateShape({ id: shape.id, type: shape.type, props: { code: v } })
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         <div style={labelStyle}>{label}</div>
         <Suspense
           fallback={
@@ -1518,7 +1543,7 @@ export class InspectorShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape}>
+      <Card shape={shape} grab>
         <div style={labelStyle}>{shape.props.label}</div>
         <InspectorView shape={shape} />
       </Card>
