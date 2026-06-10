@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@babel/standalone": "^7.29.7",
     "@monaco-editor/react": "^4.7.0",
     "monaco-editor": "^0.52.2",
     "plotly.js-basic-dist-min": "^3.6.0",

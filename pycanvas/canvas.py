@@ -18,6 +18,7 @@ from .components import (
     Label,
     LivePlot,
     Plot,
+    React,
     Repl,
     Slider,
     Toggle,
@@ -454,6 +455,16 @@ class Canvas:
         return self._make(FileBrowser, name=name, root=root, label=label,
                           width=width, height=height, pattern=pattern,
                           show_hidden=show_hidden, **place)
+
+    def react(self, source=None, path=None, name="react", label=None, width=380,
+              height=320, props=None, **place):
+        """Insert a :class:`~pycanvas.React` panel. See :meth:`insert` for ``place``.
+
+        ``source`` is JSX defining ``function Component(...)`` (or load it from a
+        file with ``path=``); ``props`` is its initial props dict.
+        """
+        return self._make(React, source=source, path=path, name=name, label=label,
+                          width=width, height=height, props=props, **place)
 
     def webview(self, url, name="web", label=None, width=800, height=600, **place):
         """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""

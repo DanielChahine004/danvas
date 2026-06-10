@@ -18,6 +18,10 @@ import {
 // only loads when a Repl panel is shown (see MonacoRepl.jsx).
 const MonacoRepl = lazy(() => import('./MonacoRepl'))
 
+// The React-panel host bundles a JSX compiler (Babel, ~3 MB), so it too is
+// code-split and only loaded the first time a React panel appears.
+const ReactHost = lazy(() => import('./ReactHost'))
+
 // Shared card styling for all PyCanvas component shapes. The card is pinned to
 // the shape's exact w/h (not 100% of an ancestor) so it tracks resizing
 // continuously and lines up with tldraw's selection box.
@@ -439,6 +443,58 @@ function CustomView({ shape }) {
       onPointerDown={(e) => e.stopPropagation()}
     />
   )
+}
+
+// --- React (user-authored React component, rendered natively) ---------------
+// The native counterpart to Custom: instead of sandboxed HTML in an iframe, the
+// panel hosts a user React component compiled at runtime from JSX source. It
+// renders as an ordinary React subtree inside the Card, so it inherits the theme
+// and selection chrome and can talk to the bridge directly (no postMessage
+// hop). The heavy compile path lives in the lazily-loaded ReactHost chunk.
+export class ReactShapeUtil extends PcShapeUtil {
+  static type = 'pcReact'
+  static props = {
+    w: T.number,
+    h: T.number,
+    label: T.string,
+    source: T.string, // JSX defining `function Component(...)`
+    data: T.string, // JSON props from Python (update()/props=)
+  }
+
+  getDefaultProps() {
+    return { w: 380, h: 320, label: 'react', source: '', data: '{}' }
+  }
+
+  component(shape) {
+    return (
+      <Card shape={shape}>
+        {/* Header has no pointerEvents, so dragging it moves the panel. */}
+        <div style={labelStyle}>{shape.props.label}</div>
+        <Suspense
+          fallback={
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--pc-faint)',
+                fontSize: 13,
+              }}
+            >
+              compiling…
+            </div>
+          }
+        >
+          <ReactHost shape={shape} />
+        </Suspense>
+      </Card>
+    )
+  }
+
+  indicator(shape) {
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
+  }
 }
 
 // --- WebView (an external URL in a same-origin iframe) ----------------------
@@ -1482,6 +1538,7 @@ export const COMPONENT_TO_SHAPE = {
   AudioFeed: 'pcAudio',
   Chat: 'pcChat',
   Custom: 'pcHtml',
+  React: 'pcReact',
   WebView: 'pcWebView',
   Toggle: 'pcToggle',
   Button: 'pcButton',
@@ -1497,6 +1554,7 @@ export const shapeUtils = [
   AudioShapeUtil,
   ChatShapeUtil,
   HtmlShapeUtil,
+  ReactShapeUtil,
   WebViewShapeUtil,
   ToggleShapeUtil,
   ButtonShapeUtil,

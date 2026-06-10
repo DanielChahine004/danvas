@@ -7,6 +7,7 @@ from .audio import AudioFeed
 from .chat import Chat
 from .custom import Custom
 from .filebrowser import FileBrowser
+from .react import React
 from .toggle import Toggle
 from .plot import Plot
 from .liveplot import LivePlot
@@ -24,6 +25,7 @@ __all__ = [
     "Chat",
     "Custom",
     "FileBrowser",
+    "React",
     "Toggle",
     "Plot",
     "LivePlot",

@@ -87,6 +87,7 @@ canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 | **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
 | **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
 | **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320, event_key="event")` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `@on(event)` / `@on_message`, `.value` (last message) |
+| **React** | `React(source=None, path=None, name="react", label=None, width=380, height=320, props=None, event_key="event")` | both | `update(**props)` (patch) / `push(data)` (stream) | `@on(event)` / `@on_message`, `.value` (last message) |
 | **FileBrowser** | `FileBrowser(root=".", name="files", label=None, width=320, height=420, pattern=None, show_hidden=False)` | both | `go(path)`, `refresh()` | `@on_select` (file path), `@on_navigate` (dir), `.value` (last file), `.cwd` |
 
 Every component takes `name` (its unique identity) first, then an optional
@@ -140,6 +141,54 @@ canvas.onPush((data) => render(data))   // no __pycanvas unwrapping needed
 into a panel while capturing the browser's mouse/keyboard to drive the host (a
 small LAN remote desktop — note its security warning).
 
+### React panels (your own component, rendered natively)
+
+`React` is the native counterpart to `Custom`. Where `Custom` renders HTML in a
+*sandboxed iframe* (isolated — no theme or bridge access), `React` takes JSX
+**source** and mounts it as a real React subtree **inside** the panel, so it
+inherits the canvas theme, dark mode and selection chrome and talks to Python
+directly. The JSX is compiled in the browser at runtime (Babel, lazily loaded
+the first time a React panel appears — like the Repl's Monaco), so you author
+components from Python with **no `npm` build**, exactly like `Custom`.
+
+Your source must define a `function Component`, which receives three props
+(`React` and its hooks are in scope):
+
+```python
+counter = canvas.react("""
+  function Component({ canvas, value, props }) {
+    const [n, setN] = React.useState(0)
+    return <button onClick={() => { setN(n + 1); canvas.send({ event: 'tap', n: n + 1 }) }}>
+      {props.label}: {n}   {/* props from Python */}
+    </button>
+  }
+""", props={"label": "Taps"})
+
+@counter.on("tap")             # canvas.send -> @on, routed by the `event` field
+def _(msg): print(msg["n"])
+
+counter.update(label="Hits")   # patch props -> live re-render (merges)
+counter.push(live_value)       # stream into the `value` prop, no re-mount
+```
+
+| In the component | Direction | Meaning |
+|---|---|---|
+| `canvas.send(data)` | panel → Python | routed to your `@on(event)` / `@on_message` handlers |
+| `value` prop | Python → panel | the latest `push(data)` (no re-mount; for high-rate streams) |
+| `props` prop | Python → panel | the dict from `update(**props)` / the `props=` arg; replayed on reconnect |
+
+**Custom vs React.** Reach for `Custom` when the content is plain HTML or you
+want the hard isolation of a sandbox (e.g. third-party snippets). Reach for
+`React` when you want a real component with hooks, the canvas theme, and native
+selection — the things the iframe can't give you. Both compile in the browser,
+so neither needs a frontend rebuild. See
+[`examples/react_component.py`](examples/react_component.py).
+
+> Security note: a React panel's source runs in the **main page**, not a sandbox
+> — it's your own (host-authored) code, the same trust level as the rest of the
+> app. Don't feed it source from an untrusted party; use `Custom` (sandboxed) for
+> that.
+
 ### File browser (pick a file, drive a pipeline)
 
 `FileBrowser` lists a directory on the canvas and lets the user navigate folders
@@ -171,11 +220,12 @@ and `refresh()` (re-list after files change on disk). See
 
 ### Writing your own
 
-**Prefer `Custom` first.** It already gives you a two-way channel, live updates
-without a reload, and event routing — all from user code with **no package edit
-and no `npm` build**. Subclass `BaseComponent` only when you need a genuinely new
-**tldraw shape** on the frontend (a bespoke render that HTML-in-an-iframe can't
-give you).
+**Prefer `Custom` or `React` first.** Between them they give you a two-way
+channel, live updates without a reload, and event routing — all from user code
+with **no package edit and no `npm` build**: `Custom` for sandboxed HTML, `React`
+for a native component with hooks and theme access. Subclass `BaseComponent` only
+when you need a genuinely new **tldraw shape** on the frontend (a bespoke canvas
+render that neither an iframe nor a hosted React subtree can give you).
 
 A subclass wires into the bridge through a handful of `BaseComponent` hooks — all
 the geometry, locking and read-back machinery is inherited, so you only supply the
