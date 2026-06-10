@@ -51,7 +51,19 @@ class Custom(BaseComponent):
             "onPush:function(fn){window.addEventListener('message',function(e){"
             "if(e.data&&e.data.__pycanvas!==undefined){fn(e.data.__pycanvas);}"
             "});}"
-            "};</script>"
+            "};"
+            # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
+            # *browser's* page zoom (tldraw can't preventDefault an event in a
+            # sandboxed frame). Swallow it here and forward the delta + cursor to
+            # the parent, which zooms the canvas at that point instead — so the
+            # gesture matches scrolling over the bare canvas. Capture phase so we
+            # win over any content (e.g. Plotly) wheel handler; plain wheel (no
+            # modifier) is left alone so panels can still scroll their content.
+            "window.addEventListener('wheel',function(e){"
+            "if(e.ctrlKey||e.metaKey){e.preventDefault();"
+            "parent.postMessage({__pycanvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');}"
+            "},{passive:false,capture:true});"
+            "</script>"
         )
         return helper + html
 

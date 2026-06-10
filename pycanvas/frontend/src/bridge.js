@@ -684,6 +684,45 @@ export function setMyName(name) {
   sendRaw({ type: 'set_name', name })
 }
 
+// Zoom the canvas at a screen point, the way tldraw's own Ctrl+wheel does.
+// Used to honour a zoom gesture that happened *inside* an iframe panel (which
+// tldraw can't see): the iframe forwards the wheel delta + cursor, and we apply
+// it to the camera here so it matches scrolling over the bare canvas.
+//
+// Camera math mirrors applyCameraFrom: to keep a page point P fixed under the
+// cursor at viewport-relative screen point S, camera = S/z - P, so after a zoom
+// z0 -> z1 the camera shifts by S*(1/z1 - 1/z0). Screen coords are made
+// viewport-relative (minus the viewport's screen origin) first.
+function zoomCanvasAtClient(clientX, clientY, deltaY) {
+  if (!editor) return
+  if (viewConfig && viewConfig.locked) return // a locked camera doesn't zoom
+  const cam = editor.getCamera()
+  const vsb = editor.getViewportScreenBounds()
+  const sx = clientX - vsb.x
+  const sy = clientY - vsb.y
+  const min = viewConfig && typeof viewConfig.min_zoom === 'number' ? viewConfig.min_zoom : 0.1
+  const max = viewConfig && typeof viewConfig.max_zoom === 'number' ? viewConfig.max_zoom : 8
+  const z0 = cam.z
+  // Exponential so a trackpad's many small deltas and a mouse's coarse notches
+  // both feel right; sign matches wheel (up/negative deltaY zooms in).
+  const z1 = Math.min(max, Math.max(min, z0 * Math.exp(-deltaY * 0.0015)))
+  if (z1 === z0) return
+  const k = 1 / z1 - 1 / z0
+  editor.setCamera({ x: cam.x + sx * k, y: cam.y + sy * k, z: z1 }, { immediate: true })
+}
+
+// Map an iframe's own (clientX, clientY) into the parent viewport using the
+// iframe element's position, then zoom there. The message's `source` is the
+// iframe's contentWindow, which we match back to its <iframe> element.
+function zoomFromIframe(sourceWin, w) {
+  const iframe = [...document.querySelectorAll('iframe')].find(
+    (f) => f.contentWindow === sourceWin
+  )
+  if (!iframe) return
+  const rect = iframe.getBoundingClientRect()
+  zoomCanvasAtClient(rect.left + w.x, rect.top + w.y, w.d)
+}
+
 // Global helper available on the top-level page (non-iframe Custom usage).
 if (typeof window !== 'undefined') {
   window.canvas = {
@@ -695,7 +734,11 @@ if (typeof window !== 'undefined') {
   // component id; forward them to Python over the shared WebSocket.
   window.addEventListener('message', (e) => {
     const d = e.data
-    if (d && typeof d === 'object' && d.__pycanvas) {
+    if (!d || typeof d !== 'object') return
+    if (d.__pycanvas_wheel) {
+      // A Ctrl/Cmd+wheel inside an iframe panel: zoom the canvas, not the browser.
+      zoomFromIframe(e.source, d.__pycanvas_wheel)
+    } else if (d.__pycanvas) {
       sendInput(d.__pycanvas, d.data)
     }
   })
