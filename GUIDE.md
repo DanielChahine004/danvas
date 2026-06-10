@@ -88,6 +88,9 @@ canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
 | **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
 | **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320, event_key="event")` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `@on(event)` / `@on_message`, `.value` (last message) |
 | **React** | `React(source=None, path=None, name="react", label=None, width=380, height=320, props=None, event_key="event")` | both | `update(**props)` (patch) / `push(data)` (stream) | `@on(event)` / `@on_message`, `.value` (last message) |
+| **Markdown** | `Markdown(text="", name="markdown", label=None, width=380, height=240)` | out | `update(text)` | — |
+| **Image** | `Image(src, name="image", label=None, width=420, height=320, fit="contain")` | out | `update(src)` — path/URL/bytes/Matplotlib/PIL/array | — |
+| **Table** | `Table(data, name="table", label=None, width=520, height=360)` | out | `update(data)` — DataFrame/Series, records, dict of columns | — |
 | **FileBrowser** | `FileBrowser(root=".", name="files", label=None, width=320, height=420, pattern=None, show_hidden=False)` | both | `go(path)`, `refresh()` | `@on_select` (file path), `@on_navigate` (dir), `.value` (last file), `.cwd` |
 
 Every component takes `name` (its unique identity) first, then an optional
@@ -140,6 +143,31 @@ canvas.onPush((data) => render(data))   // no __pycanvas unwrapping needed
 `examples/remote_control.py` uses exactly this to stream the machine's screen
 into a panel while capturing the browser's mouse/keyboard to drive the host (a
 small LAN remote desktop — note its security warning).
+
+### Show anything (auto-dispatch)
+
+When you don't want to pick a component, `canvas.show(value)` inspects the value
+and inserts the panel that best renders it — the same decision a notebook makes
+for an `Out[...]`, but **without IPython** (it calls the object's `_repr_*` hooks
+directly), so it works in plain scripts too:
+
+```python
+canvas.show(df)                  # DataFrame -> Table
+canvas.show(fig)                 # Matplotlib/Plotly figure -> Image / Plot
+canvas.show("# Notes\n- a")      # Markdown -> rendered text
+canvas.show({"ok": True})        # dict / list -> pretty JSON
+canvas.show(obj)                 # _repr_html_/_repr_png_ -> its rich view
+```
+
+Dispatch order, most specific first: an existing component passes through, then
+Plotly → image-like (Matplotlib/PIL/NumPy) → tabular (DataFrame/records) → rich
+`_repr_*` → dict/list (JSON) → string (short → Label, longer → Markdown) → scalar
+`repr`. No `name` gives each call a fresh panel; pass `name=` to **replace** one
+in place (handy in a loop). The dispatcher is also exposed as
+`pycanvas.panel_for(value)` (builds the component *without* inserting), and it's
+exactly what the notebook cell-capture (`capture_cells()`) uses per cell —
+`Markdown`, `Image` and `Table` are its render targets, usable directly too via
+`canvas.markdown(text)` / `canvas.image(src)` / `canvas.table(data)`.
 
 ### React panels (your own component, rendered natively)
 

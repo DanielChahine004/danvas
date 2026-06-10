@@ -9,23 +9,28 @@ from .components import (
     Chat,
     Custom,
     FileBrowser,
+    Image,
     Inspector,
     Label,
     LivePlot,
+    Markdown,
     Plot,
     React,
     Repl,
     Slider,
+    Table,
     Toggle,
     VideoFeed,
     WebView,
 )
+from .dispatch import panel_for
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Canvas",
     "autopanel",
+    "panel_for",
     "Merge",
     "Slider",
     "Button",
@@ -35,10 +40,13 @@ __all__ = [
     "Chat",
     "Custom",
     "FileBrowser",
+    "React",
+    "Markdown",
+    "Image",
+    "Table",
     "Toggle",
     "Plot",
     "LivePlot",
-    "React",
     "Repl",
     "Inspector",
     "WebView",

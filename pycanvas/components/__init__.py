@@ -8,6 +8,9 @@ from .chat import Chat
 from .custom import Custom
 from .filebrowser import FileBrowser
 from .react import React
+from .markdown import Markdown
+from .image import Image
+from .table import Table
 from .toggle import Toggle
 from .plot import Plot
 from .liveplot import LivePlot
@@ -26,6 +29,9 @@ __all__ = [
     "Custom",
     "FileBrowser",
     "React",
+    "Markdown",
+    "Image",
+    "Table",
     "Toggle",
     "Plot",
     "LivePlot",

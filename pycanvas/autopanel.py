@@ -39,8 +39,6 @@ the user dragged/resized the panel).
 import re
 import warnings
 
-from .components import Custom, Label, Plot
-
 
 class CellCapture:
     """Holds the ``post_run_cell`` hook state for one canvas.
@@ -217,50 +215,18 @@ class CellCapture:
     def _build(self, out, name, result, label=None):
         """Pick and construct the panel component for a cell output value.
 
-        ``label`` overrides the default source-line caption (from a
-        ``# pycanvas: label=...`` directive); ``None`` keeps the default.
+        Delegates to the shared :func:`pycanvas.panel_for` dispatcher (the same
+        one behind ``Canvas.show``), handing it the kernel's display formatter so
+        notebook-registered rich reps are honoured. ``label`` overrides the
+        default source-line caption (from a ``# pycanvas: label=...`` directive);
+        ``None`` keeps the default.
         """
+        from .dispatch import panel_for
+
         caption = label if label is not None else self._caption(result)
-
-        # Plotly figures: route through the existing Plot wrapper (interactive).
-        if _is_plotly(out):
-            plot = Plot(name=name, label=caption,
-                        width=self.slot_w, height=self.slot_h)
-            plot.update(out)
-            return plot
-
-        # Everything else: ask Jupyter's formatter for the richest MIME rep and
-        # drop it into a Custom (sandboxed iframe), matching inline rendering.
-        html = self._render_html(out)
-        if html is not None:
-            return Custom(html=html, name=name, label=caption,
-                          width=self.slot_w, height=self.slot_h)
-
-        # No rich rep available: a plain text Label.
-        return Label(name=name, value=_short_repr(out), label=caption)
-
-    def _render_html(self, out):
-        """Return an HTML body for ``out`` via the IPython display formatter.
-
-        Falls back across HTML -> raster image -> SVG. Returns ``None`` when the
-        formatter offers nothing richer than plain text (handled by the caller).
-        """
-        try:
-            data, _ = self._ip.display_formatter.format(out)
-        except Exception:
-            data = {}
-        if "text/html" in data:
-            return _document(data["text/html"])
-        for mime in ("image/png", "image/jpeg"):
-            if mime in data:
-                b64 = data[mime].strip()
-                return _document(
-                    f"<img style='max-width:100%;height:auto' "
-                    f"src='data:{mime};base64,{b64}'>"
-                )
-        if "image/svg+xml" in data:
-            return _document(data["image/svg+xml"])
-        return None
+        formatter = getattr(self._ip, "display_formatter", None)
+        return panel_for(out, name=name, label=caption, width=self.slot_w,
+                         height=self.slot_h, formatter=formatter)
 
     def _caption(self, result):
         """A short panel caption derived from the cell's source (or its id)."""
@@ -278,32 +244,6 @@ class CellCapture:
 
 
 # -- module helpers ----------------------------------------------------------
-_DOC_STYLE = (
-    "<style>body{margin:0;padding:8px;font-family:system-ui,sans-serif;"
-    "font-size:13px;color:#111;background:#fff;box-sizing:border-box}"
-    "table{border-collapse:collapse}img{display:block}</style>"
-)
-
-
-def _document(body):
-    """Wrap an HTML fragment in a minimal styled document for the iframe."""
-    return f"<!doctype html><html><head>{_DOC_STYLE}</head><body>{body}</body></html>"
-
-
-def _is_plotly(obj):
-    """Duck-type a Plotly figure without importing plotly."""
-    mod = type(obj).__module__ or ""
-    return mod.startswith("plotly") and callable(getattr(obj, "to_html", None))
-
-
-def _short_repr(obj, limit=2000):
-    """A length-bounded HTML-safe repr for the plain-text fallback."""
-    text = repr(obj)
-    if len(text) > limit:
-        text = text[:limit] + " …"
-    return text
-
-
 # A ``# pycanvas: ...`` line anywhere in the cell carries per-cell overrides.
 _DIRECTIVE_RE = re.compile(r"^[ \t]*#\s*pycanvas:[ \t]*(.*?)[ \t]*$",
                            re.IGNORECASE | re.MULTILINE)

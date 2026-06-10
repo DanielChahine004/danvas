@@ -14,13 +14,16 @@ from .components import (
     Chat,
     Custom,
     FileBrowser,
+    Image,
     Inspector,
     Label,
     LivePlot,
+    Markdown,
     Plot,
     React,
     Repl,
     Slider,
+    Table,
     Toggle,
     VideoFeed,
     WebView,
@@ -465,6 +468,49 @@ class Canvas:
         """
         return self._make(React, source=source, path=path, name=name, label=label,
                           width=width, height=height, props=props, **place)
+
+    def markdown(self, text="", name="markdown", label=None, width=380,
+                 height=240, **place):
+        """Insert a :class:`~pycanvas.Markdown` panel. See :meth:`insert` for ``place``."""
+        return self._make(Markdown, text=text, name=name, label=label,
+                          width=width, height=height, **place)
+
+    def image(self, src, name="image", label=None, width=420, height=320,
+              fit="contain", **place):
+        """Insert an :class:`~pycanvas.Image` panel. See :meth:`insert` for ``place``.
+
+        ``src`` is a path, URL, image bytes, Matplotlib/PIL figure, or array.
+        """
+        return self._make(Image, src, name=name, label=label, width=width,
+                          height=height, fit=fit, **place)
+
+    def table(self, data, name="table", label=None, width=520, height=360, **place):
+        """Insert a :class:`~pycanvas.Table` panel. See :meth:`insert` for ``place``.
+
+        ``data`` is a pandas DataFrame/Series, a list of dicts/rows, or a dict.
+        """
+        return self._make(Table, data, name=name, label=label, width=width,
+                          height=height, **place)
+
+    def show(self, value, name=None, label=None, **place):
+        """Auto-render any value as the best-fitting panel and insert it.
+
+        Picks the component the way a notebook decides how to render an output
+        (DataFrame → table, figure/array → image, Plotly → plot, rich
+        ``_repr_*`` → its HTML, dict/list → JSON, string → label/markdown, else a
+        repr label) via :func:`pycanvas.panel_for`. With no ``name`` a unique one
+        is generated; re-using a ``name`` replaces that panel in place. Returns
+        the inserted component. See :meth:`insert` for ``place``.
+        """
+        from .dispatch import panel_for
+        if name is None:
+            self._show_seq = getattr(self, "_show_seq", 0) + 1
+            name = f"panel_{self._show_seq}"
+        comp = panel_for(value, name=name, label=label)
+        prev = self._named.get(name)
+        if prev is not None:
+            self.remove(prev)  # re-show under the same name replaces in place
+        return self.insert(comp, **place)
 
     def webview(self, url, name="web", label=None, width=800, height=600, **place):
         """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""

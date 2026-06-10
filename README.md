@@ -43,8 +43,10 @@ label mirrors it. Resize and drag the cards freely on the canvas.
 
 `canvas.<component>(...)` builds a panel **and** places it in one call — the
 concise default. Every component has a factory: `slider`, `toggle`, `label`,
-`video`, `audio`, `plot`, `live_plot`, `custom`, `react`, `file_browser`,
-`webview`, `chat`, `repl`, `inspector`.
+`video`, `audio`, `plot`, `live_plot`, `custom`, `react`, `markdown`, `image`,
+`table`, `file_browser`, `webview`, `chat`, `repl`, `inspector`. Or skip picking
+one entirely — `canvas.show(value)` auto-renders any value as the right panel
+(see [Show anything](#show-anything)).
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -99,6 +101,9 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
 | `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)`, `.update(html)` |
 | `React`     | bidirectional  | your own React component (JSX), rendered natively; `@on(event)` / `@on_message`, `.update(**props)`, `.push(data)` |
+| `Markdown`  | output         | rendered Markdown text; `.update(text)` |
+| `Image`     | output         | a static image (path/URL/bytes/Matplotlib/PIL/array); `.update(src)` |
+| `Table`     | output         | tabular data (DataFrame/Series, records, dict of columns); `.update(data)` |
 | `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select` (file path), `@on_navigate`, `.value`, `pattern=` |
@@ -488,6 +493,30 @@ automatically (a pip/venv NumPy bundles its own BLAS, so it needs nothing). If a
 build fails, the error names the culprit dependency and the `exclude` fix. The
 same options exist on the CLI: `--include`, `--exclude` (both repeatable).
 
+## Show anything
+
+Don't want to pick a component? `canvas.show(value)` inspects the value and
+inserts the panel that best renders it — the same way a notebook decides how to
+display an `Out[...]`, but it works in plain scripts too (no IPython needed):
+
+```python
+canvas.show(df)                    # pandas DataFrame -> Table
+canvas.show(fig)                   # Matplotlib / Plotly figure -> Image / Plot
+canvas.show("# Notes\n- a\n- b")   # Markdown -> rendered text
+canvas.show({"status": "ok"})      # dict / list -> pretty JSON
+canvas.show(model)                 # anything with _repr_html_/_repr_png_ -> its rich view
+```
+
+Dispatch order (most specific first): an existing component passes through, then
+Plotly → image-like (Matplotlib/PIL/NumPy) → tabular (DataFrame/records) → rich
+`_repr_*` → dict/list (JSON) → string → scalar `repr`. With no `name` each call
+gets a fresh panel; pass `name=` to replace one in place. The same dispatcher is
+available standalone as `pycanvas.panel_for(value)` (builds without inserting),
+and it's what powers the notebook cell-capture below.
+
+The three render targets are also components in their own right when you want one
+explicitly: `canvas.markdown(text)`, `canvas.image(src)`, `canvas.table(data)`.
+
 ## Interactive use (Jupyter / notebooks)
 
 `serve()` blocks, which is fine for scripts. In a notebook pass `block=False`
@@ -513,9 +542,9 @@ full walkthrough.
 Don't want to wrap each cell's output in a component by hand? Call
 `canvas.capture_cells()` (alias `pycanvas.autopanel(canvas)`) once: it registers
 an IPython `post_run_cell` hook so **every cell ending in an expression** gets
-its own panel, auto-arranged in a grid. Outputs render through Jupyter's own
-display machinery, so DataFrames, matplotlib/Plotly figures, and any
-`_repr_html_` object look as they do inline. Re-running a cell swaps its panel
+its own panel, auto-arranged in a grid. Each output is rendered by the same
+`show()` dispatcher above (handed the kernel's display formatter), so DataFrames,
+matplotlib/Plotly figures, and any `_repr_html_` object look as they do inline. Re-running a cell swaps its panel
 in place — and if you'd moved, resized, or rotated that panel in the browser,
 the refreshed panel keeps the geometry you left it at instead of snapping back
 to the grid. Cells ending in a statement (assignment, `print`, loop) produce no
