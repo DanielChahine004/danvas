@@ -14,6 +14,21 @@ touch Node or npm.
 pip install -e .
 ```
 
+The base install is lightweight (sliders, plots, tables, custom/React panels,
+images, webviews, chat, …). A few features pull in heavier libraries only when
+you ask for them, as optional extras:
+
+```bash
+pip install -e ".[video]"     # VideoFeed JPEG encoding (OpenCV, ~90 MB)
+pip install -e ".[audio]"     # microphone capture for AudioFeed
+pip install -e ".[tunnel]"    # public-internet sharing (serve(tunnel=True))
+pip install -e ".[desktop]"   # native window + bake() to a standalone app
+```
+
+`canvas.video(...)` needs the `[video]` extra for its default frame encoding —
+or stream JPEG bytes you've already encoded with `VideoFeed(encode=False)`,
+which needs nothing extra.
+
 ## Hello world
 
 ```python
@@ -38,6 +53,13 @@ python examples/hello_world.py
 
 Drag the slider in the browser → `servo.value` updates in Python and the
 label mirrors it. Resize and drag the cards freely on the canvas.
+
+Your `@on_change` / `@on_layout` / `@panel.on(...)` handlers run on a background
+worker thread, not the server's event loop — so a handler that blocks (a
+`time.sleep`, an HTTP request, a slow computation, moving a real motor) won't
+freeze the canvas or stall other viewers; rendering and live feeds keep flowing.
+Handlers for a given panel still run **in order**, so a slider drag settles on
+its final value.
 
 ## Two ways to add a panel
 
@@ -653,8 +675,31 @@ Caveats:
 - **No IP / across networks** — LAN sharing only reaches the same network. To
   share with anyone, anywhere, use a tunnel — built in, see
   [Sharing across the internet](#sharing-across-the-internet-tunnels) below.
-- **No authentication** — anyone who can reach the port can interact. Use only on
-  networks you trust (and note the `Repl` remote-exec guard).
+- **Authentication is opt-in** — by default anyone who can reach the port can
+  interact. Set a `password=` (see [Password-protecting a canvas](#password-protecting-a-canvas))
+  to gate access, and note the `Repl` remote-exec guard.
+
+## Password-protecting a canvas
+
+Any shared canvas — a LAN bind, a tunnel, or both — can be gated behind a
+password so only people you give it to can connect:
+
+```python
+canvas.serve(port=8000, host="0.0.0.0", password="let-me-in")
+canvas.serve(port=8000, tunnel=True, password="let-me-in")   # works over the tunnel too
+```
+
+A visitor is shown a small password page first; once they enter it, a
+per-browser session cookie lets them straight through on every later request and
+the WebSocket — so they're asked once, not per panel. The password itself is
+never stored in the cookie (a random session token is), and the check guards
+both the page and the live socket, so an unauthenticated client can't even open
+the data channel.
+
+A password controls **who may connect**; it's independent of the `Repl`
+remote-exec guard, which controls **whether arbitrary code may run**. A
+publicly-served `Repl` still needs the explicit `allow_remote_exec=True` even
+behind a password — authenticated viewers would otherwise get code execution.
 
 ## Sharing across the internet (tunnels)
 
@@ -698,8 +743,9 @@ canvas.serve(port=8000, tunnel=True, tunnel_provider="localtunnel")
 ```
 
 Caveats:
-- **Public, unauthenticated** — the URL is reachable by anyone who has it. A
-  tunnel exposes the loopback bind to the whole internet, so a canvas containing
+- **Public by default** — the URL is reachable by anyone who has it. Add a
+  `password=` to gate it (see [Password-protecting a canvas](#password-protecting-a-canvas)).
+  A tunnel exposes the loopback bind to the whole internet, so a canvas containing
   a `Repl` is refused unless you pass `allow_remote_exec=True` (a `Repl` is
   unauthenticated remote code execution — same gate as a public `host=` bind).
 - **Quick-tunnel URLs are random and ephemeral** — a new `https://…` name each

@@ -105,8 +105,10 @@ Notes:
   good for occasional figures). `LivePlot` keeps a mounted chart and streams
   only data arrays — smooth at high rates; call `push()` every loop.
 - **VideoFeed** expects OpenCV BGR frames (`cv2`); they're JPEG-encoded and sent
-  as binary WebSocket frames (no base64/JSON). **AudioFeed** streams int16 PCM
-  the same way.
+  as binary WebSocket frames (no base64/JSON). OpenCV is the optional `[video]`
+  extra (`pip install -e ".[video]"`); or pass `encode=False` to stream JPEG
+  bytes you've already encoded, which needs no extra. **AudioFeed** streams int16
+  PCM the same way.
 
 ### Custom panels (arbitrary HTML)
 

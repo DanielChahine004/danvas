@@ -1,7 +1,5 @@
 """VideoFeed: streams OpenCV frames to the browser as binary JPEG."""
 
-import cv2
-
 from .base import BaseComponent
 from ..bridge import BINARY_VIDEO
 
@@ -29,6 +27,17 @@ class VideoFeed(BaseComponent):
         a binary frame (no base64, no JSON), fed straight into a Blob.
         """
         if self._encode:
+            try:
+                import cv2
+            except ImportError as exc:
+                # OpenCV lives in the optional [video] extra so a slider-only
+                # install stays lightweight. Only the encode path needs it; pass
+                # encode=False to stream pre-encoded JPEG bytes with no OpenCV.
+                raise RuntimeError(
+                    "VideoFeed(encode=True) needs OpenCV. Install it with "
+                    "pip install 'pycanvas[video]', or pass encode=False to send "
+                    "JPEG bytes you've already encoded."
+                ) from exc
             ok, buf = cv2.imencode(
                 ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self._quality]
             )

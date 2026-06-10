@@ -176,6 +176,12 @@ class Canvas:
         self._serving = False
         self._server = None
         self._tunnel = None
+        # Remembered from serve() so a Repl inserted *after* the server is already
+        # running (serve(block=False)) is gated the same way one present at serve
+        # time is -- a public bind without allow_remote_exec must refuse it, since
+        # a live insert pushes the panel straight to remote browsers.
+        self._public_bind = False
+        self._allow_remote_exec = False
         # Shared by all Repl cells: one kernel thread runs their code serially
         # against one namespace (set by enable_repl). None until enable_repl.
         self._kernel = Kernel()
@@ -313,6 +319,18 @@ class Canvas:
         # the component (set in its constructor); the ``name`` arg here overrides
         # that, and a label/auto fallback covers hand-built components that set
         # neither.
+        # A Repl is unauthenticated remote code execution. serve() refuses one on
+        # a public bind without allow_remote_exec, but in background mode a Repl
+        # can be inserted *after* serve() -- gate that live insert too, so the
+        # check can't be sidestepped by ordering.
+        if self._serving and self._public_bind and not self._allow_remote_exec \
+                and getattr(component, "component", None) == "Repl":
+            raise RuntimeError(
+                "a Repl cell executes arbitrary Python in this process; refusing "
+                "to add it to a publicly-served canvas (no auth). Serve on "
+                "'127.0.0.1', or pass allow_remote_exec=True to serve() if you "
+                "really intend remote code execution on a trusted network."
+            )
         if name is None:
             name = component.name
         if name is None:
@@ -809,7 +827,7 @@ class Canvas:
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               view=None, desktop=None, window_title="PyCanvas",
-              window_size=(1200, 800)):
+              window_size=(1200, 800), password=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -849,6 +867,14 @@ class Canvas:
         to force it on for a shared/tunneled canvas, or ``False`` to hide it
         entirely.
 
+        ``password`` gates access to the whole canvas: when set, a visitor is
+        shown a small password page first and the WebSocket is refused until they
+        pass it, so a shared LAN or tunneled URL isn't open to anyone who finds
+        it. The check is per-browser-session (a cookie), so each viewer enters it
+        once. It is independent of ``allow_remote_exec`` — a password controls who
+        may connect, not whether a Repl may run, so a public Repl still needs the
+        explicit opt-in even behind a password.
+
         ``view`` configures how the tldraw canvas is presented and navigated, so
         the same canvas can be a free creative workspace or a fixed UI. Pass a
         dict with any of these keys (all optional):
@@ -877,6 +903,11 @@ class Canvas:
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
         self._check_remote_exec("0.0.0.0" if tunnel else host, allow_remote_exec)
+        # Remember the bind's reach so a Repl inserted live (serve(block=False))
+        # gets the same gate; a password doesn't lift it (auth'd users still get
+        # RCE), so allow_remote_exec stays the explicit opt-in.
+        self._public_bind = tunnel or host not in ("127.0.0.1", "localhost")
+        self._allow_remote_exec = allow_remote_exec
         # The UI Inspector exposes state to every viewer; default it on only for
         # a private, non-tunneled bind. An explicit ui_inspector overrides that.
         local = host in ("127.0.0.1", "localhost")
@@ -898,11 +929,12 @@ class Canvas:
             else bool(desktop)
         if use_desktop:
             self._serve_desktop(port, host, tunnel, tunnel_provider,
-                                window_title, window_size)
+                                window_title, window_size, password)
             return self
         if not block:
             self._server = server.run_background(
-                self._bridge, port=port, open_browser=open_browser, host=host
+                self._bridge, port=port, open_browser=open_browser, host=host,
+                password=password,
             )
             if wait:
                 self._wait_until_ready()
@@ -915,11 +947,12 @@ class Canvas:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host)
+                       host=host, password=password)
         finally:
             self._stop_tunnel()
 
-    def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size):
+    def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
+                       password=None):
         """Serve in the background and show the canvas in a native window.
 
         Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
@@ -937,7 +970,8 @@ class Canvas:
             if tunnel:
                 self._start_tunnel(port, tunnel_provider)
             try:
-                server.run(self._bridge, port=port, open_browser=True, host=host)
+                server.run(self._bridge, port=port, open_browser=True, host=host,
+                           password=password)
             finally:
                 self._stop_tunnel()
             return
@@ -945,7 +979,8 @@ class Canvas:
         # thread (pywebview requires that). webview.start() blocks until the
         # window closes; tear the server down afterwards.
         self._server = server.run_background(
-            self._bridge, port=port, open_browser=False, host=host
+            self._bridge, port=port, open_browser=False, host=host,
+            password=password,
         )
         self._wait_until_ready()
         self._serving = True

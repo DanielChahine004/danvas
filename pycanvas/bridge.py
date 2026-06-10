@@ -17,6 +17,8 @@ from collections import deque
 
 from fastapi import WebSocketDisconnect
 
+from .kernel import Kernel
+
 # Friendly auto-generated identities for connecting viewers (editable in the UI).
 _VIEWER_ANIMALS = ["Fox", "Owl", "Bear", "Wolf", "Hawk", "Lynx", "Otter",
                    "Crane", "Seal", "Moth", "Newt", "Wren", "Stoat", "Vole"]
@@ -97,6 +99,15 @@ class Bridge:
         self._conflate_pending = {}   # (ws, comp_id, kind) -> (kind, msg|bytes)
         self._conflate_active = set()  # (ws, comp_id, kind) with a live sender
         self._conflate_lock = threading.Lock()
+        # User input/layout callbacks (``on_change``/``on_layout`` and the
+        # component routers) run here, on a single FIFO worker thread, instead of
+        # on the asyncio event loop. A slow or blocking callback (a sleep, an HTTP
+        # call, heavy compute -- exactly what "drag slider -> move robot" handlers
+        # do) would otherwise freeze the loop and stall rendering and every other
+        # viewer. One ordered thread preserves per-message order (so a slider drag
+        # settles on its last value) while keeping the loop free. Lazy: no thread
+        # until the first inbound message.
+        self._dispatch = Kernel()
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -377,34 +388,20 @@ class Bridge:
         if kind == "input":
             comp = self._components.get(msg.get("id"))
             if comp is not None:
-                comp._handle_input(msg.get("payload") or {})
-                # Echo the resulting state to the *other* clients so a second
-                # browser on this canvas (or a merge host aggregating it) stays in
-                # sync with a browser-driven change. Output-only components return
-                # None here and are left alone. The originating browser is
-                # excluded: it already shows the value, and echoing back mid-drag
-                # would fight the live thumb with stale values.
-                state = comp.state_payload()
-                if state:
-                    self.broadcast(
-                        {"type": "update", "id": comp.id, "payload": state},
-                        exclude=ws,
-                    )
+                payload = msg.get("payload") or {}
+                # Run the (user-authored) handler on the dispatch thread, never on
+                # the event loop -- a blocking callback can't stall rendering or
+                # other viewers. The state echo happens there too, after handling.
+                self._dispatch.submit(
+                    lambda c=comp, p=payload: self._dispatch_input(c, p, ws)
+                )
         elif kind == "layout":
             # User moved/resized a panel in the browser; sync Python's state.
             comp = self._components.get(msg.get("id"))
             if comp is not None:
-                comp._apply_remote_layout(msg)
-                # Echo the new geometry to every client (a second browser, or a
-                # merge host) as an ``update`` -- the server->browser form the
-                # frontend applies. The fields already carry the wire units the
-                # frontend expects (canvas x/y, radian rotation).
-                geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
-                        if msg.get(k) is not None}
-                if geom:
-                    self.broadcast(
-                        {"type": "update", "id": comp.id, "payload": geom}
-                    )
+                self._dispatch.submit(
+                    lambda c=comp, m=msg: self._dispatch_layout(c, m)
+                )
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
             # canonical record set and echo it to the other browsers so every
@@ -418,6 +415,37 @@ class Bridge:
             if waiter is not None:
                 waiter["data"] = msg.get("data")
                 waiter["event"].set()
+
+    def _dispatch_input(self, comp, payload, ws):
+        """Run a component's input handler (off the loop) and echo its state.
+
+        Called on the dispatch thread. Echoes the resulting state to the *other*
+        clients so a second browser (or a merge host aggregating this canvas)
+        stays in sync with a browser-driven change. Output-only components return
+        None and are left alone. The originating browser is excluded: it already
+        shows the value, and echoing back mid-drag would fight the live thumb with
+        stale values.
+        """
+        comp._handle_input(payload)
+        state = comp.state_payload()
+        if state:
+            self.broadcast(
+                {"type": "update", "id": comp.id, "payload": state}, exclude=ws
+            )
+
+    def _dispatch_layout(self, comp, msg):
+        """Apply a user move/resize (off the loop) and echo the new geometry.
+
+        Echoes to every client (a second browser, or a merge host) as an
+        ``update`` -- the server->browser form the frontend applies. The fields
+        already carry the wire units the frontend expects (canvas x/y, radian
+        rotation).
+        """
+        comp._apply_remote_layout(msg)
+        geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
+                if msg.get(k) is not None}
+        if geom:
+            self.broadcast({"type": "update", "id": comp.id, "payload": geom})
 
     async def _send(self, ws, msg):
         """Send one frame, serialized against any other send to this socket."""

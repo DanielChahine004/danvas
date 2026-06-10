@@ -69,6 +69,32 @@ def test_input_message_updates_python_value():
     assert fired == [150]
 
 
+def test_rapid_inputs_processed_in_order():
+    """A burst of inputs (a slider drag) settles on the last value, in order.
+
+    Inputs run on the bridge's single FIFO dispatch thread, so even a slow
+    callback can't reorder them or leave the value on a stale frame.
+    """
+    canvas, slider, label, app = build_client()
+    fired = []
+    slider.on_change(lambda v: fired.append(v))
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            for _ in range(4):
+                _recv(ws)
+            for v in (10, 20, 30, 40, 50):
+                ws.send_json({"type": "input", "id": slider.id,
+                              "payload": {"value": v}})
+            for _ in range(50):
+                if slider.value == 50:
+                    break
+                time.sleep(0.02)
+
+    assert slider.value == 50
+    assert fired == [10, 20, 30, 40, 50]
+
+
 def test_layout_message_syncs_python_geometry():
     canvas, slider, label, app = build_client()
     seen = []

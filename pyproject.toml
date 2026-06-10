@@ -10,7 +10,6 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "websockets>=12",
-    "opencv-python>=4.8",
     "numpy>=1.24",
 ]
 classifiers = [
@@ -25,6 +24,11 @@ classifiers = [
 # and caches the cloudflared binary on first use, so no manual install is needed.
 # Optional: tunnelling also works with a system-installed cloudflared/localtunnel.
 tunnel = ["pycloudflared>=0.2"]
+# Server-side JPEG encoding for VideoFeed (Canvas.video with the default
+# encode=True). OpenCV is large (~90 MB), so it's optional: a canvas with only
+# sliders/plots/etc. doesn't pay for it, and VideoFeed(encode=False) streams
+# pre-encoded JPEG bytes (e.g. from a hardware encoder) without OpenCV at all.
+video = ["opencv-python>=4.8"]
 # Microphone capture for AudioFeed examples (Canvas.audio). The AudioFeed
 # component itself needs nothing extra — only *capturing* mic input does. The
 # browser plays the streamed PCM through the Web Audio API.
