@@ -69,7 +69,7 @@ def worker():
             servo_1.update(round(v1))
             servo_2.update(round(v2))
 
-        # LivePlot streams smoothly — safe to push every loop (10 Hz here).
+        # LivePlot streams smoothly — safe to push every loop (100 Hz here).
         plot.push({"servo_1": servo_1.value, "servo_2": servo_2.value})
 
         # Synthetic camera frame with a sweeping bar.
@@ -78,8 +78,8 @@ def worker():
         frame[:, max(0, x - 4):x + 4, 1] = 255
         feed.update(frame)
 
-        t += 0.1
-        time.sleep(0.1)
+        t += 0.01
+        time.sleep(0.01)
 
 
 threading.Thread(target=worker, daemon=True).start()

@@ -75,10 +75,17 @@ function cardStyle(shape) {
 // panel normally. The first click selects it; the cover then lifts and the
 // content becomes interactive. Small-control panels (slider/toggle/button) pass
 // ``grab=false`` and keep single-click interaction.
+//
+// The cover has a cost: while it's up, the pointer never reaches the content,
+// so CSS :hover inside the panel is dead until the first click (native panels
+// and iframes alike). Python can opt a panel out with ``selectable=False``
+// (meta.noGrab): no cover, content live from the first hover, body clicks
+// never select the panel.
 function Card({ shape, children, grab = false }) {
   const editor = useEditor()
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
+  const noGrab = !!shape.meta?.noGrab
   const selected = useValue(
     'pc-selected',
     () => editor.getSelectedShapeIds().includes(shape.id),
@@ -87,7 +94,7 @@ function Card({ shape, children, grab = false }) {
   return (
     <HTMLContainer style={cardStyle(shape)}>
       {children}
-      {grab && !selected && !blockInput && (
+      {grab && !noGrab && !selected && !blockInput && (
         <div
           // No handler / no stopPropagation: the event bubbles to tldraw, which
           // selects + (on drag) moves the topmost panel — fixing overlap grabs.

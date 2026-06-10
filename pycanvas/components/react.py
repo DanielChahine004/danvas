@@ -32,6 +32,7 @@ The component must be named ``Component`` and receives three props:
 
 import json
 import traceback
+import re
 
 from .base import BaseComponent
 
@@ -39,13 +40,24 @@ from .base import BaseComponent
 class React(BaseComponent):
     component = "React"
 
-    def __init__(self, source=None, path=None, name="react", label=None,
-                 width=380, height=320, props=None, event_key="event",
+    def __init__(self, source=None, path=None, jsx=None, css=None, name="react",
+                 label=None, width=380, height=320, props=None, event_key="event",
                  queue="fifo"):
         super().__init__(name=name, label=label, w=width, h=height, queue=queue)
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 source = f.read()
+        # Two ways in: ``source`` is a complete component (must define
+        # ``function Component``); ``jsx`` is just the markup expression, which
+        # — with optional ``css`` — is composed into a Component under the hood.
+        if source is not None and jsx is not None:
+            raise ValueError("pass either source= (a full Component) or jsx= "
+                             "(markup to be wrapped), not both")
+        if jsx is not None:
+            source = self.compose(jsx, css or "")
+        elif css:
+            raise ValueError("css= only applies to jsx=; a full source= "
+                             "component should carry its own <style>")
         self._source = source or ""
         # Props handed to the component (and merged by ``update``). Carried to the
         # browser as a JSON string prop so they persist in the shape and replay to
@@ -61,6 +73,92 @@ class React(BaseComponent):
         props["source"] = self._source
         props["data"] = json.dumps(self._data)
         return props
+    
+    @staticmethod
+    def compose(jsx="", css=""):
+        """Wrap a JSX expression (plus optional CSS) into a full ``Component``.
+
+        Used internally for the ``jsx=`` / ``css=`` constructor path, but also
+        callable directly when you want the assembled source. The CSS lands in
+        a ``<style>`` tag scoped only by your own selectors, and the markup is
+        wrapped in a ``.react-root`` div that fills the panel.
+        """
+        return f"""
+        function Component({{ canvas, props, value }}) {{
+            return (
+                <>
+                    <style>{{`
+                        .react-root {{ width: 100%; height: 100%; }}
+                        {css}
+                    `}}</style>
+                    <div className="react-root">
+                        {jsx}
+                    </div>
+                </>
+            );
+        }}
+        """
+
+    @staticmethod
+    def from_uiverse(raw_code):
+        """Convert a uiverse.io React snippet (styled-components) to panel source.
+
+        uiverse exports React widgets as a component wrapped in a
+        ``styled-components`` ``StyledWrapper``. styled-components needs an npm
+        build, which the in-browser Babel pipeline doesn't have — so this
+        rewrites the snippet into plain React + a ``<style>`` tag:
+
+        * each ``const X = styled.tag`...``` definition is removed and its CSS
+          collected (the panel relies on native CSS nesting, supported by all
+          current browsers, since styled-components CSS is nested);
+        * ``<X>``/``</X>`` usages of those styled components become plain
+          ``<div className="pc-uiverse">`` wrappers carrying the collected CSS;
+        * imports / ``export default`` are stripped and the remaining component
+          is re-exported as the ``Component`` the panel expects.
+
+        Returns source ready for ``React(source=...)`` / ``canvas.react(...)``.
+        """
+        # Collect every styled-components definition: its name and its CSS.
+        styled_re = re.compile(r"const\s+(\w+)\s*=\s*styled\.\w+`([\s\S]*?)`;?")
+        styled = {m.group(1): m.group(2) for m in styled_re.finditer(raw_code)}
+        css = "\n".join(styled.values())
+
+        # The exported name is the component to mount; fall back to the first
+        # non-styled `const Name =` definition.
+        export_match = re.search(r"export\s+default\s+(\w+)", raw_code)
+        if export_match:
+            original_name = export_match.group(1)
+        else:
+            names = [m.group(1)
+                     for m in re.finditer(r"const\s+(\w+)\s*=", raw_code)
+                     if m.group(1) not in styled]
+            original_name = names[0] if names else "UiverseComponent"
+
+        clean = styled_re.sub("", raw_code)
+        clean = re.sub(r"^\s*import\b.*$", "", clean, flags=re.MULTILINE)
+        clean = re.sub(r"^\s*export\s+default\b.*$", "", clean, flags=re.MULTILINE)
+        # Styled tags become plain divs; the class on the outer wrapper below
+        # scopes the collected CSS to this panel.
+        for name in styled:
+            clean = re.sub(rf"<{name}(\s|>)", r"<div\1", clean)
+            clean = clean.replace(f"</{name}>", "</div>")
+
+        return f"""
+        {clean}
+
+        function Component({{ canvas, props, value }}) {{
+            return (
+                <>
+                    <style>{{`
+                        .pc-uiverse {{ {css} }}
+                    `}}</style>
+                    <div className="pc-uiverse">
+                        <{original_name} {{...props}} />
+                    </div>
+                </>
+            );
+        }}
+        """
 
     # -- write (Python -> panel) ---------------------------------------------
     def update(self, **props):

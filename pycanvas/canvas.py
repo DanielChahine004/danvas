@@ -35,7 +35,7 @@ from .kernel import Kernel
 # ``name`` is intentionally absent: it is the component's identity and travels on
 # the component itself (set in its constructor), not a placement option.
 _INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "movable",
-                "resizable", "interactive")
+                "resizable", "interactive", "selectable")
 
 
 # Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
@@ -282,7 +282,7 @@ class Canvas:
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, movable=True, resizable=True, interactive=True,
-               name=None):
+               selectable=True, name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -297,6 +297,11 @@ class Canvas:
           controls interactive (toggle with ``component.movable``).
         - ``resizable=False`` stops the user resizing it, controls still work
           (toggle with ``component.resizable``).
+        - ``selectable=False`` (content-heavy panels: Custom/React/WebView/
+          plots…) removes the click-to-select cover, so the panel's content is
+          hoverable and clickable immediately and clicking it never highlights
+          the panel — move it via marquee select or from Python (toggle with
+          ``component.selectable``).
 
         Use ``movable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
@@ -383,6 +388,8 @@ class Canvas:
             component._resizable = False
         if not interactive:
             component._interactive = False
+        if not selectable:
+            component._selectable = False
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -460,11 +467,16 @@ class Canvas:
         """Insert a :class:`~pycanvas.Chat` panel. See :meth:`insert` for ``place``."""
         return self._make(Chat, name=name, label=label, **place)
 
-    def custom(self, html=None, path=None, name="custom", label=None, width=380,
-               height=320, **place):
-        """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``."""
-        return self._make(Custom, html=html, path=path, name=name, label=label,
-                          width=width, height=height, **place)
+    def custom(self, html=None, path=None, css=None, js=None, name="custom",
+               label=None, width=380, height=320, **place):
+        """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``.
+
+        ``html``/``css``/``js`` may be given as separate strings (e.g. pasted
+        from uiverse.io) — they are composed into one document under the hood.
+        """
+        return self._make(Custom, html=html, path=path, css=css, js=js,
+                          name=name, label=label, width=width, height=height,
+                          **place)
 
     def file_browser(self, name="files", root=".", label=None, width=320,
                      height=420, pattern=None, show_hidden=False, **place):
@@ -477,15 +489,19 @@ class Canvas:
                           width=width, height=height, pattern=pattern,
                           show_hidden=show_hidden, **place)
 
-    def react(self, source=None, path=None, name="react", label=None, width=380,
-              height=320, props=None, **place):
+    def react(self, source=None, path=None, jsx=None, css=None, name="react",
+              label=None, width=380, height=320, props=None, **place):
         """Insert a :class:`~pycanvas.React` panel. See :meth:`insert` for ``place``.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
-        file with ``path=``); ``props`` is its initial props dict.
+        file with ``path=``); alternatively pass just ``jsx`` markup plus
+        optional ``css`` and the Component wrapper is added under the hood. Use
+        :meth:`React.from_uiverse` to convert a uiverse.io styled-components
+        snippet into ``source``. ``props`` is the initial props dict.
         """
-        return self._make(React, source=source, path=path, name=name, label=label,
-                          width=width, height=height, props=props, **place)
+        return self._make(React, source=source, path=path, jsx=jsx, css=css,
+                          name=name, label=label, width=width, height=height,
+                          props=props, **place)
 
     def markdown(self, text="", name="markdown", label=None, width=380,
                  height=240, **place):
@@ -709,6 +725,7 @@ class Canvas:
                 "locked": c.locked,
                 "movable": c.movable,
                 "resizable": c.resizable,
+                "selectable": c.selectable,
             }
             for c in self._components
         ]
@@ -740,6 +757,7 @@ class Canvas:
                 locked=item.get("locked"),
                 movable=item.get("movable"),
                 resizable=item.get("resizable"),
+                selectable=item.get("selectable"),
             )
 
     @staticmethod

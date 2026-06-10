@@ -80,6 +80,13 @@ class BaseComponent:
         # the shape's tldraw ``meta`` (lockInput). Contrast ``locked``, which
         # also freezes programmatic updates.
         self._interactive = True
+        # When False, the panel's body never claims the first click for
+        # selection: the frontend skips the "grab cover" it lays over
+        # content-heavy panels, so the content is hoverable/clickable
+        # immediately and clicking it never highlights the panel. The panel can
+        # then only be moved via marquee selection or from Python. Carried in
+        # the shape's tldraw ``meta`` (noGrab).
+        self._selectable = True
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -194,6 +201,24 @@ class BaseComponent:
     def interactive(self, value):
         self.set_layout(interactive=bool(value))
 
+    @property
+    def selectable(self):
+        """Whether clicking the panel's body selects (highlights) the panel.
+
+        Content-heavy panels (Custom, React, WebView, plots…) normally need a
+        first click to select the panel before their content becomes
+        interactive. Set to ``False`` to drop that cover: the content is live
+        (hover and clicks work) from the start, and clicking it never
+        highlights the panel — only the widget itself reacts. The trade-off is
+        that the panel can no longer be dragged by its body (marquee-select or
+        move it from Python instead).
+        """
+        return self._selectable
+
+    @selectable.setter
+    def selectable(self, value):
+        self.set_layout(selectable=bool(value))
+
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
         """Props sent in the ``register`` message to build the shape."""
@@ -269,7 +294,8 @@ class BaseComponent:
         self.set_layout(movable=True, resizable=True)
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
-                   locked=None, movable=None, resizable=None, interactive=None):
+                   locked=None, movable=None, resizable=None, interactive=None,
+                   selectable=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
@@ -313,6 +339,9 @@ class BaseComponent:
         if interactive is not None:
             self._interactive = bool(interactive)
             payload["interactive"] = self._interactive
+        if selectable is not None:
+            self._selectable = bool(selectable)
+            payload["selectable"] = self._selectable
         if payload:
             self._send_update(payload)
 

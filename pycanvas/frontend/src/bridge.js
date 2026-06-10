@@ -352,15 +352,18 @@ function removeComponent(id) {
 // others. `lockInput` blocks the user from touching the panel's controls while
 // the shape stays *unlocked*, so programmatic value updates still render (unlike
 // the top-level isLocked, which tldraw also refuses prop updates to).
-function lockMeta(base, movable, resizable, interactive) {
+function lockMeta(base, movable, resizable, interactive, selectable) {
   const meta = { ...(base || {}) }
   if (typeof movable === 'boolean') meta.lockMove = !movable
   if (typeof resizable === 'boolean') meta.lockResize = !resizable
   if (typeof interactive === 'boolean') meta.lockInput = !interactive
+  // noGrab drops the click-to-select cover on content-heavy panels: their
+  // content is hover/click-live immediately and a body click never selects.
+  if (typeof selectable === 'boolean') meta.noGrab = !selectable
   return meta
 }
 
-function registerComponent({ id, component, props = {}, x, y, rotation, locked, movable, resizable, interactive }) {
+function registerComponent({ id, component, props = {}, x, y, rotation, locked, movable, resizable, interactive, selectable }) {
   const shapeType = COMPONENT_TO_SHAPE[component]
   if (!shapeType) return
 
@@ -388,8 +391,8 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   if (typeof rotation === 'number') shape.rotation = rotation // radians
   if (typeof locked === 'boolean') shape.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
-      typeof interactive === 'boolean') {
-    shape.meta = lockMeta({}, movable, resizable, interactive)
+      typeof interactive === 'boolean' || typeof selectable === 'boolean') {
+    shape.meta = lockMeta({}, movable, resizable, interactive, selectable)
   }
   applyRemote(() => editor.createShape(shape))
 }
@@ -449,15 +452,15 @@ function updateComponent(id, payload) {
   if (!shape) return
   // x/y/rotation are top-level shape fields, not props; everything else
   // (incl. w/h) is a shape prop. Split them so live move/resize/rotate works.
-  const { x, y, rotation, locked, movable, resizable, interactive, ...props } = payload
+  const { x, y, rotation, locked, movable, resizable, interactive, selectable, ...props } = payload
   const patch = { id: shapeId, type: shape.type, props: { ...props } }
   if (typeof x === 'number') patch.x = x
   if (typeof y === 'number') patch.y = y
   if (typeof rotation === 'number') patch.rotation = rotation
   if (typeof locked === 'boolean') patch.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
-      typeof interactive === 'boolean') {
-    patch.meta = lockMeta(shape.meta, movable, resizable, interactive)
+      typeof interactive === 'boolean' || typeof selectable === 'boolean') {
+    patch.meta = lockMeta(shape.meta, movable, resizable, interactive, selectable)
   }
   applyRemote(() => editor.updateShape(patch))
 }

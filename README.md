@@ -203,6 +203,16 @@ def handle(msg):
 (`event_key=` changes the field used for routing if your HTML tags messages
 differently, e.g. `type`.)
 
+The HTML, CSS and JS can also be supplied as **separate strings** — handy when
+pasting a widget from a snippet site like [uiverse.io](https://uiverse.io),
+which hands you markup and a stylesheet side by side. They're composed into one
+document under the hood:
+
+```python
+panel = canvas.custom(html=markup, css=styles, js=behaviour)
+panel.update(css=new_styles)        # restyle without touching the markup
+```
+
 `panel.update(html)` swaps the whole HTML (reloads the iframe). To stream live
 data **without** reloading — keeping the iframe's focus, listeners and scroll —
 use `panel.push(data)`, received via `canvas.onPush(fn)`. That's what powers
@@ -249,6 +259,33 @@ def _(msg): print("rotated to", msg["deg"])
 `state_payload` is the key hook: the bridge calls it right after registering the
 panel with each new WebSocket client, so the iframe is always seeded with the
 current value on load — no polling or `{type: "ready"}` retry needed.
+
+### React panels
+
+`React` is the native counterpart to `Custom`: instead of sandboxed HTML in an
+iframe, you ship JSX *source* from Python and it's compiled in the browser
+(Babel, lazily loaded — no `npm` build) and mounted as a real React subtree
+inside the panel, inheriting the canvas theme and talking to Python with no
+postMessage hop. Pass a full component as `source=` (it must define
+`function Component({ canvas, value, props })`), or just markup + CSS and let
+the wrapper be added for you:
+
+```python
+counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</button>',
+                       css='button { font-size: 18px; }')
+```
+
+uiverse.io exports its React widgets with `styled-components`, which needs an
+npm build — `React.from_uiverse(raw)` rewrites such a snippet into plain
+React + CSS that the in-browser pipeline accepts:
+
+```python
+panel = canvas.react(source=pycanvas.React.from_uiverse(raw_snippet))
+```
+
+See [`examples/react_styled_component.py`](examples/react_styled_component.py)
+and [`examples/custom_styled_component.py`](examples/custom_styled_component.py)
+for both flavours of pasted-widget panel.
 
 ### Web pages (WebView)
 
@@ -412,7 +449,7 @@ replaces the old arrow instead of stacking a duplicate.
 
 ## Locking & interactivity
 
-Four **independent** controls gate how a panel responds to the user. Set any of
+Five **independent** controls gate how a panel responds to the user. Set any of
 them on `insert` (or a factory), or flip them live as a property — each write is
 pushed to the browser immediately. Because they're separate axes you can mix them
 freely (e.g. pin a panel in place while keeping its slider live).
@@ -423,7 +460,16 @@ freely (e.g. pin a panel in place while keeping its slider live).
 | `movable=False`     | **no**         | yes              | yes                   | yes                        |
 | `resizable=False`   | yes            | **no**           | yes                   | yes                        |
 | `interactive=False` | yes            | yes              | **no**                | yes                        |
+| `selectable=False`  | header/marquee only | yes         | yes, **immediately**  | yes                        |
 | `locked=True`       | **no**         | **no**           | **no**                | **no** (frozen)            |
+
+`selectable` only matters on content-heavy panels (`Custom`, `React`, `WebView`,
+plots, chat, repl…). By default those need a first click to *select* the panel
+before their content takes the pointer — which also means CSS `:hover` effects
+inside the widget don't run until that click. `selectable=False` drops that
+cover: the widget is hover- and click-live from the start, and clicking it never
+highlights the panel — at the cost of not being able to drag the panel by its
+body (use marquee select, the header, or Python `move()`).
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -815,6 +861,8 @@ Caveats / v1 scope:
 python examples/hello_world.py        # slider + label
 python examples/sensor_dashboard.py   # live VideoFeed + worker thread
 python examples/custom_html.py        # hand-written HTML panel, bidirectional
+python examples/custom_styled_component.py  # uiverse.io HTML+CSS widget pasted into a Custom panel
+python examples/react_styled_component.py   # uiverse.io React widget via React.from_uiverse
 python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
@@ -867,10 +915,11 @@ would cost readability for no throughput.
 
 `register` carries optional `x`/`y`/`rotation` (top-level shape placement;
 `rotation` in radians) plus optional lock flags (`locked`, `movable`,
-`resizable`, `interactive`). `update` payloads may include `value`/component
-props as well as live layout changes (`x`, `y`, `w`, `h`, `rotation`) and those
-same lock flags. `locked` maps to tldraw's `isLocked`; `movable`/`resizable`/
-`interactive` ride in the shape's `meta` (`lockMove`/`lockResize`/`lockInput`) so
-they gate user gestures without freezing programmatic updates. `remove` deletes a
+`resizable`, `interactive`, `selectable`). `update` payloads may include
+`value`/component props as well as live layout changes (`x`, `y`, `w`, `h`,
+`rotation`) and those same lock flags. `locked` maps to tldraw's `isLocked`;
+`movable`/`resizable`/`interactive`/`selectable` ride in the shape's `meta`
+(`lockMove`/`lockResize`/`lockInput`/`noGrab`) so they gate user gestures
+without freezing programmatic updates. `remove` deletes a
 panel from connected clients. Server → browser: `register`, `update`, `remove`;
 browser → server: `input`.
