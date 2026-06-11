@@ -27,4 +27,4 @@ chat.post("welcome — say hi 👋")
 
 # host="" makes it reachable from other devices on the same Wi-Fi; pass
 # tunnel=True instead to share it with anyone on the public internet.
-canvas.serve(port=8000, host="", tunnel=True)
+canvas.serve(port=8000, tunnel=True)
