@@ -24,20 +24,24 @@ const ReactHost = lazy(() => import('./ReactHost'))
 
 // Shared card styling for all PyCanvas component shapes. The card is pinned to
 // the shape's exact w/h (not 100% of an ancestor) so it tracks resizing
-// continuously and lines up with tldraw's selection box.
+// continuously and lines up with tldraw's selection box. A frameless panel
+// (meta.noFrame, Python `frame=False`) keeps the same flex box but drops every
+// visible piece of chrome — background, border, shadow, padding — so its
+// content appears to sit directly on the canvas.
 function cardStyle(shape) {
+  const noFrame = !!shape.meta?.noFrame
   return {
     display: 'flex',
     flexDirection: 'column',
     width: shape.props.w,
     height: shape.props.h,
     boxSizing: 'border-box',
-    padding: '10px 12px',
-    background: 'var(--pc-bg)',
+    padding: noFrame ? 0 : '10px 12px',
+    background: noFrame ? 'transparent' : 'var(--pc-bg)',
     color: 'var(--pc-text)',
-    border: '1px solid var(--pc-border)',
+    border: noFrame ? 'none' : '1px solid var(--pc-border)',
     borderRadius: 8,
-    boxShadow: '0 1px 3px var(--pc-shadow)',
+    boxShadow: noFrame ? 'none' : '0 1px 3px var(--pc-shadow)',
     fontFamily: 'system-ui, sans-serif',
     overflow: 'hidden',
     // Anchors the lock overlay (see Card) to the card's own box.
@@ -122,6 +126,14 @@ const labelStyle = {
   marginBottom: 6,
 }
 
+// The caption header every panel shows. Part of the card chrome, so a
+// frameless panel (meta.noFrame) hides it along with the rest of the card.
+// It has no pointerEvents, so on grab-style panels dragging it moves the panel.
+function CardLabel({ shape }) {
+  if (shape.meta?.noFrame) return null
+  return <div style={labelStyle}>{shape.props.label}</div>
+}
+
 // Shared base for every PyCanvas panel. It reads two per-shape flags from the
 // shape's `meta` to support interaction-preserving locks (set from Python via
 // `movable` / `resizable`):
@@ -134,6 +146,14 @@ const labelStyle = {
 class PcShapeUtil extends BaseBoxShapeUtil {
   canResize(shape) {
     return !shape.meta?.lockResize
+  }
+
+  // Shared hover/selection outline. Frameless panels (meta.noFrame) suppress
+  // it so nothing ever draws a rectangle around their content — selection still
+  // happens (marquee), it just isn't highlighted.
+  indicator(shape) {
+    if (shape.meta?.noFrame) return null
+    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
   }
 
   hideResizeHandles(shape) {
@@ -276,15 +296,12 @@ export class SliderShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <SliderControl shape={shape} editor={this.editor} onRelease={shape.props.on_release} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Label ------------------------------------------------------------------
@@ -305,15 +322,12 @@ export class LabelShapeUtil extends PcShapeUtil {
     const { label, value } = shape.props
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{label}</div>
+        <CardLabel shape={shape} />
         <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--pc-text)' }}>{value}</div>
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- VideoFeed --------------------------------------------------------------
@@ -358,7 +372,8 @@ function VideoView({ shape }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--pc-video-bg)',
+        // Frameless: transparent letterbox bars instead of a dark slab.
+        background: shape.meta?.noFrame ? 'transparent' : 'var(--pc-video-bg)',
         borderRadius: 4,
         overflow: 'hidden',
       }}
@@ -394,15 +409,12 @@ export class VideoShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <VideoView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Custom (arbitrary HTML in a sandboxed iframe) --------------------------
@@ -423,15 +435,12 @@ export class HtmlShapeUtil extends PcShapeUtil {
     return (
       <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <CustomView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // The sandboxed iframe that hosts a Custom panel's HTML. Beyond rendering the
@@ -468,7 +477,9 @@ function CustomView({ shape }) {
         width: '100%',
         border: 'none',
         borderRadius: 4,
-        background: 'var(--pc-bg)',
+        // A frameless panel keeps the iframe transparent too, so user HTML
+        // with a transparent body floats directly on the canvas.
+        background: shape.meta?.noFrame ? 'transparent' : 'var(--pc-bg)',
         pointerEvents: 'all',
       }}
       // Keep tldraw from hijacking drags/zoom meant for the iframe content.
@@ -501,7 +512,7 @@ export class ReactShapeUtil extends PcShapeUtil {
     return (
       <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <Suspense
           fallback={
             <div
@@ -524,9 +535,6 @@ export class ReactShapeUtil extends PcShapeUtil {
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- WebView (an external URL in a same-origin iframe) ----------------------
@@ -552,7 +560,7 @@ export class WebViewShapeUtil extends PcShapeUtil {
     return (
       <Card shape={shape} grab>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <iframe
           title={shape.props.label}
           src={shape.props.url}
@@ -566,7 +574,9 @@ export class WebViewShapeUtil extends PcShapeUtil {
             width: '100%',
             border: 'none',
             borderRadius: 4,
-            background: 'var(--pc-bg)',
+            // Frameless: don't paint behind the page while it loads (external
+            // sites usually bring their own background anyway).
+            background: shape.meta?.noFrame ? 'transparent' : 'var(--pc-bg)',
             pointerEvents: 'all',
           }}
           // Keep tldraw from hijacking drags/zoom meant for the iframe content.
@@ -576,9 +586,6 @@ export class WebViewShapeUtil extends PcShapeUtil {
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Button (a momentary action trigger) ------------------------------------
@@ -600,7 +607,7 @@ export class ButtonShapeUtil extends PcShapeUtil {
     const id = componentIdOf(shape.id)
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{label}</div>
+        <CardLabel shape={shape} />
         <button
           style={{
             alignSelf: 'flex-start',
@@ -623,9 +630,6 @@ export class ButtonShapeUtil extends PcShapeUtil {
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Toggle (pick one of N options) -----------------------------------------
@@ -648,7 +652,7 @@ export class ToggleShapeUtil extends PcShapeUtil {
     const id = componentIdOf(shape.id)
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{label}</div>
+        <CardLabel shape={shape} />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {options.map((opt) => {
             const active = opt === value
@@ -687,9 +691,6 @@ export class ToggleShapeUtil extends PcShapeUtil {
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- LivePlot (streaming Plotly, no iframe reload) --------------------------
@@ -740,15 +741,12 @@ export class LivePlotShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape} grab>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <LivePlotView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- AudioFeed (streaming PCM played through the Web Audio API) -------------
@@ -893,15 +891,12 @@ export class AudioShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape}>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <AudioView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Chat (shared room for everyone viewing the canvas) ---------------------
@@ -1055,15 +1050,12 @@ export class ChatShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape} grab>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <ChatView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Repl (code cell against the shared kernel namespace) -------------------
@@ -1096,7 +1088,7 @@ export class ReplShapeUtil extends PcShapeUtil {
       this.editor.updateShape({ id: shape.id, type: shape.type, props: { code: v } })
     return (
       <Card shape={shape} grab>
-        <div style={labelStyle}>{label}</div>
+        <CardLabel shape={shape} />
         <Suspense
           fallback={
             <div
@@ -1166,13 +1158,44 @@ export class ReplShapeUtil extends PcShapeUtil {
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // --- Inspector (live table of canvas components or kernel globals) ----------
 const INSPECTOR_COLS = ['name', 'type', 'value', 'x', 'y', 'w', 'h']
+
+// A live readout of the current viewport: the canvas point at screen centre
+// and the zoom level — exactly the x/y/zoom that serve(view=...) / set_view()
+// take, so a user can pan/zoom to a framing they like and copy the numbers to
+// pin it as a fixed view. useValue tracks the camera, so it updates live.
+function ViewReadout() {
+  const editor = useEditor()
+  const view = useValue(
+    'pc-view-readout',
+    () => {
+      const c = editor.getViewportPageBounds().center
+      return { x: Math.round(c.x), y: Math.round(c.y), zoom: editor.getZoomLevel() }
+    },
+    [editor]
+  )
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        fontSize: 11,
+        fontFamily: 'ui-monospace, monospace',
+        color: 'var(--pc-muted)',
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        cursor: 'text',
+        pointerEvents: 'all',
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      title="current viewport — pass these to serve(view=...) or canvas.set_view() to fix this view"
+    >
+      view: x={view.x} y={view.y} zoom={view.zoom.toFixed(2)}
+    </div>
+  )
+}
 
 // The body is a component so the search box / type filter can hold local state
 // (they filter the already-sent rows client-side, so typing is instant).
@@ -1344,6 +1367,7 @@ function InspectorView({ shape }) {
           </tbody>
         </table>
       </div>
+      <ViewReadout />
     </>
   )
 }
@@ -1551,15 +1575,12 @@ export class InspectorShapeUtil extends PcShapeUtil {
   component(shape) {
     return (
       <Card shape={shape} grab>
-        <div style={labelStyle}>{shape.props.label}</div>
+        <CardLabel shape={shape} />
         <InspectorView shape={shape} />
       </Card>
     )
   }
 
-  indicator(shape) {
-    return <rect width={shape.props.w} height={shape.props.h} rx={8} />
-  }
 }
 
 // Map of the `component` string sent by Python -> tldraw shape type.

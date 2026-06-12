@@ -50,7 +50,7 @@ function Component({ canvas, value, props }) {
 
 canvas = pycanvas.Canvas()
 
-panel = canvas.react(PING_JSX, name="ping", props={"title": "Hello, React"}, x=80, y=80)
+panel = canvas.react(PING_JSX, name="ping", props={"title": "Hello, React"}, x=80, y=80, frame=False)
 status = canvas.label("status", value="click ping", x=400, y=80)
 
 

@@ -23,6 +23,7 @@ export function componentIdOf(shapeId) {
 export function setEditor(e) {
   editor = e
   setupGeometrySync(e)
+  setupSelectionFilter(e)
   setupDrawSync(e)
   // The view config usually arrives (in `welcome`) just after mount, but if it
   // was already known before this editor instance existed, apply it now.
@@ -77,6 +78,34 @@ function setupGeometrySync(ed) {
     dirtyShapes.add(next.id)
     if (flushTimer) clearTimeout(flushTimer)
     flushTimer = setTimeout(flushGeometry, 120)
+  })
+}
+
+// Make `selectable=False` (meta.noGrab) mean what it says: the panel can never
+// be hovered or selected by the user — not by body click, edge click, or
+// marquee — so no highlight or selection box ever outlines it. Without this,
+// tldraw hit-tests the shape's geometry directly (pointer events that miss the
+// panel's interactive content land on the canvas underneath), so an "empty"
+// region of a frameless panel would still hover-highlight and click-select.
+// Implemented as a page-state filter rather than per-event handlers so every
+// selection path (click, marquee, select-all) is covered. Python updates aren't
+// affected — they never go through the editor's selection state.
+function setupSelectionFilter(ed) {
+  ed.sideEffects.registerBeforeChangeHandler('instance_page_state', (prev, next) => {
+    const noGrab = (id) => {
+      const shape = ed.getShape(id)
+      return !!(shape && shape.meta && shape.meta.noGrab)
+    }
+    let out = next
+    if (next.hoveredShapeId && next.hoveredShapeId !== prev.hoveredShapeId &&
+        noGrab(next.hoveredShapeId)) {
+      out = { ...out, hoveredShapeId: null }
+    }
+    if (next.selectedShapeIds !== prev.selectedShapeIds &&
+        next.selectedShapeIds.some(noGrab)) {
+      out = { ...out, selectedShapeIds: next.selectedShapeIds.filter((id) => !noGrab(id)) }
+    }
+    return out
   })
 }
 
@@ -352,7 +381,7 @@ function removeComponent(id) {
 // others. `lockInput` blocks the user from touching the panel's controls while
 // the shape stays *unlocked*, so programmatic value updates still render (unlike
 // the top-level isLocked, which tldraw also refuses prop updates to).
-function lockMeta(base, movable, resizable, interactive, selectable) {
+function lockMeta(base, movable, resizable, interactive, selectable, frame) {
   const meta = { ...(base || {}) }
   if (typeof movable === 'boolean') meta.lockMove = !movable
   if (typeof resizable === 'boolean') meta.lockResize = !resizable
@@ -360,10 +389,13 @@ function lockMeta(base, movable, resizable, interactive, selectable) {
   // noGrab drops the click-to-select cover on content-heavy panels: their
   // content is hover/click-live immediately and a body click never selects.
   if (typeof selectable === 'boolean') meta.noGrab = !selectable
+  // noFrame strips the card chrome (background/border/shadow/label) and the
+  // hover/selection indicator, so the content sits bare on the canvas.
+  if (typeof frame === 'boolean') meta.noFrame = !frame
   return meta
 }
 
-function registerComponent({ id, component, props = {}, x, y, rotation, locked, movable, resizable, interactive, selectable }) {
+function registerComponent({ id, component, props = {}, x, y, rotation, locked, movable, resizable, interactive, selectable, frame }) {
   const shapeType = COMPONENT_TO_SHAPE[component]
   if (!shapeType) return
 
@@ -391,8 +423,9 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   if (typeof rotation === 'number') shape.rotation = rotation // radians
   if (typeof locked === 'boolean') shape.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
-      typeof interactive === 'boolean' || typeof selectable === 'boolean') {
-    shape.meta = lockMeta({}, movable, resizable, interactive, selectable)
+      typeof interactive === 'boolean' || typeof selectable === 'boolean' ||
+      typeof frame === 'boolean') {
+    shape.meta = lockMeta({}, movable, resizable, interactive, selectable, frame)
   }
   applyRemote(() => editor.createShape(shape))
 }
@@ -452,15 +485,16 @@ function updateComponent(id, payload) {
   if (!shape) return
   // x/y/rotation are top-level shape fields, not props; everything else
   // (incl. w/h) is a shape prop. Split them so live move/resize/rotate works.
-  const { x, y, rotation, locked, movable, resizable, interactive, selectable, ...props } = payload
+  const { x, y, rotation, locked, movable, resizable, interactive, selectable, frame, ...props } = payload
   const patch = { id: shapeId, type: shape.type, props: { ...props } }
   if (typeof x === 'number') patch.x = x
   if (typeof y === 'number') patch.y = y
   if (typeof rotation === 'number') patch.rotation = rotation
   if (typeof locked === 'boolean') patch.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
-      typeof interactive === 'boolean' || typeof selectable === 'boolean') {
-    patch.meta = lockMeta(shape.meta, movable, resizable, interactive, selectable)
+      typeof interactive === 'boolean' || typeof selectable === 'boolean' ||
+      typeof frame === 'boolean') {
+    patch.meta = lockMeta(shape.meta, movable, resizable, interactive, selectable, frame)
   }
   applyRemote(() => editor.updateShape(patch))
 }

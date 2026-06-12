@@ -80,13 +80,20 @@ class BaseComponent:
         # the shape's tldraw ``meta`` (lockInput). Contrast ``locked``, which
         # also freezes programmatic updates.
         self._interactive = True
-        # When False, the panel's body never claims the first click for
-        # selection: the frontend skips the "grab cover" it lays over
-        # content-heavy panels, so the content is hoverable/clickable
-        # immediately and clicking it never highlights the panel. The panel can
-        # then only be moved via marquee selection or from Python. Carried in
-        # the shape's tldraw ``meta`` (noGrab).
+        # When False, the user can't select this panel at all: the frontend
+        # skips the "grab cover" it lays over content-heavy panels (so the
+        # content is hoverable/clickable immediately) AND filters the panel out
+        # of hover/selection state, so no click, marquee, or select-all ever
+        # highlights or selects it. The panel can then only be moved/resized
+        # from Python. Carried in the shape's tldraw ``meta`` (noGrab).
         self._selectable = True
+        # When False the panel's rectangular card chrome is removed: no
+        # background, border, shadow, padding, or label header, and no
+        # hover/selection highlight rectangle — the component's content appears
+        # to sit directly on the canvas. Carried in the shape's tldraw ``meta``
+        # (noFrame). Often paired with ``selectable=False`` so clicking the
+        # content never outlines it.
+        self._frame = True
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -203,21 +210,39 @@ class BaseComponent:
 
     @property
     def selectable(self):
-        """Whether clicking the panel's body selects (highlights) the panel.
+        """Whether the user can select (highlight) this panel at all.
 
         Content-heavy panels (Custom, React, WebView, plots…) normally need a
         first click to select the panel before their content becomes
-        interactive. Set to ``False`` to drop that cover: the content is live
-        (hover and clicks work) from the start, and clicking it never
-        highlights the panel — only the widget itself reacts. The trade-off is
-        that the panel can no longer be dragged by its body (marquee-select or
-        move it from Python instead).
+        interactive. Set to ``False`` to drop that cover *and* make the panel
+        invisible to selection: the content is live (hover and clicks work)
+        from the start, and no click, marquee, or select-all ever highlights
+        or selects the panel — only the widget itself reacts. The trade-off is
+        that the user can't move or resize it; do that from Python (or flip
+        ``selectable`` back on).
         """
         return self._selectable
 
     @selectable.setter
     def selectable(self, value):
         self.set_layout(selectable=bool(value))
+
+    @property
+    def frame(self):
+        """Whether the panel draws its rectangular card chrome.
+
+        Set to ``False`` to strip the card entirely — background, border,
+        shadow, padding, label header, and the hover/selection highlight
+        rectangle — so the component's content appears to float directly on
+        the canvas. The panel still occupies its w×h box and can be moved or
+        resized as usual (marquee select still works). Pair with
+        ``selectable=False`` if clicks on the content should never select it.
+        """
+        return self._frame
+
+    @frame.setter
+    def frame(self, value):
+        self.set_layout(frame=bool(value))
 
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
@@ -295,7 +320,7 @@ class BaseComponent:
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
                    locked=None, movable=None, resizable=None, interactive=None,
-                   selectable=None):
+                   selectable=None, frame=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
@@ -342,6 +367,9 @@ class BaseComponent:
         if selectable is not None:
             self._selectable = bool(selectable)
             payload["selectable"] = self._selectable
+        if frame is not None:
+            self._frame = bool(frame)
+            payload["frame"] = self._frame
         if payload:
             self._send_update(payload)
 

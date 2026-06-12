@@ -45,7 +45,7 @@ canvas = pycanvas.Canvas()
 
 | Method | Purpose |
 |---|---|
-| `insert(component, x=, y=, w=, h=, rotation=, locked=, movable=, resizable=, name=)` | Register a panel, place it, and return it. |
+| `insert(component, x=, y=, w=, h=, rotation=, locked=, movable=, resizable=, interactive=, selectable=, frame=, name=)` | Register a panel, place it, and return it. |
 | `remove(component)` | Pull a panel off the canvas (live). |
 | `connect(start, end, name=, text=, **props)` | Draw an arrow between two panels; returns an `Arrow`. `name` is identity, `text` is the caption. |
 | `disconnect(arrow_or_name)` | Remove an arrow by object or name. |
@@ -349,6 +349,27 @@ Key distinction:
 canvas.insert(gauge, x=40, y=40, movable=False, resizable=False)  # pinned, live
 panel.lock()        # freeze completely
 panel.unlock()
+```
+
+### Frameless panels
+
+`frame=False` strips the panel's card chrome entirely — background, border,
+shadow, padding, the label header, *and* the hover/selection highlight
+rectangle — so the component's content appears to sit directly on the canvas:
+
+```python
+canvas.insert(widget, x=40, y=40, frame=False)   # or comp.frame = False later
+```
+
+The panel still occupies its `w×h` box and can be moved/resized as usual —
+selecting it shows tldraw's normal selection box and resize handles (handy for
+placing it), it just isn't outlined on hover. Pair it with `selectable=False`
+for content (Custom/React/WebView…) that should feel like a free-floating
+widget: live on hover, and *never* selectable by the user — no click, marquee,
+or select-all highlights it (move it from Python instead):
+
+```python
+canvas.custom(name="gauge", html=..., frame=False, selectable=False)
 ```
 
 ---

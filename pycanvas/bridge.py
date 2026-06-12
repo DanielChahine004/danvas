@@ -160,6 +160,8 @@ class Bridge:
             msg["interactive"] = False
         if not getattr(component, "_selectable", True):
             msg["selectable"] = False
+        if not getattr(component, "_frame", True):
+            msg["frame"] = False
         return msg
 
     def register_live(self, component):

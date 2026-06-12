@@ -134,7 +134,7 @@ def main():
 
     # selectable=False: hover effects (the tooltips) work without first
     # clicking to select the panel, and clicks never highlight the panel.
-    canvas.insert(panel, x=50, y=50, selectable=False)
+    canvas.insert(panel, x=50, y=50, selectable=False, frame=False)
     canvas.serve(desktop=True, view={"ui": False})
 
 if __name__ == "__main__":

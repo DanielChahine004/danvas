@@ -35,7 +35,7 @@ from .kernel import Kernel
 # ``name`` is intentionally absent: it is the component's identity and travels on
 # the component itself (set in its constructor), not a placement option.
 _INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "movable",
-                "resizable", "interactive", "selectable")
+                "resizable", "interactive", "selectable", "frame")
 
 
 # Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
@@ -282,7 +282,7 @@ class Canvas:
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, movable=True, resizable=True, interactive=True,
-               selectable=True, name=None):
+               selectable=True, frame=True, name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -298,10 +298,16 @@ class Canvas:
         - ``resizable=False`` stops the user resizing it, controls still work
           (toggle with ``component.resizable``).
         - ``selectable=False`` (content-heavy panels: Custom/React/WebView/
-          plots…) removes the click-to-select cover, so the panel's content is
-          hoverable and clickable immediately and clicking it never highlights
-          the panel — move it via marquee select or from Python (toggle with
+          plots…) removes the click-to-select cover — the panel's content is
+          hoverable and clickable immediately — and makes the panel invisible
+          to selection entirely: no click, marquee, or select-all ever
+          highlights it. Move/resize it from Python (toggle with
           ``component.selectable``).
+        - ``frame=False`` strips the panel's card chrome — background, border,
+          shadow, padding, label header, and the hover/selection highlight
+          rectangle — so the component's content appears to sit directly on
+          the canvas (toggle with ``component.frame``). Pair with
+          ``selectable=False`` if clicking the content should never select it.
 
         Use ``movable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
@@ -390,6 +396,8 @@ class Canvas:
             component._interactive = False
         if not selectable:
             component._selectable = False
+        if not frame:
+            component._frame = False
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -726,6 +734,7 @@ class Canvas:
                 "movable": c.movable,
                 "resizable": c.resizable,
                 "selectable": c.selectable,
+                "frame": c.frame,
             }
             for c in self._components
         ]
@@ -758,6 +767,7 @@ class Canvas:
                 movable=item.get("movable"),
                 resizable=item.get("resizable"),
                 selectable=item.get("selectable"),
+                frame=item.get("frame"),
             )
 
     @staticmethod

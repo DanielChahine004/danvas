@@ -349,6 +349,11 @@ to the kernel **globals** view, and click any row to drill into an object's
 fields. It's the same `Inspector` component, just summoned from the UI instead
 of `canvas.inspector(...)`.
 
+The panel's footer shows a live **view readout** — `view: x=… y=… zoom=…`,
+tracking the camera as you pan and zoom. The numbers are exactly what
+`serve(view=...)` / `set_view()` take, so navigate to a framing you like and
+copy them to pin it as a fixed view.
+
 Because that panel can surface your component state (and, in globals mode, your
 kernel variables) to **everyone** connected, the button is offered only on a
 local bind (`127.0.0.1`) by default. On a LAN or tunneled canvas it's hidden
@@ -460,16 +465,18 @@ freely (e.g. pin a panel in place while keeping its slider live).
 | `movable=False`     | **no**         | yes              | yes                   | yes                        |
 | `resizable=False`   | yes            | **no**           | yes                   | yes                        |
 | `interactive=False` | yes            | yes              | **no**                | yes                        |
-| `selectable=False`  | header/marquee only | yes         | yes, **immediately**  | yes                        |
+| `selectable=False`  | **no** (Python only) | **no**     | yes, **immediately**  | yes                        |
 | `locked=True`       | **no**         | **no**           | **no**                | **no** (frozen)            |
 
-`selectable` only matters on content-heavy panels (`Custom`, `React`, `WebView`,
-plots, chat, repl…). By default those need a first click to *select* the panel
-before their content takes the pointer — which also means CSS `:hover` effects
-inside the widget don't run until that click. `selectable=False` drops that
-cover: the widget is hover- and click-live from the start, and clicking it never
-highlights the panel — at the cost of not being able to drag the panel by its
-body (use marquee select, the header, or Python `move()`).
+`selectable` mostly matters on content-heavy panels (`Custom`, `React`,
+`WebView`, plots, chat, repl…). By default those need a first click to *select*
+the panel before their content takes the pointer — which also means CSS
+`:hover` effects inside the widget don't run until that click.
+`selectable=False` drops that cover **and** makes the panel invisible to
+selection entirely: the widget is hover- and click-live from the start, and no
+click, marquee, or select-all ever highlights or selects the panel. The
+trade-off is that the user can't move or resize it at all — do that from
+Python (`move()` / `resize()`), or flip `selectable` back on.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -496,6 +503,28 @@ whose thumb tracks an automatic value the user mustn't drag. `lock()` freezes
 everything *including* your own `update()` calls, so the thumb would stop moving.
 See [`examples/robot_control.py`](examples/robot_control.py) — vision mode makes
 the servo sliders inert (`interactive=False`) while they sweep on their own.
+
+### Frameless panels
+
+`frame=False` strips a panel's card chrome entirely — background, border,
+shadow, padding, the label header, and the hover-highlight outline — so the
+component's content appears to sit directly on the canvas:
+
+```python
+canvas.insert(widget, x=40, y=40, frame=False)   # or widget.frame = False, live
+```
+
+The panel still occupies its `w×h` box and behaves normally otherwise:
+selecting it shows the usual selection box and resize handles (handy for
+placing it), it just isn't outlined on hover. Frameless `Custom`/`WebView`
+iframes and `VideoFeed` letterboxes turn transparent too, so user HTML with a
+transparent body (the `css=`/`js=` compose path sets one) floats free. Pair it
+with `selectable=False` for a true free-floating widget — live on hover and
+completely untouchable by the user:
+
+```python
+canvas.custom(name="gauge", html=..., frame=False, selectable=False)
+```
 
 ## Saving & loading
 
@@ -914,12 +943,13 @@ Control messages stay JSON — they're low-rate and self-describing, so binary
 would cost readability for no throughput.
 
 `register` carries optional `x`/`y`/`rotation` (top-level shape placement;
-`rotation` in radians) plus optional lock flags (`locked`, `movable`,
-`resizable`, `interactive`, `selectable`). `update` payloads may include
+`rotation` in radians) plus optional lock/appearance flags (`locked`, `movable`,
+`resizable`, `interactive`, `selectable`, `frame`). `update` payloads may include
 `value`/component props as well as live layout changes (`x`, `y`, `w`, `h`,
-`rotation`) and those same lock flags. `locked` maps to tldraw's `isLocked`;
-`movable`/`resizable`/`interactive`/`selectable` ride in the shape's `meta`
-(`lockMove`/`lockResize`/`lockInput`/`noGrab`) so they gate user gestures
-without freezing programmatic updates. `remove` deletes a
+`rotation`) and those same flags. `locked` maps to tldraw's `isLocked`;
+`movable`/`resizable`/`interactive`/`selectable`/`frame` ride in the shape's
+`meta` (`lockMove`/`lockResize`/`lockInput`/`noGrab`/`noFrame`) so they gate
+user gestures (or strip the card chrome) without freezing programmatic
+updates. `remove` deletes a
 panel from connected clients. Server → browser: `register`, `update`, `remove`;
 browser → server: `input`.
