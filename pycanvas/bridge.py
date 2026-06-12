@@ -58,6 +58,21 @@ class Bridge:
     def __init__(self):
         self._components = {}  # id -> BaseComponent
         self._arrows = {}  # id -> Arrow
+        # Identity of this server *run*. Component ids are minted fresh every
+        # run, so a browser whose socket reconnects to a new run (re-running the
+        # script, a crash, a hot reload) still shows the previous run's panels —
+        # stacked exactly on top of the new ones, dead to input. The run id rides
+        # the welcome frame; the frontend clears every managed shape when it sees
+        # the id change, so a stale page heals itself on reconnect.
+        self._run_id = uuid.uuid4().hex[:8]
+        # Wire observers (canvas.on_frame / serve(debug=True)): each is called
+        # as fn(direction, msg) with direction "out" (Python -> browser) or "in"
+        # (browser -> Python) for every JSON frame and a summary of every binary
+        # frame. ``_tap_guard`` makes taps reentrancy-safe: anything a tap itself
+        # sends (e.g. updating a debug panel) is not re-tapped, so a tap that
+        # drives a component can't recurse.
+        self._frame_taps = []
+        self._tap_guard = threading.local()
         self._connections = set()
         # One asyncio.Lock per live connection. The websockets legacy protocol
         # forbids concurrent writes (its drain() has no internal lock — two
@@ -118,6 +133,49 @@ class Bridge:
         # settles on its last value) while keeping the loop free. Lazy: no thread
         # until the first inbound message.
         self._dispatch = Kernel()
+
+    # -- wire observation ------------------------------------------------------
+    def add_frame_tap(self, fn):
+        """Register ``fn(direction, msg)`` to observe every WebSocket frame.
+
+        ``direction`` is ``"out"`` (Python -> browser) or ``"in"`` (browser ->
+        Python); ``msg`` is the frame's dict (binary media frames arrive as a
+        ``{"type": "binary", ...}`` summary). Taps observe; they must not block
+        (they run inline on the sending/receiving path). A tap may safely drive
+        components — frames a tap itself causes are not re-tapped.
+        """
+        self._frame_taps.append(fn)
+        return fn
+
+    def remove_frame_tap(self, fn):
+        if fn in self._frame_taps:
+            self._frame_taps.remove(fn)
+
+    def _tap_frame(self, direction, msg):
+        """Hand one frame to every tap, guarding against tap-driven recursion."""
+        if not self._frame_taps or getattr(self._tap_guard, "active", False):
+            return
+        self._tap_guard.active = True
+        try:
+            for fn in list(self._frame_taps):
+                try:
+                    fn(direction, msg)
+                except Exception:
+                    traceback.print_exc()
+        finally:
+            self._tap_guard.active = False
+
+    def _tap_binary(self, data):
+        """Report a binary media frame to taps as a small JSON-able summary."""
+        if not self._frame_taps:
+            return
+        try:  # header: [type][idLen][id bytes][payload] (see encode_binary_frame)
+            kind = {BINARY_VIDEO: "video", BINARY_AUDIO: "audio"}.get(data[0])
+            cid = data[2:2 + data[1]].decode("utf-8", "replace")
+            self._tap_frame("out", {"type": "binary", "id": cid,
+                                    "media": kind, "bytes": len(data)})
+        except Exception:
+            pass
 
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
@@ -206,6 +264,7 @@ class Bridge:
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
                                   "view": view_for_client,
+                                  "runId": self._run_id,
                                   "reload": self._reload})
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
@@ -234,6 +293,12 @@ class Bridge:
                 await self._send(
                     ws, {"type": "load_snapshot", "data": self._loaded_doc}
                 )
+            # One diagnostic line per connection, so "nothing happens" debugging
+            # starts with evidence: the viewer reached the server and what state
+            # it was seeded with.
+            print(f"[pycanvas] viewer '{viewer['name']}' connected "
+                  f"(replayed {len(self._components)} panels, "
+                  f"{len(self._arrows)} arrows)")
 
             while True:
                 raw = await ws.receive_text()
@@ -252,6 +317,7 @@ class Bridge:
             # again — drop it so the map doesn't grow unbounded.
             if gone is not None:
                 self._view_per_client.pop(gone["id"], None)
+                print(f"[pycanvas] viewer '{gone['name']}' disconnected")
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
@@ -393,6 +459,7 @@ class Bridge:
         kind = msg.get("type")
         if kind == "heartbeat":
             return  # liveness only; timestamp already refreshed above
+        self._tap_frame("in", msg)
         if kind == "set_name":
             self._rename_viewer(ws, msg.get("name"))
             return
@@ -506,7 +573,8 @@ class Bridge:
         avoid echoing a browser's own input straight back to it.
         """
         if self._loop is None:
-            return
+            return  # not serving yet; connection replay will carry the state
+        self._tap_frame("out", msg)
         for ws in list(self._connections):
             if ws is exclude:
                 continue
@@ -528,6 +596,7 @@ class Bridge:
         """
         if self._loop is None:
             return
+        self._tap_binary(data)
         for ws in list(self._connections):
             if ws is exclude:
                 continue
@@ -586,6 +655,10 @@ class Bridge:
         """
         if self._loop is None:
             return
+        if data is not None:
+            self._tap_binary(data)
+        else:
+            self._tap_frame("out", msg)
         kind = "bin" if data is not None else "msg"
         for ws in list(self._connections):
             if ws is exclude:

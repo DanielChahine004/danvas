@@ -442,6 +442,24 @@ servo.resize(w=500, h=160)
 servo.set_layout(x=120, y=90, rotation=30)   # any combination in one message
 ```
 
+### Auto height (`h="auto"`)
+
+Text-y panels are hard to size by eye. On the Custom-based panels (`markdown`,
+`custom`, `table`, `image`, …) pass `h="auto"` and the panel's height fits its
+rendered content — measured in the browser after layout, and re-fitted when
+the content reflows (e.g. you narrow the panel, or `update()` changes the
+text). Width stays yours; the fitted height is reported back so `comp.h` stays
+in sync:
+
+```python
+notes = canvas.markdown("# Heading\n\nas tall as this text, no taller", h="auto")
+```
+
+The fit lands right after the panel first renders (until then it uses the
+default height), so a panel placed `below=` an auto-height anchor is positioned
+using the anchor's height *at insert time* — give the anchor an explicit `h`
+when the gap below it must be exact.
+
 ### Relative placement
 
 Instead of computing absolute coordinates, anchor a panel to one already placed
@@ -1033,6 +1051,7 @@ Caveats / v1 scope:
 
 ```bash
 python examples/hello_world.py        # slider + label
+python examples/frontend_backend_tour.py  # interactive tour of the wire protocol, with a live frame tap
 python examples/sensor_dashboard.py   # live VideoFeed + worker thread
 python examples/custom_html.py        # hand-written HTML panel, bidirectional
 python examples/custom_styled_component.py  # uiverse.io HTML+CSS widget pasted into a Custom panel
@@ -1067,6 +1086,53 @@ npm run build
 
 For standalone UI work without a Python backend, run `npm run dev` and open
 `http://localhost:5173/?demo` to seed sample shapes.
+
+## Debugging the wire
+
+Everything between Python and the browser is JSON frames over one WebSocket,
+so when something "doesn't update" the first question is always: *is the frame
+on the wire or not?* Three tools answer it without touching any internals.
+
+**`serve(debug=True)`** logs every frame to the console — what Python sends
+(`->`) and what each browser sends back (`<-`) — with the component's friendly
+name resolved:
+
+```
+[pycanvas] <- input 'speed'   {"type": "input", "id": "...", "payload": {"value": 7}}
+[pycanvas] -> update 'mirror' {"type": "update", "id": "...", "payload": {"value": "saw 7"}}
+```
+
+**`canvas.on_frame(fn)`** is the programmatic version — a decorator-friendly
+observer called as `fn(direction, msg)` for every frame (`direction` is
+`"out"` or `"in"`; heartbeats are skipped, binary media frames arrive as a
+small `{"type": "binary", "id", "media", "bytes"}` summary). Taps may safely
+drive components — frames a tap itself causes are not re-tapped, so e.g.
+mirroring traffic into a panel can't loop:
+
+```python
+@canvas.on_frame
+def log(direction, msg):
+    print(direction, msg["type"], msg.get("id"))
+```
+
+**Connection lines** are always printed, debug or not, so a viewer reaching
+(or losing) the server is never invisible:
+
+```
+[pycanvas] viewer 'Otter' connected (replayed 4 panels, 1 arrows)
+[pycanvas] viewer 'Otter' disconnected
+```
+
+See [`examples/frontend_backend_tour.py`](examples/frontend_backend_tour.py)
+for an interactive walkthrough of the protocol that mirrors live frames onto
+the canvas itself.
+
+**Stale tabs heal themselves.** Panel ids are minted fresh on every run of your
+script, and a browser tab from an earlier run reconnects automatically without
+reloading the page. The server stamps each run with an id in its `welcome`
+frame; when the frontend sees the run change, it drops the previous run's
+panels before the new run's are replayed — so re-running a script never leaves
+dead, stacked duplicates behind, with or without `hot_reload`.
 
 ## WebSocket protocol
 

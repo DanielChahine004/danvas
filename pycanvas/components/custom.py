@@ -31,6 +31,13 @@ class Custom(BaseComponent):
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, event_key="event"):
+        # ``h="auto"`` fits the panel's height to its rendered content: the
+        # iframe measures its document and the frontend resizes the shape (and
+        # reports the result back, so ``comp.h`` syncs). Width stays yours —
+        # narrow the panel and the height re-fits to the reflowed content.
+        self._auto_h = h == "auto"
+        if self._auto_h:
+            h = None  # default height until the first content measurement lands
         # ``w``/``h`` are optional overrides; when omitted the panel falls back
         # to ``default_w``/``default_h`` (set per subclass) via BaseComponent.
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
@@ -82,6 +89,35 @@ class Custom(BaseComponent):
             "},{passive:false,capture:true});"
             "</script>"
         )
+        if self._auto_h:
+            # h="auto": measure the document's natural height and report it to
+            # the parent (which resizes the shape — see fitFromIframe). The
+            # height overrides neutralize full-viewport styling (compose() sets
+            # body min-height:100vh) that would otherwise peg the measurement at
+            # the frame height; a ResizeObserver re-fits when content reflows
+            # (e.g. the user narrows the panel).
+            helper += (
+                "<script>(function(){"
+                "var fit=function(){"
+                "var b=document.body,d=document.documentElement;"
+                "var h=Math.ceil(Math.max(b?b.scrollHeight:0,d?d.scrollHeight:0));"
+                f"parent.postMessage({{__pycanvas_fit:{{id:{cid},h:h}}}},'*');"
+                "};"
+                "var arm=function(){"
+                "var st=document.createElement('style');"
+                "st.textContent='html,body{height:auto !important;"
+                "min-height:0 !important;overflow:hidden !important}';"
+                "document.head.appendChild(st);"
+                "fit();"
+                "if(window.ResizeObserver){"
+                "new ResizeObserver(fit).observe(document.body);}"
+                "};"
+                "if(document.readyState==='loading'){"
+                "document.addEventListener('DOMContentLoaded',arm);}"
+                "else{arm();}"
+                "window.addEventListener('load',fit);"
+                "})();</script>"
+            )
         return helper + html
 
     @staticmethod

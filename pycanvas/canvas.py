@@ -187,6 +187,45 @@ class Canvas:
         """
         return list(self._bridge._viewers.values())
 
+    def on_frame(self, fn):
+        """Observe every WebSocket frame: ``fn(direction, msg)``. Decorator-friendly.
+
+        The supported way to watch the wire — no monkeypatching needed.
+        ``direction`` is ``"out"`` (Python → browser) or ``"in"`` (browser →
+        Python); ``msg`` is the frame dict (``register``/``update``/``remove``
+        going out, ``input``/``layout``/``chat``/``draw`` coming in; binary media
+        frames arrive as a ``{"type": "binary", "id", "media", "bytes"}``
+        summary; heartbeats are skipped). Use it to debug "why isn't my panel
+        updating", to build protocol visualizations, or to log traffic::
+
+            @canvas.on_frame
+            def log(direction, msg):
+                print(direction, msg["type"], msg.get("id"))
+
+        Taps run inline on the send/receive path, so keep them fast. A tap may
+        safely drive components (e.g. mirror frames into a panel) — frames the
+        tap itself causes are not re-tapped. Remove with :meth:`off_frame`.
+        For plain console logging, ``serve(debug=True)`` installs one for you.
+        """
+        return self._bridge.add_frame_tap(fn)
+
+    def off_frame(self, fn):
+        """Remove a frame observer registered with :meth:`on_frame`."""
+        self._bridge.remove_frame_tap(fn)
+
+    def _debug_frame(self, direction, msg):
+        """The ``serve(debug=True)`` tap: print one console line per frame."""
+        arrow = "->" if direction == "out" else "<-"
+        comp = self._bridge._components.get(msg.get("id"))
+        name = f" {comp.name!r}" if comp is not None else ""
+        try:
+            body = json.dumps(msg, default=str)
+        except (TypeError, ValueError):
+            body = str(msg)
+        if len(body) > 200:
+            body = body[:200] + "...'"
+        print(f"[pycanvas] {arrow} {msg.get('type', '?')}{name} {body}")
+
     def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
                       origin=(0, 0), include_source=True, auto=True,
                       draggable=True, resizable=True, locked=False,
@@ -332,6 +371,20 @@ class Canvas:
                 "'127.0.0.1', or pass allow_remote_exec=True to serve() if you "
                 "really intend remote code execution on a trusted network."
             )
+        # ``h="auto"`` (Custom-based panels: markdown, custom, table, image…)
+        # fits the panel height to its rendered content: flag the component (its
+        # iframe then reports content height; the frontend resizes to fit) and
+        # fall back to the default height until the first measurement lands.
+        if h == "auto":
+            if hasattr(component, "_auto_h"):
+                component._auto_h = True
+            else:
+                warnings.warn(
+                    "h='auto' is only supported on Custom-based panels "
+                    "(custom, markdown, table, image, …); using the default "
+                    "height", stacklevel=2,
+                )
+            h = None
         # Relative placement: derive x/y from an anchor panel's live geometry.
         # Resolved before the swap-in-place logic below, so an explicit relative
         # placement wins over an evicted panel's old position.
@@ -914,7 +967,8 @@ class Canvas:
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               view=None, desktop=None, window_title="PyCanvas",
-              window_size=(1200, 800), password=None, hot_reload=False):
+              window_size=(1200, 800), password=None, hot_reload=False,
+              debug=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -994,6 +1048,12 @@ class Canvas:
         size. Desktop mode runs on the main thread and blocks until the window is
         closed (``block`` doesn't apply); if pywebview isn't installed it warns
         and falls back to the browser. See :meth:`bake` to build the executable.
+
+        ``debug=True`` logs every WebSocket frame to the console — what Python
+        sends (``->``) and what each browser sends back (``<-``) — so "the panel
+        isn't updating" turns into evidence: either the frame is on the wire or
+        it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
+        ("viewer connected / disconnected") are always printed, debug or not.
         """
         if os.environ.get("_PYCANVAS_RELOAD_CHECK") == "1":
             # Hot-reload pre-flight (see hotreload.run_monitor): the monitor
@@ -1046,6 +1106,11 @@ class Canvas:
             bool(ui_inspector) if ui_inspector is not None
             else (local and not tunnel)
         )
+        # Wire logging: a frame tap that prints every JSON frame (and binary
+        # summaries) with the component's friendly name. ASCII arrows on purpose
+        # — Windows consoles often run cp1252, which can't print "▼"/"▲".
+        if debug:
+            self._bridge.add_frame_tap(self._debug_frame)
         # Merge serve's view onto any config already set via set_view() rather
         # than clobbering it, so `set_view(ui=False); serve()` (or bake(), which
         # calls serve with no view) keeps the earlier settings. An explicit

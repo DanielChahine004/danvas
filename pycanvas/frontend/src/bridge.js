@@ -193,6 +193,11 @@ function applyDraw(diff) {
 
 let heartbeatTimer = null
 
+// The backend run this page last talked to (from the welcome frame). Survives
+// socket reconnects (module state lives as long as the page); a fresh page
+// starts at null and adopts whatever run it first joins.
+let lastRunId = null
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${proto}://${location.host}/ws`
@@ -291,11 +296,18 @@ function handle(msg) {
   } else if (msg.type === 'view') {
     applyLiveView(msg.view || {})
   } else if (msg.type === 'welcome') {
-    // A hot-reload restart: the page didn't reload, only the socket reconnected,
-    // so the previous run's panels are still on the canvas. Drop them before the
-    // server replays this run's (panel ids change every run, so the new ones
-    // would otherwise appear *alongside* the stale ones).
-    if (msg.reload) clearManaged()
+    // The socket reconnected without the page reloading — if the backend is a
+    // *different run* (re-run script, crash + restart, hot reload), the previous
+    // run's panels are still on the canvas. Panel ids change every run, so the
+    // new ones would appear *alongside* (stacked on top of) the stale, dead
+    // ones. Detect the run change via the welcome runId and drop the managed
+    // shapes first; the server replays this run's panels right after.
+    // (msg.reload is the older hot-reload-only signal, kept for compatibility.)
+    if (msg.reload || (lastRunId !== null && msg.runId && msg.runId !== lastRunId)) {
+      console.info('[pycanvas] backend is a new run; clearing the previous run\'s panels')
+      clearManaged()
+    }
+    if (msg.runId) lastRunId = msg.runId
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
     setViewConfig(msg.view || null)
@@ -790,6 +802,38 @@ function zoomFromIframe(sourceWin, w) {
   zoomCanvasAtClient(rect.left + w.x, rect.top + w.y, w.d)
 }
 
+// Auto-height (`h="auto"` on Custom/Markdown panels): the iframe measures its
+// own document and posts the content height; resize the shape to fit and report
+// the new geometry to Python — same read-back path as a user resize, so
+// `comp.h` stays in sync. The card chrome around the iframe (header, padding)
+// is measured via offsetHeight, which is in layout px (CSS transforms don't
+// affect it), i.e. already in shape units.
+function fitFromIframe(sourceWin, fit) {
+  if (!editor || typeof fit.h !== 'number') return
+  const iframe = [...document.querySelectorAll('iframe')].find(
+    (f) => f.contentWindow === sourceWin
+  )
+  if (!iframe) return
+  const shapeId = createShapeId(fit.id)
+  const shape = editor.getShape(shapeId)
+  if (!shape) return
+  const overhead = Math.max(0, shape.props.h - iframe.offsetHeight)
+  const h = Math.max(40, Math.ceil(fit.h + overhead))
+  if (Math.abs(h - shape.props.h) < 3) return // settled — don't ping-pong
+  applyRemote(() =>
+    editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
+  )
+  sendRaw({
+    type: 'layout',
+    id: fit.id,
+    x: shape.x,
+    y: shape.y,
+    rotation: shape.rotation,
+    w: shape.props.w,
+    h,
+  })
+}
+
 // Global helper available on the top-level page (non-iframe Custom usage).
 if (typeof window !== 'undefined') {
   window.canvas = {
@@ -805,6 +849,9 @@ if (typeof window !== 'undefined') {
     if (d.__pycanvas_wheel) {
       // A Ctrl/Cmd+wheel inside an iframe panel: zoom the canvas, not the browser.
       zoomFromIframe(e.source, d.__pycanvas_wheel)
+    } else if (d.__pycanvas_fit) {
+      // An h="auto" panel reporting its content height.
+      fitFromIframe(e.source, d.__pycanvas_fit)
     } else if (d.__pycanvas) {
       sendInput(d.__pycanvas, d.data)
     }

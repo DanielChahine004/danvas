@@ -107,6 +107,7 @@ this object. Here's the map of what `canvas` can do, so you know what's coming:
 | **View control** | `set_view` |
 | **Persist** | `save`, `load` |
 | **Notebook** | `capture_cells`, `stop_capturing_cells`, `enable_repl` |
+| **Debug** | `on_frame`, `off_frame`, `serve(debug=True)` |
 | **Package** | `bake` |
 
 ---
@@ -465,6 +466,16 @@ comp.rotation = 30       # degrees, clockwise
 `x / y / w / h / rotation` are all readable and assignable. Omit `x`/`y` at
 insert and the frontend auto-cascades the panel into view.
 
+Sizing text by eye is fiddly, so the Custom-based panels (`markdown`,
+`custom`, `table`, `image`, …) accept **`h="auto"`**: the height fits the
+rendered content, re-fits when it reflows (you narrow the panel, or
+`update()` changes the text), and is reported back so `comp.h` stays in sync.
+Width stays yours:
+
+```python
+canvas.markdown("# Notes\n\nexactly as tall as this text", h="auto")
+```
+
 Or skip coordinates entirely and place panels **relative to each other** with
 `below=` / `above=` / `right_of=` / `left_of=` (an already-placed component or
 its name) and a `gap` in pixels (default 16). Vertical anchors align left
@@ -690,11 +701,35 @@ The *same script* is both source and app — inside the `.exe` (`sys.frozen`),
 `bake` skips the build and just runs. Needs the `[desktop]` extra. CLI equivalent:
 `python -m pycanvas.bake your_script.py`.
 
+### Debugging: watch the wire
+
+Everything is JSON frames over one WebSocket, so when a panel "isn't
+updating", look at the wire. `serve(debug=True)` logs every frame to the
+console — `->` is Python → browser, `<-` is the reverse — with component names
+resolved. Programmatically, `canvas.on_frame` observes the same traffic (and
+may safely drive panels — frames a tap causes are not re-tapped):
+
+```python
+@canvas.on_frame
+def log(direction, msg):
+    print(direction, msg["type"], msg.get("id"))
+```
+
+A line is also printed whenever a viewer connects (with how much state was
+replayed to it) or disconnects, debug or not. For a hands-on walkthrough of
+the whole protocol, run
+[`examples/frontend_backend_tour.py`](examples/frontend_backend_tour.py) — it
+mirrors the live frames onto the canvas while you interact with it.
+
 ### Reconnection
 
 The browser auto-reconnects if the server restarts, and the server replays full
 state (every value, geometry, lock, and arrow) to any fresh connection — so
-reloads and restarts are seamless.
+reloads and restarts are seamless. Each run of your script also stamps its
+connections with a fresh run id: a tab left open from an *earlier* run detects
+the change when it reconnects and clears that run's (now dead) panels before
+the replay arrives, so re-running a script never leaves stale duplicates
+stacked on top of the live ones.
 
 ---
 

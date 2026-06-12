@@ -7,6 +7,27 @@ carry breaking changes (called out below).
 ## Unreleased
 
 ### Added
+- **Stale tabs heal on reconnect.** Every server run is stamped with a run id
+  (sent in the WebSocket `welcome` frame). A browser tab left open from an
+  earlier run reconnects, sees the run change, and clears that run's dead
+  panels before the new run's are replayed — so re-running a script no longer
+  leaves stale, unresponsive duplicates stacked on top of the live panels.
+  (Previously this cleanup only happened under `hot_reload=True`.)
+- **Wire debugging.** `serve(debug=True)` logs every WebSocket frame to the
+  console (`->` Python→browser, `<-` browser→Python) with component names
+  resolved. Programmatic equivalent: `canvas.on_frame(fn)` /
+  `canvas.off_frame(fn)` — a decorator-friendly observer called as
+  `fn(direction, msg)` for every frame (binary media as a small summary,
+  heartbeats skipped). Taps are reentrancy-guarded, so a tap may drive panels
+  without looping back into itself. A connection line — `viewer 'X' connected
+  (replayed N panels, M arrows)` / `disconnected` — is always printed.
+- **Auto height.** Custom-based panels (`markdown`, `custom`, `table`,
+  `image`, …) accept `h="auto"`: the panel's height fits its rendered content,
+  re-fits when the content reflows (narrowing the panel, `update()`), and the
+  fitted height is reported back so `comp.h` stays in sync.
+- **New example.** `examples/frontend_backend_tour.py` — an interactive tour of
+  how the frontend talks to the backend, mirroring the live protocol frames
+  onto a wire-tap panel (via `canvas.on_frame`) while you interact.
 - **Relative placement.** `insert()` and every factory accept `below=` /
   `above=` / `right_of=` / `left_of=` (an already-placed component or its name)
   plus `gap=` (pixels, default 16), deriving `x`/`y` from the anchor's live
