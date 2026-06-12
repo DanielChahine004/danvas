@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package + test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest httpx
+      - name: Run tests
+        run: pytest -q
+
+  package:
+    # Builds the wheel and proves the frontend bundle actually ships and serves —
+    # a missing pycanvas/frontend/dist/assets/* would otherwise install fine but
+    # render a blank page, which unit tests can't catch.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+      - name: Install the built wheel into a clean environment
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+      - name: Assert the frontend bundle is present and served
+        run: |
+          /tmp/clean/bin/python - <<'PY'
+          import os, threading, time, urllib.request
+          import pycanvas
+          from pycanvas import server
+
+          # 1. The built assets must be packaged, not just index.html.
+          assets = os.path.join(server.DIST_DIR, "assets")
+          files = os.listdir(assets) if os.path.isdir(assets) else []
+          assert any(f.endswith(".js") for f in files), f"no JS in {assets}: {files}"
+          print("packaged assets:", files)
+
+          # 2. The server must actually serve index.html and the referenced JS.
+          canvas = pycanvas.Canvas()
+          canvas.label("ci", "hello")
+          canvas.serve(port=8137, open_browser=False, block=False)
+          time.sleep(1.0)
+          base = "http://127.0.0.1:8137"
+          html = urllib.request.urlopen(base + "/").read().decode()
+          assert "<div id=\"root\"" in html or "<script" in html, "index.html looks empty"
+          # Pull the first hashed asset the page references and fetch it.
+          import re
+          m = re.search(r'/assets/[\w.\-]+\.js', html)
+          assert m, f"index.html references no /assets/*.js: {html[:300]}"
+          code = urllib.request.urlopen(base + m.group(0)).getcode()
+          assert code == 200, f"asset {m.group(0)} returned {code}"
+          print("served", m.group(0), "->", code)
+          canvas.stop()
+          print("PACKAGE SMOKE TEST OK")
+          PY

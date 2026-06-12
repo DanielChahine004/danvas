@@ -5,9 +5,16 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["pycanvas*"]
 
+# The built frontend (pycanvas/frontend/dist: the JS/CSS/font bundle tldraw and
+# the panels are served from) is data, not Python, so packages.find won't pick
+# it up. Without this it's dropped from the wheel and a pip-installed canvas
+# serves a blank page (index.html with 404s for /assets/*). Ship the whole dist.
+[tool.setuptools.package-data]
+pycanvas = ["frontend/dist/**/*"]
+
 [project]
 name = "pycanvas"
-version = "0.1.0"
+version = "0.2.0"
 description = "A browser-based spatial canvas with UI panels defined and controlled from Python."
 readme = "README.md"
 requires-python = ">=3.9"
