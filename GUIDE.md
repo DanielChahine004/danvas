@@ -1,425 +1,515 @@
-# PyCanvas — Conceptual Guide
+# PyCanvas — A Guide for Newcomers
 
-A browser-based spatial canvas (tldraw) driven entirely from Python. You create
-panels in Python, drop them on an infinite canvas, and read/write their values
-live over a WebSocket. No frontend code required.
+PyCanvas turns Python into the brain behind a live, infinite, browser-based
+canvas (built on [tldraw](https://tldraw.dev)). You create **panels** in Python,
+drop them onto the canvas, and read or drive their values live over a WebSocket.
+**You never write any frontend code** — Python is the only language you touch.
 
 ```python
 import pycanvas
 
-canvas = pycanvas.Canvas()
-speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100))
-out   = canvas.insert(pycanvas.Label("readout"))
+canvas = pycanvas.Canvas()                                  # 1. make a canvas
+speed  = canvas.slider("speed", min=0, max=100)             # 2. add panels
+out    = canvas.label("readout")
 
-@speed.on_change
+@speed.on_change                                            # 3. wire them up
 def _(v):
     out.update(f"speed = {v}")
 
-canvas.serve()   # opens http://127.0.0.1:8000 and blocks
+canvas.serve()                                              # 4. serve (opens the browser)
 ```
 
----
-
-## Mental model
-
-- **`Canvas`** — the one object you own. It holds components, draws arrows
-  between them, and runs the web server.
-- **Components** — the panels (Slider, Label, Toggle, VideoFeed, Plot, LivePlot,
-  Custom). You build one, `insert` it, then `update()` it or read `.value`.
-- **Bridge** — internal. A single WebSocket multiplexes every component by id.
-  State lives in Python + the tldraw shape; the browser is a thin view.
-- **Direction of data**:
-  - Python → browser: `component.update(...)` (and `move`/`resize`/`lock`).
-  - Browser → Python: user input fires your `@component.on_change` callbacks.
-
-Everything is thread-safe: you can `update()` from any thread while the server
-runs in another.
+Run that file and a browser opens with a slider and a label on an infinite
+canvas. Drag the slider; the label follows. That's the whole loop, and the rest
+of this guide unpacks what else each line can do.
 
 ---
 
-## The Canvas object
+## 1. The mental model
+
+PyCanvas has **four nouns** and **two directions of data**. Hold these in your
+head and everything else falls into place.
+
+### The four nouns
+
+| Noun | What it is | You get it from |
+|---|---|---|
+| **Canvas** | The one object you own. It holds everything and runs the web server. | `pycanvas.Canvas()` |
+| **Component** | A panel on the canvas — a slider, a plot, an image, a chat box. | `canvas.slider(...)`, `canvas.plot(...)`, … |
+| **Arrow** | A connector drawn between two panels. Reroutes itself as they move. | `canvas.connect(a, b)` |
+| **Viewer** | A connected browser. Several people can watch/edit the same canvas at once. | `canvas.viewers` |
+
+### The two directions of data
+
+Everything that happens is one of these two flows:
+
+```
+   Python  ──update()──►  browser        "I changed a value, show it"
+   Python  ◄─on_change──  browser        "the user did something, react to it"
+```
+
+- **Python → browser:** you call `component.update(...)` (or `push`, `move`,
+  `resize`, `lock`, …). The change appears instantly in every open browser.
+- **Browser → Python:** the user drags a slider, clicks a button, picks a file —
+  this fires a callback you registered with `@component.on_change` (or
+  `on_click`, `on_message`, …).
+
+### Three facts that make it feel magic
+
+1. **State lives in Python.** The browser is a thin view. If a browser reloads or
+   a new viewer connects, PyCanvas replays the full current state (every value,
+   position, lock, and arrow) to them. Reconnection is seamless.
+2. **Everything is thread-safe.** You can call `update()` from any thread while
+   the server runs in another. Background worker loops are a first-class pattern.
+3. **Names are identities.** Every component and arrow has a unique `name`. It's
+   how you look it up (`canvas.speed`), and re-using a name *replaces* the old
+   panel instead of stacking a duplicate (great for re-running a cell).
+
+---
+
+## 2. The lifecycle: five steps to building a canvas
+
+Every PyCanvas program is the same five steps. The rest of this guide is one
+section per step.
+
+```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  1. Create        canvas = pycanvas.Canvas()                     │
+  │  2. Add panels    canvas.slider(...) / canvas.plot(...) / ...    │
+  │  3. Wire them up   @comp.on_change ... comp.update(...)          │
+  │  4. Arrange        position, size, lock, frame, arrows           │
+  │  5. Serve & share  canvas.serve(...)                             │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+Steps 2–4 can also happen *after* step 5, live, if you serve in the background
+(`serve(block=False)`) — that's the notebook workflow (see §9).
+
+---
+
+## 3. Step 1 — Create the canvas
 
 ```python
 canvas = pycanvas.Canvas()
 ```
 
-| Method | Purpose |
+That's it. One `Canvas` per app. It starts empty. Everything else is a method on
+this object. Here's the map of what `canvas` can do, so you know what's coming:
+
+| Category | Methods |
 |---|---|
-| `insert(component, x=, y=, w=, h=, rotation=, locked=, draggable=, resizable=, operable=, grabable=, frame=, name=)` | Register a panel, place it, and return it. |
-| `remove(component)` | Pull a panel off the canvas (live). |
-| `connect(start, end, name=, text=, **props)` | Draw an arrow between two panels; returns an `Arrow`. `name` is identity, `text` is the caption. |
-| `disconnect(arrow_or_name)` | Remove an arrow by object or name. |
-| `serve(port=8000, open_browser=True, host="127.0.0.1", block=True, wait=True)` | Start server; **block** (default) or, with `block=False`, **return immediately** (Jupyter). |
-| `stop()` | Shut down a background server (started with `block=False`). |
-| `wait()` | Park the main thread until a background server shuts down (`Ctrl+C`) — keeps a *script* alive after `serve(block=False)`. |
-
-**Identity vs. caption.** Every component and arrow has a unique **`name`** — the
-backend identity that becomes its `canvas.<name>` attribute / `canvas["<name>"]`
-key and the eviction key (inserting again under the same name replaces the old
-one). `name` is **required** when you build a component (it's the first argument);
-the utility panels — `Plot`, `LivePlot`, `Repl`, `Inspector`, `Custom` — default
-it to their type word. A component's **`label`** (and an arrow's **`text`**) is
-purely the caption shown in the UI and is optional — it defaults to the `name`.
-`canvas.<name>` works as an attribute when the name is a valid identifier
-(otherwise use `canvas["<name>"]`).
-
-```python
-canvas.slider("speed", label="Speed")   # name="speed", caption "Speed"
-canvas.speed            # the component (by name)
-canvas["speed"]         # same
-
-canvas.slider("rpm")    # no label -> caption defaults to the name, "rpm"
-```
+| **Add panels** | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `plot`, `live_plot`, `image`, `table`, `markdown`, `chat`, `custom`, `react`, `webview`, `file_browser`, `repl`, `inspector`, `show`, and the generic `insert` |
+| **Connect** | `connect`, `disconnect` |
+| **Remove** | `remove` |
+| **Look up** | `canvas.<name>`, `canvas["<name>"]`, `canvas.components`, `canvas.arrows`, `canvas.viewers` |
+| **Serve** | `serve`, `stop`, `wait` |
+| **Background work** | `background` |
+| **View control** | `set_view` |
+| **Persist** | `save`, `load` |
+| **Notebook** | `capture_cells`, `stop_capturing_cells`, `enable_repl` |
+| **Package** | `bake` |
 
 ---
 
-## Components
+## 4. Step 2 — Add panels (components)
 
-### Premade
+### Two ways to add a panel
 
-| Component | Construct | Direction | Drive it with | Read |
-|---|---|---|---|---|
-| **Slider** | `Slider(name, min=0, max=100, default=None, label=None)` | both | `update(value)` | `.value` (number) |
-| **Toggle** | `Toggle(name, options, default=None, label=None)` | both | `update(option)` | `.value` (chosen string) |
-| **Button** | `Button(name, text=None, label=None)` | in | — | `@on_click`, `.value` (click count) |
-| **Label** | `Label(name, value="", label=None)` | out | `update(value)` | — |
-| **VideoFeed** | `VideoFeed(name, quality=70, label=None)` | out | `update(frame)` — OpenCV BGR numpy array | — |
-| **Plot** | `Plot(name="plot", label=None, width=560, height=420)` | out | `update(fig)` — a Plotly figure or HTML string | — |
-| **LivePlot** | `LivePlot(name="live plot", traces=None, max_points=300, mode="lines", layout=None, ..., label=None)` | out | `push({"trace": y, ...})`, `clear()` | — |
-| **Custom** | `Custom(html=None, path=None, name="custom", label=None, width=380, height=320, event_key="event")` | both | `update(html)` (reload) / `push(data)` (stream, no reload) | `@on(event)` / `@on_message`, `.value` (last message) |
-| **React** | `React(source=None, path=None, name="react", label=None, width=380, height=320, props=None, event_key="event")` | both | `update(**props)` (patch) / `push(data)` (stream) | `@on(event)` / `@on_message`, `.value` (last message) |
-| **Markdown** | `Markdown(text="", name="markdown", label=None, width=380, height=240)` | out | `update(text)` | — |
-| **Image** | `Image(src, name="image", label=None, width=420, height=320, fit="contain")` | out | `update(src)` — path/URL/bytes/Matplotlib/PIL/array | — |
-| **Table** | `Table(data, name="table", label=None, width=520, height=360)` | out | `update(data)` — DataFrame/Series, records, dict of columns | — |
-| **FileBrowser** | `FileBrowser(root=".", name="files", label=None, width=320, height=420, pattern=None, show_hidden=False)` | both | `go(path)`, `refresh()` | `@on_select` (file path), `@on_navigate` (dir), `.value` (last file), `.cwd` |
+Both do the same thing — build a component and place it on the canvas — pick
+whichever reads better:
 
-Every component takes `name` (its unique identity) first, then an optional
-`label` caption; the input components (Slider/Toggle/Label/VideoFeed) **require**
-`name`, the utility panels default it. `canvas.<component>(...)` factory methods
-take the same arguments.
+```python
+# A) Factory method (shortest; recommended)
+speed = canvas.slider("speed", min=0, max=100, x=80, y=80)
 
-Notes:
-- **Slider / Toggle** are bidirectional — moving them in the browser fires your
-  callback; `update()` moves them from Python.
-- **Plot vs LivePlot**: `Plot` re-renders a Plotly iframe per update (simple,
-  good for occasional figures). `LivePlot` keeps a mounted chart and streams
-  only data arrays — smooth at high rates; call `push()` every loop.
-- **VideoFeed** expects OpenCV BGR frames (`cv2`); they're JPEG-encoded and sent
-  as binary WebSocket frames (no base64/JSON). OpenCV is the optional `[video]`
-  extra (`pip install -e ".[video]"`); or pass `encode=False` to stream JPEG
-  bytes you've already encoded, which needs no extra. **AudioFeed** streams int16
-  PCM the same way.
+# B) Build, then insert (useful for hand-built or reused components)
+s = pycanvas.Slider("speed", min=0, max=100)
+speed = canvas.insert(s, x=80, y=80)
+```
 
-### Custom panels (arbitrary HTML)
+Either way you get the component object back, so you can drive it later.
 
-`Custom` renders any HTML in a sandboxed iframe with a symmetric `canvas` helper:
-`canvas.send(data)` posts back to Python, `canvas.onPush(fn)` receives data
-Python streams in. Route inbound messages by an `event` field with
-`@panel.on("event")` (or `@panel.on_message` for a catch-all) — no subclass, no
-hand-written dispatcher:
+### Naming: identity vs. caption
+
+Two different things are easy to confuse:
+
+- **`name`** is the **identity** — unique, required (the input panels make it the
+  first argument; utility panels default it to their type word). It becomes the
+  `canvas.<name>` handle and the **eviction key**: insert again under the same
+  name and the old panel is replaced.
+- **`label`** is the **caption** shown in the panel's header. Purely cosmetic,
+  optional; defaults to the `name`.
+
+```python
+canvas.slider("speed", label="Engine speed")  # name="speed", header reads "Engine speed"
+canvas.speed                                   # look it up by name
+canvas["speed"]                                # same (use this if name isn't a valid identifier)
+```
+
+### The component catalog
+
+Components are grouped by what they're *for*. "Direction" tells you the data
+flow: **in** (user → Python), **out** (Python → user), or **both**.
+
+#### Inputs — the user drives Python
+
+| Component | Factory | Read | React with |
+|---|---|---|---|
+| **Slider** | `canvas.slider(name, min=0, max=100, default=None, step=1)` | `.value` (number) | `@on_change` |
+| **Toggle** | `canvas.toggle(name, options, default=None)` | `.value` (chosen string) | `@on_change` |
+| **Button** | `canvas.button(name, text=None)` | `.value` (click count) | `@on_click` |
+
+#### Outputs — Python drives the display
+
+| Component | Factory | Drive it with |
+|---|---|---|
+| **Label** | `canvas.label(name, value="")` | `update(text)` |
+| **Markdown** | `canvas.markdown(text="")` | `update(text)` |
+| **Image** | `canvas.image(src, fit="contain")` | `update(src)` — path / URL / bytes / Matplotlib / PIL / NumPy array |
+| **Table** | `canvas.table(data)` | `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns |
+| **Plot** | `canvas.plot(name="plot")` | `update(fig)` — a Plotly figure or HTML string |
+
+#### Streaming — high-rate feeds
+
+| Component | Factory | Drive it with |
+|---|---|---|
+| **LivePlot** | `canvas.live_plot(traces=None, max_points=300, mode="lines")` | `push({"trace": y})` every loop; `clear()` |
+| **VideoFeed** | `canvas.video(name, quality=70)` | `update(frame)` — OpenCV BGR NumPy array |
+| **AudioFeed** | `canvas.audio(name, sample_rate=16000, channels=1)` | `update(pcm)` — int16 PCM samples |
+
+> **Plot vs LivePlot.** `Plot` re-renders a whole Plotly figure each update —
+> simple, good for occasional charts. `LivePlot` keeps a mounted chart and
+> streams only new data points — smooth at high rates. Use `push()` in a loop.
+
+> **Video/audio** are sent as raw binary WebSocket frames (no base64/JSON
+> overhead). `VideoFeed` JPEG-encodes via OpenCV (the optional `[video]` extra);
+> pass `encode=False` to send JPEG bytes you already have, needing no extra.
+
+#### Content — embed arbitrary HTML, React, or web pages
+
+| Component | Factory | Notes |
+|---|---|---|
+| **Custom** | `canvas.custom(html=…, css=…, js=…)` | Any HTML in a **sandboxed iframe**. Two-way. See below. |
+| **React** | `canvas.react(source=…, props=…)` | Your own React component, compiled in the browser, native to the canvas. |
+| **WebView** | `canvas.webview(url)` | Embed any live web page. |
+| **FileBrowser** | `canvas.file_browser(root=".", pattern=None)` | Pick a file from disk (sandboxed to `root`). |
+
+#### Interaction between viewers
+
+| Component | Factory | Notes |
+|---|---|---|
+| **Chat** | `canvas.chat(name="chat")` | A shared message room across all viewers. `post(text)`, `@on_message`. |
+
+#### Code & introspection (local/trusted use)
+
+| Component | Factory | Notes |
+|---|---|---|
+| **Repl** | `canvas.repl()` | A code cell that runs Python against a shared namespace. Call `canvas.enable_repl()` first. |
+| **Inspector** | `canvas.inspector(source="components")` | A live "variable explorer" of your panels or the REPL namespace. |
+
+> **Security:** a `Repl` is unauthenticated remote code execution. PyCanvas
+> **refuses** to serve a canvas containing one on a non-local address (LAN /
+> tunnel) unless you pass `serve(..., allow_remote_exec=True)`. Only do that on a
+> network you trust.
+
+### "Just show me this value" — `canvas.show(...)`
+
+When you don't want to pick a component, `show` inspects the value and inserts
+the panel that best renders it — the same call a notebook makes for an `Out[…]`,
+but **without IPython**, so it works in plain scripts too:
+
+```python
+canvas.show(df)                 # DataFrame  -> Table
+canvas.show(fig)                # figure     -> Plot / Image
+canvas.show("# Notes\n- a")     # string     -> Markdown
+canvas.show({"ok": True})       # dict/list  -> pretty JSON
+canvas.show(obj)                # anything with _repr_html_/_repr_png_ -> its rich view
+```
+
+No `name` gives each call a fresh panel; pass `name=` to **replace** one in place
+(handy in a loop). The same dispatcher is `pycanvas.panel_for(value)` if you want
+the component *without* inserting it.
+
+### Custom panels (the escape hatch you'll reach for most)
+
+`Custom` renders any HTML in a sandboxed iframe and gives you a symmetric
+`canvas` helper inside it: `canvas.send(data)` posts back to Python,
+`canvas.onPush(fn)` receives data Python streams in. Route inbound messages by an
+`event` field — no subclass, no dispatcher:
 
 ```python
 panel = canvas.custom(html="""
   <button onclick="canvas.send({event: 'go'})">Go</button>
 """)
 
-@panel.on("go")            # fires only for {event: 'go'}
+@panel.on("go")               # fires only for {event: 'go'}
 def handle(msg):
-    print(msg)             # {'event': 'go'}
+    print(msg)
 ```
 
-Load from a file with `Custom(path="dashboard.html")`. Replace content live with
-`panel.update(new_html)` (this reloads the iframe).
+- `panel.update(new_html)` replaces the content (reloads the iframe).
+- `panel.push(data)` streams data in **without** reloading — keeps focus, scroll,
+  and listeners intact. Receive it with `canvas.onPush(fn)` in the iframe. Use
+  this for high-rate feeds.
+- Load from a file with `canvas.custom(path="dashboard.html")`.
 
-To stream live data **without** reloading — keeping the iframe's focus,
-listeners and scroll intact — use `panel.push(data)`, received via
-`canvas.onPush(fn)`. This suits high-rate feeds and two-way interactive panels:
+### React panels (a native component, no `npm` build)
 
-```python
-panel.push(frame_b64)      # Python -> iframe, no reload
-```
-```js
-canvas.onPush((data) => render(data))   // no __pycanvas unwrapping needed
-```
-
-`examples/remote_control.py` uses exactly this to stream the machine's screen
-into a panel while capturing the browser's mouse/keyboard to drive the host (a
-small LAN remote desktop — note its security warning).
-
-### Show anything (auto-dispatch)
-
-When you don't want to pick a component, `canvas.show(value)` inspects the value
-and inserts the panel that best renders it — the same decision a notebook makes
-for an `Out[...]`, but **without IPython** (it calls the object's `_repr_*` hooks
-directly), so it works in plain scripts too:
-
-```python
-canvas.show(df)                  # DataFrame -> Table
-canvas.show(fig)                 # Matplotlib/Plotly figure -> Image / Plot
-canvas.show("# Notes\n- a")      # Markdown -> rendered text
-canvas.show({"ok": True})        # dict / list -> pretty JSON
-canvas.show(obj)                 # _repr_html_/_repr_png_ -> its rich view
-```
-
-Dispatch order, most specific first: an existing component passes through, then
-Plotly → image-like (Matplotlib/PIL/NumPy) → tabular (DataFrame/records) → rich
-`_repr_*` → dict/list (JSON) → string (short → Label, longer → Markdown) → scalar
-`repr`. No `name` gives each call a fresh panel; pass `name=` to **replace** one
-in place (handy in a loop). The dispatcher is also exposed as
-`pycanvas.panel_for(value)` (builds the component *without* inserting), and it's
-exactly what the notebook cell-capture (`capture_cells()`) uses per cell —
-`Markdown`, `Image` and `Table` are its render targets, usable directly too via
-`canvas.markdown(text)` / `canvas.image(src)` / `canvas.table(data)`.
-
-### React panels (your own component, rendered natively)
-
-`React` is the native counterpart to `Custom`. Where `Custom` renders HTML in a
-*sandboxed iframe* (isolated — no theme or bridge access), `React` takes JSX
-**source** and mounts it as a real React subtree **inside** the panel, so it
-inherits the canvas theme, dark mode and selection chrome and talks to Python
-directly. The JSX is compiled in the browser at runtime (Babel, lazily loaded
-the first time a React panel appears — like the Repl's Monaco), so you author
-components from Python with **no `npm` build**, exactly like `Custom`.
-
-Your source must define a `function Component`, which receives three props
-(`React` and its hooks are in scope):
+`React` is the native counterpart to `Custom`. Instead of a sandboxed iframe, it
+mounts a real React subtree *inside* the panel — inheriting the canvas theme,
+dark mode, and selection chrome, and talking to Python directly. You write JSX
+**from Python** and it's compiled in the browser at runtime, so there's no build
+step:
 
 ```python
 counter = canvas.react("""
   function Component({ canvas, value, props }) {
     const [n, setN] = React.useState(0)
-    return <button onClick={() => { setN(n + 1); canvas.send({ event: 'tap', n: n + 1 }) }}>
-      {props.label}: {n}   {/* props from Python */}
+    return <button onClick={() => { setN(n+1); canvas.send({event:'tap', n:n+1}) }}>
+      {props.label}: {n}
     </button>
   }
 """, props={"label": "Taps"})
 
-@counter.on("tap")             # canvas.send -> @on, routed by the `event` field
+@counter.on("tap")
 def _(msg): print(msg["n"])
 
-counter.update(label="Hits")   # patch props -> live re-render (merges)
+counter.update(label="Hits")   # patch props -> live re-render
 counter.push(live_value)       # stream into the `value` prop, no re-mount
 ```
 
-| In the component | Direction | Meaning |
-|---|---|---|
-| `canvas.send(data)` | panel → Python | routed to your `@on(event)` / `@on_message` handlers |
-| `value` prop | Python → panel | the latest `push(data)` (no re-mount; for high-rate streams) |
-| `props` prop | Python → panel | the dict from `update(**props)` / the `props=` arg; replayed on reconnect |
+**Custom vs React:** reach for **Custom** for plain HTML or when you want the hard
+isolation of a sandbox (third-party snippets). Reach for **React** when you want
+hooks, the canvas theme, and native selection. A React panel's source runs in the
+main page (your trust level) — don't feed it untrusted source; use `Custom` for
+that.
 
-**Custom vs React.** Reach for `Custom` when the content is plain HTML or you
-want the hard isolation of a sandbox (e.g. third-party snippets). Reach for
-`React` when you want a real component with hooks, the canvas theme, and native
-selection — the things the iframe can't give you. Both compile in the browser,
-so neither needs a frontend rebuild. See
-[`examples/react_component.py`](examples/react_component.py).
+### FileBrowser — pick a file, drive a pipeline
 
-> Security note: a React panel's source runs in the **main page**, not a sandbox
-> — it's your own (host-authored) code, the same trust level as the rest of the
-> app. Don't feed it source from an untrusted party; use `Custom` (sandboxed) for
-> that.
-
-### File browser (pick a file, drive a pipeline)
-
-`FileBrowser` lists a directory on the canvas and lets the user navigate folders
-and select a file — the input end of a "choose a file → run something → show the
-result" loop. It's a `Custom` panel under the hood (no frontend build), with the
-directory listing done in Python (the browser can't read the disk):
+The input end of a "choose a file → run something → show the result" loop. The
+directory listing happens in Python (the browser can't read disk):
 
 ```python
 files = canvas.file_browser("files", root="./data", pattern="*.csv")
 plot  = canvas.plot("result")
 
-@files.on_select                 # fires with the chosen file's absolute path
+@files.on_select                       # fires with the chosen file's absolute path
 def run(path):
-    plot.update(build_figure(path))   # your pipeline drives another panel
+    plot.update(build_figure(path))
 
-@files.on_navigate               # optional: fires with the new dir on each cd
+@files.on_navigate                     # optional: fires with the new dir on each cd
 def _(cwd): ...
 ```
 
-`root` is a **hard sandbox**: every path the browser asks for is resolved with
-`realpath` and rejected if it escapes `root` (symlinks included), so navigating
-"up" stops there and a remote viewer can't walk the rest of your disk — which
-matters once you `serve(host="0.0.0.0")` or tunnel. `pattern` is an fnmatch glob
-that filters *files* (folders always show so the tree stays navigable);
-`show_hidden=False` hides dotfiles. Read the current directory with `.cwd` and the
-last selected file with `.value`; drive it from Python with `go(path)` (navigate)
-and `refresh()` (re-list after files change on disk). See
-[`examples/file_browser.py`](examples/file_browser.py).
+`root` is a **hard sandbox**: every requested path is resolved with `realpath`
+and rejected if it escapes `root` (symlinks included) — so a remote viewer can't
+walk the rest of your disk. `pattern` is an fnmatch glob filtering *files*;
+`show_hidden=False` hides dotfiles. Read `.cwd` and `.value` (last file); drive
+it with `go(path)` and `refresh()`.
 
-### Writing your own
+### Writing your own component
 
-**Prefer `Custom` or `React` first.** Between them they give you a two-way
-channel, live updates without a reload, and event routing — all from user code
-with **no package edit and no `npm` build**: `Custom` for sandboxed HTML, `React`
-for a native component with hooks and theme access. Subclass `BaseComponent` only
-when you need a genuinely new **tldraw shape** on the frontend (a bespoke canvas
-render that neither an iframe nor a hosted React subtree can give you).
-
-A subclass wires into the bridge through a handful of `BaseComponent` hooks — all
-the geometry, locking and read-back machinery is inherited, so you only supply the
-data behaviour:
-
-| Hook | Direction | Purpose |
-|---|---|---|
-| `component` (class attr) | — | The frontend shape **type string**; must match a registered tldraw shape util in `pycanvas/frontend`. |
-| `register_props()` | Python → browser | The props sent in the initial `register` message that builds the shape. Default returns your constructor `**props`; override to add fields. |
-| `state_payload()` | Python → browser | State pushed *right after* register (and replayed to every reconnecting client). Return `None` for nothing. |
-| `update(...)` | Python → browser | Your public write method. Call `self._send_update(payload)` (or `self._send_binary(...)` for raw frames) to push to the shape. |
-| `_handle_input(payload)` | browser → Python | Called when the shape posts back. Store into `self._value` (under `self._lock`) and fan out to `self._callbacks` so `@on_change` works. |
-
-The default `_handle_input` already stores `payload["value"]` and fires
-`on_change`, so a simple bidirectional control may not need to override it. See
+**Prefer `Custom` or `React` first** — between them you get a two-way channel,
+live updates, and event routing, all from user code with no package edit and no
+`npm` build. Only subclass `BaseComponent` when you need a genuinely new **tldraw
+shape** on the frontend, which means editing and rebuilding the React frontend
+(`npm run build` in `pycanvas/frontend`). A subclass wires into the bridge
+through a few hooks — `register_props()`, `state_payload()`, `update()`, and
+`_handle_input()` — and inherits all the geometry/locking machinery. See
 [`pycanvas/components/slider.py`](pycanvas/components/slider.py) (minimal) or
-[`pycanvas/components/video.py`](pycanvas/components/video.py) (binary frames) as
-templates.
-
-**The catch:** the matching frontend shape must exist, which means editing the
-React/tldraw frontend and rebuilding it (`npm run build` in
-`pycanvas/frontend`) — the step `Custom` exists to spare you. Only take this path
-when a new shape is truly required.
+[`video.py`](pycanvas/components/video.py) (binary frames) as templates.
 
 ---
 
-## Reading and updating values
+## 5. Step 3 — Wire them up (interactivity)
+
+This is the two-directions-of-data model in practice.
+
+### Python → browser: `update()` / `push()`
 
 ```python
-slider.value                 # current value (read, thread-safe)
-
-slider.update(42)            # push a value to the browser
-label.update("ready")
-toggle.update("on")
-liveplot.push({"temp": 21.5})
-
-@slider.on_change            # browser -> Python (Slider/Toggle)
-def _(v): ...
-
-@custom.on_message           # browser -> Python (Custom)
-def _(data): ...
+slider.update(42)              # move the slider from Python
+label.update("ready")          # set the label text
+toggle.update("on")            # set the toggle
+liveplot.push({"temp": 21.5})  # stream a data point
 ```
 
-`update()` is one-directional Python→browser; `on_change`/`on_message` is the
-reverse. State persists in Python, so a browser that reconnects replays the
-current values automatically.
+`update()` carries state — a reconnecting browser replays the latest value
+automatically. `push()` is for high-rate streams that you don't need replayed.
+
+### Browser → Python: callbacks
+
+Register a callback with a decorator. The method name tells you the event:
+
+```python
+@slider.on_change             # Slider/Toggle moved by the user
+def _(v): ...
+
+@button.on_click              # Button pressed
+def _(): ...
+
+@custom.on("go")              # Custom/React: a specific {event: 'go'} message
+def _(msg): ...
+
+@custom.on_message            # Custom/React: catch-all for any message
+def _(data): ...
+
+@files.on_select              # FileBrowser: a file was chosen
+def _(path): ...
+
+@chat.on_message              # Chat: every line anyone sends
+def _(entry): ...
+```
+
+Reads are always available and thread-safe via `.value`:
+
+```python
+speed.value      # current slider value
+toggle.value     # chosen option
+button.value     # click count
+```
+
+### Background workers — the producer-loop pattern
+
+Most live canvases have a loop somewhere feeding a panel (a camera, a sensor, a
+telemetry stream). Register it with `@canvas.background` and `serve()` starts it
+on a daemon thread *in the serving process* — which is what makes it play nicely
+with hot reload and single-owner resources like a webcam:
+
+```python
+feed = canvas.video("webcam")
+
+@canvas.background
+def stream():
+    cap = cv2.VideoCapture(0)
+    while True:
+        ok, frame = cap.read()
+        if ok:
+            feed.update(frame)
+
+canvas.serve(hot_reload=True)
+```
+
+> You *can* start a raw `threading.Thread(...).start()` yourself, but prefer
+> `@canvas.background`: it defers the loop to the serving process, so it won't
+> grab a camera in the hot-reload monitor and starve the real worker.
+
+### Backpressure: the queue policy
+
+Each component chooses what happens when its updates outpace a slow viewer:
+
+- `queue="fifo"` (default) — deliver every update in order, nothing dropped.
+  Right for controls and labels where each value matters.
+- `queue="latest"` — keep only the newest pending value per viewer, dropping
+  stale ones. Right for live media/telemetry (VideoFeed defaults to this).
+
+Set it any time: `plot.queue = "latest"`.
 
 ---
 
-## Layout, locking, resizing
+## 6. Step 4 — Arrange & constrain
 
-Every component exposes live geometry. Set at insert time or change any time:
+### Position, size, rotation
+
+Set geometry at insert time, or change it live any time — every write is pushed
+to the browser immediately:
 
 ```python
 canvas.insert(comp, x=80, y=80, w=300, h=160, rotation=15)
 
-comp.x = 200            # move (live)
+comp.x = 200             # move (live)
 comp.move(200, 120)
-comp.w += 50            # resize (live)
+comp.w += 50             # resize (live)
 comp.resize(w=400, h=200)
-comp.rotation = 30      # degrees, clockwise
+comp.rotation = 30       # degrees, clockwise
 ```
 
-`x/y/w/h/rotation` are readable and assignable; reads reflect what Python last
-set.
+`x / y / w / h / rotation` are all readable and assignable. Omit `x`/`y` at
+insert and the frontend auto-cascades the panel into view.
 
-### Three independent lock modes
+### Locking — five independent controls
 
-| Goal | API | User can move? | resize? | **operable?** |
-|---|---|---|---|---|
-| Stop dragging only | `draggable=False` / `comp.draggable = False` | ❌ | ✅ | ✅ |
-| Stop resizing only | `resizable=False` / `comp.resizable = False` | ✅ | ❌ | ✅ |
-| Make controls inert, stay placeable | `operable=False` / `comp.operable = False` | ✅ | ✅ | ❌ |
-| Pin in place, stay usable | `comp.pin()` (`unpin()`) | ❌ | ❌ | ✅ |
-| Fully lock (static + inert) | `locked=True` / `comp.lock()` (`unlock()`) | ❌ | ❌ | ❌ |
+This is the part newcomers most often want a clear table for. Each lock gates a
+*different* thing, and they compose. **Python's own `move()`/`resize()`/`update()`
+always work regardless** — these gate the *user*, not you.
 
-Key distinction:
-- **`draggable` / `resizable`** gate only *user gestures*; the panel's sliders and
-  buttons keep working. Use `pin()` for an interactive-but-fixed panel.
-- **`operable=False`** is the inverse: the user can't operate the controls (a
-  transparent overlay swallows pointer events), but the panel stays *unlocked*,
-  so it can still be moved/selected **and** your `update()` calls keep rendering.
-  Use it for a control that tracks an automatic value the user mustn't drag — a
-  slider whose thumb follows a live reading, say.
-- **`locked`** is the hard lock — it also blocks interaction (a locked slider
-  won't emit changes) *and* freezes programmatic `update()`s.
-- **Python `move()` / `resize()` always work**, regardless of these — they gate
-  the user, not you.
+| You want to… | Use | User can move? | resize? | operate controls? | Python `update()` renders? |
+|---|---|:---:|:---:|:---:|:---:|
+| Stop dragging only | `draggable=False` | ❌ | ✅ | ✅ | ✅ |
+| Stop resizing only | `resizable=False` | ✅ | ❌ | ✅ | ✅ |
+| Pin in place, stay usable | `comp.pin()` | ❌ | ❌ | ✅ | ✅ |
+| Freeze controls, keep placeable | `operable=False` | ✅ | ✅ | ❌ | ✅ |
+| Fully lock (static + inert) | `locked=True` / `comp.lock()` | ❌ | ❌ | ❌ | ❌ |
+
+The three to really understand:
+
+- **`draggable` / `resizable`** gate only *user gestures*. The panel's sliders and
+  buttons keep working. `comp.pin()` is the shorthand for both off.
+- **`operable=False`** is the inverse: the user can't touch the controls (a
+  transparent overlay swallows their clicks), but the panel stays unlocked, so it
+  can still be moved **and your `update()` calls keep rendering**. Perfect for a
+  control that displays an automatic value the user mustn't drag.
+- **`locked=True`** is the hard lock — it freezes everything, *including* your
+  programmatic updates.
+
+Every lock is also a settable property: `comp.draggable = False`,
+`comp.operable = False`, `comp.lock()` / `comp.unlock()`, `comp.pin()` /
+`comp.unpin()`.
+
+### Frameless & non-grabbable panels
+
+Two more knobs for making content feel like it floats on the canvas:
+
+- **`frame=False`** strips the panel's card chrome — background, border, shadow,
+  padding, the label header, *and* the hover/selection highlight — so the content
+  appears to sit directly on the canvas. The panel still occupies its `w×h` box
+  and can be selected/moved.
+- **`grabbable=False`** (content panels) drops the click-to-select cover so the
+  content is interactive on the first hover, *and* makes the panel invisible to
+  selection — no click, marquee, or select-all touches it. Move it from Python
+  only.
+
+Pair them for a free-floating live widget:
 
 ```python
-canvas.insert(gauge, x=40, y=40, draggable=False, resizable=False)  # pinned, live
-panel.lock()        # freeze completely
-panel.unlock()
+canvas.custom(name="gauge", html=…, frame=False, grabbable=False)
 ```
 
-### Frameless panels
+### Arrows — connect panels
 
-`frame=False` strips the panel's card chrome entirely — background, border,
-shadow, padding, the label header, *and* the hover/selection highlight
-rectangle — so the component's content appears to sit directly on the canvas:
-
-```python
-canvas.insert(widget, x=40, y=40, frame=False)   # or comp.frame = False later
-```
-
-The panel still occupies its `w×h` box and can be moved/resized as usual —
-selecting it shows tldraw's normal selection box and resize handles (handy for
-placing it), it just isn't outlined on hover. Pair it with `grabable=False`
-for content (Custom/React/WebView…) that should feel like a free-floating
-widget: live on hover, and *never* selectable by the user — no click, marquee,
-or select-all highlights it (move it from Python instead):
-
-```python
-canvas.custom(name="gauge", html=..., frame=False, grabable=False)
-```
-
----
-
-## Arrows
-
-Arrows are first-class, managed like components. They bind to the two panels and
-reroute automatically as those panels move or resize.
+Arrows are first-class, managed like components, and reroute automatically as
+their endpoints move:
 
 ```python
 a = canvas.connect(src, dst, name="flow", text="x1", color="blue")
 
-canvas.flow              # lookup by name (like components)
-a.color = "red"          # live property change
+canvas.flow                  # look up by name, like a component
+a.color = "red"              # live property change
 a.update(dash="dashed", size="l", bend=40)
-a.text = "boosted"       # change the visible caption (identity unchanged)
+a.text = "boosted"           # change the caption (identity unchanged)
 
 canvas.disconnect("flow")    # remove by name (or pass the Arrow)
 ```
 
-`name` is the arrow's **identity**: the `canvas.<name>` lookup key — same
-convention as components — and is unique, so connecting again under the same
-`name` destroys the old arrow and the new one becomes the reference. Omit it and
-the name is derived from the endpoints (`"<start.name>-><end.name>"`), so a
-second unnamed arrow between the same two panels replaces the first. `text` is
-the **caption** drawn on the
-arrow (no caption is shown when omitted); change it freely via `a.text = ...` /
-`a.update(text=...)` without disturbing identity.
+Like components, `name` is the arrow's identity (re-connecting under the same
+name replaces it; omit it and it's derived from the endpoints), and `text` is the
+cosmetic caption.
 
-**Arrow properties** (`connect(..., **props)` or `arrow.update(...)`):
-
-| Prop | Values |
+| Property | Values |
 |---|---|
 | `color` | black, grey, violet, light-violet, blue, light-blue, yellow, orange, green, light-green, light-red, red, white |
 | `dash` | draw, solid, dashed, dotted |
 | `size` | s, m, l, xl |
 | `arrowhead_start`, `arrowhead_end` | none, arrow, triangle, square, dot, pipe, diamond, inverted, bar |
-| `bend` | number |
-| `text` | caption string (the visible label on the arrow) |
+| `bend` | a number |
 
-Invalid enum values make tldraw reject the shape (it won't render) — stick to
-the lists above.
+> Invalid enum values make tldraw silently reject the shape — stick to the lists.
 
----
+### Reading the user's layout back
 
-## Reading the UI back, saving & loading
-
-By default, geometry flows Python → browser. With **read-back**, the reverse
-also works: when a user drags, resizes, or rotates a panel, Python's
-`comp.x / y / w / h / rotation` update to match, and an optional callback fires.
+By default geometry flows Python → browser. **Read-back** adds the reverse: when
+a user drags or resizes a panel, Python's `comp.x/y/w/h/rotation` update to
+match, and an optional callback fires:
 
 ```python
 @panel.on_layout
@@ -427,145 +517,321 @@ def _(comp):
     print("user moved it to", comp.x, comp.y)
 ```
 
-(Your own programmatic `move()`/`resize()` don't trigger this — only user
-gestures do.)
+(Your own `move()`/`resize()` don't trigger this — only user gestures do.)
 
-### Saving and loading
+---
+
+## 7. Step 5 — Serve & share
+
+`canvas.serve()` is the last line of most scripts. Its options unlock everything
+from "open it on my screen" to "share it on the public internet."
+
+### Blocking (the default — for scripts)
+
+```python
+canvas.serve(port=8000)        # opens the browser, blocks until Ctrl+C
+```
+
+### Background (for Jupyter / interactive)
+
+```python
+canvas.serve(port=8000, block=False)   # returns immediately
+canvas.slider("late")                  # appears live on the already-open page
+canvas.stop()                          # shut it down
+```
+
+After `serve(block=False)`, every later `insert` / `connect` / `update` is pushed
+straight to the open page. In a **plain script** (not a notebook) you must keep
+the process alive — call `canvas.wait()` at the end, or the daemon server thread
+dies when the script exits.
+
+### Share on your LAN
+
+`host` is the bind address — which network interfaces to listen on:
+
+```python
+canvas.serve(host="0.0.0.0")   # reachable from other devices on the same Wi-Fi
+```
+
+The default `127.0.0.1` is local-only. With `0.0.0.0`, `serve()` prints the exact
+`network:` URL to open on another device (it uses *this* machine's IP). Two
+gotchas: your OS firewall may block the port (allow it once), and a `Repl` on the
+canvas refuses a non-local bind unless `allow_remote_exec=True`.
+
+### Share across the internet (tunnel)
+
+```python
+canvas.serve(tunnel=True)      # prints a public https://… URL anyone can open
+```
+
+`tunnel_provider="cloudflared"` (default, no signup) or `"localtunnel"`. A tunnel
+exposes the canvas to the whole internet, so it's gated for `Repl` exactly like a
+public bind.
+
+### Password-protect it
+
+```python
+canvas.serve(host="0.0.0.0", password="hunter2")
+```
+
+Visitors see a password page first; the WebSocket is refused until they pass. The
+check is per-browser-session (a cookie), so each viewer enters it once. A password
+controls *who connects*, not whether a Repl may run — that still needs the
+explicit `allow_remote_exec`.
+
+### Control the viewport (`view=` and `set_view`)
+
+Make the same canvas a free creative workspace or a fixed kiosk UI. Pass a `view`
+dict to `serve` (initial state) or call `canvas.set_view(...)` live:
+
+```python
+canvas.serve(view={"zoom": 1.5, "ui": False, "locked": True})
+
+canvas.set_view(ui=False)                      # hide tldraw's toolbars everywhere
+canvas.set_view(zoom=2.0)                      # zoom all viewers to 200%
+canvas.set_view(locked=True)                   # freeze pan/zoom (kiosk)
+canvas.set_view(x=100, y=200, client_id="…")   # move ONE viewer's camera only
+```
+
+| `view` key | Effect |
+|---|---|
+| `x` / `y` / `zoom` | Initial camera position and zoom (1.0 = 100%) |
+| `locked` | `True` freezes pan and zoom entirely |
+| `min_zoom` / `max_zoom` | Clamp how far the viewer can zoom |
+| `ui` | `False` hides tldraw's toolbars/menus |
+| `grid` | `True` shows the background grid |
+| `read_only` | `True` puts tldraw in read-only mode (no drawing) |
+
+`set_view` with a `client_id` (from `canvas.viewers`) steers just that one
+viewer; omit it to broadcast to everyone.
+
+### Multiple viewers
+
+`canvas.viewers` is the live roster of connected browsers — each a dict with
+`id`, `name`, and `color`. The `id` is what `set_view(..., client_id=…)` expects.
+The list reflects who's connected *right now*. Pair it with `Chat` for a shared
+room.
+
+### Hot reload (auto-restart on save)
+
+```python
+canvas.serve(hot_reload=True)
+```
+
+Watches the `.py` files next to your script and restarts the whole process on any
+save, so edits — a different `default=`, a moved panel, `ui=False` — take effect
+immediately. The browser tab reconnects on its own (no new tab). If an edit has a
+syntax error, the last working version keeps serving until you fix it. Script-only
+(`block=True`); not available in notebooks.
+
+### Desktop app & packaging (`bake`)
+
+Run in a native window instead of the browser, and ship a standalone `.exe`:
+
+```python
+canvas.serve(desktop=True)         # native window (pywebview) instead of browser
+canvas.bake(name="RobotConsole")   # python script.py -> builds a one-file .exe
+```
+
+`bake` bundles Python, the backend, and the frontend with PyInstaller. The built
+app needs nothing installed: launching it runs your script in a native window.
+The *same script* is both source and app — inside the `.exe` (`sys.frozen`),
+`bake` skips the build and just runs. Needs the `[desktop]` extra. CLI equivalent:
+`python -m pycanvas.bake your_script.py`.
+
+### Reconnection
+
+The browser auto-reconnects if the server restarts, and the server replays full
+state (every value, geometry, lock, and arrow) to any fresh connection — so
+reloads and restarts are seamless.
+
+---
+
+## 8. Merging canvases — many hosts, one shared surface
+
+This is PyCanvas's standout collaboration feature, and it works differently from
+everything above. Normally one `Canvas` is one Python process feeding one set of
+browsers. **Merge** lets several *independent* canvases — each hosted by a
+different person, in a different process, on a different machine — appear as a
+single unified board that everyone can watch and interact with.
+
+The key idea: **nobody gives up their own canvas.** Each person keeps running
+their own `Canvas` on their own port, exactly as before. A separate, lightweight
+**aggregator** connects to each of them as a client (just like a browser does),
+composites all their panels onto one surface, and re-serves the union on a new
+port. It runs *no* component logic and holds *no* state of its own — it caches
+each source's panels and **routes interactions back to the owning process**. So a
+click on Sarah's button still computes in Sarah's Python; Josef's runs in his.
+
+```
+   Sarah's Canvas  (:8001) ─┐
+   Josef's Canvas  (:8002) ─┼──►  Merge host (:8080)  ──►  everyone's browser
+   Maria's Canvas  (:8003) ─┘        (composites + routes)
+```
+
+### Start a merge
+
+From the command line — point it at the running canvases and pick a port:
+
+```bash
+# unify three running canvases onto http://localhost:8080
+python -m pycanvas.merge :8001 :8002 host3:8003 --port 8080
+```
+
+Or from Python (e.g. in a notebook):
+
+```python
+from pycanvas import Merge
+
+Merge([8001, 8002]).serve(port=8080)            # blocks, like Canvas.serve()
+Merge([8001, 8002]).serve(port=8080, block=False)  # background; later .stop()
+```
+
+### Sources can be anywhere
+
+A source is a bare port (`8001`, `:8001`), a `host:port`, **or a full tunnel
+URL** — so you can merge canvases that people are hosting on entirely different
+networks, as long as each has run `serve(tunnel=True)`:
+
+```bash
+python -m pycanvas.merge https://a.loca.lt https://b.loca.lt --tunnel
+```
+
+`--tunnel` (or `serve(tunnel=True)`) also publishes the *merged* view itself, so
+collaborators on any network can open one `https://…` URL and see everyone's
+work together.
+
+### Overlay vs. regions
+
+| Layout | How | Result |
+|---|---|---|
+| **Overlay** (default) | `Merge([…])` | Every source keeps its real coordinates — canvases stack in the same space, as if drawn on one sheet. |
+| **Side-by-side** | `Merge([…], region_width=2000)` | Each source gets its own horizontal strip that many pixels wide, so they sit next to each other instead of overlapping. |
+
+### Live & resilient
+
+Sources connect, disconnect, and reconnect freely. While a source is down its
+panels go inert and drop out of the merged view; they reappear (and resume
+computing in their owner's process) when it comes back. Viewers on the merged
+view also get **shared presence and chat** — they see each other in the roster
+and can talk, mediated by the merge host.
+
+### What merges, and the `Repl` gate
+
+- **Merged:** all code-driven panels and arrows, with full two-way interaction
+  routed back to each source.
+- **Not merged (v1):** free-form user drawings aren't composited, and rearranging
+  panels in the merged view is local to the merge host — it isn't pushed back to
+  the source canvases.
+- **Security:** the merge host runs no code itself, but a browser interacting with
+  a merged `Repl` would execute code *in that source's* process. That's refused
+  unless you pass `allow_remote_exec=True` (`--allow-remote-exec` on the CLI) —
+  same opt-in as `Canvas.serve`.
+
+See [`examples/merge_canvases.ipynb`](examples/merge_canvases.ipynb).
+
+---
+
+## 9. Saving, loading & the notebook workflow
+
+### Save and load a board
 
 One pair of methods persists the whole board to a single JSON file:
 
 ```python
-canvas.save("board.json")     # panel formation + the user's freehand drawings
-canvas.load("board.json")     # snaps panels back into place, restores drawings
+canvas.save("board.json")   # panel formation + the user's freehand drawings
+canvas.load("board.json")   # snaps panels back, restores drawings
 ```
 
 The file holds two things:
 
 - **`layout`** — every panel's geometry and lock state (accurate thanks to
-  read-back). Panels are *code*, so only their placement is saved, never their
-  behaviour. On load they're matched by id (same run), then by name (across
-  runs).
-- **`drawings`** — the free-form shapes, text and arrows the user drew in the
-  UI, which have no Python counterpart. These come from a connected browser
-  (the source of truth), so an open page is needed to capture them; with no
-  browser open, `save()` writes the formation alone.
+  read-back). Panels are *code*, so only their *placement* is saved, never their
+  behaviour.
+- **`drawings`** — the free-form shapes, text, and arrows the user drew in the UI,
+  which have no Python counterpart. These come from a connected browser, so an
+  open page is needed to capture them.
 
 Because panels aren't saved as data, **recreate them in code first, then call
-`load()`** — it repositions those live panels and merges the saved drawings on
-top of them (bound arrows follow their panels automatically):
+`load()`** — it repositions the live panels and lays the saved drawings on top:
 
 ```python
 canvas = pycanvas.Canvas()
-speed = canvas.insert(pycanvas.Slider("speed"), ...)   # same names as when saved
-# ... insert the rest of your panels ...
-canvas.load("board.json")     # formation + drawings, in one call
+canvas.slider("speed")          # same names as when you saved
+# ... recreate the rest of your panels ...
+canvas.load("board.json")
 canvas.serve()
 ```
 
-Pass `load(..., formation=False)` to restore only the user's drawings and leave
-your panels wherever your code placed them (the saved formation is ignored).
+Pass `load(..., formation=False)` to restore only the drawings and leave your
+panels where your code placed them.
+
+### Jupyter / notebooks
+
+Serve once in the background, then keep adding panels from later cells:
+
+```python
+canvas = pycanvas.Canvas()
+canvas.serve(block=False)       # returns immediately; page stays open
+# ... any later cell ...
+canvas.show(df)                 # appears live on the open page
+```
+
+### Mirror every cell's output automatically
+
+`capture_cells()` registers a hook so each cell ending in an expression gets (or
+refreshes) its own auto-arranged panel — no manual `insert` per cell:
+
+```python
+canvas = pycanvas.Canvas()
+canvas.serve(block=False)
+canvas.capture_cells()          # now every cell's output lands on the canvas
+```
+
+Re-running a cell swaps its panel in place. A `# pycanvas:` directive line in a
+cell overrides placement (or opts out with `skip`); `capture_cells(auto=False)`
+inverts it to an allowlist. Stop with `stop_capturing_cells()`. The standalone
+function is `pycanvas.autopanel(canvas, ...)`.
 
 ---
 
-## Serving & hosting
+## 10. Quick reference
 
-### Blocking (scripts)
-
-```python
-canvas.serve(port=8000)                 # opens browser, blocks until Ctrl+C
-```
-
-### Background (Jupyter / interactive)
+**Build & drive:**
 
 ```python
-canvas.serve(port=8000, block=False)    # returns immediately
-canvas.slider("late")                   # appears live on the open page
-canvas.stop()                           # shut it down
+canvas = pycanvas.Canvas()
+comp   = canvas.slider("x", min=0, max=10, x=40, y=40)   # add + place
+comp.update(5)                                           # Python -> browser
+comp.value                                               # read (thread-safe)
+
+@comp.on_change                                          # browser -> Python
+def _(v): ...
 ```
 
-After `serve(block=False)`, every later `insert` / `connect` / `update` is pushed
-to the already-open page. This is the notebook workflow: serve once, then keep
-adding and driving panels from new cells.
-
-### LAN / sharing
-
-`host` is the **bind address** — which interfaces the server listens on:
+**Arrange & lock:**
 
 ```python
-canvas.serve(host="0.0.0.0")            # reachable from other devices on the LAN
+comp.move(100, 100); comp.resize(w=300); comp.rotation = 15
+comp.pin()            # fixed but interactive
+comp.operable = False # inert controls, still driven by Python
+comp.lock()           # frozen completely
+comp.frame = False    # no card chrome
+canvas.connect(a, b, color="blue", text="flow")
 ```
 
-Default `127.0.0.1` is local-only. Use `"0.0.0.0"` (or `""`, same thing) to let
-other devices on your Wi‑Fi connect. When you bind non-locally, `serve()` prints
-the exact address to open elsewhere:
-
-```
-PyCanvas serving  (Ctrl+C to stop):
-  local:   http://127.0.0.1:8000
-  network: http://192.168.1.42:8000   <- open this on another device on the same Wi-Fi
-```
-
-Open that **network** URL on the other device (the phone/laptop uses *this*
-machine's IP, not its own). Two gotchas if it won't connect:
-
-- **Firewall** — your OS may block inbound connections to the port. On Windows,
-  allow it once: `New-NetFirewallRule -DisplayName "PyCanvas 8000" -Direction
-  Inbound -Action Allow -Protocol TCP -LocalPort 8000 -Profile Any` (admin shell).
-- **Different network / no IP wanted** — to share without dealing with IPs or
-  firewalls, or across networks, keep the default local bind and run a tunnel:
-  in VS Code open the **Ports** panel → **Forward a Port** → `8000` for a public
-  `https://…` URL; or `ngrok http 8000` / `cloudflared tunnel --url
-  http://localhost:8000`.
-
-If a `Repl` is on the canvas, non-local serving is refused unless
-`serve(..., allow_remote_exec=True)` — a REPL is unauthenticated remote code
-execution, so only enable that on a trusted network.
-
-### Reconnection
-
-The browser auto-reconnects if the server restarts, and the server replays full
-state (every component's current values, geometry, locks, and all arrows) to any
-fresh connection — so reloads and restarts are seamless.
-
----
-
-## Patterns
-
-**Background worker driving panels:**
+**Serve:**
 
 ```python
-import threading, time
-
-def loop():
-    while True:
-        plot.push({"temp": read_sensor()})
-        time.sleep(0.1)
-
-threading.Thread(target=loop, daemon=True).start()
-canvas.serve()
+canvas.serve()                                   # script: blocks
+canvas.serve(block=False); ...; canvas.wait()    # background, then park
+canvas.serve(host="0.0.0.0", password="…")       # LAN, gated
+canvas.serve(tunnel=True)                         # public URL
+canvas.serve(hot_reload=True)                     # restart on save
+canvas.serve(view={"ui": False, "locked": True}) # kiosk
+canvas.bake(name="MyApp")                         # build a desktop .exe
 ```
 
-**A fixed dashboard layout** — pin panels so users can interact but not rearrange.
-Define your own dict mapping each component to the position you want, then insert
-them all in a loop (this is just your data — the canvas isn't iterated):
-
-```python
-# You build this dict: component -> (x, y) position on the canvas.
-layout = {
-    pycanvas.Slider("speed"): (80, 80),
-    pycanvas.Toggle("mode", options=["a", "b"]): (80, 220),
-    pycanvas.Label("status"): (380, 80),
-}
-
-for comp, (x, y) in layout.items():
-    # draggable/resizable False => placed exactly here, but still interactive.
-    canvas.insert(comp, x=x, y=y, draggable=False, resizable=False)
-```
-
-If instead you want to act on panels you've *already* inserted, keep your own
-references (or use named lookup) — e.g. `canvas.speed.lock()`. There is no
-public "iterate every component on the canvas" API; you track the panels you
-care about yourself.
-
-See [`examples/`](examples/) for full programs (robot control, sensor dashboard,
-locking + arrows, notebook workflow).
+See [`examples/`](examples/) for full programs — robot control, sensor dashboard,
+webcam feed, locking + arrows, chat room, notebook workflows, tunneling, and
+packaging. The [README](README.md) is the exhaustive reference for every option.
