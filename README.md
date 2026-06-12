@@ -239,7 +239,7 @@ typed constructor, or to override `state_payload` so every connecting client
 ```python
 class Dial(pycanvas.Custom):
     def __init__(self, name="dial", **place):
-        super().__init__(html=DIAL_HTML, name=name, width=220, height=260, **place)
+        super().__init__(html=DIAL_HTML, name=name, w=220, h=260, **place)
         self._angle = 0
 
     # Called automatically for every connecting client — no "ready" handshake needed.
@@ -491,18 +491,18 @@ freely (e.g. pin a panel in place while keeping its slider live).
 | `draggable=False`   | **no**         | yes              | yes                   | yes                        |
 | `resizable=False`   | yes            | **no**           | yes                   | yes                        |
 | `operable=False`    | yes            | yes              | **no**                | yes                        |
-| `grabable=False`    | **no** (Python only) | **no**     | yes, **immediately**  | yes                        |
+| `grabbable=False`    | **no** (Python only) | **no**     | yes, **immediately**  | yes                        |
 | `locked=True`       | **no**         | **no**           | **no**                | **no** (frozen)            |
 
-`grabable` mostly matters on content-heavy panels (`Custom`, `React`,
+`grabbable` mostly matters on content-heavy panels (`Custom`, `React`,
 `WebView`, plots, chat, repl…). By default those need a first click to *select*
 the panel before their content takes the pointer — which also means CSS
 `:hover` effects inside the widget don't run until that click.
-`grabable=False` drops that cover **and** makes the panel invisible to
+`grabbable=False` drops that cover **and** makes the panel invisible to
 selection entirely: the widget is hover- and click-live from the start, and no
 click, marquee, or select-all ever highlights or selects the panel. The
 trade-off is that the user can't move or resize it at all — do that from
-Python (`move()` / `resize()`), or flip `grabable` back on.
+Python (`move()` / `resize()`), or flip `grabbable` back on.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
@@ -545,11 +545,11 @@ selecting it shows the usual selection box and resize handles (handy for
 placing it), it just isn't outlined on hover. Frameless `Custom`/`WebView`
 iframes and `VideoFeed` letterboxes turn transparent too, so user HTML with a
 transparent body (the `css=`/`js=` compose path sets one) floats free. Pair it
-with `selectable=False` for a true free-floating widget — live on hover and
+with `grabbable=False` for a true free-floating widget — live on hover and
 completely untouchable by the user:
 
 ```python
-canvas.custom(name="gauge", html=..., frame=False, grabable=False)
+canvas.custom(name="gauge", html=..., frame=False, grabbable=False)
 ```
 
 ## Saving & loading

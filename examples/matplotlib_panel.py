@@ -41,7 +41,7 @@ canvas = pycanvas.Canvas()
 
 freq = canvas.insert(pycanvas.Slider("frequency", min=1, max=10, default=3))
 plot = canvas.insert(
-    pycanvas.Custom(html=render_plot(3), name="matplotlib", width=460, height=380)
+    pycanvas.Custom(html=render_plot(3), name="matplotlib", w=460, h=380)
 )
 
 

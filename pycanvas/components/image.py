@@ -24,13 +24,13 @@ class Image(Custom):
     default_w = 420
     default_h = 320
 
-    def __init__(self, src, name="image", label=None, width=420, height=320,
+    def __init__(self, src, name="image", label=None, w=None, h=None,
                  fit="contain"):
         # ``fit`` is the CSS object-fit: "contain" (default, whole image) or
         # "cover" (fill, cropping overflow).
         self._fit = fit
         super().__init__(html=self._render(src), name=name, label=label,
-                         width=width, height=height)
+                         w=w, h=h)
 
     def update(self, src):
         """Replace the image, live."""

@@ -25,9 +25,9 @@ class Table(Custom):
     default_w = 520
     default_h = 360
 
-    def __init__(self, data, name="table", label=None, width=520, height=360):
+    def __init__(self, data, name="table", label=None, w=None, h=None):
         super().__init__(html=self._render(data), name=name, label=label,
-                         width=width, height=height)
+                         w=w, h=h)
 
     def update(self, data):
         """Replace the table contents, live."""

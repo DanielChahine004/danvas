@@ -80,8 +80,8 @@ canvas = pycanvas.Canvas()
 clock = canvas.custom(
     html=CLOCK_HTML,
     name="analog_clock",
-    width=250,
-    height=250,
+    w=250,
+    h=250,
     x=100,
     y=100
 )

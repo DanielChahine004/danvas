@@ -225,8 +225,8 @@ class CellCapture:
 
         caption = label if label is not None else self._caption(result)
         formatter = getattr(self._ip, "display_formatter", None)
-        return panel_for(out, name=name, label=caption, width=self.slot_w,
-                         height=self.slot_h, formatter=formatter)
+        return panel_for(out, name=name, label=caption, w=self.slot_w,
+                         h=self.slot_h, formatter=formatter)
 
     def _caption(self, result):
         """A short panel caption derived from the cell's source (or its id)."""

@@ -4,6 +4,8 @@ import math
 import threading
 import traceback
 
+from .._flags import LAYOUT_FLAGS
+
 
 class BaseComponent:
     """A bidirectional canvas component.
@@ -63,37 +65,14 @@ class BaseComponent:
         # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
         # read and incremented. Like position, it is a top-level shape field.
         self._rotation = 0
-        # When True the panel is fully locked in tldraw (isLocked): it can't be
-        # moved, resized, rotated, selected, OR interacted with. Top-level field.
-        self._locked = False
-        # Finer-grained, interaction-preserving locks. With these the panel's
-        # controls (sliders, buttons) still work; only the drag-to-move and
-        # resize-handle gestures are disabled. Carried in the shape's tldraw
-        # ``meta`` and enforced by the frontend's onTranslate / canResize hooks.
-        self._draggable = True
-        self._resizable = True
-        # Another interaction-preserving flag, but the inverse emphasis: when
-        # False the user can't operate the panel's controls (a transparent
-        # overlay swallows pointer events on the frontend), yet the panel stays
-        # *unlocked* so Python ``update()`` calls still render — e.g. a slider
-        # whose thumb tracks an automatic value the user mustn't drag. Carried in
-        # the shape's tldraw ``meta`` (lockInput). Contrast ``locked``, which
-        # also freezes programmatic updates.
-        self._operable = True
-        # When False, the user can't grab/select this panel at all: the frontend
-        # skips the "grab cover" it lays over content-heavy panels (so the
-        # content is hoverable/clickable immediately) AND filters the panel out
-        # of hover/selection state, so no click, marquee, or select-all ever
-        # highlights or selects it. The panel can then only be moved/resized
-        # from Python. Carried in the shape's tldraw ``meta`` (noGrab).
-        self._grabable = True
-        # When False the panel's rectangular card chrome is removed: no
-        # background, border, shadow, padding, or label header, and no
-        # hover/selection highlight rectangle — the component's content appears
-        # to sit directly on the canvas. Carried in the shape's tldraw ``meta``
-        # (noFrame). Often paired with ``selectable=False`` so clicking the
-        # content never outlines it.
-        self._frame = True
+        # Lock / chrome flags, all defaulted from the single table in _flags.py:
+        # ``locked`` (full lock, top-level tldraw isLocked); ``draggable`` /
+        # ``resizable`` / ``operable`` / ``grabbable`` (interaction-preserving
+        # locks carried in the shape's tldraw ``meta``); ``frame`` (the card
+        # chrome). See pycanvas/_flags.py for the per-flag semantics, the wire
+        # keys, and the property docstrings generated at the bottom of this file.
+        for _flag in LAYOUT_FLAGS.values():
+            setattr(self, _flag.attr, _flag.default)
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -166,83 +145,10 @@ class BaseComponent:
     def rotation(self, value):
         self.set_layout(rotation=value)
 
-    @property
-    def locked(self):
-        """Whether the panel is fully locked (no move/resize/interaction)."""
-        return self._locked
-
-    @locked.setter
-    def locked(self, value):
-        self.set_layout(locked=bool(value))
-
-    @property
-    def draggable(self):
-        """Whether the user can drag the panel. Control interaction is unaffected."""
-        return self._draggable
-
-    @draggable.setter
-    def draggable(self, value):
-        self.set_layout(draggable=bool(value))
-
-    @property
-    def resizable(self):
-        """Whether the user can resize the panel. Interaction is unaffected."""
-        return self._resizable
-
-    @resizable.setter
-    def resizable(self, value):
-        self.set_layout(resizable=bool(value))
-
-    @property
-    def operable(self):
-        """Whether the user can operate the panel's controls from the UI.
-
-        Set to ``False`` to make the controls inert to the user while the panel
-        stays unlocked, so Python ``update()`` calls still render live (e.g. a
-        slider thumb that tracks an automatic value the user mustn't drag). The
-        panel can still be moved/selected; use ``locked`` to freeze everything.
-        """
-        return self._operable
-
-    @operable.setter
-    def operable(self, value):
-        self.set_layout(operable=bool(value))
-
-    @property
-    def grabable(self):
-        """Whether the user can grab/select this panel at all.
-
-        Content-heavy panels (Custom, React, WebView, plots…) normally need a
-        first click to select the panel before their content becomes
-        interactive. Set to ``False`` to drop that cover *and* make the panel
-        invisible to selection: the content is live (hover and clicks work)
-        from the start, and no click, marquee, or select-all ever highlights
-        or selects the panel — only the widget itself reacts. The trade-off is
-        that the user can't move or resize it; do that from Python (or flip
-        ``grabable`` back on).
-        """
-        return self._grabable
-
-    @grabable.setter
-    def grabable(self, value):
-        self.set_layout(grabable=bool(value))
-
-    @property
-    def frame(self):
-        """Whether the panel draws its rectangular card chrome.
-
-        Set to ``False`` to strip the card entirely — background, border,
-        shadow, padding, label header, and the hover/selection highlight
-        rectangle — so the component's content appears to float directly on
-        the canvas. The panel still occupies its w×h box and can be moved or
-        resized as usual (marquee select still works). Pair with
-        ``selectable=False`` if clicks on the content should never select it.
-        """
-        return self._frame
-
-    @frame.setter
-    def frame(self, value):
-        self.set_layout(frame=bool(value))
+    # The lock/chrome flag properties (``locked``, ``draggable``, ``resizable``,
+    # ``operable``, ``grabbable``, ``frame``) are generated from LAYOUT_FLAGS at
+    # the bottom of this module — one read-back property + a setter that routes
+    # through set_layout for each. See pycanvas/_flags.py.
 
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
@@ -320,17 +226,17 @@ class BaseComponent:
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
                    locked=None, draggable=None, resizable=None, operable=None,
-                   grabable=None, frame=None):
+                   grabbable=None, frame=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
         reconnecting client replays the new layout. ``x``/``y`` travel as the
         panel's canvas position, ``rotation`` (degrees) as its angle. ``locked``
         is a full lock (also blocks interaction *and* programmatic updates);
-        ``draggable``/``resizable``/``operable`` are interaction-preserving
-        locks carried in the shape's tldraw ``meta`` (``operable=False`` makes
-        controls inert to the user while value updates keep rendering).
-        ``w``/``h`` are shape props.
+        ``draggable``/``resizable``/``operable``/``grabbable`` are
+        interaction-preserving locks carried in the shape's tldraw ``meta``
+        (``operable=False`` makes controls inert to the user while value updates
+        keep rendering). ``w``/``h`` are shape props.
         """
         payload = {}
         if x is not None:
@@ -352,24 +258,19 @@ class BaseComponent:
         if rotation is not None:
             self._rotation = rotation
             payload["rotation"] = math.radians(rotation)  # tldraw uses radians
-        if locked is not None:
-            self._locked = bool(locked)
-            payload["locked"] = self._locked
-        if draggable is not None:
-            self._draggable = bool(draggable)
-            payload["movable"] = self._draggable
-        if resizable is not None:
-            self._resizable = bool(resizable)
-            payload["resizable"] = self._resizable
-        if operable is not None:
-            self._operable = bool(operable)
-            payload["interactive"] = self._operable
-        if grabable is not None:
-            self._grabable = bool(grabable)
-            payload["selectable"] = self._grabable
-        if frame is not None:
-            self._frame = bool(frame)
-            payload["frame"] = self._frame
+        # The boolean lock/chrome flags are uniform: store the attribute and put
+        # the wire key on the payload. Driven by LAYOUT_FLAGS so a new flag needs
+        # only a table entry plus its keyword above.
+        flag_values = {
+            "locked": locked, "draggable": draggable, "resizable": resizable,
+            "operable": operable, "grabbable": grabbable, "frame": frame,
+        }
+        for name, value in flag_values.items():
+            if value is None:
+                continue
+            flag = LAYOUT_FLAGS[name]
+            setattr(self, flag.attr, bool(value))
+            payload[flag.wire] = bool(value)
         if payload:
             self._send_update(payload)
 
@@ -421,3 +322,26 @@ class BaseComponent:
                 cb(self.value)
             except Exception:
                 traceback.print_exc()
+
+
+def _flag_property(name, flag):
+    """Build the read/write property for one lock/chrome flag.
+
+    The getter returns the backing attribute; the setter routes through
+    :meth:`BaseComponent.set_layout` so the change is broadcast live and the
+    stored state stays consistent.
+    """
+    def getter(self):
+        return getattr(self, flag.attr)
+
+    def setter(self, value):
+        self.set_layout(**{name: bool(value)})
+
+    return property(getter, setter, doc=flag.doc)
+
+
+# Attach the flag properties declared in _flags.py onto BaseComponent. Defining
+# them here (rather than by hand) keeps the wire key, default, and docstring in
+# one table — adding a flag is a single entry there.
+for _name, _flag in LAYOUT_FLAGS.items():
+    setattr(BaseComponent, _name, _flag_property(_name, _flag))

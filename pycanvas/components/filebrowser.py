@@ -131,10 +131,10 @@ class FileBrowser(Custom):
     default_w = 320
     default_h = 420
 
-    def __init__(self, root=".", name="files", label=None, width=320, height=420,
+    def __init__(self, root=".", name="files", label=None, w=None, h=None,
                  pattern=None, show_hidden=False):
         super().__init__(html=_FILE_BROWSER_HTML, name=name, label=label,
-                         width=width, height=height)
+                         w=w, h=h)
         # Resolve the sandbox root once; every later path is checked against it.
         self._root = os.path.realpath(root)
         self._cwd = self._root

@@ -49,16 +49,16 @@ def test_register_messages_sent_on_connect():
 
 
 def test_register_message_carries_initial_locks():
-    """draggable/operable/grabable=False set at insert reach the first register.
+    """draggable/operable/grabbable=False set at insert reach the first register.
 
-    The public flags are stored as _draggable/_operable/_grabable; the wire keys
+    The public flags are stored as _draggable/_operable/_grabbable; the wire keys
     stay movable/interactive/selectable. A rename once left register_message
     reading the old attribute names, so initial locks silently defaulted to "on"
     and only took effect after a later set_layout. Guard the mapping here.
     """
     canvas = pycanvas.Canvas()
     locked = canvas.label("pinned", "x", draggable=False, operable=False,
-                          grabable=False)
+                          grabbable=False)
     free = canvas.label("free", "y")
 
     msg = canvas._bridge.register_message(locked)

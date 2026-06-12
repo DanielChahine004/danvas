@@ -17,6 +17,7 @@ from collections import deque
 
 from fastapi import WebSocketDisconnect
 
+from ._flags import LAYOUT_FLAGS
 from .kernel import Kernel
 
 # Friendly auto-generated identities for connecting viewers (editable in the UI).
@@ -159,23 +160,16 @@ class Bridge:
         rot = getattr(component, "_rotation", None)
         if rot is not None:
             msg["rotation"] = math.radians(rot)
-        if getattr(component, "_locked", False):
-            msg["locked"] = True
-        # The public API names are draggable/operable/grabable (see base.py); the
-        # wire keys stay movable/interactive/selectable, matching set_layout's
-        # payload and the frontend's lockMeta. Read the new attribute names —
-        # reading the old ones silently defaulted every lock to "on", so initial
-        # draggable/operable/grabable=False never reached the browser.
-        if not getattr(component, "_draggable", True):
-            msg["movable"] = False
-        if not getattr(component, "_resizable", True):
-            msg["resizable"] = False
-        if not getattr(component, "_operable", True):
-            msg["interactive"] = False
-        if not getattr(component, "_grabable", True):
-            msg["selectable"] = False
-        if not getattr(component, "_frame", True):
-            msg["frame"] = False
+        # Lock/chrome flags: send each only when it differs from its default
+        # (e.g. locked=True, or draggable=False as movable=False), matching
+        # set_layout's payload and the frontend's lockMeta. The Python names
+        # (draggable/operable/grabbable) map to the wire keys
+        # (movable/interactive/selectable) via the LAYOUT_FLAGS table, the single
+        # source of truth shared with base.py and canvas.py.
+        for flag in LAYOUT_FLAGS.values():
+            value = getattr(component, flag.attr, flag.default)
+            if value != flag.default:
+                msg[flag.wire] = value
         return msg
 
     def register_live(self, component):

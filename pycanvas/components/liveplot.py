@@ -21,6 +21,8 @@ _DEFAULT_LAYOUT = {
 
 class LivePlot(BaseComponent):
     component = "LivePlot"
+    default_w = 560
+    default_h = 380
 
     def __init__(
         self,
@@ -29,11 +31,12 @@ class LivePlot(BaseComponent):
         max_points=300,
         mode="lines",
         layout=None,
-        width=560,
-        height=380,
+        w=None,
+        h=None,
         label=None,
     ):
-        super().__init__(name=name, label=label, w=width, h=height)
+        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
+        super().__init__(name=name, label=label, **size)
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}

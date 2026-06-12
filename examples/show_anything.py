@@ -15,7 +15,7 @@ canvas = pycanvas.Canvas()
 
 # A string of Markdown -> rendered text.
 canvas.show("# Dashboard\nA few values, each auto-rendered.", x=40, y=40,
-            label="notes", draggable=False, resizable=False, grabable=False)
+            label="notes", draggable=False, resizable=False, grabbable=False)
 
 # Records (list of dicts) -> a Table.
 canvas.show(

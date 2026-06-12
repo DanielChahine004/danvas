@@ -20,7 +20,7 @@ canvas = pycanvas.Canvas()
 # queue="latest" drops stale frames for a slow viewer so latency stays bounded
 # rather than the feed backing up (it's VideoFeed's default; explicit here).
 feed = canvas.video("webcam", queue="latest")
-sound = canvas.audio("mic", sample_rate=16000, grabable=False)
+sound = canvas.audio("mic", sample_rate=16000, grabbable=False)
 status = canvas.label("status", "starting...")
 
 

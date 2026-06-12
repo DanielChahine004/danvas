@@ -82,7 +82,7 @@ DIAL_HTML = """
 canvas = pycanvas.Canvas()
 
 # No subclass needed: insert the HTML, then route inbound events with @dial.on.
-dial = canvas.custom(html=DIAL_HTML, name="dial", width=220, height=260, x=80, y=80)
+dial = canvas.custom(html=DIAL_HTML, name="dial", w=220, h=260, x=80, y=80)
 status = canvas.label("status", value="drag the dial", x=340, y=80)
 
 

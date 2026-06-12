@@ -47,7 +47,7 @@ PANEL_HTML = """
 </html>
 """
 
-panel = canvas.custom(html=PANEL_HTML, name="my_panel", width=420, height=240)
+panel = canvas.custom(html=PANEL_HTML, name="my_panel", w=420, h=240)
 reply = canvas.label("python received", value="(waiting for input)")
 
 

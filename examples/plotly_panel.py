@@ -32,7 +32,7 @@ resolution = canvas.insert(
     pycanvas.Slider("resolution", min=10, max=400, default=120)
 )
 chart = canvas.insert(
-    pycanvas.Custom(html=render_chart(120), name="plotly", width=560, height=420)
+    pycanvas.Custom(html=render_chart(120), name="plotly", w=560, h=420)
 )
 
 

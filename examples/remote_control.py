@@ -162,7 +162,7 @@ canvas = pycanvas.Canvas()
 _w = 760
 _h = round(_w * SCREEN_H / SCREEN_W) + 30  # + header
 screen = canvas.custom(html=PANEL_HTML, name="screen", label="remote screen",
-                       width=_w, height=_h)
+                       w=_w, h=_h)
 
 
 @screen.on_message

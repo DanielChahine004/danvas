@@ -40,10 +40,14 @@ from .base import BaseComponent
 class React(BaseComponent):
     component = "React"
 
+    default_w = 380
+    default_h = 320
+
     def __init__(self, source=None, path=None, jsx=None, css=None, name="react",
-                 label=None, width=380, height=320, props=None, event_key="event",
+                 label=None, w=None, h=None, props=None, event_key="event",
                  queue="fifo"):
-        super().__init__(name=name, label=label, w=width, h=height, queue=queue)
+        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
+        super().__init__(name=name, label=label, queue=queue, **size)
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 source = f.read()

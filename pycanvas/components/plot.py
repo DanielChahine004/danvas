@@ -16,10 +16,11 @@ _EMPTY = (
 class Plot(Custom):
     # Reuses the Custom (pcHtml) shape on the frontend.
     component = "Custom"
+    default_w = 560
+    default_h = 420
 
-    def __init__(self, name="plot", label=None, width=560, height=420):
-        super().__init__(html=_EMPTY, name=name, label=label, width=width,
-                         height=height)
+    def __init__(self, name="plot", label=None, w=None, h=None):
+        super().__init__(html=_EMPTY, name=name, label=label, w=w, h=h)
 
     def update(self, figure):
         """Display a Plotly figure or an HTML string."""

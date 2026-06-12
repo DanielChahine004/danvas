@@ -13,8 +13,6 @@ A/V sync). Browsers won't start audio until the user clicks the panel's enable
 button, per the browser autoplay policy.
 """
 
-import numpy as np
-
 from .base import BaseComponent
 from ..bridge import BINARY_AUDIO
 
@@ -56,6 +54,12 @@ class AudioFeed(BaseComponent):
         """Normalise any accepted chunk form to little-endian int16 bytes."""
         if isinstance(chunk, (bytes, bytearray, memoryview)):
             return bytes(chunk)
+        # NumPy is only needed for the array path, so it's imported lazily here
+        # (and lives in the ``[audio]`` extra) — a canvas of sliders/plots that
+        # never streams audio doesn't pay for the ~60 MB dependency. Callers
+        # already passing raw int16 ``bytes`` skip this branch entirely.
+        import numpy as np
+
         arr = np.asarray(chunk)
         if arr.size == 0:
             return b""

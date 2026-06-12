@@ -26,10 +26,15 @@ from .base import BaseComponent
 
 class Custom(BaseComponent):
     component = "Custom"
+    default_w = 380
+    default_h = 320
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
-                 label=None, width=380, height=320, event_key="event"):
-        super().__init__(name=name, label=label, w=width, h=height)
+                 label=None, w=None, h=None, event_key="event"):
+        # ``w``/``h`` are optional overrides; when omitted the panel falls back
+        # to ``default_w``/``default_h`` (set per subclass) via BaseComponent.
+        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
+        super().__init__(name=name, label=label, **size)
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 html = f.read()

@@ -23,9 +23,10 @@ class WebView(BaseComponent):
     default_w = 800
     default_h = 600
 
-    def __init__(self, url, name="web", label=None, width=800, height=600):
+    def __init__(self, url, name="web", label=None, w=None, h=None):
+        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label if label is not None else url,
-                         w=width, h=height)
+                         **size)
         self._url = self._normalize(url)
 
     @staticmethod

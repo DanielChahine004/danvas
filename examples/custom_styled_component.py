@@ -336,12 +336,12 @@ def main():
 
     # html and css are pasted straight from uiverse.io; Custom composes them
     # into one iframe document under the hood (a js= string works the same way).
-    panel = pycanvas.Custom(html=HTML, css=CSS, width=300, height=200)
+    panel = pycanvas.Custom(html=HTML, css=CSS, w=300, h=200)
 
-    # grabable=False: the widget is hover/click-live immediately and the
+    # grabbable=False: the widget is hover/click-live immediately and the
     # user can never select it (move it from Python). frame=False strips the
     # card chrome so the widget floats directly on the canvas.
-    canvas.insert(panel, x=50, y=50, grabable=False, frame=False)
+    canvas.insert(panel, x=50, y=50, grabbable=False, frame=False)
     canvas.serve(view={'ui':True})
 
 if __name__ == "__main__":

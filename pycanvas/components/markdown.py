@@ -28,10 +28,10 @@ class Markdown(Custom):
     default_w = 380
     default_h = 240
 
-    def __init__(self, text="", name="markdown", label=None, width=380, height=240):
+    def __init__(self, text="", name="markdown", label=None, w=None, h=None):
         self._text = text
         super().__init__(html=self._render(text), name=name, label=label,
-                         width=width, height=height)
+                         w=w, h=h)
 
     def update(self, text):
         """Replace the rendered Markdown, live."""

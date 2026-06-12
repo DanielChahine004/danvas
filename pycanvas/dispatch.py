@@ -20,7 +20,7 @@ from .components import BaseComponent, Custom, Image, Label, Markdown, Plot, Tab
 from .components._doc import document
 
 
-def panel_for(value, name="panel", label=None, width=None, height=None,
+def panel_for(value, name="panel", label=None, w=None, h=None,
               formatter=None):
     """Build (but don't insert) the panel that best renders ``value``.
 
@@ -28,44 +28,40 @@ def panel_for(value, name="panel", label=None, width=None, height=None,
     existing component → Plotly → image-like (Matplotlib/PIL/array) → tabular
     (DataFrame/Series) → rich ``_repr_*`` → dict/list (JSON) → string → scalar.
     ``formatter`` is an optional IPython ``display_formatter`` used ahead of the
-    ``_repr_*`` hooks.
+    ``_repr_*`` hooks. ``w``/``h`` override the chosen component's default size
+    (each component carries its own sensible default).
     """
     if isinstance(value, BaseComponent):
         return value  # already a panel — show it as-is
 
     if _is_plotly(value):
-        plot = Plot(name=name, label=label, width=width or 560, height=height or 420)
+        plot = Plot(name=name, label=label, w=w, h=h)
         plot.update(value)
         return plot
 
     if _is_image_like(value):
-        return Image(value, name=name, label=label,
-                     width=width or 420, height=height or 320)
+        return Image(value, name=name, label=label, w=w, h=h)
 
     if _is_tabular(value):
-        return Table(value, name=name, label=label,
-                     width=width or 520, height=height or 360)
+        return Table(value, name=name, label=label, w=w, h=h)
 
     html = _rich_html(value, formatter)
     if html is not None:
-        return Custom(html=html, name=name, label=label,
-                      width=width or 520, height=height or 360)
+        return Custom(html=html, name=name, label=label, w=w, h=h)
 
     if isinstance(value, (dict, list, tuple, set)):
         body = (
             "<pre style='margin:0;white-space:pre-wrap;font-size:12px'>"
             f"{_escape(_as_json(value))}</pre>"
         )
-        return Custom(html=document(body), name=name, label=label,
-                      width=width or 420, height=height or 320)
+        return Custom(html=document(body), name=name, label=label, w=w, h=h)
 
     if isinstance(value, str):
         # A short single-line string reads best as a bold Label; longer/multi-line
         # text is treated as Markdown (which renders plain prose fine too).
         if "\n" not in value and len(value) <= 80:
             return Label(name=name, value=value, label=label)
-        return Markdown(value, name=name, label=label,
-                        width=width or 380, height=height or 220)
+        return Markdown(value, name=name, label=label, w=w, h=h)
 
     return Label(name=name, value=_short(value), label=label)
 

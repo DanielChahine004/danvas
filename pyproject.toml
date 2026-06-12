@@ -17,7 +17,6 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "websockets>=12",
-    "numpy>=1.24",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
@@ -36,10 +35,11 @@ tunnel = ["pycloudflared>=0.2"]
 # sliders/plots/etc. doesn't pay for it, and VideoFeed(encode=False) streams
 # pre-encoded JPEG bytes (e.g. from a hardware encoder) without OpenCV at all.
 video = ["opencv-python>=4.8"]
-# Microphone capture for AudioFeed examples (Canvas.audio). The AudioFeed
-# component itself needs nothing extra — only *capturing* mic input does. The
-# browser plays the streamed PCM through the Web Audio API.
-audio = ["sounddevice>=0.4"]
+# Audio streaming for AudioFeed (Canvas.audio). NumPy converts float/array PCM
+# chunks to int16 (callers passing raw int16 bytes don't even need it, but the
+# common sounddevice path does); sounddevice captures the microphone in the
+# examples. The browser plays the streamed PCM through the Web Audio API.
+audio = ["numpy>=1.24", "sounddevice>=0.4"]
 # Packaging a canvas into a standalone desktop app (Canvas.bake / python -m
 # pycanvas.bake). pywebview shows the canvas in a native window; PyInstaller
 # bundles everything into a self-contained executable.

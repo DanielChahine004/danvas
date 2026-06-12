@@ -139,8 +139,8 @@ function Component({ canvas, props }) {
 """
 
 # --- 3. Setup Components ---
-browser = canvas.react(name='browser', source=JSX_SOURCE, props={"files": current_files}, x=100, y=100, width=250, height=500, grabable=False, frame=False)
-status = canvas.label(name="status", value=f"Exploring: {ROOT_DIR}", x=400, y=200, w=300, h=100, grabable=False)
+browser = canvas.react(name='browser', source=JSX_SOURCE, props={"files": current_files}, x=100, y=100, w=250, h=500, grabbable=False, frame=False)
+status = canvas.label(name="status", value=f"Exploring: {ROOT_DIR}", x=400, y=200, w=300, h=100, grabbable=False)
 
 @browser.on("select")
 def on_select(msg):

@@ -9,6 +9,8 @@ import uuid
 import warnings
 
 from . import server
+from ._flags import LAYOUT_FLAGS
+from .arrow import Arrow, _arrow_props
 from .bridge import Bridge
 from .components import (
     AudioFeed,
@@ -35,135 +37,9 @@ from .kernel import Kernel
 # Keyword names consumed by ``Canvas.insert`` itself. A factory method splits
 # these off and forwards everything else to the component constructor.
 # ``name`` is intentionally absent: it is the component's identity and travels on
-# the component itself (set in its constructor), not a placement option.
-_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "draggable",
-                "resizable", "operable", "grabable", "frame")
-
-
-# Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
-# arrow's ``name`` (its identity / eviction key) is handled separately and never
-# sent as a shape prop; ``text`` is the caption tldraw actually draws.
-_ARROW_PROP_ALIASES = {
-    "arrowhead_start": "arrowheadStart",
-    "arrowhead_end": "arrowheadEnd",
-    "label_color": "labelColor",
-}
-
-
-def _arrow_props(props):
-    """Translate snake_case kwargs to tldraw arrow prop names."""
-    return {_ARROW_PROP_ALIASES.get(k, k): v for k, v in props.items()}
-
-
-class Arrow:
-    """A connector between two panels, managed much like a component.
-
-    Returned by :meth:`Canvas.connect`. The arrow binds to each panel in tldraw,
-    so it reroutes automatically as the panels move or resize. It is bound to the
-    canvas bridge so its appearance can be changed live::
-
-        a = canvas.connect(src, dst, name="flow", text="x1", color="blue")
-        a.color = "red"               # or a.update(color="red")
-        a.text = "x2"                 # change the visible caption live
-        a.update(dash="dashed", text="x3")
-
-    ``name`` is the arrow's **identity**: the ``canvas.<name>`` handle and the
-    eviction key, so connecting again under the same ``name`` destroys the
-    previous arrow and makes the new one the reference. Omit it and the name is
-    derived from the endpoints (``"<start.name>-><end.name>"``), so re-connecting
-    the same two panels replaces the old arrow rather than duplicating it.
-    ``text`` is the
-    **caption** drawn on the arrow; it is purely cosmetic and may change freely
-    without affecting identity. When ``text`` is omitted the arrow shows no
-    caption (the identity is never drawn).
-
-    Valid tldraw values: ``color`` one of black/grey/violet/light-violet/blue/
-    light-blue/yellow/orange/green/light-green/light-red/red/white; ``dash`` one
-    of draw/solid/dashed/dotted; ``size`` one of s/m/l/xl; ``arrowhead_start`` /
-    ``arrowhead_end`` one of none/arrow/triangle/square/dot/pipe/diamond/
-    inverted/bar; ``bend`` a number.
-
-    Pass it (or its ``name``) to :meth:`Canvas.disconnect` to remove it.
-    """
-
-    def __init__(self, arrow_id, start, end, bridge, props=None,
-                 name=None, text=None):
-        self.id = arrow_id
-        self.start = start
-        self.end = end
-        self.name = name    # unique identity / canvas.<name> handle / eviction key
-        self._bridge = bridge
-        self._props = dict(props or {})
-        # ``text`` is the visible caption, kept distinct from the identity. When
-        # omitted the arrow shows no caption (the identity is never drawn).
-        if text is not None:
-            self._props["text"] = text
-
-    def register_message(self):
-        """Build the ``arrow`` register message (current props included)."""
-        return {
-            "type": "arrow",
-            "id": self.id,
-            "start": self.start.id,
-            "end": self.end.id,
-            "props": dict(self._props),
-        }
-
-    def update(self, **props):
-        """Change arrow properties live (color, text, dash, size, bend, ...).
-
-        Accepts the friendly names in the class docstring. Stored so a
-        reconnecting client replays the new appearance.
-        """
-        props = _arrow_props(props)
-        self._props.update(props)
-        if self._bridge is not None:
-            self._bridge.broadcast(
-                {"type": "update", "id": self.id, "payload": props}
-            )
-        return self
-
-    # -- convenience accessors for the common props --------------------------
-    @property
-    def color(self):
-        return self._props.get("color")
-
-    @color.setter
-    def color(self, value):
-        self.update(color=value)
-
-    @property
-    def text(self):
-        """The caption drawn on the arrow (tldraw's ``text`` prop)."""
-        return self._props.get("text")
-
-    @text.setter
-    def text(self, value):
-        self.update(text=value)
-
-    @property
-    def dash(self):
-        return self._props.get("dash")
-
-    @dash.setter
-    def dash(self, value):
-        self.update(dash=value)
-
-    @property
-    def size(self):
-        return self._props.get("size")
-
-    @size.setter
-    def size(self, value):
-        self.update(size=value)
-
-    @property
-    def bend(self):
-        return self._props.get("bend")
-
-    @bend.setter
-    def bend(self, value):
-        self.update(bend=value)
+# the component itself (set in its constructor), not a placement option. The lock
+# /chrome flags come straight from the shared LAYOUT_FLAGS table.
+_INSERT_KEYS = ("x", "y", "w", "h", "rotation", *LAYOUT_FLAGS)
 
 
 class Canvas:
@@ -196,6 +72,8 @@ class Canvas:
         # never the hot-reload monitor (which would otherwise grab the same
         # exclusive resources, e.g. a camera, and starve the real worker).
         self._background = []
+        # Counter behind the auto-generated names for unnamed show() panels.
+        self._show_seq = 0
 
     def enable_repl(self, namespace=None):
         """Bind the namespace that ``Repl`` cells execute against.
@@ -372,7 +250,7 @@ class Canvas:
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=True,
-               grabable=True, frame=True, name=None):
+               grabbable=True, frame=True, name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -392,16 +270,16 @@ class Canvas:
           ``update()`` calls still render live — use this to lock interactive
           controls while driving them programmatically. The panel stays movable
           (toggle with ``component.operable``).
-        - ``grabable=False`` (content-heavy panels) removes the click-to-select
+        - ``grabbable=False`` (content-heavy panels) removes the click-to-select
           cover — the panel's content is hoverable and clickable immediately —
           and makes the panel invisible to selection entirely: no click,
           marquee, or select-all ever highlights it. Move/resize it from
-          Python only (toggle with ``component.grabable``).
+          Python only (toggle with ``component.grabbable``).
         - ``frame=False`` strips the panel's card chrome — background, border,
           shadow, padding, label header, and the hover/selection highlight
           rectangle — so the component's content appears to sit directly on
           the canvas (toggle with ``component.frame``). Pair with
-          ``grabable=False`` if clicking the content should never select it.
+          ``grabbable=False`` if clicking the content should never select it.
 
         Use ``draggable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
@@ -442,19 +320,34 @@ class Canvas:
             label = component._props.get("label")
             name = label if isinstance(label, str) and label else self._auto_name(
                 component.component)
+        # A component name doubles as the ``canvas.<name>`` attribute handle, so a
+        # name that shadows a real Canvas method/property (``save``, ``slider``,
+        # ``components``…) would be silently unreachable that way (``__getattr__``
+        # only fires when normal lookup fails). Warn, since the handle still works
+        # through ``canvas["<name>"]``. ``hasattr`` on the class reads the
+        # descriptor without invoking any property getter.
+        if isinstance(name, str) and hasattr(type(self), name):
+            warnings.warn(
+                f"component name {name!r} shadows a Canvas attribute; reach it "
+                f"with canvas[{name!r}] (canvas.{name} stays the method/property)",
+                stacklevel=2,
+            )
         # Names are unique handles. If something else already holds this name (a
         # prior component, or this component in an earlier state), pull it off the
         # canvas first so the stale panel disappears from the UI instead of
         # lingering unreferenced. The newcomer then takes over the name and is the
-        # only panel rendered for it.
+        # only panel rendered for it. Re-inserting under the same name is the
+        # intended swap-in-place (e.g. re-running a cell), so it's silent; only a
+        # name reused across *different* kinds of object is worth a warning.
         old = self._named.get(name)
         if old is not None and old is not component:
-            warnings.warn(
-                f"name {name!r} already used by a "
-                f"{old.__class__.__name__}; removing it and rebinding the "
-                f"name to the new {component.__class__.__name__}",
-                stacklevel=2,
-            )
+            if type(old) is not type(component):
+                warnings.warn(
+                    f"name {name!r} already used by a "
+                    f"{old.__class__.__name__}; removing it and rebinding the "
+                    f"name to the new {component.__class__.__name__}",
+                    stacklevel=2,
+                )
             # Swap-in-place: inherit the displaced panel's live position/rotation
             # when the caller didn't pin one, so re-inserting under the same name
             # (e.g. re-running a `canvas.webview(...)` cell) keeps where the user
@@ -480,18 +373,17 @@ class Canvas:
             component._props["h"] = h
         if rotation is not None:
             component._rotation = rotation
-        if locked:
-            component._locked = True
-        if not draggable:
-            component._draggable = False
-        if not resizable:
-            component._resizable = False
-        if not operable:
-            component._operable = False
-        if not grabable:
-            component._grabable = False
-        if not frame:
-            component._frame = False
+        # Apply each lock/chrome flag only when it differs from the default, so
+        # the stored attribute matches what set_layout/register would send. The
+        # names and backing attributes come from the shared LAYOUT_FLAGS table.
+        flag_args = {
+            "locked": locked, "draggable": draggable, "resizable": resizable,
+            "operable": operable, "grabbable": grabbable, "frame": frame,
+        }
+        for fname, value in flag_args.items():
+            flag = LAYOUT_FLAGS[fname]
+            if bool(value) != flag.default:
+                setattr(component, flag.attr, bool(value))
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -538,10 +430,17 @@ class Canvas:
         place = {k: kw.pop(k) for k in _INSERT_KEYS if k in kw}
         return self.insert(cls(*args, **kw), **place)
 
-    def slider(self, name, min=0, max=100, default=None, label=None, **place):
-        """Insert a :class:`~pycanvas.Slider`. See :meth:`insert` for ``place``."""
+    def slider(self, name, min=0, max=100, default=None, step=1,
+               on_release=False, label=None, **place):
+        """Insert a :class:`~pycanvas.Slider`. See :meth:`insert` for ``place``.
+
+        ``step`` sets the granularity and the int-vs-float behaviour (a
+        fractional step like ``0.1`` makes it a float slider). ``on_release=True``
+        reports only the settled value when the user lets go, instead of every
+        value during the drag.
+        """
         return self._make(Slider, name, min=min, max=max, default=default,
-                          label=label, **place)
+                          step=step, on_release=on_release, label=label, **place)
 
     def toggle(self, name, options, default=None, label=None, **place):
         """Insert a :class:`~pycanvas.Toggle`. See :meth:`insert` for ``place``."""
@@ -570,63 +469,58 @@ class Canvas:
         return self._make(Chat, name=name, label=label, **place)
 
     def custom(self, html=None, path=None, css=None, js=None, name="custom",
-               label=None, width=380, height=320, **place):
+               label=None, **place):
         """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``.
 
         ``html``/``css``/``js`` may be given as separate strings (e.g. pasted
         from uiverse.io) — they are composed into one document under the hood.
+        Size the panel with ``w``/``h`` in ``place``.
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
-                          name=name, label=label, width=width, height=height,
-                          **place)
+                          name=name, label=label, **place)
 
-    def file_browser(self, name="files", root=".", label=None, width=320,
-                     height=420, pattern=None, show_hidden=False, **place):
+    def file_browser(self, name="files", root=".", label=None, pattern=None,
+                     show_hidden=False, **place):
         """Insert a :class:`~pycanvas.FileBrowser`. See :meth:`insert` for ``place``.
 
         Navigation is confined to ``root``. ``pattern`` (an fnmatch glob like
-        ``"*.csv"``) filters which files are shown.
+        ``"*.csv"``) filters which files are shown. Size it with ``w``/``h`` in
+        ``place``.
         """
         return self._make(FileBrowser, name=name, root=root, label=label,
-                          width=width, height=height, pattern=pattern,
-                          show_hidden=show_hidden, **place)
+                          pattern=pattern, show_hidden=show_hidden, **place)
 
     def react(self, source=None, path=None, jsx=None, css=None, name="react",
-              label=None, width=380, height=320, props=None, **place):
+              label=None, props=None, **place):
         """Insert a :class:`~pycanvas.React` panel. See :meth:`insert` for ``place``.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
         file with ``path=``); alternatively pass just ``jsx`` markup plus
         optional ``css`` and the Component wrapper is added under the hood. Use
         :meth:`React.from_uiverse` to convert a uiverse.io styled-components
-        snippet into ``source``. ``props`` is the initial props dict.
+        snippet into ``source``. ``props`` is the initial props dict. Size it
+        with ``w``/``h`` in ``place``.
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
-                          name=name, label=label, width=width, height=height,
-                          props=props, **place)
+                          name=name, label=label, props=props, **place)
 
-    def markdown(self, text="", name="markdown", label=None, width=380,
-                 height=240, **place):
+    def markdown(self, text="", name="markdown", label=None, **place):
         """Insert a :class:`~pycanvas.Markdown` panel. See :meth:`insert` for ``place``."""
-        return self._make(Markdown, text=text, name=name, label=label,
-                          width=width, height=height, **place)
+        return self._make(Markdown, text=text, name=name, label=label, **place)
 
-    def image(self, src, name="image", label=None, width=420, height=320,
-              fit="contain", **place):
+    def image(self, src, name="image", label=None, fit="contain", **place):
         """Insert an :class:`~pycanvas.Image` panel. See :meth:`insert` for ``place``.
 
         ``src`` is a path, URL, image bytes, Matplotlib/PIL figure, or array.
         """
-        return self._make(Image, src, name=name, label=label, width=width,
-                          height=height, fit=fit, **place)
+        return self._make(Image, src, name=name, label=label, fit=fit, **place)
 
-    def table(self, data, name="table", label=None, width=520, height=360, **place):
+    def table(self, data, name="table", label=None, **place):
         """Insert a :class:`~pycanvas.Table` panel. See :meth:`insert` for ``place``.
 
         ``data`` is a pandas DataFrame/Series, a list of dicts/rows, or a dict.
         """
-        return self._make(Table, data, name=name, label=label, width=width,
-                          height=height, **place)
+        return self._make(Table, data, name=name, label=label, **place)
 
     def show(self, value, name=None, label=None, **place):
         """Auto-render any value as the best-fitting panel and insert it.
@@ -640,23 +534,20 @@ class Canvas:
         """
         from .dispatch import panel_for
         if name is None:
-            self._show_seq = getattr(self, "_show_seq", 0) + 1
+            self._show_seq += 1
             name = f"panel_{self._show_seq}"
         comp = panel_for(value, name=name, label=label)
-        prev = self._named.get(name)
-        if prev is not None:
-            self.remove(prev)  # re-show under the same name replaces in place
+        # insert() handles eviction of whatever currently holds this name, so
+        # re-showing under the same name replaces in place on its own.
         return self.insert(comp, **place)
 
-    def webview(self, url, name="web", label=None, width=800, height=600, **place):
+    def webview(self, url, name="web", label=None, **place):
         """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""
-        return self._make(WebView, url, name=name, label=label, width=width,
-                          height=height, **place)
+        return self._make(WebView, url, name=name, label=label, **place)
 
-    def plot(self, name="plot", label=None, width=560, height=420, **place):
+    def plot(self, name="plot", label=None, **place):
         """Insert a :class:`~pycanvas.Plot`. See :meth:`insert` for ``place``."""
-        return self._make(Plot, name=name, label=label, width=width,
-                          height=height, **place)
+        return self._make(Plot, name=name, label=label, **place)
 
     def live_plot(self, name="live plot", **kw):
         """Insert a :class:`~pycanvas.LivePlot`.
@@ -735,12 +626,16 @@ class Canvas:
         # leaves the UI before the new arrow takes the name over.
         old = self._named.get(name)
         if old is not None and old is not arrow:
-            warnings.warn(
-                f"name {name!r} already used by a "
-                f"{old.__class__.__name__}; removing it and rebinding the "
-                f"name to the new Arrow",
-                stacklevel=2,
-            )
+            # Re-connecting the same endpoints (an Arrow replacing an Arrow) is
+            # the intended in-place swap, so stay quiet; only warn when the name
+            # was held by a different kind of object (a panel).
+            if not isinstance(old, Arrow):
+                warnings.warn(
+                    f"name {name!r} already used by a "
+                    f"{old.__class__.__name__}; removing it and rebinding the "
+                    f"name to the new Arrow",
+                    stacklevel=2,
+                )
             if old in self._arrows:
                 self.disconnect(old)
             elif old in self._components:
@@ -824,11 +719,8 @@ class Canvas:
                 "w": c.w,
                 "h": c.h,
                 "rotation": c.rotation,
-                "locked": c.locked,
-                "draggable": c.draggable,
-                "resizable": c.resizable,
-                "grabable": c.grabable,
-                "frame": c.frame,
+                # Every lock/chrome flag, straight from the shared table.
+                **{name: getattr(c, name) for name in LAYOUT_FLAGS},
             }
             for c in self._components
         ]
@@ -857,11 +749,8 @@ class Canvas:
                 w=item.get("w"),
                 h=item.get("h"),
                 rotation=item.get("rotation"),
-                locked=item.get("locked"),
-                draggable=item.get("draggable"),
-                resizable=item.get("resizable"),
-                grabable=item.get("grabable"),
-                frame=item.get("frame"),
+                # Flags absent from an older save stay None (left unchanged).
+                **{name: item.get(name) for name in LAYOUT_FLAGS},
             )
 
     @staticmethod
@@ -872,9 +761,9 @@ class Canvas:
     def wait_for_client(self, timeout=10.0):
         """Block until at least one browser is connected, or ``timeout`` elapses.
 
-        Useful before :meth:`load_canvas`, which pushes to connected clients —
-        give the freshly opened page a moment to connect first. Returns ``True``
-        if a client connected.
+        Useful before :meth:`load`, which pushes to connected clients — give the
+        freshly opened page a moment to connect first. Returns ``True`` if a
+        client connected.
         """
         deadline = time.monotonic() + timeout
         while not self._bridge._connections and time.monotonic() < deadline:
@@ -1031,7 +920,7 @@ class Canvas:
         and falls back to the browser. See :meth:`bake` to build the executable.
         """
         if os.environ.get("_PYCANVAS_RELOAD_CHECK") == "1":
-            # Hot-reload pre-flight (see _run_hot_reload_monitor): the monitor
+            # Hot-reload pre-flight (see hotreload.run_monitor): the monitor
             # runs the edited script in this mode to confirm it imports and runs
             # before tearing down the live worker. Reaching serve() means the
             # module body executed without error -- which is all the check needs
@@ -1053,7 +942,8 @@ class Canvas:
                     "session."
                 )
             if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
-                self._run_hot_reload_monitor(main_file)
+                from .hotreload import run_monitor
+                run_monitor(main_file)
                 return self
             if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
                 # Already opened on first launch; a reload should reuse the
@@ -1120,118 +1010,6 @@ class Canvas:
                        host=host, password=password)
         finally:
             self._stop_tunnel()
-
-    def _run_hot_reload_monitor(self, main_file):
-        """Re-run ``main_file`` as a subprocess, restarting it on ``.py`` edits.
-
-        This is the monitor side of ``serve(hot_reload=True)``: it never binds a
-        port itself, just watches the script's directory (top-level ``.py``
-        files only) by polling mtimes, and respawns the worker subprocess on any
-        change or addition/removal. The worker is launched with
-        ``_PYCANVAS_RELOAD_WORKER=1`` so its own ``serve(hot_reload=True)`` call
-        skips straight to actually serving; ``_PYCANVAS_RELOAD_RESTART=1`` is
-        added from the second launch onward so it doesn't reopen the browser
-        (the frontend reconnects its existing websocket automatically).
-
-        Before tearing the running worker down, each edit is pre-flighted in
-        ``_PYCANVAS_RELOAD_CHECK`` mode (the script runs but serve() exits before
-        binding). If that fails -- a syntax slip, a bad import, an exception in
-        the module body -- the restart is skipped and the last working version
-        keeps serving, so a half-finished edit doesn't take the canvas down.
-        """
-        import subprocess
-
-        directory = os.path.dirname(os.path.abspath(main_file)) or "."
-
-        def snapshot():
-            out = {}
-            for fname in os.listdir(directory):
-                if fname.endswith(".py"):
-                    fpath = os.path.join(directory, fname)
-                    try:
-                        out[fpath] = os.path.getmtime(fpath)
-                    except OSError:
-                        pass
-            return out
-
-        def stop(proc):
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-
-        base_env = dict(os.environ)
-        base_env["_PYCANVAS_RELOAD_WORKER"] = "1"
-
-        def spawn(restart):
-            env = dict(base_env)
-            if restart:
-                env["_PYCANVAS_RELOAD_RESTART"] = "1"
-            return subprocess.Popen([sys.executable, main_file, *sys.argv[1:]],
-                                    env=env)
-
-        def script_ok():
-            """True if the edited script imports/runs cleanly (pre-flight).
-
-            Runs it in check mode -- the body executes but serve() exits before
-            binding a port or starting threads, so this never collides with the
-            worker that's still serving. On failure the captured stderr is
-            surfaced so the error is visible in the console.
-            """
-            env = dict(base_env)
-            env["_PYCANVAS_RELOAD_CHECK"] = "1"
-            result = subprocess.run(
-                [sys.executable, main_file, *sys.argv[1:]],
-                env=env, capture_output=True, text=True,
-            )
-            if result.returncode != 0:
-                sys.stderr.write(result.stderr or "")
-            return result.returncode == 0
-
-        def wait_for_edit(last):
-            """Block until a watched file changes; return the new snapshot."""
-            while True:
-                time.sleep(0.5)
-                snap = snapshot()
-                if snap != last:
-                    return snap
-
-        print(f"PyCanvas hot reload: watching {directory} (*.py)")
-        proc = spawn(restart=False)
-        last = snapshot()
-        try:
-            while True:
-                # Wait for either a file edit or the worker exiting on its own.
-                changed = False
-                while proc.poll() is None:
-                    time.sleep(0.5)
-                    snap = snapshot()
-                    if snap != last:
-                        last = snap
-                        changed = True
-                        break
-                if not changed:
-                    # Worker ended without an edit: a clean exit (e.g. a closed
-                    # desktop window) stops the monitor; a crash leaves it
-                    # watching so the next save can bring the canvas back.
-                    if proc.returncode in (0, None):
-                        return
-                    print("PyCanvas hot reload: the app exited with an error; "
-                          "waiting for the next save...")
-                    last = wait_for_edit(last)
-                print("PyCanvas hot reload: change detected, checking...")
-                if not script_ok():
-                    print("PyCanvas hot reload: the edit has an error -- keeping "
-                          "the running version. Fix it and save again.")
-                    continue
-                if proc.poll() is None:
-                    stop(proc)
-                print("PyCanvas hot reload: restarting...")
-                proc = spawn(restart=True)
-        except KeyboardInterrupt:
-            if proc is not None and proc.poll() is None:
-                stop(proc)
 
     def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
                        password=None):
