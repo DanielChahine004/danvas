@@ -45,7 +45,7 @@ canvas = pycanvas.Canvas()
 
 | Method | Purpose |
 |---|---|
-| `insert(component, x=, y=, w=, h=, rotation=, locked=, movable=, resizable=, interactive=, selectable=, frame=, name=)` | Register a panel, place it, and return it. |
+| `insert(component, x=, y=, w=, h=, rotation=, locked=, draggable=, resizable=, operable=, grabable=, frame=, name=)` | Register a panel, place it, and return it. |
 | `remove(component)` | Pull a panel off the canvas (live). |
 | `connect(start, end, name=, text=, **props)` | Draw an arrow between two panels; returns an `Arrow`. `name` is identity, `text` is the caption. |
 | `disconnect(arrow_or_name)` | Remove an arrow by object or name. |
@@ -324,18 +324,18 @@ set.
 
 ### Three independent lock modes
 
-| Goal | API | User can move? | resize? | **interact?** |
+| Goal | API | User can move? | resize? | **operable?** |
 |---|---|---|---|---|
-| Stop dragging only | `movable=False` / `comp.movable = False` | ❌ | ✅ | ✅ |
+| Stop dragging only | `draggable=False` / `comp.draggable = False` | ❌ | ✅ | ✅ |
 | Stop resizing only | `resizable=False` / `comp.resizable = False` | ✅ | ❌ | ✅ |
-| Make controls inert, stay placeable | `interactive=False` / `comp.interactive = False` | ✅ | ✅ | ❌ |
+| Make controls inert, stay placeable | `operable=False` / `comp.operable = False` | ✅ | ✅ | ❌ |
 | Pin in place, stay usable | `comp.pin()` (`unpin()`) | ❌ | ❌ | ✅ |
 | Fully lock (static + inert) | `locked=True` / `comp.lock()` (`unlock()`) | ❌ | ❌ | ❌ |
 
 Key distinction:
-- **`movable` / `resizable`** gate only *user gestures*; the panel's sliders and
+- **`draggable` / `resizable`** gate only *user gestures*; the panel's sliders and
   buttons keep working. Use `pin()` for an interactive-but-fixed panel.
-- **`interactive=False`** is the inverse: the user can't operate the controls (a
+- **`operable=False`** is the inverse: the user can't operate the controls (a
   transparent overlay swallows pointer events), but the panel stays *unlocked*,
   so it can still be moved/selected **and** your `update()` calls keep rendering.
   Use it for a control that tracks an automatic value the user mustn't drag — a
@@ -346,7 +346,7 @@ Key distinction:
   the user, not you.
 
 ```python
-canvas.insert(gauge, x=40, y=40, movable=False, resizable=False)  # pinned, live
+canvas.insert(gauge, x=40, y=40, draggable=False, resizable=False)  # pinned, live
 panel.lock()        # freeze completely
 panel.unlock()
 ```
@@ -363,13 +363,13 @@ canvas.insert(widget, x=40, y=40, frame=False)   # or comp.frame = False later
 
 The panel still occupies its `w×h` box and can be moved/resized as usual —
 selecting it shows tldraw's normal selection box and resize handles (handy for
-placing it), it just isn't outlined on hover. Pair it with `selectable=False`
+placing it), it just isn't outlined on hover. Pair it with `grabable=False`
 for content (Custom/React/WebView…) that should feel like a free-floating
 widget: live on hover, and *never* selectable by the user — no click, marquee,
 or select-all highlights it (move it from Python instead):
 
 ```python
-canvas.custom(name="gauge", html=..., frame=False, selectable=False)
+canvas.custom(name="gauge", html=..., frame=False, grabable=False)
 ```
 
 ---
@@ -558,8 +558,8 @@ layout = {
 }
 
 for comp, (x, y) in layout.items():
-    # movable/resizable False => placed exactly here, but still interactive.
-    canvas.insert(comp, x=x, y=y, movable=False, resizable=False)
+    # draggable/resizable False => placed exactly here, but still interactive.
+    canvas.insert(comp, x=x, y=y, draggable=False, resizable=False)
 ```
 
 If instead you want to act on panels you've *already* inserted, keep your own

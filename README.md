@@ -459,33 +459,33 @@ them on `insert` (or a factory), or flip them live as a property — each write 
 pushed to the browser immediately. Because they're separate axes you can mix them
 freely (e.g. pin a panel in place while keeping its slider live).
 
-| Control             | User can move? | User can resize? | Controls interactive? | Python `update()` renders? |
+| Control             | User can move? | User can resize? | Controls operable? | Python `update()` renders? |
 |---------------------|----------------|------------------|-----------------------|----------------------------|
 | *(default)*         | yes            | yes              | yes                   | yes                        |
-| `movable=False`     | **no**         | yes              | yes                   | yes                        |
+| `draggable=False`   | **no**         | yes              | yes                   | yes                        |
 | `resizable=False`   | yes            | **no**           | yes                   | yes                        |
-| `interactive=False` | yes            | yes              | **no**                | yes                        |
-| `selectable=False`  | **no** (Python only) | **no**     | yes, **immediately**  | yes                        |
+| `operable=False`    | yes            | yes              | **no**                | yes                        |
+| `grabable=False`    | **no** (Python only) | **no**     | yes, **immediately**  | yes                        |
 | `locked=True`       | **no**         | **no**           | **no**                | **no** (frozen)            |
 
-`selectable` mostly matters on content-heavy panels (`Custom`, `React`,
+`grabable` mostly matters on content-heavy panels (`Custom`, `React`,
 `WebView`, plots, chat, repl…). By default those need a first click to *select*
 the panel before their content takes the pointer — which also means CSS
 `:hover` effects inside the widget don't run until that click.
-`selectable=False` drops that cover **and** makes the panel invisible to
+`grabable=False` drops that cover **and** makes the panel invisible to
 selection entirely: the widget is hover- and click-live from the start, and no
 click, marquee, or select-all ever highlights or selects the panel. The
 trade-off is that the user can't move or resize it at all — do that from
-Python (`move()` / `resize()`), or flip `selectable` back on.
+Python (`move()` / `resize()`), or flip `grabable` back on.
 
 ```python
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
 
-servo.movable = False        # user can't drag the panel; the slider still works
+servo.draggable = False      # user can't drag the panel; the slider still works
 servo.resizable = False      # user can't resize it; the slider still works
-servo.interactive = False    # user can't operate the slider, but your update()s
+servo.operable = False       # user can't operate the slider, but your update()s
                              #   still move the thumb — and the panel stays
-                             #   movable/resizable (those axes are unaffected)
+                             #   draggable/resizable (those axes are unaffected)
 servo.locked = True          # full lock: no move, resize, or interaction — AND
                              #   programmatic update()s stop rendering too
 ```
@@ -493,16 +493,16 @@ servo.locked = True          # full lock: no move, resize, or interaction — AN
 Two helpers wrap the common combinations:
 
 ```python
-servo.pin();  servo.unpin()    # movable=False + resizable=False (controls stay live)
-servo.lock(); servo.unlock()   # full lock on / off
+servo.pin();  servo.unpin()     # draggable=False + resizable=False (controls stay live)
+servo.lock(); servo.unlock()    # full lock on / off
 ```
 
-The key distinction is **`interactive` vs `locked`**: `interactive=False` blocks
+The key distinction is **`operable` vs `locked`**: `operable=False` blocks
 the *user* from operating the control while your code keeps driving it — a slider
 whose thumb tracks an automatic value the user mustn't drag. `lock()` freezes
 everything *including* your own `update()` calls, so the thumb would stop moving.
 See [`examples/robot_control.py`](examples/robot_control.py) — vision mode makes
-the servo sliders inert (`interactive=False`) while they sweep on their own.
+the servo sliders inert (`operable=False`) while they sweep on their own.
 
 ### Frameless panels
 
@@ -523,7 +523,7 @@ with `selectable=False` for a true free-floating widget — live on hover and
 completely untouchable by the user:
 
 ```python
-canvas.custom(name="gauge", html=..., frame=False, selectable=False)
+canvas.custom(name="gauge", html=..., frame=False, grabable=False)
 ```
 
 ## Saving & loading

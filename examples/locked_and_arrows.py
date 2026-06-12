@@ -8,7 +8,7 @@ the canvas reads like a pipeline:
                   v
                [status]
 
-The stage panels are inserted ``movable=False, resizable=False`` so the diagram
+The stage panels are inserted ``draggable=False, resizable=False`` so the diagram
 keeps its shape — they can't be dragged or resized in the browser, but their
 sliders STILL WORK (unlike a full ``locked=True``, which also blocks
 interaction). The ``lock`` toggle at the bottom flips that live: switch it to
@@ -23,19 +23,19 @@ canvas = pycanvas.Canvas()
 # Stage panels at fixed positions: pinned (no move/resize) but still interactive.
 source = canvas.insert(
     pycanvas.Slider("input", min=0, max=100, default=20),
-    x=80, y=80, movable=False, resizable=False,
+    x=80, y=80, draggable=False, resizable=False,
 )
 gain = canvas.insert(
     pycanvas.Slider("gain", min=1, max=10, default=2),
-    x=420, y=80, movable=False, resizable=False,
+    x=420, y=80, draggable=False, resizable=False,
 )
 output = canvas.insert(
     pycanvas.Label("output", value="0"),
-    x=760, y=80, movable=False, resizable=False,
+    x=760, y=80, draggable=False, resizable=False,
 )
 status = canvas.insert(
     pycanvas.Label("status", value="idle"),
-    x=420, y=300, movable=False, resizable=False,
+    x=420, y=300, draggable=False, resizable=False,
 )
 
 # Wire the panels together. Arrows bind to the panels and reroute on their own.
@@ -48,7 +48,7 @@ canvas.connect(gain, status, name="monitor", text="monitor", dash="dashed")
 # A control panel that stays draggable, plus a toggle to lock/unlock the stages.
 lock = canvas.insert(
     pycanvas.Toggle("lock", options=["locked", "unlocked"]),
-    x=80, y=300, movable=False, resizable=False,
+    x=80, y=300, draggable=False, resizable=False,
 )
 
 
@@ -75,7 +75,7 @@ def on_lock(value):
     pinned = value == "locked"
     for panel in (source, gain, output, status):
         # Pin position and size but leave the controls interactive.
-        panel.movable = not pinned
+        panel.draggable = not pinned
         panel.resizable = not pinned
     print("stages", "pinned" if pinned else "free")
 

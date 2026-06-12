@@ -32,3 +32,6 @@ examples/saved_layout.json
 .DS_Store
 Thumbs.db
 claude.ps1
+.mcp.json
+# Added by code-review-graph
+.code-review-graph/

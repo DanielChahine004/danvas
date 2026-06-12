@@ -21,7 +21,7 @@ cell id) rather than stacking a duplicate. Cells that end in a statement
 A cell may override its own panel with a ``# pycanvas:`` directive line — to
 pin a position/size, lock it, rename it, or opt out entirely::
 
-    # pycanvas: x=40 y=80 w=600 h=400 movable=false
+    # pycanvas: x=40 y=80 w=600 h=400 draggable=false
     fig
 
     # pycanvas: name=metrics label="Live metrics" locked=true
@@ -30,8 +30,8 @@ pin a position/size, lock it, rename it, or opt out entirely::
     # pycanvas: skip
     secret  # not mirrored to the canvas
 
-Recognised keys: ``x y w h rotation`` (numbers), ``locked movable resizable
-interactive`` (true/false), ``name``/``label`` (strings), and a bare ``skip``.
+Recognised keys: ``x y w h rotation`` (numbers), ``locked draggable resizable
+operable`` (true/false), ``name``/``label`` (strings), and a bare ``skip``.
 Anything unspecified falls back to the auto-grid (or, on a re-run, to wherever
 the user dragged/resized the panel).
 """
@@ -50,7 +50,7 @@ class CellCapture:
 
     def __init__(self, canvas, cols=3, slot_w=520, slot_h=420, gap=40,
                  origin=(0, 0), include_source=True, auto=True,
-                 movable=True, resizable=True, locked=False, interactive=True):
+                 draggable=True, resizable=True, locked=False, operable=True):
         self.canvas = canvas
         self.cols = cols
         self.slot_w = slot_w
@@ -64,8 +64,8 @@ class CellCapture:
         self.auto = auto
         # Default lock/interaction state stamped on every panel's first
         # appearance (a per-cell `# pycanvas:` directive still overrides these).
-        self._lock_defaults = {"movable": movable, "resizable": resizable,
-                               "locked": locked, "interactive": interactive}
+        self._lock_defaults = {"draggable": draggable, "resizable": resizable,
+                               "locked": locked, "operable": operable}
         self._ip = None
         # Maps a cell's stable id -> the grid slot it claimed, so re-running a
         # cell lands its refreshed panel back in the same spot. ``_next_slot`` is
@@ -170,8 +170,8 @@ class CellCapture:
             # Re-run: start from the panel's live geometry (user moves included).
             place.update(x=prev.x, y=prev.y, w=prev.w, h=prev.h,
                          rotation=prev.rotation, locked=prev.locked,
-                         movable=prev.movable, resizable=prev.resizable,
-                         interactive=prev.interactive)
+                         draggable=prev.draggable, resizable=prev.resizable,
+                         operable=prev.operable)
         else:
             # First appearance: capture-level default size + lock/interaction
             # state, and the next grid slot unless the directive pins position.
@@ -250,7 +250,7 @@ _DIRECTIVE_RE = re.compile(r"^[ \t]*#\s*pycanvas:[ \t]*(.*?)[ \t]*$",
 # Placement/lock keys forwarded straight to ``Canvas.insert`` (numbers/bools),
 # plus ``name``/``label`` (strings) which the caller pulls off first.
 _NUMERIC_KEYS = {"x", "y", "w", "h", "rotation"}
-_BOOL_KEYS = {"locked", "movable", "resizable", "interactive"}
+_BOOL_KEYS = {"locked", "draggable", "resizable", "operable"}
 _STR_KEYS = {"name", "label"}
 _DIRECTIVE_KEYS = _NUMERIC_KEYS | _BOOL_KEYS | _STR_KEYS
 
@@ -278,10 +278,10 @@ def _parse_directive(raw_cell):
     bare tokens ``skip`` and ``show`` map to ``{"skip": True}`` / ``{"show":
     True}`` — ``skip`` leaves the cell off the canvas, ``show`` opts a cell in
     under ``capture_cells(auto=False)``. Recognised keys: ``x y w h rotation``
-    (numbers), ``locked movable resizable interactive`` (true/false), and
+    (numbers), ``locked draggable resizable operable`` (true/false), and
     ``name``/``label`` (strings). Pairs are space- or comma-separated, e.g.::
 
-        # pycanvas: x=40 y=80 w=600 h=400 movable=false
+        # pycanvas: x=40 y=80 w=600 h=400 draggable=false
         # pycanvas: skip
         # pycanvas: name=metrics, label="Live metrics", locked=true
     """
@@ -313,8 +313,8 @@ def _parse_directive(raw_cell):
 
 
 def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
-              include_source=True, auto=True, movable=True, resizable=True,
-              locked=False, interactive=True):
+              include_source=True, auto=True, draggable=True, resizable=True,
+              locked=False, operable=True):
     """Mirror subsequent notebook cell outputs onto ``canvas``.
 
     Registers an IPython ``post_run_cell`` hook so each cell that ends in an
@@ -333,8 +333,8 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     unless a cell carries a ``# pycanvas:`` directive (a bare ``show`` to use the
     default grid, or any placement option like ``x=… y=…``).
 
-    ``movable``/``resizable``/``locked``/``interactive`` set the default
-    lock state stamped on every panel (e.g. ``movable=False, resizable=False``
+    ``draggable``/``resizable``/``locked``/``operable`` set the default
+    lock state stamped on every panel (e.g. ``draggable=False, resizable=False``
     to pin them all in place); a per-cell ``# pycanvas:`` directive overrides
     these for that cell.
 
@@ -346,8 +346,8 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
         return existing
     capture = CellCapture(canvas, cols=cols, slot_w=slot_w, slot_h=slot_h,
                           gap=gap, origin=origin, include_source=include_source,
-                          auto=auto, movable=movable, resizable=resizable,
-                          locked=locked, interactive=interactive)
+                          auto=auto, draggable=draggable, resizable=resizable,
+                          locked=locked, operable=operable)
     capture.start()
     canvas._cell_capture = capture
     return capture

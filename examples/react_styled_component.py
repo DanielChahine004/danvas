@@ -132,9 +132,9 @@ def main():
     panel = pycanvas.React(source=pycanvas.React.from_uiverse(REACT_SOURCE),
                            width=300, height=120)
 
-    # selectable=False: hover effects (the tooltips) work without first
+    # grabable=False: hover effects (the tooltips) work without first
     # clicking to select the panel, and clicks never highlight the panel.
-    canvas.insert(panel, x=50, y=50, selectable=False, frame=False)
+    canvas.insert(panel, x=50, y=50, grabable=False, frame=False)
     canvas.serve(desktop=True, view={"ui": False})
 
 if __name__ == "__main__":

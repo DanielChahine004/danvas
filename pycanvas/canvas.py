@@ -34,8 +34,8 @@ from .kernel import Kernel
 # these off and forwards everything else to the component constructor.
 # ``name`` is intentionally absent: it is the component's identity and travels on
 # the component itself (set in its constructor), not a placement option.
-_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "movable",
-                "resizable", "interactive", "selectable", "frame")
+_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "locked", "draggable",
+                "resizable", "operable", "grabable", "frame")
 
 
 # Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
@@ -219,8 +219,8 @@ class Canvas:
 
     def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
                       origin=(0, 0), include_source=True, auto=True,
-                      movable=True, resizable=True, locked=False,
-                      interactive=True):
+                      draggable=True, resizable=True, locked=False,
+                      operable=True):
         """Mirror subsequent notebook cell outputs onto this canvas.
 
         Registers an IPython ``post_run_cell`` hook so each cell ending in an
@@ -236,8 +236,8 @@ class Canvas:
         *nothing* unless a cell carries such a directive (e.g. a bare
         ``# pycanvas: show``) — an explicit allowlist instead of a blocklist.
 
-        ``movable``/``resizable``/``locked``/``interactive`` set the default lock
-        state for every panel (e.g. ``movable=False`` to pin them all); a
+        ``draggable``/``resizable``/``locked``/``operable`` set the default lock
+        state for every panel (e.g. ``draggable=False`` to pin them all); a
         per-cell directive overrides them.
 
         Stop with :meth:`stop_capturing_cells`.
@@ -246,8 +246,8 @@ class Canvas:
 
         return autopanel(self, cols=cols, slot_w=slot_w, slot_h=slot_h,
                          gap=gap, origin=origin, include_source=include_source,
-                         auto=auto, movable=movable, resizable=resizable,
-                         locked=locked, interactive=interactive)
+                         auto=auto, draggable=draggable, resizable=resizable,
+                         locked=locked, operable=operable)
 
     def stop_capturing_cells(self):
         """Stop mirroring cell outputs (unregister the ``post_run_cell`` hook).
@@ -281,35 +281,39 @@ class Canvas:
         )
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
-               locked=False, movable=True, resizable=True, interactive=True,
-               selectable=True, frame=True, name=None):
+               locked=False, draggable=True, resizable=True, operable=True,
+               grabable=True, frame=True, name=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
         let the frontend auto-cascade. ``w``/``h`` set its size in pixels;
         omit them to use the component's default size.
 
-        Three independent lock controls:
+        Five independent lock controls:
 
         - ``locked=True`` fully locks the panel — no move, resize, or
           interaction (toggle later with ``component.lock()`` / ``unlock()``).
-        - ``movable=False`` stops the user dragging the panel but keeps its
-          controls interactive (toggle with ``component.movable``).
+        - ``draggable=False`` stops the user dragging the panel but keeps its
+          controls interactive (toggle with ``component.draggable``).
         - ``resizable=False`` stops the user resizing it, controls still work
           (toggle with ``component.resizable``).
-        - ``selectable=False`` (content-heavy panels: Custom/React/WebView/
-          plots…) removes the click-to-select cover — the panel's content is
-          hoverable and clickable immediately — and makes the panel invisible
-          to selection entirely: no click, marquee, or select-all ever
-          highlights it. Move/resize it from Python (toggle with
-          ``component.selectable``).
+        - ``operable=False`` (content-heavy panels: Custom/React/WebView/
+          plots…) makes the controls inert to the user while Python
+          ``update()`` calls still render live — use this to lock interactive
+          controls while driving them programmatically. The panel stays movable
+          (toggle with ``component.operable``).
+        - ``grabable=False`` (content-heavy panels) removes the click-to-select
+          cover — the panel's content is hoverable and clickable immediately —
+          and makes the panel invisible to selection entirely: no click,
+          marquee, or select-all ever highlights it. Move/resize it from
+          Python only (toggle with ``component.grabable``).
         - ``frame=False`` strips the panel's card chrome — background, border,
           shadow, padding, label header, and the hover/selection highlight
           rectangle — so the component's content appears to sit directly on
           the canvas (toggle with ``component.frame``). Pair with
-          ``selectable=False`` if clicking the content should never select it.
+          ``grabable=False`` if clicking the content should never select it.
 
-        Use ``movable=False, resizable=False`` (or ``component.pin()``) to pin an
+        Use ``draggable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
         regardless of these — they only gate user gestures.
 
@@ -388,14 +392,14 @@ class Canvas:
             component._rotation = rotation
         if locked:
             component._locked = True
-        if not movable:
-            component._movable = False
+        if not draggable:
+            component._draggable = False
         if not resizable:
             component._resizable = False
-        if not interactive:
-            component._interactive = False
-        if not selectable:
-            component._selectable = False
+        if not operable:
+            component._operable = False
+        if not grabable:
+            component._grabable = False
         if not frame:
             component._frame = False
         component_id = uuid.uuid4().hex
@@ -731,9 +735,9 @@ class Canvas:
                 "h": c.h,
                 "rotation": c.rotation,
                 "locked": c.locked,
-                "movable": c.movable,
+                "draggable": c.draggable,
                 "resizable": c.resizable,
-                "selectable": c.selectable,
+                "grabable": c.grabable,
                 "frame": c.frame,
             }
             for c in self._components
@@ -764,9 +768,9 @@ class Canvas:
                 h=item.get("h"),
                 rotation=item.get("rotation"),
                 locked=item.get("locked"),
-                movable=item.get("movable"),
+                draggable=item.get("draggable"),
                 resizable=item.get("resizable"),
-                selectable=item.get("selectable"),
+                grabable=item.get("grabable"),
                 frame=item.get("frame"),
             )
 

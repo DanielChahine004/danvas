@@ -50,12 +50,12 @@ def on_mode(value):
     print("mode switched to:", value)
     status.update(f"mode: {value}")
     # In vision mode the worker drives the servos, so make the sliders inert to
-    # the user while their thumbs keep tracking the pushed values. `interactive`
+    # the user while their thumbs keep tracking the pushed values. `operable`
     # blocks UI input without locking the shape -- unlike lock(), which would
     # also freeze the programmatic updates and stop the thumb moving.
     drive = value == "vision"
-    servo_1.interactive = not drive
-    servo_2.interactive = not drive
+    servo_1.operable = not drive
+    servo_2.operable = not drive
 
 
 def worker():

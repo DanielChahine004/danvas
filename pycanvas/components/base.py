@@ -70,7 +70,7 @@ class BaseComponent:
         # controls (sliders, buttons) still work; only the drag-to-move and
         # resize-handle gestures are disabled. Carried in the shape's tldraw
         # ``meta`` and enforced by the frontend's onTranslate / canResize hooks.
-        self._movable = True
+        self._draggable = True
         self._resizable = True
         # Another interaction-preserving flag, but the inverse emphasis: when
         # False the user can't operate the panel's controls (a transparent
@@ -79,14 +79,14 @@ class BaseComponent:
         # whose thumb tracks an automatic value the user mustn't drag. Carried in
         # the shape's tldraw ``meta`` (lockInput). Contrast ``locked``, which
         # also freezes programmatic updates.
-        self._interactive = True
-        # When False, the user can't select this panel at all: the frontend
+        self._operable = True
+        # When False, the user can't grab/select this panel at all: the frontend
         # skips the "grab cover" it lays over content-heavy panels (so the
         # content is hoverable/clickable immediately) AND filters the panel out
         # of hover/selection state, so no click, marquee, or select-all ever
         # highlights or selects it. The panel can then only be moved/resized
         # from Python. Carried in the shape's tldraw ``meta`` (noGrab).
-        self._selectable = True
+        self._grabable = True
         # When False the panel's rectangular card chrome is removed: no
         # background, border, shadow, padding, or label header, and no
         # hover/selection highlight rectangle — the component's content appears
@@ -176,13 +176,13 @@ class BaseComponent:
         self.set_layout(locked=bool(value))
 
     @property
-    def movable(self):
-        """Whether the user can drag the panel. Interaction is unaffected."""
-        return self._movable
+    def draggable(self):
+        """Whether the user can drag the panel. Control interaction is unaffected."""
+        return self._draggable
 
-    @movable.setter
-    def movable(self, value):
-        self.set_layout(movable=bool(value))
+    @draggable.setter
+    def draggable(self, value):
+        self.set_layout(draggable=bool(value))
 
     @property
     def resizable(self):
@@ -194,7 +194,7 @@ class BaseComponent:
         self.set_layout(resizable=bool(value))
 
     @property
-    def interactive(self):
+    def operable(self):
         """Whether the user can operate the panel's controls from the UI.
 
         Set to ``False`` to make the controls inert to the user while the panel
@@ -202,15 +202,15 @@ class BaseComponent:
         slider thumb that tracks an automatic value the user mustn't drag). The
         panel can still be moved/selected; use ``locked`` to freeze everything.
         """
-        return self._interactive
+        return self._operable
 
-    @interactive.setter
-    def interactive(self, value):
-        self.set_layout(interactive=bool(value))
+    @operable.setter
+    def operable(self, value):
+        self.set_layout(operable=bool(value))
 
     @property
-    def selectable(self):
-        """Whether the user can select (highlight) this panel at all.
+    def grabable(self):
+        """Whether the user can grab/select this panel at all.
 
         Content-heavy panels (Custom, React, WebView, plots…) normally need a
         first click to select the panel before their content becomes
@@ -219,13 +219,13 @@ class BaseComponent:
         from the start, and no click, marquee, or select-all ever highlights
         or selects the panel — only the widget itself reacts. The trade-off is
         that the user can't move or resize it; do that from Python (or flip
-        ``selectable`` back on).
+        ``grabable`` back on).
         """
-        return self._selectable
+        return self._grabable
 
-    @selectable.setter
-    def selectable(self, value):
-        self.set_layout(selectable=bool(value))
+    @grabable.setter
+    def grabable(self, value):
+        self.set_layout(grabable=bool(value))
 
     @property
     def frame(self):
@@ -309,26 +309,26 @@ class BaseComponent:
     def pin(self):
         """Pin in place and fix size, but keep controls interactive, live.
 
-        Shorthand for ``set_layout(movable=False, resizable=False)`` — unlike
+        Shorthand for ``set_layout(draggable=False, resizable=False)`` — unlike
         :meth:`lock`, sliders and buttons on the panel still work.
         """
-        self.set_layout(movable=False, resizable=False)
+        self.set_layout(draggable=False, resizable=False)
 
     def unpin(self):
         """Allow dragging and resizing again, live."""
-        self.set_layout(movable=True, resizable=True)
+        self.set_layout(draggable=True, resizable=True)
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
-                   locked=None, movable=None, resizable=None, interactive=None,
-                   selectable=None, frame=None):
+                   locked=None, draggable=None, resizable=None, operable=None,
+                   grabable=None, frame=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. Stored state is updated so a
         reconnecting client replays the new layout. ``x``/``y`` travel as the
         panel's canvas position, ``rotation`` (degrees) as its angle. ``locked``
         is a full lock (also blocks interaction *and* programmatic updates);
-        ``movable``/``resizable``/``interactive`` are interaction-preserving
-        locks carried in the shape's tldraw ``meta`` (``interactive=False`` makes
+        ``draggable``/``resizable``/``operable`` are interaction-preserving
+        locks carried in the shape's tldraw ``meta`` (``operable=False`` makes
         controls inert to the user while value updates keep rendering).
         ``w``/``h`` are shape props.
         """
@@ -355,18 +355,18 @@ class BaseComponent:
         if locked is not None:
             self._locked = bool(locked)
             payload["locked"] = self._locked
-        if movable is not None:
-            self._movable = bool(movable)
-            payload["movable"] = self._movable
+        if draggable is not None:
+            self._draggable = bool(draggable)
+            payload["movable"] = self._draggable
         if resizable is not None:
             self._resizable = bool(resizable)
             payload["resizable"] = self._resizable
-        if interactive is not None:
-            self._interactive = bool(interactive)
-            payload["interactive"] = self._interactive
-        if selectable is not None:
-            self._selectable = bool(selectable)
-            payload["selectable"] = self._selectable
+        if operable is not None:
+            self._operable = bool(operable)
+            payload["interactive"] = self._operable
+        if grabable is not None:
+            self._grabable = bool(grabable)
+            payload["selectable"] = self._grabable
         if frame is not None:
             self._frame = bool(frame)
             payload["frame"] = self._frame
