@@ -8,6 +8,7 @@ each is only needed if you actually pass that kind of object.
 
 import base64
 import io
+import sys
 
 from .custom import Custom
 from ._doc import document
@@ -33,7 +34,12 @@ class Image(Custom):
                          w=w, h=h)
 
     def update(self, src):
-        """Replace the image, live."""
+        """Replace the image, live.
+
+        A Matplotlib figure is auto-released from pyplot's registry after
+        rendering, so calling this in a loop with fresh figures doesn't leak —
+        no manual ``plt.close()`` needed.
+        """
         super().update(self._render(src))
 
     def _render(self, src):
@@ -62,6 +68,12 @@ def _to_data_uri(src):
     if hasattr(src, "savefig"):
         buf = io.BytesIO()
         src.savefig(buf, format="png", bbox_inches="tight")
+        # Release the figure from pyplot's global registry, which would
+        # otherwise keep every figure alive — a leak when update(fig) runs in a
+        # loop. The figure object itself stays usable (savefig still works).
+        plt = sys.modules.get("matplotlib.pyplot")
+        if plt is not None:
+            plt.close(src)
         return _bytes_uri(buf.getvalue(), "image/png")
     # Anything exposing the IPython PNG hook (e.g. some plotting objects).
     png = getattr(src, "_repr_png_", None)

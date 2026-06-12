@@ -4,6 +4,32 @@ All notable changes to PyCanvas are recorded here. This project aims to follow
 [Semantic Versioning](https://semver.org/); while pre-1.0, minor versions may
 carry breaking changes (called out below).
 
+## Unreleased
+
+### Added
+- **Relative placement.** `insert()` and every factory accept `below=` /
+  `above=` / `right_of=` / `left_of=` (an already-placed component or its name)
+  plus `gap=` (pixels, default 16), deriving `x`/`y` from the anchor's live
+  geometry — no more hand-computing dashboard coordinates. Vertical anchors
+  align left edges, horizontal ones align top edges; two anchors set one axis
+  each, and an explicit `x`/`y` overrides the derived coordinate.
+- **`queue=` at creation.** The send-queue policy can now be passed to
+  `insert()` and every factory (`canvas.image(fig, queue="latest")`) instead of
+  only being set afterwards via the `comp.queue` property.
+
+### Fixed
+- **Matplotlib figures no longer accumulate in pyplot's registry.** `Image`
+  releases a figure from `matplotlib.pyplot` after rasterizing it, so
+  `img.update(fig)` with a fresh figure per loop iteration (e.g. redrawing on a
+  slider tick) no longer leaks; manual `plt.close()` is unnecessary. The figure
+  object itself stays usable.
+
+### Docs
+- README and GUIDE now state the factory signature convention explicitly:
+  input/interactive panels take `name` first; content panels (`image`, `table`,
+  `markdown`, `custom`, `react`, `webview`, `show`) take the content first with
+  `name=` as a keyword.
+
 ## 0.2.0
 
 ### Fixed

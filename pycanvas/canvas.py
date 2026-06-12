@@ -38,8 +38,10 @@ from .kernel import Kernel
 # these off and forwards everything else to the component constructor.
 # ``name`` is intentionally absent: it is the component's identity and travels on
 # the component itself (set in its constructor), not a placement option. The lock
-# /chrome flags come straight from the shared LAYOUT_FLAGS table.
-_INSERT_KEYS = ("x", "y", "w", "h", "rotation", *LAYOUT_FLAGS)
+# /chrome flags come straight from the shared LAYOUT_FLAGS table. ``queue`` lives
+# here (not in every constructor) so all factories accept it uniformly.
+_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "queue",
+                "below", "above", "right_of", "left_of", "gap", *LAYOUT_FLAGS)
 
 
 class Canvas:
@@ -250,12 +252,28 @@ class Canvas:
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=True,
-               grabbable=True, frame=True, name=None):
+               grabbable=True, frame=True, name=None, queue=None,
+               below=None, above=None, right_of=None, left_of=None, gap=16):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
         let the frontend auto-cascade. ``w``/``h`` set its size in pixels;
         omit them to use the component's default size.
+
+        Instead of absolute coordinates, place the panel relative to one
+        already on the canvas: ``below=`` / ``above=`` / ``right_of=`` /
+        ``left_of=`` take a component (or its name) and position this panel
+        ``gap`` pixels away from it, aligned with its edge. An explicit ``x`` or
+        ``y`` overrides the corresponding derived coordinate. The anchor must
+        already have a position (placed with ``x``/``y``, relatively, or moved
+        by a user — auto-cascaded panels have no Python-side position until a
+        browser reports one).
+
+        ``queue`` sets the component's send-queue policy under backpressure:
+        ``"fifo"`` (deliver everything, in order) or ``"latest"`` (drop stale
+        pending updates — right for high-rate feeds like a figure redrawn on
+        every slider tick). ``None`` keeps the component's own default. Also a
+        settable property: ``comp.queue = "latest"``.
 
         Five independent lock controls:
 
@@ -314,6 +332,19 @@ class Canvas:
                 "'127.0.0.1', or pass allow_remote_exec=True to serve() if you "
                 "really intend remote code execution on a trusted network."
             )
+        # Relative placement: derive x/y from an anchor panel's live geometry.
+        # Resolved before the swap-in-place logic below, so an explicit relative
+        # placement wins over an evicted panel's old position.
+        if below is not None or above is not None or right_of is not None \
+                or left_of is not None:
+            new_w = w if w is not None else component.w
+            new_h = h if h is not None else component.h
+            rx, ry = self._relative_position(
+                below, above, right_of, left_of, gap, new_w, new_h)
+            if x is None:
+                x = rx
+            if y is None:
+                y = ry
         if name is None:
             name = component.name
         if name is None:
@@ -384,6 +415,8 @@ class Canvas:
             flag = LAYOUT_FLAGS[fname]
             if bool(value) != flag.default:
                 setattr(component, flag.attr, bool(value))
+        if queue is not None:
+            component.queue = queue  # property setter validates the policy
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -407,6 +440,49 @@ class Canvas:
         if self._serving:
             self._bridge.register_live(component)
         return component
+
+    def _relative_position(self, below, above, right_of, left_of, gap,
+                           new_w, new_h):
+        """Compute an (x, y) from the relative-placement anchors given to insert.
+
+        Each anchor is a component or its name. ``below``/``above`` align the new
+        panel's left edge with the anchor's and stack it ``gap`` pixels under/over
+        it; ``right_of``/``left_of`` align top edges and set it beside. One anchor
+        sets both coordinates; two (e.g. ``below=a, right_of=b``) each set their
+        own axis. ``above``/``left_of`` need the new panel's size (``new_w``/
+        ``new_h``) since they offset by it.
+        """
+        def resolve(ref, kind):
+            if ref is None:
+                return None
+            comp = self._named.get(ref) if isinstance(ref, str) else ref
+            if comp is None or not hasattr(comp, "w"):
+                raise ValueError(f"{kind}={ref!r} is not a component on this canvas")
+            if comp.x is None or comp.y is None:
+                raise ValueError(
+                    f"can't place {kind} {comp.name!r}: it has no position yet "
+                    "(give it x/y, place it relatively, or wait for the browser "
+                    "to report where auto-cascade put it)"
+                )
+            return comp
+        below, above = resolve(below, "below"), resolve(above, "above")
+        right_of, left_of = resolve(right_of, "right_of"), resolve(left_of, "left_of")
+        x = y = None
+        # Vertical anchors own y (and suggest x); horizontal anchors own x (and
+        # suggest y). Explicit horizontal beats a vertical anchor's suggestion.
+        if below is not None:
+            x, y = below.x, below.y + below.h + gap
+        elif above is not None:
+            x, y = above.x, above.y - gap - new_h
+        if right_of is not None:
+            x = right_of.x + right_of.w + gap
+            if y is None:
+                y = right_of.y
+        elif left_of is not None:
+            x = left_of.x - gap - new_w
+            if y is None:
+                y = left_of.y
+        return x, y
 
     def _auto_name(self, kind):
         """Return a unique fallback handle (e.g. ``slider1``) for an unnamed item.

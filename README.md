@@ -76,9 +76,16 @@ feed  = canvas.video("camera")
 plot  = canvas.live_plot("servos", traces=["s1", "s2"])
 ```
 
-The first argument is the component's `name` (its unique `canvas.<name>` handle);
-an optional `label=` sets a different on-screen caption. Factories also forward
-`insert`'s placement and lock options, so a fully-specified panel fits on one line:
+Factory signatures follow one convention, worth knowing once: **panels you read
+from take `name` first** (`slider`, `toggle`, `button`, `label`, `video`,
+`audio`, `chat`, `live_plot`, `plot`, `repl`, `inspector` — the name is how
+you'll reach them later), while **panels that render content take the content
+first** (`image(src)`, `table(data)`, `markdown(text)`, `custom(html)`,
+`react(source)`, `webview(url)`, `show(value)`) with `name=` as an optional
+keyword that defaults to the type word (`"image"`, `"table"`, …). Either way the
+`name` is the unique `canvas.<name>` handle, and an optional `label=` sets a
+different on-screen caption. Factories also forward `insert`'s placement, lock,
+and `queue` options, so a fully-specified panel fits on one line:
 
 ```python
 servo = canvas.slider("servo", min=0, max=180, default=90, label="Servo 1", x=80, y=80)
@@ -151,8 +158,8 @@ Two knobs keep pycanvas a thin, fast layer for high-rate feeds (cameras, live
 telemetry) without piling up latency on a slow viewer.
 
 **Queue policy** — how a component's updates behave when they outpace the
-connection. Every component has a `queue` setting (settable as a property, so it
-works on any of them):
+connection. Every component has a `queue` setting — pass `queue=` to any factory
+or `insert(...)`, or set it later as a property:
 
 - **`"fifo"`** (default) — deliver every update in order, nothing dropped. Right
   for controls, labels, anything where each value matters.
@@ -163,9 +170,9 @@ works on any of them):
   in-flight send + one pending value, so a fast producer can't lag a slow client.
 
 ```python
-cam = canvas.video("door")          # VideoFeed defaults to queue="latest"
-plot = canvas.live_plot("temps")
-plot.queue = "latest"               # drop stale telemetry for slow viewers
+cam  = canvas.video("door")                      # VideoFeed defaults to queue="latest"
+plot = canvas.live_plot("temps", queue="latest") # set it at creation...
+plot.queue = "latest"                            # ...or any time later
 ```
 
 **Pre-encoded frames** — `VideoFeed(encode=False)` skips `cv2.imencode` and sends
@@ -435,6 +442,25 @@ servo.resize(w=500, h=160)
 servo.set_layout(x=120, y=90, rotation=30)   # any combination in one message
 ```
 
+### Relative placement
+
+Instead of computing absolute coordinates, anchor a panel to one already placed
+with `below=` / `above=` / `right_of=` / `left_of=` (a component or its name),
+spaced by `gap` pixels (default 16). A vertical anchor aligns left edges; a
+horizontal one aligns top edges. Combine two to set each axis independently, and
+an explicit `x`/`y` overrides the derived coordinate:
+
+```python
+plot     = canvas.plot("plot", x=400, y=40, w=600, h=400)
+controls = canvas.slider("t", min=0, max=1, step=0.01, below=plot)      # under it
+legend   = canvas.markdown("…", right_of=plot, gap=24)                  # beside it
+button   = canvas.button("go", below=controls, right_of=plot)           # grid corner
+```
+
+The anchor must already have a position — given `x`/`y`, placed relatively
+itself, or dragged by a user. (Auto-cascaded panels have no Python-side position
+until a browser reports one.)
+
 Every component has a unique **`name`** — its first constructor argument (pass
 `name=` to `insert` to override). That `name` is the component's identity: the
 `canvas.<name>` / `canvas["<name>"]` handle, and the key that makes a later
@@ -658,6 +684,11 @@ notebook cell-capture below.
 
 The three render targets are also components in their own right when you want one
 explicitly: `canvas.markdown(text)`, `canvas.image(src)`, `canvas.table(data)`.
+
+**Matplotlib figures don't leak.** Rendering a figure (via `canvas.image(fig)`,
+`img.update(fig)`, or `show(fig)`) releases it from pyplot's global registry
+after rasterizing — so redrawing a fresh figure on every slider tick or loop
+iteration needs no manual `plt.close()`. The figure object itself stays usable.
 
 **The `Table` is interactive.** A DataFrame, CSV, or list of records renders a
 panel you can **sort** (click a header — numeric columns sort numerically),

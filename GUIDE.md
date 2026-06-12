@@ -146,6 +146,18 @@ canvas.speed                                   # look it up by name
 canvas["speed"]                                # same (use this if name isn't a valid identifier)
 ```
 
+**Which argument comes first?** One convention covers every factory — panels
+you *read from* take the `name` first; panels that *render content* take the
+content first and `name=` as a keyword:
+
+| Kind | First argument | `name` | Factories |
+|---|---|---|---|
+| Input / interactive | `name` (required) | positional, first | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `chat`, `live_plot`, `plot`, `repl`, `inspector`, `file_browser` |
+| Content renderers | the content | keyword, defaults to the type word | `image(src)`, `table(data)`, `markdown(text)`, `custom(html)`, `react(source)`, `webview(url)`, `show(value)` |
+
+So two named image panels are `canvas.image(fig_a, name="flow")` and
+`canvas.image(fig_b, name="paths")` — content first, identity as a keyword.
+
 ### The component catalog
 
 Components are grouped by what they're *for*. "Direction" tells you the data
@@ -180,6 +192,10 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 > **Plot vs LivePlot.** `Plot` re-renders a whole Plotly figure each update —
 > simple, good for occasional charts. `LivePlot` keeps a mounted chart and
 > streams only new data points — smooth at high rates. Use `push()` in a loop.
+
+> **Matplotlib figures don't leak.** `Image` releases a figure from pyplot's
+> global registry after rasterizing it, so `img.update(fig)` with a fresh
+> figure per loop iteration needs no manual `plt.close()`.
 
 > **Video/audio** are sent as raw binary WebSocket frames (no base64/JSON
 > overhead). `VideoFeed` JPEG-encodes via OpenCV (the optional `[video]` extra);
@@ -424,7 +440,8 @@ Each component chooses what happens when its updates outpace a slow viewer:
 - `queue="latest"` — keep only the newest pending value per viewer, dropping
   stale ones. Right for live media/telemetry (VideoFeed defaults to this).
 
-Set it any time: `plot.queue = "latest"`.
+Pass it to any factory or `insert` (`canvas.image(fig, queue="latest")`), or
+set it any time as a property: `plot.queue = "latest"`.
 
 ---
 
@@ -447,6 +464,19 @@ comp.rotation = 30       # degrees, clockwise
 
 `x / y / w / h / rotation` are all readable and assignable. Omit `x`/`y` at
 insert and the frontend auto-cascades the panel into view.
+
+Or skip coordinates entirely and place panels **relative to each other** with
+`below=` / `above=` / `right_of=` / `left_of=` (an already-placed component or
+its name) and a `gap` in pixels (default 16). Vertical anchors align left
+edges, horizontal ones align top edges; combine two to set each axis, and an
+explicit `x`/`y` overrides the derived coordinate:
+
+```python
+plot   = canvas.plot("plot", x=400, y=40, w=600, h=400)
+t      = canvas.slider("t", min=0, max=1, step=0.01, below=plot)   # under the plot
+notes  = canvas.markdown("…", right_of=plot, gap=24)               # beside it
+go     = canvas.button("go", below=t, right_of=plot)               # grid corner
+```
 
 ### Locking — five independent controls
 
