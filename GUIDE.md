@@ -166,7 +166,7 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 | **Label** | `canvas.label(name, value="")` | `update(text)` |
 | **Markdown** | `canvas.markdown(text="")` | `update(text)` |
 | **Image** | `canvas.image(src, fit="contain")` | `update(src)` — path / URL / bytes / Matplotlib / PIL / NumPy array |
-| **Table** | `canvas.table(data)` | `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns |
+| **Table** | `canvas.table(data)` | interactive: sort / filter / per-column distributions. `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns |
 | **Plot** | `canvas.plot(name="plot")` | `update(fig)` — a Plotly figure or HTML string |
 
 #### Streaming — high-rate feeds
@@ -219,16 +219,37 @@ the panel that best renders it — the same call a notebook makes for an `Out[�
 but **without IPython**, so it works in plain scripts too:
 
 ```python
-canvas.show(df)                 # DataFrame  -> Table
+canvas.show(df)                 # DataFrame  -> interactive Table
 canvas.show(fig)                # figure     -> Plot / Image
-canvas.show("# Notes\n- a")     # string     -> Markdown
+canvas.show("use **bold**")     # Markdown   -> rendered text
 canvas.show({"ok": True})       # dict/list  -> pretty JSON
 canvas.show(obj)                # anything with _repr_html_/_repr_png_ -> its rich view
 ```
 
+It looks at *what's inside* the value, not just its type, so strings, paths and
+bytes do the obvious thing:
+
+```python
+canvas.show("data.csv")         # an existing CSV file   -> interactive Table
+canvas.show("photo.png")        # an existing image file -> Image
+canvas.show("notes.md")         # .md / .json / .html    -> render by type
+canvas.show("https://x/p.png")  # image URL / data: URI  -> Image
+canvas.show("https://x.com")    # a bare web URL         -> clickable link
+canvas.show("<h1>Hi</h1>")      # literal HTML           -> rendered HTML
+canvas.show(png_bytes)          # image bytes            -> Image
+```
+
+Detection is conservative — a single `*` isn't read as Markdown, and a path is
+only special when it's a real file — so ordinary text stays a plain bold label.
 No `name` gives each call a fresh panel; pass `name=` to **replace** one in place
 (handy in a loop). The same dispatcher is `pycanvas.panel_for(value)` if you want
 the component *without* inserting it.
+
+The `Table` this produces (from a DataFrame, CSV, or list of records) is
+**interactive**: click a header to sort, type in the filter box to narrow rows,
+and flip on *distributions* to see a little histogram (numeric columns) or
+top-values bar chart (categorical) under each header — all in the browser, no
+extra dependencies.
 
 ### Custom panels (the escape hatch you'll reach for most)
 

@@ -23,7 +23,7 @@ canvas.show(
         {"sensor": "temp", "value": 21.4, "unit": "C"},
         {"sensor": "humidity", "value": 48, "unit": "%"},
         {"sensor": "pressure", "value": 1013, "unit": "hPa"},
-    ],
+    ]*30000,
     x=440, y=40, label="readings",
 )
 
@@ -33,6 +33,7 @@ canvas.show({"status": "ok", "uptime_s": 3600, "tags": ["a", "b"]},
 
 # A plain scalar -> a Label.
 canvas.show(42.0, x=440, y=320, label="count")
+canvas.show([42.0, 890, 324,3214,214,124,12], x=440, y=320, label="count")
 
 # Re-show under the same name to replace a panel in place (e.g. in a loop):
 canvas.show("starting…", name="live", x=40, y=520, label="status")

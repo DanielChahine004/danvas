@@ -125,7 +125,7 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `React`     | bidirectional  | your own React component (JSX), rendered natively; `@on(event)` / `@on_message`, `.update(**props)`, `.push(data)` |
 | `Markdown`  | output         | rendered Markdown text; `.update(text)` |
 | `Image`     | output         | a static image (path/URL/bytes/Matplotlib/PIL/array); `.update(src)` |
-| `Table`     | output         | tabular data (DataFrame/Series, records, dict of columns); `.update(data)` |
+| `Table`     | output         | interactive tabular data (DataFrame/Series, records, dict of columns) — sort, filter, per-column distributions; `.update(data)` |
 | `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select` (file path), `@on_navigate`, `.value`, `pattern=` |
@@ -623,22 +623,48 @@ inserts the panel that best renders it — the same way a notebook decides how t
 display an `Out[...]`, but it works in plain scripts too (no IPython needed):
 
 ```python
-canvas.show(df)                    # pandas DataFrame -> Table
+canvas.show(df)                    # pandas DataFrame -> interactive Table
 canvas.show(fig)                   # Matplotlib / Plotly figure -> Image / Plot
-canvas.show("# Notes\n- a\n- b")   # Markdown -> rendered text
+canvas.show("use **bold** here")   # Markdown syntax -> rendered text
 canvas.show({"status": "ok"})      # dict / list -> pretty JSON
 canvas.show(model)                 # anything with _repr_html_/_repr_png_ -> its rich view
 ```
 
+`show()` looks at *what's inside* a value, not just its type — strings, paths,
+URLs and bytes are inspected rather than dumped verbatim:
+
+```python
+canvas.show("report.csv")          # existing file -> interactive Table
+canvas.show("photo.png")           # existing image file -> Image
+canvas.show("notes.md")            # .md / .json / .html files render by type
+canvas.show("https://site.com/x.png")  # image URL / data: URI -> Image
+canvas.show("https://example.com") # bare web URL -> a clickable link
+canvas.show("<h1>Hi</h1>")         # literal HTML -> rendered HTML
+canvas.show(png_bytes)             # image bytes -> Image
+canvas.show(Path("chart.png"))     # pathlib.Path works anywhere a path does
+```
+
 Dispatch order (most specific first): an existing component passes through, then
 Plotly → image-like (Matplotlib/PIL/NumPy) → tabular (DataFrame/records) → rich
-`_repr_*` → dict/list (JSON) → string → scalar `repr`. With no `name` each call
-gets a fresh panel; pass `name=` to replace one in place. The same dispatcher is
-available standalone as `pycanvas.panel_for(value)` (builds without inserting),
-and it's what powers the notebook cell-capture below.
+`_repr_*` → dict/list (JSON) → image bytes → string → scalar `repr`. Strings are
+further inspected for a file path, an image/web URL, literal HTML, or Markdown
+syntax (even a short one-liner like `**bold**`); a plain one-liner stays a bold
+`Label`. Detection is deliberately conservative — single `*italic*` isn't treated
+as Markdown, and a path is only special when it's a real existing file — so
+ordinary text isn't misread. With no `name` each call gets a fresh panel; pass
+`name=` to replace one in place. The same dispatcher is available standalone as
+`pycanvas.panel_for(value)` (builds without inserting), and it's what powers the
+notebook cell-capture below.
 
 The three render targets are also components in their own right when you want one
 explicitly: `canvas.markdown(text)`, `canvas.image(src)`, `canvas.table(data)`.
+
+**The `Table` is interactive.** A DataFrame, CSV, or list of records renders a
+panel you can **sort** (click a header — numeric columns sort numerically),
+**filter** (a search box hides non-matching rows), and inspect: a *distributions*
+toggle reveals a per-column mini-chart — a histogram for numeric columns, a
+top-values bar chart for categorical ones. It's all client-side inside the
+sandboxed panel, so it needs no extra dependencies and `update(data)` re-renders.
 
 ## Hot reloading (auto-restart on save)
 

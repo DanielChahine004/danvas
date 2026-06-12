@@ -27,6 +27,24 @@ carry breaking changes (called out below).
   lighter. Callers streaming raw int16 bytes never import it at all.
 
 ### Added
+- **`canvas.show()` now inspects strings, paths, and bytes instead of always
+  showing them verbatim.** A string is routed by what it contains: an existing
+  **file path** renders by extension (image / CSV→table / Markdown / JSON / HTML
+  / text), an **image URL or `data:` URI** becomes an image, a bare **web URL**
+  becomes a clickable link, literal **HTML** renders as HTML, and **Markdown**
+  syntax renders as Markdown even when short (previously only multi-line or long
+  strings did). `bytes` carrying an image (PNG/JPEG/GIF/WebP/BMP/SVG) render as
+  that image, and `pathlib.Path` is accepted anywhere a path string is. Plain
+  one-liners still render as a bold `Label`. No new dependencies (CSV uses the
+  stdlib `csv` module).
+- **`Table` (and `canvas.show(df)`) is now interactive in the browser.** Click a
+  header to sort (numeric columns sort numerically; cycles asc → desc →
+  original), filter rows with the search box, and toggle a per-column
+  distribution chart — a histogram for numeric columns, a top-values bar chart
+  for categorical ones — drawn as inline SVG. All client-side inside the existing
+  sandboxed iframe, no new dependencies. Large tables render the first 2,000 rows
+  (distributions still computed over the full data). pandas `Series` now render
+  too, and a non-trivial DataFrame index shows as a leading column.
 - `canvas.slider(...)` now exposes `step` and `on_release` directly.
 - `insert()` warns when a component name shadows a `Canvas` attribute (e.g.
   `save`, `components`); reach such a panel via `canvas["<name>"]`.

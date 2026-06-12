@@ -11,6 +11,49 @@ def test_dispatch_strings():
     assert isinstance(panel_for("x" * 200), Markdown)          # long -> Markdown
 
 
+def test_dispatch_smart_strings():
+    # Markdown syntax renders as Markdown even when short and single-line.
+    assert isinstance(panel_for("use **bold** here"), Markdown)
+    assert isinstance(panel_for("# Heading"), Markdown)
+    assert isinstance(panel_for("- a bullet"), Markdown)
+    assert isinstance(panel_for("see `code`"), Markdown)
+    # Plain prose is not misread as Markdown (single * isn't a marker).
+    assert isinstance(panel_for("a * b * c = d"), Label)
+    assert isinstance(panel_for("just a plain sentence"), Label)
+    # Literal HTML renders as HTML; a bare URL becomes a clickable link.
+    assert isinstance(panel_for("<h1>hi</h1>"), Custom)
+    assert isinstance(panel_for("https://example.com"), Markdown)
+
+
+def test_dispatch_image_url_and_bytes():
+    assert isinstance(panel_for("https://cdn.test/pic.png"), Image)
+    assert isinstance(panel_for("data:image/png;base64,iVBOR"), Image)
+    assert isinstance(panel_for(b"\x89PNG\r\n\x1a\nfake"), Image)
+    # Non-image bytes fall through to a repr label.
+    assert isinstance(panel_for(b"not an image"), Label)
+
+
+def test_dispatch_file_paths(tmp_path):
+    import pathlib
+
+    png = tmp_path / "a.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 16)
+    csvf = tmp_path / "a.csv"
+    csvf.write_text("name,age\nx,1\ny,2\n")
+    mdf = tmp_path / "a.md"
+    mdf.write_text("# Title\n- a\n- b")
+    jsonf = tmp_path / "a.json"
+    jsonf.write_text('[{"k": 1}, {"k": 2}]')
+
+    assert isinstance(panel_for(str(png)), Image)
+    assert isinstance(panel_for(str(csvf)), Table)       # CSV -> Table (stdlib)
+    assert isinstance(panel_for(str(mdf)), Markdown)
+    assert isinstance(panel_for(str(jsonf)), Table)      # JSON records -> Table
+    assert isinstance(panel_for(pathlib.Path(png)), Image)  # pathlib.Path
+    # A path-shaped string that isn't a real file stays a plain string.
+    assert isinstance(panel_for("nope.png"), Label)
+
+
 def test_dispatch_scalars_and_structures():
     assert isinstance(panel_for(42), Label)
     # A bare dict / list of scalars renders as JSON in a Custom panel.
@@ -56,12 +99,15 @@ def test_markdown_renders_headings_and_lists():
 
 def test_table_from_records_has_header_and_cells():
     html = Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()["html"]
-    assert "<th>name</th>" in html and "<td>a</td>" in html
+    assert ">name<" in html and "<td>a</td>" in html
+    # The interactive table flags the numeric column, marks sortable headers,
+    # and embeds a per-column distribution chart.
+    assert 'data-num="1"' in html and 'class="pc-head"' in html and "<svg" in html
 
 
 def test_table_from_dict_of_columns():
     html = Table({"x": [1, 2], "y": [3, 4]}).register_props()["html"]
-    assert "<th>x</th>" in html and "<td>4</td>" in html
+    assert ">x<" in html and "<td>4</td>" in html
 
 
 def test_image_from_bytes_sniffs_mime():
