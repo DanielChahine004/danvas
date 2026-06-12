@@ -1,4 +1,6 @@
 import os
+import sys
+import types
 
 import pytest
 
@@ -28,6 +30,26 @@ def test_build_args_core_flags():
         args[args.index("--collect-submodules") + 1],
     ]
     assert "uvicorn" in args and "websockets" in args
+    # A plain canvas pulls in no heavy optional deps: numpy is not force-collected.
+    assert "numpy" not in args
+
+
+def test_build_args_collects_numpy_only_on_request():
+    base = bake._build_args("/p/app.py", "App", "/p/dist", "/p")
+    assert "numpy" not in base  # off by default
+    withnp = bake._build_args("/p/app.py", "App", "/p/dist", "/p", collect_numpy=True)
+    i = withnp.index("numpy")
+    assert withnp[i - 1] == "--collect-submodules"
+
+
+def test_packages_for_components():
+    # Only the components with heavy runtime deps contribute packages.
+    assert bake._packages_for_components({"Slider", "Label"}) == set()
+    assert bake._packages_for_components({"AudioFeed"}) == {"numpy"}
+    assert bake._packages_for_components({"VideoFeed"}) == {"cv2"}
+    assert bake._packages_for_components({"Image"}) == {"PIL"}
+    assert bake._packages_for_components({"AudioFeed", "VideoFeed"}) == {"numpy", "cv2"}
+    assert bake._packages_for_components(None) == set()
 
 
 def test_build_args_onedir_and_console_and_icon():
@@ -46,6 +68,63 @@ def test_build_args_onedir_and_console_and_icon():
 def test_build_app_missing_entry():
     with pytest.raises(FileNotFoundError):
         bake.build_app("/no/such/script.py")
+
+
+def _capture_build_args(monkeypatch, tmp_path, **kwargs):
+    """Run build_app with PyInstaller/frontend stubbed, returning the arg list."""
+    entry = tmp_path / "app.py"
+    entry.write_text("import pycanvas\n")
+    monkeypatch.setattr(bake, "_frontend_dist", lambda: str(tmp_path))
+    monkeypatch.setattr(bake, "_conda_mkl_binaries", lambda: [])
+    captured = {}
+    fake = types.SimpleNamespace(run=lambda args: captured.setdefault("args", args))
+    monkeypatch.setitem(sys.modules, "PyInstaller", types.SimpleNamespace(__main__=fake))
+    monkeypatch.setitem(sys.modules, "PyInstaller.__main__", fake)
+    bake.build_app(str(entry), name="App", **kwargs)
+    return captured["args"]
+
+
+def test_baked_app_excludes_tunnel_and_ipython_by_default(monkeypatch, tmp_path):
+    # pycloudflared + IPython drag the whole scientific/notebook stack into the
+    # build; a standalone local app needs neither, so they're excluded by default.
+    args = _capture_build_args(monkeypatch, tmp_path)
+    excluded = {args[i + 1] for i, a in enumerate(args) if a == "--exclude-module"}
+    assert {"pycloudflared", "IPython"} <= excluded
+    # A slider-only app collects no numpy and no media deps.
+    collected = {args[i + 1] for i, a in enumerate(args)
+                 if a in ("--collect-all", "--collect-submodules")}
+    assert not ({"numpy", "cv2", "PIL"} & collected)
+
+
+def test_components_drive_optional_deps(monkeypatch, tmp_path):
+    # An AudioFeed pulls numpy back in (with conda-MKL collection enabled);
+    # a VideoFeed collects OpenCV.
+    args = _capture_build_args(monkeypatch, tmp_path, components={"AudioFeed"})
+    assert args[args.index("numpy") - 1] == "--collect-submodules"
+    args = _capture_build_args(monkeypatch, tmp_path, components={"VideoFeed"})
+    assert args[args.index("cv2") - 1] == "--collect-all"
+    # An Image collects Pillow, and Pillow is then NOT in the exclude list.
+    args = _capture_build_args(monkeypatch, tmp_path, components={"Image"})
+    assert args[args.index("PIL") - 1] == "--collect-all"
+    excluded = {args[i + 1] for i, a in enumerate(args) if a == "--exclude-module"}
+    assert "PIL" not in excluded
+
+
+def test_unused_media_deps_are_excluded(monkeypatch, tmp_path):
+    # With no Image/VideoFeed on the canvas, Pillow and OpenCV are excluded so a
+    # transitive/typing import (e.g. pygments.formatters.img -> PIL -> numpy)
+    # can't drag them — and numpy — into the build.
+    args = _capture_build_args(monkeypatch, tmp_path)
+    excluded = {args[i + 1] for i, a in enumerate(args) if a == "--exclude-module"}
+    assert {"PIL", "cv2"} <= excluded
+
+
+def test_include_overrides_default_exclude(monkeypatch, tmp_path):
+    # Forcing a default-excluded package back via include wins over the exclude.
+    args = _capture_build_args(monkeypatch, tmp_path, include=["IPython"])
+    excluded = {args[i + 1] for i, a in enumerate(args) if a == "--exclude-module"}
+    assert "IPython" not in excluded
+    assert args[args.index("IPython") - 1] == "--collect-all"
 
 
 def test_bake_runs_app_when_frozen(monkeypatch):

@@ -12,14 +12,17 @@ import re
 from .custom import Custom
 from ._doc import document
 
+# Colours use translucent greys (not fixed light slate) so code blocks, tables,
+# and borders read correctly on both the light and dark canvas themes the panel
+# now follows. See _doc._THEMED_CSS for how the text colour tracks the theme.
 _MD_CSS = (
     "h1,h2,h3{margin:.4em 0 .3em;line-height:1.25}"
     "h1{font-size:1.5em}h2{font-size:1.3em}h3{font-size:1.1em}"
     "p{margin:.4em 0}ul,ol{margin:.4em 0;padding-left:1.4em}"
-    "pre{background:#f1f5f9;border-radius:6px;padding:8px;overflow:auto}"
-    "code{background:#f1f5f9;border-radius:4px;padding:1px 4px}"
+    "pre{background:rgba(127,127,127,.15);border-radius:6px;padding:8px;overflow:auto}"
+    "code{background:rgba(127,127,127,.15);border-radius:4px;padding:1px 4px}"
     "pre code{background:none;padding:0}"
-    "table{border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:3px 8px}"
+    "table{border-collapse:collapse}th,td{border:1px solid rgba(127,127,127,.4);padding:3px 8px}"
 )
 
 
@@ -38,8 +41,16 @@ class Markdown(Custom):
         self._text = text
         super().update(self._render(text))
 
+    def register_props(self):
+        # `themed` tells the frontend to blend this panel into the canvas theme
+        # (transparent body + theme-following text) rather than render it as a
+        # white notebook document the way Image/Table do.
+        props = super().register_props()
+        props["themed"] = True
+        return props
+
     def _render(self, text):
-        return document(_md_to_html(text or ""), _MD_CSS)
+        return document(_md_to_html(text or ""), _MD_CSS, theme=True)
 
 
 def _md_to_html(text):

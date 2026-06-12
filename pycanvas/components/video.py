@@ -28,7 +28,12 @@ class VideoFeed(BaseComponent):
         """
         if self._encode:
             try:
-                import cv2
+                # Imported via importlib so PyInstaller's analysis can't see it
+                # and bundle OpenCV into a baked app that never encodes frames;
+                # bake() bundles cv2 when a VideoFeed is on the canvas.
+                import importlib
+
+                cv2 = importlib.import_module("cv2")
             except ImportError as exc:
                 # OpenCV lives in the optional [video] extra so a slider-only
                 # install stays lightweight. Only the encode path needs it; pass

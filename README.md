@@ -648,15 +648,23 @@ See [`examples/bake_app.py`](examples/bake_app.py).
 
 **What gets bundled.** Only the packages your script actually imports are
 included — *not* your whole environment — plus what PyInstaller's hooks add. So
-you normally specify nothing. Two escape hatches when analysis gets it wrong:
+you normally specify nothing. Heavy optional deps are bundled only when the
+canvas uses the component that needs them — **numpy** for an `AudioFeed`,
+**OpenCV** for a `VideoFeed`, **Pillow** for an `Image` — so a slider-only app
+doesn't drag them in. The public tunnel (`pycloudflared`), IPython, ipywidgets
+and PyInstaller itself are excluded by default: a standalone local app needs
+none of them, and any one would otherwise pull in a large unrelated tree (tqdm →
+pandas/scipy/torch, the Jupyter stack, Pillow → numpy). Two escape hatches when
+analysis gets it wrong:
 
 ```python
 canvas.bake(name="App", include=["my_plugin"])   # force-add a dynamic/plugin import
 canvas.bake(name="App", exclude=["torch"])        # skip a broken/unused dep that crashes the build
 ```
 
-On a **conda** environment the MKL DLLs NumPy needs are detected and bundled
-automatically (a pip/venv NumPy bundles its own BLAS, so it needs nothing). If a
+When numpy is bundled on a **conda** environment, the MKL DLLs it needs are
+detected and bundled automatically (a pip/venv NumPy bundles its own BLAS, so it
+needs nothing). If a
 build fails, the error names the culprit dependency and the `exclude` fix. The
 same options exist on the CLI: `--include`, `--exclude` (both repeatable).
 

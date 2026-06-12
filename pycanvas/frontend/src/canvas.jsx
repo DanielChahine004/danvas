@@ -429,10 +429,13 @@ export class HtmlShapeUtil extends PcShapeUtil {
     h: T.number,
     label: T.string,
     html: T.string,
+    // Prose panels (Markdown) set this so CustomView blends the iframe into the
+    // canvas theme instead of showing it as a white notebook document.
+    themed: T.boolean,
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'custom', html: '' }
+    return { w: 380, h: 320, label: 'custom', html: '', themed: false }
   }
 
   component(shape) {
@@ -456,6 +459,12 @@ export class HtmlShapeUtil extends PcShapeUtil {
 function CustomView({ shape }) {
   const ref = useRef(null)
   const id = componentIdOf(shape.id)
+  const editor = useEditor()
+  // A `themed` panel (Markdown) blends into the canvas: its document body is
+  // transparent so the panel's --pc-bg shows through, and we hand the iframe a
+  // `color-scheme` matching tldraw's theme so the doc's prefers-color-scheme
+  // query (which colours its text) tracks the dark/light toggle, not the OS.
+  const dark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
 
   useEffect(() => {
     const post = (data) => {
@@ -484,6 +493,9 @@ function CustomView({ shape }) {
         // A frameless panel keeps the iframe transparent too, so user HTML
         // with a transparent body floats directly on the canvas.
         background: shape.meta?.noFrame ? 'transparent' : 'var(--pc-bg)',
+        // Themed (Markdown) panels propagate the canvas theme into the sandboxed
+        // doc; everything else renders on its own (light) document.
+        colorScheme: shape.props.themed ? (dark ? 'dark' : 'light') : undefined,
         pointerEvents: 'all',
       }}
       // Keep tldraw from hijacking drags/zoom meant for the iframe content.

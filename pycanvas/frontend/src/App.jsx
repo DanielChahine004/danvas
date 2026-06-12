@@ -40,7 +40,13 @@ export default function App() {
           } catch {
             editor.user.updateUserPreferences({ colorScheme: 'dark' })
           }
+          // Camera controls: plain scroll zooms (tldraw defaults to pan), and
+          // right-click-drag pans. setCameraOptions merges, so this `zoom`
+          // wheel behaviour survives the server's later applyViewOptions calls.
+          editor.setCameraOptions({ wheelBehavior: 'zoom' })
+          const cleanup = enableRightDragPan(editor)
           setEditor(editor)
+          return cleanup
         }}
       />
     </div>
@@ -138,6 +144,70 @@ function InspectorButton() {
       {state.open ? 'Inspector ✕' : 'Inspector'}
     </button>
   )
+}
+
+// Make right-click-drag pan the camera. tldraw has no built-in option for this
+// (right-click is its context menu), so we move the camera from raw pointer
+// events on its container. Listeners run in the capture phase and stopPropagation
+// on the right button so tldraw never sees the gesture. Camera x/y are page-space,
+// so a screen-pixel drag delta is divided by zoom. A locked camera won't move:
+// setCamera respects isLocked unless `force` is passed (we don't).
+//
+// The context menu is suppressed only when the drag actually moved (>4px), so a
+// plain right-click still opens tldraw's menu. Returns a cleanup for onMount.
+function enableRightDragPan(editor) {
+  const el = editor.getContainer()
+  let panning = false
+  let moved = 0
+  let lastX = 0
+  let lastY = 0
+
+  const onDown = (e) => {
+    if (e.button !== 2) return
+    panning = true
+    moved = 0
+    lastX = e.clientX
+    lastY = e.clientY
+    try { el.setPointerCapture(e.pointerId) } catch {}
+    e.stopPropagation()
+  }
+  const onMove = (e) => {
+    if (!panning) return
+    const dx = e.clientX - lastX
+    const dy = e.clientY - lastY
+    moved += Math.abs(dx) + Math.abs(dy)
+    lastX = e.clientX
+    lastY = e.clientY
+    const cam = editor.getCamera()
+    editor.setCamera(
+      { x: cam.x + dx / cam.z, y: cam.y + dy / cam.z, z: cam.z },
+      { immediate: true }
+    )
+    e.preventDefault()
+    e.stopPropagation()
+  }
+  const onUp = (e) => {
+    if (e.button !== 2 || !panning) return
+    panning = false
+    try { el.releasePointerCapture(e.pointerId) } catch {}
+    e.stopPropagation()
+  }
+  const onContextMenu = (e) => {
+    if (moved > 4) e.preventDefault() // a drag, not a click — swallow the menu
+  }
+
+  el.addEventListener('pointerdown', onDown, true)
+  el.addEventListener('pointermove', onMove, true)
+  el.addEventListener('pointerup', onUp, true)
+  el.addEventListener('pointercancel', onUp, true)
+  el.addEventListener('contextmenu', onContextMenu, true)
+  return () => {
+    el.removeEventListener('pointerdown', onDown, true)
+    el.removeEventListener('pointermove', onMove, true)
+    el.removeEventListener('pointerup', onUp, true)
+    el.removeEventListener('pointercancel', onUp, true)
+    el.removeEventListener('contextmenu', onContextMenu, true)
+  }
 }
 
 function seedDemo(editor) {

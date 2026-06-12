@@ -1224,8 +1224,15 @@ class Canvas:
         skips modules — use it when a broken or unused optional dependency would
         otherwise crash the build (e.g. ``exclude=["torch"]``).
 
-        On a conda environment the MKL DLLs NumPy needs are detected and bundled
-        automatically (a pip/venv NumPy needs nothing). Building requires the
+        Heavy optional dependencies are bundled only when this canvas uses the
+        component that needs them — numpy for an AudioFeed, OpenCV for a
+        VideoFeed — so a slider-only app doesn't drag them in. When numpy is
+        bundled on a conda environment, the MKL DLLs it needs are detected and
+        bundled automatically too (a pip/venv NumPy needs nothing). The public
+        tunnel (``pycloudflared``) and IPython are excluded by default — a
+        standalone local app needs neither, and either one pulls in a large
+        unrelated dependency tree; pass them in ``include`` if you really need
+        them. Building requires the
         desktop extra: ``pip install 'pycanvas[desktop]'``. To build without
         editing your script, the equivalent CLI is
         ``python -m pycanvas.bake your_script.py``.
@@ -1245,10 +1252,27 @@ class Canvas:
                     "pass entry='your_script.py' or use "
                     "`python -m pycanvas.bake your_script.py`"
                 )
+        # The script has already run by the time bake() is called, so sys.modules
+        # reflects exactly what it imported. If it pulled in a heavy optional dep
+        # bake otherwise treats as component-only (numpy/Pillow/OpenCV), bundle it
+        # — and keep bake's default media-dep exclusions from dropping it. numpy in
+        # particular needs its conda MKL DLLs, which only ride along when it's
+        # collected (see build_app), so this is what makes a script that imports
+        # numpy directly produce a working exe.
+        include = list(include or [])
+        for pkg in ("numpy", "PIL", "cv2"):
+            if pkg in sys.modules and pkg not in include:
+                include.append(pkg)
+
         out = _bake.build_app(
             entry, name=name, icon=icon, onefile=onefile,
             windowed=windowed, distpath=distpath, exclude=exclude,
             include=include,
+            # Tell the build which heavy optional deps to bundle, based on the
+            # components this canvas actually uses (numpy for AudioFeed, OpenCV
+            # for VideoFeed, Pillow for Image) — a slider-only app stays lean.
+            # Keyed by class name (several components share the "Custom" type).
+            components={type(c).__name__ for c in self._components},
         )
         print(f"PyCanvas baked: {out}")
         return out

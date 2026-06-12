@@ -92,7 +92,13 @@ def _to_data_uri(src):
         hasattr(src, "shape") and hasattr(src, "dtype")
     ):
         try:
-            from PIL import Image as _PILImage
+            # Via importlib so PyInstaller's analysis doesn't follow it and pull
+            # Pillow (and, through PIL._typing, numpy) into a baked app that
+            # never renders an array image; bake() bundles Pillow when an Image
+            # component is on the canvas (see pycanvas/bake.py).
+            import importlib
+
+            _PILImage = importlib.import_module("PIL.Image")
         except Exception as exc:  # pragma: no cover - depends on env
             raise ValueError(
                 "showing a NumPy array as an image needs Pillow "

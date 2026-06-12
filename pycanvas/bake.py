@@ -26,6 +26,62 @@ def _frontend_dist():
     return os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 
+# Heavy optional dependencies that specific components import only at runtime,
+# and dynamically (via importlib) so PyInstaller's analysis can't see them — see
+# the imports in components/audio.py, video.py and image.py. We bundle them back
+# only when the canvas actually uses the component, so a slider-only app doesn't
+# pay for numpy/OpenCV/Pillow (numpy alone is ~60 MB). Keyed by component *class*
+# name (Image renders as a "Custom" panel, so the frontend type can't tell them
+# apart). ``cv2``/``PIL`` are collected whole; ``numpy`` means a conda/MKL-aware
+# collect.
+_COMPONENT_PACKAGES = {
+    "AudioFeed": {"numpy"},
+    "VideoFeed": {"cv2"},
+    "Image": {"PIL"},
+}
+
+
+def _packages_for_components(component_types):
+    """Map a set of component class names to the extra packages they need bundled."""
+    needs = set()
+    for t in component_types or ():
+        needs |= _COMPONENT_PACKAGES.get(t, set())
+    return needs
+
+
+# Optional dependencies a *baked* app never needs — it's a standalone, local
+# desktop app — but which, left in, drag enormous unrelated trees into the build:
+#   * pycloudflared (the [tunnel] extra's binary downloader) imports tqdm.auto,
+#     which statically pulls tqdm's notebook/gui/pandas integrations and so
+#     cascades into ipywidgets -> IPython, matplotlib, and pandas -> scipy ->
+#     torch -> networkx/tensorboard. A frozen app opens no public tunnel.
+#   * IPython (also reachable via python-dotenv's dotenv.ipython) pulls the
+#     Jupyter stack. A frozen app runs no notebook kernel.
+#   * ipywidgets is optionally imported by rich.live (reached via
+#     fastapi -> pydantic -> rich) for Jupyter display, and pulls ipykernel ->
+#     pyzmq, comm, and matplotlib. A frozen app renders no Jupyter widgets.
+#   * PyInstaller itself is dragged in by pycanvas.bake (which imports it to
+#     build), and its splash support pulls Pillow -> numpy. A frozen app never
+#     rebuilds, so neither PyInstaller nor pycanvas.bake belongs in it.
+# Excluding these severs the cascade without excluding numpy/pandas/etc.
+# themselves, so an app that imports them directly still bundles them. The
+# caller can force one back by naming it in ``include``.
+_DEFAULT_EXCLUDES = (
+    "pycloudflared", "IPython", "ipywidgets", "PyInstaller", "pycanvas.bake",
+)
+
+
+# Component-only optional deps: their sole realistic use in a canvas app is via
+# the component that needs them (Pillow for Image, OpenCV for VideoFeed). When no
+# such component is on the canvas we exclude them, so a transitive/typing import
+# can't drag them — and their own heavy deps — in. Pillow is the worst offender:
+# pygments' image formatter (reached via Markdown -> codehilite -> pygments) and
+# others import it, and PIL._typing then imports numpy.typing, pulling all of
+# numpy (~30 MB). numpy itself is deliberately NOT auto-excluded — scripts
+# commonly import it directly — but with Pillow gone its transitive path is cut.
+_EXCLUDABLE_COMPONENT_PACKAGES = ("PIL", "cv2")
+
+
 # Core MKL/OpenMP runtime DLLs a conda NumPy depends on. They live in
 # <prefix>/Library/bin, outside the numpy package, so PyInstaller's analysis
 # can't see them and the frozen app dies with "mkl_intel_thread...dll not found".
@@ -83,7 +139,7 @@ def _failure_hint(exc):
 def _build_args(entry, name, dist_src, pkg_root, *, icon=None, onefile=True,
                 windowed=True, distpath="dist", workpath="build", clean=False,
                 add_data=None, binaries=None, exclude=None, include=None,
-                hidden_imports=None, extra_args=None):
+                hidden_imports=None, collect_numpy=False, extra_args=None):
     """Assemble the PyInstaller argument list (pure; no filesystem side effects).
 
     ``entry``/``dist_src``/``icon``/``pkg_root`` are expected already absolute.
@@ -106,14 +162,16 @@ def _build_args(entry, name, dist_src, pkg_root, *, icon=None, onefile=True,
         "--add-data", f"{dist_src}{sep}{_FRONTEND_DEST}",
         # pycanvas imports some modules lazily (tunnel, components); collect them
         # all so analysis can't miss one. uvicorn/websockets load their protocol
-        # backends dynamically, so collect those wholesale too. numpy (used by
-        # VideoFeed/AudioFeed via cv2) loads C-extension submodules dynamically
-        # that the default analysis misses on newer versions.
+        # backends dynamically, so collect those wholesale too.
         "--collect-submodules", "pycanvas",
-        "--collect-submodules", "numpy",
         "--collect-all", "uvicorn",
         "--collect-all", "websockets",
     ]
+    if collect_numpy:
+        # Only when the app actually uses numpy (e.g. an AudioFeed). numpy loads
+        # C-extension submodules dynamically that the default analysis misses on
+        # newer versions, so pull the whole package in.
+        args += ["--collect-submodules", "numpy"]
     args.append("--onefile" if onefile else "--onedir")
     if windowed:
         args.append("--windowed")
@@ -139,20 +197,49 @@ def _build_args(entry, name, dist_src, pkg_root, *, icon=None, onefile=True,
 
 def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
               distpath="dist", workpath="build", clean=False, exclude=None,
-              include=None, add_data=None, hidden_imports=None, extra_args=None):
+              include=None, components=None, add_data=None, hidden_imports=None,
+              extra_args=None):
     """Build ``entry`` into a standalone executable, returning its path.
 
     PyInstaller bundles only the packages your script actually imports (not the
     whole environment) plus what its hooks add — so you normally specify nothing.
     ``include`` force-adds packages the static analysis can't see (dynamic or
     plugin imports); ``exclude`` skips modules, useful when a broken/unused
-    optional dependency would otherwise crash the build. On a conda environment
-    the MKL DLLs NumPy needs are auto-detected and bundled.
+    optional dependency would otherwise crash the build.
+
+    ``components`` is the set of component type names the canvas uses; their
+    heavy optional dependencies (numpy for AudioFeed, OpenCV for VideoFeed) are
+    imported dynamically and so invisible to PyInstaller — we bundle them back
+    only when the matching component is present, keeping a slider-only app from
+    dragging in numpy/OpenCV. Requesting numpy (an AudioFeed, or ``numpy`` in
+    ``include``) also auto-detects and bundles the MKL DLLs a conda NumPy needs.
     """
     entry = os.path.abspath(entry)
     if not os.path.isfile(entry):
         raise FileNotFoundError(f"entry script not found: {entry}")
     name = name or os.path.splitext(os.path.basename(entry))[0]
+
+    # Decide which heavy optional deps to bundle: those the canvas's components
+    # need, plus anything the caller force-added via ``include``. numpy is
+    # special (conda MKL stack); other packages (cv2) just need --collect-all.
+    include = list(include or [])
+    needs = _packages_for_components(components)
+    collect_numpy = "numpy" in needs or "numpy" in include
+    include = [p for p in include if p != "numpy"]
+    for pkg in sorted(needs - {"numpy"}):
+        if pkg not in include:
+            include.append(pkg)
+
+    # Drop dev/tunnel-only deps that would otherwise pull the whole scientific
+    # and notebook stack (see _DEFAULT_EXCLUDES), unless the caller asked for one.
+    exclude = list(exclude or [])
+    for mod in _DEFAULT_EXCLUDES:
+        if mod not in exclude and mod not in include:
+            exclude.append(mod)
+    # Drop component-only media deps the canvas doesn't use (see the constant).
+    for mod in _EXCLUDABLE_COMPONENT_PACKAGES:
+        if mod not in needs and mod not in include and mod not in exclude:
+            exclude.append(mod)
 
     dist_src = _frontend_dist()
     if not os.path.isdir(dist_src):
@@ -170,14 +257,16 @@ def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
         ) from exc
 
     pkg_root = os.path.dirname(os.path.dirname(__file__))  # contains pycanvas/
-    binaries = _conda_mkl_binaries()
+    # The conda MKL DLLs are only relevant when numpy itself is bundled.
+    binaries = _conda_mkl_binaries() if collect_numpy else []
     args = _build_args(
         entry, name, dist_src, pkg_root,
         icon=os.path.abspath(icon) if icon else None,
         onefile=onefile, windowed=windowed, distpath=distpath,
         workpath=workpath, clean=clean, add_data=add_data,
         binaries=binaries, exclude=exclude, include=include,
-        hidden_imports=hidden_imports, extra_args=extra_args,
+        hidden_imports=hidden_imports, collect_numpy=collect_numpy,
+        extra_args=extra_args,
     )
 
     # On conda, MKL and a dependency's own bundled OpenMP (e.g. torch) can both
