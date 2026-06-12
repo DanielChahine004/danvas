@@ -15,7 +15,7 @@ canvas = pycanvas.Canvas()
 
 # A string of Markdown -> rendered text.
 canvas.show("# Dashboard\nA few values, each auto-rendered.", x=40, y=40,
-            label="notes")
+            label="notes", draggable=False, resizable=False, grabable=False)
 
 # Records (list of dicts) -> a Table.
 canvas.show(
@@ -39,4 +39,4 @@ canvas.show("starting…", name="live", x=40, y=520, label="status")
 canvas.show("ready ✔", name="live", x=40, y=520, label="status")  # replaces it
 
 print("Each value was auto-rendered by canvas.show — no component chosen by hand.")
-canvas.serve(port=8000)
+canvas.serve(port=8000, hot_reload=True)

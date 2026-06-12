@@ -9,7 +9,6 @@ so the two are independent streams — handy for monitoring, not lip-synced.
 If ``sounddevice`` isn't installed the example still runs video-only.
 """
 
-import threading
 import time
 
 import cv2
@@ -21,10 +20,11 @@ canvas = pycanvas.Canvas()
 # queue="latest" drops stale frames for a slow viewer so latency stays bounded
 # rather than the feed backing up (it's VideoFeed's default; explicit here).
 feed = canvas.video("webcam", queue="latest")
-sound = canvas.audio("mic", sample_rate=16000)
+sound = canvas.audio("mic", sample_rate=16000, grabable=False)
 status = canvas.label("status", "starting...")
 
 
+@canvas.background
 def video_worker():
     # 0 is the default camera; change the index for a different device.
     cap = cv2.VideoCapture(0)
@@ -54,6 +54,7 @@ def video_worker():
         time.sleep(1 / 30)  # cap at ~30 fps
 
 
+@canvas.background
 def audio_worker():
     try:
         import sounddevice as sd
@@ -77,7 +78,7 @@ def audio_worker():
         print(f"[webcam] audio capture failed: {exc}")
 
 
-threading.Thread(target=video_worker, daemon=True).start()
-threading.Thread(target=audio_worker, daemon=True).start()
-
-canvas.serve(port=8000, tunnel=True)
+# The capture loops are registered with canvas.background (above), so serve()
+# starts them as daemon threads in the worker process -- never in the hot-reload
+# monitor, which would otherwise hold the camera and starve the real worker.
+canvas.serve(port=8000, tunnel=True, hot_reload=True)

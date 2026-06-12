@@ -291,6 +291,11 @@ function handle(msg) {
   } else if (msg.type === 'view') {
     applyLiveView(msg.view || {})
   } else if (msg.type === 'welcome') {
+    // A hot-reload restart: the page didn't reload, only the socket reconnected,
+    // so the previous run's panels are still on the canvas. Drop them before the
+    // server replays this run's (panel ids change every run, so the new ones
+    // would otherwise appear *alongside* the stale ones).
+    if (msg.reload) clearManaged()
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
     setViewConfig(msg.view || null)
@@ -364,6 +369,31 @@ function loadSnapshot(data) {
   } catch (err) {
     console.error('[pycanvas] failed to load drawings', err)
   }
+}
+
+// Drop every pycanvas-managed shape (panels + connector arrows) and its live
+// wiring. Used on a hot-reload reconnect: the new backend run replays the full
+// panel set right after, so this clears the previous run's shapes (whose ids no
+// longer match anything) to stop them lingering. User free-form drawings aren't
+// managed, so they're untouched. Deleting a panel also cascades its arrow
+// bindings, so arrows go cleanly even though they're deleted in the same pass.
+function clearManaged() {
+  if (!editor) return
+  const ids = [...managedIds]
+  applyRemote(() => {
+    for (const shapeId of ids) {
+      if (editor.getShape(shapeId)) editor.deleteShape(shapeId)
+    }
+  })
+  managedIds.clear()
+  liveHandlers.clear()
+  liveBuffer.clear()
+  setUiInspectorOpen(false)
+  // Rewind the auto-placement cascade so panels without an explicit x/y land in
+  // the same spots after the reload as before it. The server replays components
+  // in stable insertion order, so from 0 the same panels get the same slots;
+  // without this the counter keeps climbing and they drift each reload.
+  placeIndex = 0
 }
 
 function removeComponent(id) {

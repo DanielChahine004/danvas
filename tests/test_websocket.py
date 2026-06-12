@@ -48,6 +48,31 @@ def test_register_messages_sent_on_connect():
     assert regs[slider.id]["props"]["max"] == 180
 
 
+def test_register_message_carries_initial_locks():
+    """draggable/operable/grabable=False set at insert reach the first register.
+
+    The public flags are stored as _draggable/_operable/_grabable; the wire keys
+    stay movable/interactive/selectable. A rename once left register_message
+    reading the old attribute names, so initial locks silently defaulted to "on"
+    and only took effect after a later set_layout. Guard the mapping here.
+    """
+    canvas = pycanvas.Canvas()
+    locked = canvas.label("pinned", "x", draggable=False, operable=False,
+                          grabable=False)
+    free = canvas.label("free", "y")
+
+    msg = canvas._bridge.register_message(locked)
+    assert msg["movable"] is False
+    assert msg["interactive"] is False
+    assert msg["selectable"] is False
+
+    # A default panel carries none of the lock flags, so the frontend keeps them on.
+    free_msg = canvas._bridge.register_message(free)
+    assert "movable" not in free_msg
+    assert "interactive" not in free_msg
+    assert "selectable" not in free_msg
+
+
 def test_input_message_updates_python_value():
     canvas, slider, label, app = build_client()
     fired = []

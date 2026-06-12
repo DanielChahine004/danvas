@@ -148,11 +148,15 @@ class PcShapeUtil extends BaseBoxShapeUtil {
     return !shape.meta?.lockResize
   }
 
-  // Shared hover/selection outline. Frameless panels (meta.noFrame) suppress
-  // it so nothing ever draws a rectangle around their content — selection still
-  // happens (marquee), it just isn't highlighted.
+  // Shared hover/selection outline. Suppressed for frameless panels
+  // (meta.noFrame) so nothing draws a rectangle around their bare content, and
+  // for non-grabbable panels (meta.noGrab, Python grabable=False): those can't
+  // be hovered or selected by the user, so the light-blue edge highlight should
+  // never appear on them. Returning null here is the definitive guard — it's the
+  // only thing that paints the outline, regardless of any stray hover/select
+  // state. (The bridge's page-state filter still keeps them out of selection.)
   indicator(shape) {
-    if (shape.meta?.noFrame) return null
+    if (shape.meta?.noFrame || shape.meta?.noGrab) return null
     return <rect width={shape.props.w} height={shape.props.h} rx={8} />
   }
 

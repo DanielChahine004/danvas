@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 import warnings
@@ -190,6 +191,11 @@ class Canvas:
         # Set by capture_cells()/autopanel() to the active CellCapture, so a
         # second call is idempotent and stop_capturing_cells() can find it.
         self._cell_capture = None
+        # Background worker callables registered via background(); serve() starts
+        # each as a daemon thread, but only in the process that actually serves --
+        # never the hot-reload monitor (which would otherwise grab the same
+        # exclusive resources, e.g. a camera, and starve the real worker).
+        self._background = []
 
     def enable_repl(self, namespace=None):
         """Bind the namespace that ``Repl`` cells execute against.
@@ -217,6 +223,51 @@ class Canvas:
         namespace.setdefault("canvas", self)
         self._namespace = namespace
         return self
+
+    def background(self, fn, *args, **kwargs):
+        """Register ``fn`` to run as a daemon thread when the canvas serves.
+
+        Use this for the producer loops that feed panels — a camera capture, a
+        sensor poll, a telemetry stream. ``serve()`` starts each registered
+        callable on its own daemon thread just before it begins serving, so the
+        threads stop with the process and never outlive it::
+
+            feed = canvas.video("webcam")
+
+            @canvas.background
+            def stream():
+                cap = cv2.VideoCapture(0)
+                while True:
+                    ok, frame = cap.read()
+                    if ok:
+                        feed.update(frame)
+
+            canvas.serve(hot_reload=True)
+
+        Crucially, the thread is started only in the process that actually
+        serves. Under ``serve(hot_reload=True)`` the original process becomes a
+        file-watching *monitor* that respawns a worker subprocess on every edit;
+        if a camera (or any single-owner resource) were opened at import time —
+        the usual ``threading.Thread(...).start()`` at module scope — the monitor
+        would hold it and the real worker could never acquire it. Registering the
+        loop here defers it to the serving process, so hot reload works.
+
+        Returns ``fn`` so it can be used as a decorator. ``*args``/``**kwargs``
+        are forwarded to ``fn`` when the thread starts.
+        """
+        self._background.append((fn, args, kwargs))
+        return fn
+
+    def _start_background(self):
+        """Spawn each registered background worker as a daemon thread.
+
+        Called from serve() in the serving process only (not the hot-reload
+        monitor). Daemon so they don't block interpreter shutdown / a reload's
+        process teardown.
+        """
+        for fn, args, kwargs in self._background:
+            threading.Thread(target=fn, args=args, kwargs=kwargs,
+                             daemon=True).start()
 
     @property
     def components(self):
@@ -979,6 +1030,14 @@ class Canvas:
         closed (``block`` doesn't apply); if pywebview isn't installed it warns
         and falls back to the browser. See :meth:`bake` to build the executable.
         """
+        if os.environ.get("_PYCANVAS_RELOAD_CHECK") == "1":
+            # Hot-reload pre-flight (see _run_hot_reload_monitor): the monitor
+            # runs the edited script in this mode to confirm it imports and runs
+            # before tearing down the live worker. Reaching serve() means the
+            # module body executed without error -- which is all the check needs
+            # -- so exit cleanly *without* binding a port or starting threads, so
+            # the check never collides with the worker that's still serving.
+            sys.exit(0)
         if hot_reload:
             if not block:
                 raise ValueError(
@@ -1001,6 +1060,10 @@ class Canvas:
                 # existing tab (the frontend reconnects its websocket
                 # automatically) instead of popping another one.
                 open_browser = False
+                # Tell the reconnecting browser this is a fresh run so it drops
+                # the previous run's panels (their ids change each run) before we
+                # replay this run's — otherwise stale panels linger beside the new.
+                self._bridge._reload = True
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
@@ -1024,6 +1087,11 @@ class Canvas:
         serve_view = self._normalize_view(view)
         if serve_view is not None:
             self._bridge._view = {**(self._bridge._view or {}), **serve_view}
+        # Start any registered background workers now -- we're in the serving
+        # process (the hot-reload monitor returned above), so producer loops that
+        # grab single-owner resources (a camera, a serial port) run here, never
+        # in the monitor.
+        self._start_background()
         # Native-window mode: default to on only inside a baked executable, so a
         # plain `python script.py` still opens the browser. Blocks on the webview
         # loop (main thread), so the non-blocking branch below is skipped.
@@ -1064,6 +1132,12 @@ class Canvas:
         skips straight to actually serving; ``_PYCANVAS_RELOAD_RESTART=1`` is
         added from the second launch onward so it doesn't reopen the browser
         (the frontend reconnects its existing websocket automatically).
+
+        Before tearing the running worker down, each edit is pre-flighted in
+        ``_PYCANVAS_RELOAD_CHECK`` mode (the script runs but serve() exits before
+        binding). If that fails -- a syntax slip, a bad import, an exception in
+        the module body -- the restart is skipped and the last working version
+        keeps serving, so a half-finished edit doesn't take the canvas down.
         """
         import subprocess
 
@@ -1087,29 +1161,74 @@ class Canvas:
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-        env = dict(os.environ)
-        env["_PYCANVAS_RELOAD_WORKER"] = "1"
+        base_env = dict(os.environ)
+        base_env["_PYCANVAS_RELOAD_WORKER"] = "1"
+
+        def spawn(restart):
+            env = dict(base_env)
+            if restart:
+                env["_PYCANVAS_RELOAD_RESTART"] = "1"
+            return subprocess.Popen([sys.executable, main_file, *sys.argv[1:]],
+                                    env=env)
+
+        def script_ok():
+            """True if the edited script imports/runs cleanly (pre-flight).
+
+            Runs it in check mode -- the body executes but serve() exits before
+            binding a port or starting threads, so this never collides with the
+            worker that's still serving. On failure the captured stderr is
+            surfaced so the error is visible in the console.
+            """
+            env = dict(base_env)
+            env["_PYCANVAS_RELOAD_CHECK"] = "1"
+            result = subprocess.run(
+                [sys.executable, main_file, *sys.argv[1:]],
+                env=env, capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                sys.stderr.write(result.stderr or "")
+            return result.returncode == 0
+
+        def wait_for_edit(last):
+            """Block until a watched file changes; return the new snapshot."""
+            while True:
+                time.sleep(0.5)
+                snap = snapshot()
+                if snap != last:
+                    return snap
+
         print(f"PyCanvas hot reload: watching {directory} (*.py)")
-        restart = False
-        proc = None
+        proc = spawn(restart=False)
+        last = snapshot()
         try:
             while True:
-                if restart:
-                    env["_PYCANVAS_RELOAD_RESTART"] = "1"
-                proc = subprocess.Popen([sys.executable, main_file, *sys.argv[1:]],
-                                        env=env)
-                last = snapshot()
+                # Wait for either a file edit or the worker exiting on its own.
                 changed = False
                 while proc.poll() is None:
                     time.sleep(0.5)
-                    if snapshot() != last:
+                    snap = snapshot()
+                    if snap != last:
+                        last = snap
                         changed = True
                         break
                 if not changed:
-                    return  # worker exited on its own
-                print("PyCanvas hot reload: change detected, restarting...")
-                stop(proc)
-                restart = True
+                    # Worker ended without an edit: a clean exit (e.g. a closed
+                    # desktop window) stops the monitor; a crash leaves it
+                    # watching so the next save can bring the canvas back.
+                    if proc.returncode in (0, None):
+                        return
+                    print("PyCanvas hot reload: the app exited with an error; "
+                          "waiting for the next save...")
+                    last = wait_for_edit(last)
+                print("PyCanvas hot reload: change detected, checking...")
+                if not script_ok():
+                    print("PyCanvas hot reload: the edit has an error -- keeping "
+                          "the running version. Fix it and save again.")
+                    continue
+                if proc.poll() is None:
+                    stop(proc)
+                print("PyCanvas hot reload: restarting...")
+                proc = spawn(restart=True)
         except KeyboardInterrupt:
             if proc is not None and proc.poll() is None:
                 stop(proc)

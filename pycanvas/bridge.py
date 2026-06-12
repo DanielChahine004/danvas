@@ -87,6 +87,12 @@ class Bridge:
         # the welcome frame so the button only shows where it's allowed.
         self._canvas = None
         self._ui_inspector = False
+        # True when this process is a hot-reload restart (serve sets it). It rides
+        # the welcome frame so a reconnecting browser — whose page never reloaded,
+        # only its socket — drops the previous run's panels before this run's are
+        # replayed. Without it, panels (which get fresh ids each run) pile up: the
+        # old shapes linger beside the new ones. See serve(hot_reload=True).
+        self._reload = False
         # Optional viewport/navigation config (initial camera, zoom limits, pan/
         # zoom lock, UI chrome visibility). Sent to each browser in `welcome` and
         # applied to tldraw on connect. ``None`` leaves every default in place.
@@ -155,13 +161,18 @@ class Bridge:
             msg["rotation"] = math.radians(rot)
         if getattr(component, "_locked", False):
             msg["locked"] = True
-        if not getattr(component, "_movable", True):
+        # The public API names are draggable/operable/grabable (see base.py); the
+        # wire keys stay movable/interactive/selectable, matching set_layout's
+        # payload and the frontend's lockMeta. Read the new attribute names —
+        # reading the old ones silently defaulted every lock to "on", so initial
+        # draggable/operable/grabable=False never reached the browser.
+        if not getattr(component, "_draggable", True):
             msg["movable"] = False
         if not getattr(component, "_resizable", True):
             msg["resizable"] = False
-        if not getattr(component, "_interactive", True):
+        if not getattr(component, "_operable", True):
             msg["interactive"] = False
-        if not getattr(component, "_selectable", True):
+        if not getattr(component, "_grabable", True):
             msg["selectable"] = False
         if not getattr(component, "_frame", True):
             msg["frame"] = False
@@ -200,7 +211,8 @@ class Bridge:
                 view_for_client = self._view
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
-                                  "view": view_for_client})
+                                  "view": view_for_client,
+                                  "reload": self._reload})
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)

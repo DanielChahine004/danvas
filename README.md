@@ -657,6 +657,51 @@ It's only for the script dev loop: it needs `block=True` (the default) and a rea
 script entry point, so it raises if combined with `block=False` or run from a
 notebook/REPL. Stop it with `Ctrl+C`.
 
+**A broken save won't take the canvas down.** Before restarting, each edit is
+pre-flighted — the script is run far enough to confirm it imports and its body
+executes — and only a clean run triggers the swap. If the save has an error (a
+syntax slip mid-edit, a typo'd name, a bad import) the restart is skipped, the
+error is printed, and the **last working version keeps serving**. Fix the file
+and save again to pick up from there.
+
+### Background workers (`canvas.background`)
+
+Got a producer loop — a camera capture, a sensor poll, a telemetry stream that
+calls `feed.update(...)`? Register it with `canvas.background` instead of starting
+a thread yourself. `serve()` runs each registered callable on its own daemon
+thread just before it begins serving:
+
+```python
+feed = canvas.video("webcam")
+
+@canvas.background
+def stream():
+    cap = cv2.VideoCapture(0)
+    while True:
+        ok, frame = cap.read()
+        if ok:
+            feed.update(frame)
+
+canvas.serve(hot_reload=True)
+```
+
+**Rule of thumb: wrap every long-running thread in `@canvas.background`** — and
+it's *required*, not just tidy, once `hot_reload=True` is in play. Hot reload
+makes the original process a file-watching **monitor** that respawns a worker on
+every save, and it runs your whole script body first. A thread you start by hand
+(`threading.Thread(...).start()` at module scope) therefore runs in *both* the
+monitor and the worker — so if it grabs a single-owner resource (a camera, a
+serial port, the microphone) the idle monitor holds it and the real worker can
+never acquire it. `canvas.background` defers the thread to the serving process
+only, so it's started in the worker and never in the monitor.
+
+It's a good habit even without hot reload: the thread starts at `serve()` rather
+than at import, so importing your script as a module (tests, `bake`, a notebook)
+doesn't kick off the loop. You can use it as a decorator (above) or call it
+directly — `canvas.background(stream)` — and any extra `*args`/`**kwargs` are
+forwarded when the thread starts. It's for *your* application loops; pycanvas's
+own internals (input dispatch, tunnel, reaper) are already managed.
+
 ## Interactive use (Jupyter / notebooks)
 
 `serve()` blocks, which is fine for scripts. In a notebook pass `block=False`
