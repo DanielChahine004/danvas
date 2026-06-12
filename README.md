@@ -394,6 +394,23 @@ canvas.set_view({"zoom": 2.0})     # zoom everyone to 200%
 canvas.set_view(locked=True)       # freeze pan/zoom live
 ```
 
+**Per-viewer views.** Pass `client_id` to change the view for **one** viewer
+instead of broadcasting to everyone — e.g. a button that jumps just the person
+who clicked it to a different region, leaving the others where they are. The id
+comes from `canvas.viewers`, which lists everyone connected right now as
+`{"id", "name", "color"}` dicts:
+
+```python
+for v in canvas.viewers:           # who's connected right now
+    print(v["id"], v["name"])
+
+canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)   # move just that viewer
+```
+
+Omitting `client_id` keeps the default global behaviour. A per-viewer override
+is dropped automatically when that viewer disconnects, and new joiners get the
+global config (never someone else's per-viewer state).
+
 See [`examples/fixed_view.py`](examples/fixed_view.py).
 
 ## Layout: position, size, rotation
@@ -433,6 +450,15 @@ canvas["servo"].update(120)         # canvas["..."] also works for non-identifie
 > resizes and rotations in the browser — those are reported back, so `x`/`y`/
 > `w`/`h`/`rotation` stay in sync (register `@panel.on_layout` to react to them).
 > A panel's `x`/`y` are `None` only until it's first placed — by Python or a drag.
+
+`canvas.components` is the list of every panel on the canvas, for iterating or
+applying something to all of them at once (the arrows are `canvas.arrows`):
+
+```python
+for c in canvas.components:         # nudge everything 20px right
+    if c.x is not None:
+        c.x += 20
+```
 
 ## Arrows
 
@@ -613,6 +639,23 @@ and it's what powers the notebook cell-capture below.
 
 The three render targets are also components in their own right when you want one
 explicitly: `canvas.markdown(text)`, `canvas.image(src)`, `canvas.table(data)`.
+
+## Hot reloading (auto-restart on save)
+
+While iterating on a script, pass `hot_reload=True` to `serve()` so PyCanvas
+restarts the process whenever you save a `.py` file in the script's folder —
+change a `default=`, move a panel, flip `ui=False`, and it takes effect on save
+without re-running the command by hand:
+
+```python
+canvas.serve(port=8000, hot_reload=True)   # run as `python your_script.py`
+```
+
+The browser tab reconnects to the restarted server on its own — no new tab opens
+and you don't refresh. It watches by polling file mtimes (no extra dependency).
+It's only for the script dev loop: it needs `block=True` (the default) and a real
+script entry point, so it raises if combined with `block=False` or run from a
+notebook/REPL. Stop it with `Ctrl+C`.
 
 ## Interactive use (Jupyter / notebooks)
 

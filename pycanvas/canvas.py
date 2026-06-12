@@ -1,6 +1,7 @@
 """Canvas: the public entry point. Holds components and serves the app."""
 
 import json
+import os
 import sys
 import time
 import uuid
@@ -216,6 +217,44 @@ class Canvas:
         namespace.setdefault("canvas", self)
         self._namespace = namespace
         return self
+
+    @property
+    def components(self):
+        """Return a list of all components on the canvas.
+
+        Allows iteration and batch operations on all components::
+
+            for comp in canvas.components:
+                comp.move(100, 100)
+        """
+        return self._components
+
+    @property
+    def arrows(self):
+        """Return a list of all arrows (connectors) on the canvas.
+
+        The counterpart to :attr:`components` for the connectors added with
+        :meth:`connect`.
+        """
+        return self._arrows
+
+    @property
+    def viewers(self):
+        """Return the currently connected viewers as a list of dicts.
+
+        Each entry has ``id`` (an opaque per-connection identifier), ``name``
+        (the viewer's editable display name) and ``color`` (their roster
+        colour). The ``id`` is what :meth:`set_view` expects for its
+        ``client_id`` argument, e.g. to point one viewer's camera at something
+        without moving everyone else::
+
+            for v in canvas.viewers:
+                canvas.set_view(x=0, y=0, client_id=v["id"])
+
+        The list reflects whoever is connected *right now* — a viewer who
+        disconnects drops out of it, and there is no history of past viewers.
+        """
+        return list(self._bridge._viewers.values())
 
     def capture_cells(self, cols=3, slot_w=520, slot_h=420, gap=40,
                       origin=(0, 0), include_source=True, auto=True,
@@ -859,7 +898,7 @@ class Canvas:
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               view=None, desktop=None, window_title="PyCanvas",
-              window_size=(1200, 800), password=None):
+              window_size=(1200, 800), password=None, hot_reload=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -875,6 +914,15 @@ class Canvas:
         is automatic in a notebook/REPL (the kernel lives on), but a plain script
         that ends right after ``serve(block=False)`` will exit and tear the
         server down — call :meth:`wait` to park the main thread there instead.
+
+        ``hot_reload=True`` watches the ``.py`` files alongside the running
+        script and restarts the whole process whenever one changes, so edits —
+        a different ``default=``, a moved panel, ``ui=False`` — take effect on
+        save. The browser tab reconnects to the restarted server on its own (no
+        new tab opens). Only available with ``block=True`` (a script entry
+        point); ``block=False`` with ``hot_reload=True`` raises an error, and
+        calling it outside a ``python yourscript.py`` run (e.g. a notebook)
+        raises too.
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
@@ -931,6 +979,28 @@ class Canvas:
         closed (``block`` doesn't apply); if pywebview isn't installed it warns
         and falls back to the browser. See :meth:`bake` to build the executable.
         """
+        if hot_reload:
+            if not block:
+                raise ValueError(
+                    "hot_reload=True requires block=True (not block=False). "
+                    "Hot reloading restarts the entire process, which is "
+                    "incompatible with background mode."
+                )
+            main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+            if main_file is None:
+                raise RuntimeError(
+                    "hot_reload=True requires running as a script "
+                    "(`python yourscript.py`), not from an interactive "
+                    "session."
+                )
+            if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
+                self._run_hot_reload_monitor(main_file)
+                return self
+            if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
+                # Already opened on first launch; a reload should reuse the
+                # existing tab (the frontend reconnects its websocket
+                # automatically) instead of popping another one.
+                open_browser = False
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
@@ -982,6 +1052,67 @@ class Canvas:
                        host=host, password=password)
         finally:
             self._stop_tunnel()
+
+    def _run_hot_reload_monitor(self, main_file):
+        """Re-run ``main_file`` as a subprocess, restarting it on ``.py`` edits.
+
+        This is the monitor side of ``serve(hot_reload=True)``: it never binds a
+        port itself, just watches the script's directory (top-level ``.py``
+        files only) by polling mtimes, and respawns the worker subprocess on any
+        change or addition/removal. The worker is launched with
+        ``_PYCANVAS_RELOAD_WORKER=1`` so its own ``serve(hot_reload=True)`` call
+        skips straight to actually serving; ``_PYCANVAS_RELOAD_RESTART=1`` is
+        added from the second launch onward so it doesn't reopen the browser
+        (the frontend reconnects its existing websocket automatically).
+        """
+        import subprocess
+
+        directory = os.path.dirname(os.path.abspath(main_file)) or "."
+
+        def snapshot():
+            out = {}
+            for fname in os.listdir(directory):
+                if fname.endswith(".py"):
+                    fpath = os.path.join(directory, fname)
+                    try:
+                        out[fpath] = os.path.getmtime(fpath)
+                    except OSError:
+                        pass
+            return out
+
+        def stop(proc):
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        env = dict(os.environ)
+        env["_PYCANVAS_RELOAD_WORKER"] = "1"
+        print(f"PyCanvas hot reload: watching {directory} (*.py)")
+        restart = False
+        proc = None
+        try:
+            while True:
+                if restart:
+                    env["_PYCANVAS_RELOAD_RESTART"] = "1"
+                proc = subprocess.Popen([sys.executable, main_file, *sys.argv[1:]],
+                                        env=env)
+                last = snapshot()
+                changed = False
+                while proc.poll() is None:
+                    time.sleep(0.5)
+                    if snapshot() != last:
+                        changed = True
+                        break
+                if not changed:
+                    return  # worker exited on its own
+                print("PyCanvas hot reload: change detected, restarting...")
+                stop(proc)
+                restart = True
+        except KeyboardInterrupt:
+            if proc is not None and proc.poll() is None:
+                stop(proc)
 
     def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
                        password=None):
@@ -1084,33 +1215,46 @@ class Canvas:
         print(f"PyCanvas baked: {out}")
         return out
 
-    def set_view(self, view=None, **opts):
-        """Change viewport/navigation properties live on every open browser.
+    def set_view(self, view=None, client_id=None, **opts):
+        """Change viewport/navigation properties live on connected browsers.
 
         Accepts the same options as ``serve(view=...)`` (initial camera, zoom
         limits, ``locked``, ``ui``, ``grid``, ``read_only``), given as a dict
-        and/or keyword args, and pushes them to all connected canvases at once::
+        and/or keyword args, and pushes them to connected canvases::
 
-            canvas.set_view(ui=False)            # hide the toolbars now
-            canvas.set_view({"zoom": 2.0})       # zoom every viewer to 200%
-            canvas.set_view(locked=True)         # freeze pan/zoom live
+            canvas.set_view(ui=False)                      # hide toolbars everywhere
+            canvas.set_view({"zoom": 2.0})                 # zoom all viewers to 200%
+            canvas.set_view(locked=True)                   # freeze pan/zoom everywhere
+            canvas.set_view(x=100, y=200, client_id="...")  # move view for one user
+
+        If ``client_id`` is omitted, changes broadcast to all viewers (default).
+        If ``client_id`` is provided (a viewer's unique id from the roster), the
+        change affects only that viewer's local view state—other viewers unaffected.
 
         Only the keys you pass change; the rest keep their current value.
         Passing ``x``/``y``/``zoom`` re-centres the camera immediately (subject
-        to any lock); omitting them leaves each viewer where they were looking.
-        A viewer who connects later still gets the merged configuration in their
-        welcome frame, so live changes persist for new arrivals. Returns ``self``.
+        to any lock); omitting them leaves viewers where they were looking.
+        A viewer who connects later still gets the merged global configuration in
+        their welcome frame (or per-client state if one exists for them).
+        Returns ``self``.
         """
         merged_in = dict(view or {})
         merged_in.update(opts)
         delta = self._normalize_view(merged_in) or {}
         if not delta:
             return self
-        # Remember the merged config so a later-connecting browser starts from it
-        # (the welcome frame), and broadcast just the delta so applying it can
-        # tell whether the camera was meant to move.
-        self._bridge._view = {**(self._bridge._view or {}), **delta}
-        self._bridge.broadcast({"type": "view", "view": delta})
+
+        if client_id is None:
+            # Broadcast to all: update global view state.
+            self._bridge._view = {**(self._bridge._view or {}), **delta}
+            self._bridge.broadcast({"type": "view", "view": delta})
+        else:
+            # Send to one client: update per-client view state.
+            self._bridge._view_per_client[client_id] = {
+                **(self._bridge._view_per_client.get(client_id) or {}),
+                **delta
+            }
+            self._bridge.send_to_client(client_id, {"type": "view", "view": delta})
         return self
 
     def _start_tunnel(self, port, provider):

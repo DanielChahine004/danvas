@@ -91,6 +91,9 @@ class Bridge:
         # zoom lock, UI chrome visibility). Sent to each browser in `welcome` and
         # applied to tldraw on connect. ``None`` leaves every default in place.
         self._view = None
+        # Per-client view state: viewer_id -> view_dict. When set, overrides the
+        # global _view for that specific client (merged with global defaults).
+        self._view_per_client = {}
         # Conflated ("latest" queue policy) send state. For components that opt
         # out of FIFO, we keep only the newest pending value per (socket,
         # component, channel) and a flag marking whether a sender is draining it,
@@ -190,9 +193,14 @@ class Bridge:
         try:
             # Tell this client who it is, so it can label its own chat messages
             # and prefill the editable name field.
+            view_for_client = self._view_per_client.get(viewer["id"])
+            if view_for_client is not None:
+                view_for_client = {**(self._view or {}), **view_for_client}
+            else:
+                view_for_client = self._view
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
-                                  "view": self._view})
+                                  "view": view_for_client})
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)
@@ -232,7 +240,12 @@ class Bridge:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
             self._drop_conflate(ws)
-            self._viewers.pop(ws, None)
+            gone = self._viewers.pop(ws, None)
+            # Viewer ids are minted fresh per connection and never reused, so a
+            # per-client view override for a departed viewer can never apply
+            # again — drop it so the map doesn't grow unbounded.
+            if gone is not None:
+                self._view_per_client.pop(gone["id"], None)
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
@@ -356,7 +369,9 @@ class Bridge:
                     self._connections.discard(ws)
                     self._send_locks.pop(ws, None)
                     self._drop_conflate(ws)
-                    if self._viewers.pop(ws, None) is not None:
+                    gone = self._viewers.pop(ws, None)
+                    if gone is not None:
+                        self._view_per_client.pop(gone["id"], None)
                         self._last_seen.pop(ws, None)
                         self._broadcast_roster()
             except Exception:
@@ -520,6 +535,21 @@ class Bridge:
         except Exception:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
+
+    def send_to_client(self, viewer_id, msg):
+        """Send ``msg`` to the one client with this viewer id. Any-thread safe.
+
+        A no-op if no live connection carries that id (it has disconnected, or
+        the id is stale). The viewer map is snapshotted before scanning so a
+        concurrent connect/disconnect on the loop thread can't trip a
+        "dict changed size" error -- mirrors :meth:`broadcast`.
+        """
+        if self._loop is None:
+            return
+        ws = next((s for s, v in list(self._viewers.items())
+                   if v.get("id") == viewer_id), None)
+        if ws is not None:
+            asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
 
     @staticmethod
     def _merge_update(existing, new_msg):
