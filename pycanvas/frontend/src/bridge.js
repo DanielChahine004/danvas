@@ -370,6 +370,8 @@ function handle(msg) {
     createArrow(msg)
   } else if (msg.type === 'update') {
     updateComponent(msg.id, msg.payload || {})
+  } else if (msg.type === 'order') {
+    reorderComponent(msg.id, msg.op)
   } else if (msg.type === 'remove') {
     removeComponent(msg.id)
   } else if (msg.type === 'get_snapshot') {
@@ -635,6 +637,24 @@ function updateComponent(id, payload) {
     patch.meta = lockMeta(shape.meta, movable, resizable, interactive, selectable, frame)
   }
   applyRemote(() => editor.updateShape(patch))
+}
+
+// Change a managed panel's stacking order (Python to_front/to_back/forward/
+// backward). tldraw owns the fractional z-index; we just invoke its reorder ops
+// as a remote change so the move doesn't echo back to Python as a user edit.
+// `front`/`back` jump past everything; `forward`/`backward` step one place,
+// respecting tldraw's overlap-aware ordering.
+function reorderComponent(id, op) {
+  if (!editor) return
+  const shapeId = createShapeId(id)
+  if (!editor.getShape(shapeId)) return
+  const ids = [shapeId]
+  applyRemote(() => {
+    if (op === 'front') editor.bringToFront(ids)
+    else if (op === 'back') editor.sendToBack(ids)
+    else if (op === 'forward') editor.bringForward(ids)
+    else if (op === 'backward') editor.sendBackward(ids)
+  })
 }
 
 // --- live-data side channel (used by LivePlot shapes) -----------------------

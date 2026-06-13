@@ -706,6 +706,21 @@ servo.pin();  servo.unpin()     # draggable=False + resizable=False (controls st
 servo.lock(); servo.unlock()    # full lock on / off
 ```
 
+#### Stacking order
+
+Where panels overlap, control which sits on top — live, from Python:
+
+```python
+panel.to_front()    # above every other panel
+panel.to_back()     # beneath every other panel
+panel.forward()     # one step up
+panel.backward()    # one step down
+```
+
+`to_front()` / `to_back()` persist across a reload (a reconnecting client
+rebuilds the panel in the new order); `forward()` / `backward()` are a single
+overlap-aware nudge and apply to the live canvas only.
+
 The key distinction is **`operable` vs `locked`**: `operable=False` blocks
 the *user* from operating the control while your code keeps driving it — a slider
 whose thumb tracks an automatic value the user mustn't drag. `lock()` freezes

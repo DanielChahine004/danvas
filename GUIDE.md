@@ -583,6 +583,22 @@ Every lock is also a settable property: `comp.draggable = False`,
 `comp.operable = False`, `comp.lock()` / `comp.unlock()`, `comp.pin()` /
 `comp.unpin()`.
 
+#### Stacking order (z-index)
+
+When panels overlap, control which one is on top — live, from Python:
+
+```python
+comp.to_front()    # above every other panel
+comp.to_back()     # beneath every other panel
+comp.forward()     # one step up
+comp.backward()    # one step down
+```
+
+`to_front()` / `to_back()` are durable — they reorder the panel in the replay
+registry, so a client that reconnects or reloads rebuilds the stack the same way.
+`forward()` / `backward()` are a single overlap-aware step (tldraw semantics)
+applied to the live canvas only.
+
 ### Frameless & non-grabbable panels
 
 Two more knobs for making content feel like it floats on the canvas:

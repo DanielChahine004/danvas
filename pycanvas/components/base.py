@@ -253,6 +253,43 @@ class BaseComponent:
         """Allow dragging and resizing again, live."""
         self.set_layout(draggable=True, resizable=True)
 
+    # -- stacking order (z-index) --------------------------------------------
+    def to_front(self):
+        """Raise this panel above every other panel, live.
+
+        Persists across reload: a reconnecting client rebuilds the panel on top.
+        """
+        self._send_order("front")
+
+    def to_back(self):
+        """Lower this panel beneath every other panel, live.
+
+        Persists across reload: a reconnecting client rebuilds the panel at the
+        bottom of the stack.
+        """
+        self._send_order("back")
+
+    def forward(self):
+        """Raise this panel one step up the stack, live.
+
+        A single overlap-aware nudge (tldraw semantics); not persisted across a
+        reload — use :meth:`to_front` for a durable change.
+        """
+        self._send_order("forward")
+
+    def backward(self):
+        """Lower this panel one step down the stack, live.
+
+        A single overlap-aware nudge (tldraw semantics); not persisted across a
+        reload — use :meth:`to_back` for a durable change.
+        """
+        self._send_order("backward")
+
+    def _send_order(self, op):
+        if self._bridge is None:
+            return
+        self._bridge.reorder_component(self.id, op)
+
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
                    locked=None, draggable=None, resizable=None, operable=None,
                    grabbable=None, frame=None):

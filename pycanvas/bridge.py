@@ -217,6 +217,24 @@ class Bridge:
         self._components.pop(component_id, None)
         self.broadcast({"type": "remove", "id": component_id})
 
+    def reorder_component(self, component_id, op):
+        """Restack a panel (front/back/forward/backward) on every live client.
+
+        ``front``/``back`` also move the component to the end/start of the replay
+        registry, so a client that connects or reloads rebuilds the panels in the
+        new stacking order (later-registered shapes sit on top). ``forward`` /
+        ``backward`` are a live one-step nudge only: tldraw's overlap-aware step
+        has no faithful registry equivalent, so it isn't persisted across reload.
+        """
+        comp = self._components.get(component_id)
+        if comp is not None and op in ("front", "back"):
+            self._components.pop(component_id)
+            if op == "front":
+                self._components[component_id] = comp  # last in -> top of stack
+            else:
+                self._components = {component_id: comp, **self._components}
+        self.broadcast({"type": "order", "id": component_id, "op": op})
+
     def add_arrow(self, arrow):
         """Store an ``Arrow`` and broadcast its register message to live clients.
 
