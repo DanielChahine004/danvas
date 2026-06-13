@@ -9,6 +9,7 @@ import asyncio
 import json
 import math
 import random
+import sys
 import threading
 import time
 import traceback
@@ -19,6 +20,31 @@ from fastapi import WebSocketDisconnect
 
 from ._flags import LAYOUT_FLAGS
 from .kernel import Kernel
+
+
+def _diag(msg):
+    """Print a server-thread diagnostic line without tripping the Jupyter kernel.
+
+    These lines (viewer connected / disconnected) fire from the asyncio server
+    thread, not from a cell. Inside an ipykernel, ``sys.stdout`` is an
+    ``OutStream`` that tags every write with the *currently executing* cell's
+    parent header and ships it over iopub; a write from a background thread
+    therefore gets attributed to whatever cell ran last. During "Run All" that
+    cell has already finished, so VS Code's Jupyter extension tries to attach
+    the output to a disposed execution and throws "notebook controller is
+    DISPOSED", killing every remaining queued cell. Writing to the original
+    ``sys.__stdout__`` (the kernel's real fd, surfaced in the kernel log) skips
+    the per-cell redirection. In a plain script ``__stdout__ is stdout``, so
+    behaviour there is unchanged.
+    """
+    stream = sys.__stdout__
+    if stream is None:  # e.g. pythonw / detached stdout — nothing to write to
+        return
+    try:
+        stream.write(msg + "\n")
+        stream.flush()
+    except (ValueError, OSError):
+        pass  # stream closed mid-shutdown; a diagnostic line isn't worth raising
 
 # Friendly auto-generated identities for connecting viewers (editable in the UI).
 _VIEWER_ANIMALS = ["Fox", "Owl", "Bear", "Wolf", "Hawk", "Lynx", "Otter",
@@ -346,7 +372,7 @@ class Bridge:
             # One diagnostic line per connection, so "nothing happens" debugging
             # starts with evidence: the viewer reached the server and what state
             # it was seeded with.
-            print(f"[pycanvas] viewer '{viewer['name']}' connected "
+            _diag(f"[pycanvas] viewer '{viewer['name']}' connected "
                   f"(replayed {len(self._components)} panels, "
                   f"{len(self._arrows)} arrows)")
 
@@ -356,7 +382,11 @@ class Bridge:
         except WebSocketDisconnect:
             pass
         except Exception:
-            traceback.print_exc()
+            # Same background-thread hazard as _diag: route the trace to the
+            # kernel's real stderr so it can't be misattributed to a finished
+            # cell and dispose the controller mid "Run All".
+            if sys.__stderr__ is not None:
+                traceback.print_exc(file=sys.__stderr__)
         finally:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
@@ -370,7 +400,7 @@ class Bridge:
                 # Tell peers to drop this viewer's rendered cursor.
                 if self._cursors:
                     self.broadcast({"type": "cursor_gone", "id": gone["id"]})
-                print(f"[pycanvas] viewer '{gone['name']}' disconnected")
+                _diag(f"[pycanvas] viewer '{gone['name']}' disconnected")
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
