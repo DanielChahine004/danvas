@@ -130,7 +130,7 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
 | `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()`; optional `smoothing=` |
 | `Histogram` | output         | a distribution over training (TensorBoard-style); `.add(values, step)` |
-| `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)`, `.update(html)` |
+| `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)` / `.push_binary(bytes)`, `.update(html)` |
 | `React`     | bidirectional  | your own React component (JSX), rendered natively; `@on(event)` / `@on_message`, `.update(**props)`, `.push(data)` |
 | `Markdown`  | output         | rendered Markdown text; `.update(text)` |
 | `Image`     | output         | a static image (path/URL/bytes/Matplotlib/PIL/array); `.update(src)` |
@@ -278,6 +278,22 @@ use `panel.push(data)`, received via `canvas.onPush(fn)`. That's what powers
 [`examples/remote_control.py`](examples/remote_control.py), which streams the
 host's screen into one panel and replays the browser's mouse/keyboard back onto
 the machine (a tiny LAN remote desktop — read its security note first).
+
+For **frame- or array-grade** telemetry — where per-sample JSON/base64 cost would
+dominate — `panel.push_binary(bytes)` streams raw bytes on a **binary** WebSocket
+frame instead, the same fast path `VideoFeed`/`AudioFeed` use (no JSON serialize,
+no base64). The *same* `canvas.onPush(fn)` receives it, but as an `ArrayBuffer`,
+so branch on the type to tell the two streams apart — and it honours `queue=`, so
+`queue="latest"` drops stale buffers for a slow viewer just as it does for video:
+
+```python
+cam = canvas.custom(html='''
+  <canvas id="v"></canvas>
+  <script>
+    canvas.onPush(d => d instanceof ArrayBuffer ? drawFrame(d) : handleControl(d));
+  </script>''', queue="latest")
+cam.push_binary(jpeg_bytes)          # raw bytes, straight onto a binary frame
+```
 
 Because it's just HTML in an iframe, anything that renders to HTML works:
 

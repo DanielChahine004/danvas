@@ -274,6 +274,7 @@ function connect() {
 // Binary-frame type codes (must match the server's bridge.py).
 const BIN_VIDEO = 1
 const BIN_AUDIO = 2
+const BIN_CUSTOM = 3
 const frameDecoder = new TextDecoder()
 
 // Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its
@@ -290,7 +291,10 @@ function handleBinary(buf) {
   if (buf.byteLength < 2 + idLen) return
   const id = frameDecoder.decode(new Uint8Array(buf, 2, idLen))
   const payload = buf.slice(2 + idLen) // ArrayBuffer of the media bytes
-  if (type === BIN_VIDEO || type === BIN_AUDIO) {
+  // Video (JPEG) / audio (int16 PCM) feed their decoders; a Custom panel's
+  // push_binary lands on the same liveHandler as its JSON push(), forwarding the
+  // ArrayBuffer straight into the iframe (canvas.onPush receives it untouched).
+  if (type === BIN_VIDEO || type === BIN_AUDIO || type === BIN_CUSTOM) {
     const handler = liveHandlers.get(id)
     if (handler) handler(payload)
   }

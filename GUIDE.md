@@ -304,6 +304,11 @@ def handle(msg):
 - `panel.push(data)` streams data in **without** reloading — keeps focus, scroll,
   and listeners intact. Receive it with `canvas.onPush(fn)` in the iframe. Use
   this for high-rate feeds.
+- `panel.push_binary(bytes)` is the binary counterpart of `push` for frame- or
+  array-grade telemetry: raw bytes ride a binary WebSocket frame (no JSON, no
+  base64 — the `VideoFeed`/`AudioFeed` fast path), arriving at the same
+  `canvas.onPush(fn)` as an `ArrayBuffer` (branch with `d instanceof ArrayBuffer`
+  to separate the two streams). Honours the `queue=` policy.
 - Load from a file with `canvas.custom(path="dashboard.html")`.
 
 ### React panels (a native component, no `npm` build)

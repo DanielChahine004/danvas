@@ -22,6 +22,7 @@ import json
 import traceback
 
 from .base import BaseComponent
+from ..bridge import BINARY_CUSTOM
 
 
 class Custom(BaseComponent):
@@ -208,6 +209,24 @@ class Custom(BaseComponent):
         frames) and live two-way panels.
         """
         self._send_update({"post": data})
+
+    def push_binary(self, data):
+        """Stream raw bytes into the iframe on a **binary** WebSocket frame.
+
+        The high-throughput counterpart to :meth:`push`: instead of JSON-encoding
+        the payload, ``data`` (``bytes``/``bytearray``/``memoryview``) rides a
+        binary frame — no JSON serialize, no base64 — the same fast path
+        ``VideoFeed``/``AudioFeed`` use. In the iframe the *same*
+        ``canvas.onPush(fn)`` receives it, but as an ``ArrayBuffer`` rather than a
+        decoded value, so disambiguate the two streams with
+        ``fn = d => d instanceof ArrayBuffer ? handleBytes(d) : handleJson(d)``.
+
+        Use it for frame- or array-grade telemetry (a custom video codec, packed
+        sensor buffers) where per-sample JSON/base64 cost would dominate. Honours
+        the panel's ``queue`` policy, so ``queue="latest"`` drops stale buffers for
+        a slow viewer just as it does for video.
+        """
+        self._send_binary(BINARY_CUSTOM, bytes(data))
 
     # -- input routing (browser -> Python) -----------------------------------
     def on(self, event=None):
