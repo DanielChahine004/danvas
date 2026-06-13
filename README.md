@@ -65,8 +65,9 @@ its final value.
 
 `canvas.<component>(...)` builds a panel **and** places it in one call — the
 concise default. Every component has a factory: `slider`, `toggle`, `label`,
-`video`, `audio`, `plot`, `live_plot`, `custom`, `react`, `markdown`, `image`,
-`table`, `file_browser`, `webview`, `chat`, `repl`, `inspector`. Or skip picking
+`video`, `audio`, `plot`, `live_plot`, `histogram`, `custom`, `react`,
+`markdown`, `image`, `table`, `file_browser`, `webview`, `chat`, `repl`,
+`inspector`. Or skip picking
 one entirely — `canvas.show(value)` auto-renders any value as the right panel
 (see [Show anything](#show-anything)).
 
@@ -122,17 +123,18 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 |-------------|----------------|-----|
 | `Slider`    | bidirectional  | `.value`, `@on_change`, `.update(v)` |
 | `Toggle`    | bidirectional  | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
-| `Button`    | input          | momentary action; `@on_click`, `.value` (click count); `text=` |
+| `Button`    | input          | momentary action; `@on_click`, `.value` (click count); `text=`, `.update(text)` to relabel live |
 | `Label`     | output         | `.update(text)` |
 | `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → binary JPEG over WS) |
 | `AudioFeed` | output         | `.update(pcm_chunk)` (PCM → Web Audio playback) |
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
-| `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()` |
+| `LivePlot`  | output         | streaming telemetry; `.push({trace: y, ...})`, `.clear()`; optional `smoothing=` |
+| `Histogram` | output         | a distribution over training (TensorBoard-style); `.add(values, step)` |
 | `Custom`    | bidirectional  | arbitrary HTML in a sandboxed iframe; `@on(event)` / `@on_message`, `.push(data)`, `.update(html)` |
 | `React`     | bidirectional  | your own React component (JSX), rendered natively; `@on(event)` / `@on_message`, `.update(**props)`, `.push(data)` |
 | `Markdown`  | output         | rendered Markdown text; `.update(text)` |
 | `Image`     | output         | a static image (path/URL/bytes/Matplotlib/PIL/array); `.update(src)` |
-| `Table`     | output         | interactive tabular data (DataFrame/Series, records, dict of columns) — sort, filter, per-column distributions; `.update(data)` |
+| `Table`     | output         | interactive tabular data (DataFrame/Series, records, dict of columns, or a flat dict → key/value rows) — sort, filter, per-column distributions; `.update(data)` |
 | `WebView`   | output         | an external website/URL in an iframe; `.navigate(url)` |
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select` (file path), `@on_navigate`, `.value`, `pattern=` |
@@ -150,6 +152,32 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 plot = canvas.insert(pycanvas.LivePlot("servos", traces=["s1", "s2"], max_points=300))
 # in your loop:
 plot.push({"s1": servo_1.value, "s2": servo_2.value})
+```
+
+Traces don't have to be declared up front — `traces=` only fixes the legend
+order, and pushing a key it hasn't seen adds that trace on the fly
+(`plot.push({"s3": v})`). Pass `x=` to plot against a real step/epoch instead of
+the auto-incrementing sample index. And `smoothing=` (an EMA weight in `[0, 1)`,
+settable live as `plot.smoothing`) overlays a bold smoothed line on a faint raw
+one — the TensorBoard scalar look:
+
+```python
+loss = canvas.live_plot("loss", smoothing=0.6)
+loss.push({"train": train_loss, "val": val_loss}, x=step)
+```
+
+### Histograms — a distribution over training
+
+`Histogram` is the streaming-distribution panel (TensorBoard's HISTOGRAMS tab):
+call `.add(values, step)` whenever you want to record a distribution — a layer's
+weights or gradients once per epoch — and it shows how that distribution shifts
+across steps, as a density heatmap (value-bin vs. step) or `mode="overlay"`
+lines. It reuses `Plot`'s Plotly path, so it needs `plotly` only when used.
+
+```python
+hist = canvas.histogram("weights/fc1", bins=40)
+for epoch in range(epochs):
+    hist.add(model.fc1.weight.detach().numpy(), step=epoch)
 ```
 
 ### Streaming performance: queue policy & pre-encoded frames
@@ -424,8 +452,10 @@ See [`examples/fixed_view.py`](examples/fixed_view.py).
 
 Pass placement to `insert`, or change it live at any time. `x`/`y` are canvas
 coordinates, `w`/`h` are pixels, `rotation` is in degrees (clockwise). Omit
-`x`/`y` to let the canvas auto-place the panel; omit `w`/`h` to use the
-component's default size.
+`x`/`y` and the panel is **auto-arranged** — unpositioned panels flow
+left-to-right, top-to-bottom, packed by their real size with a small gap so they
+never overlap (uniform panels read as a tidy grid; mixed sizes pack like
+masonry). Omit `w`/`h` to use the component's default size.
 
 ```python
 servo = canvas.insert(
@@ -476,8 +506,39 @@ button   = canvas.button("go", below=controls, right_of=plot)           # grid c
 ```
 
 The anchor must already have a position — given `x`/`y`, placed relatively
-itself, or dragged by a user. (Auto-cascaded panels have no Python-side position
-until a browser reports one.)
+itself, or dragged by a user. (Auto-arranged panels — those inserted without
+`x`/`y` — have no Python-side position until a browser reports one.)
+
+### Auto-layout (`grid` / `column` / `row`)
+
+For a dashboard built from many panels, don't track coordinates by hand. Open a
+`with canvas.grid(...)` (or `column` / `row`) block and any panel you insert
+inside it — without an explicit `x`/`y` or relative anchor — drops into the next
+cell, taking the slot size unless you pass your own `w`/`h`:
+
+```python
+with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
+    canvas.live_plot("loss")
+    canvas.live_plot("accuracy")    # next column
+    canvas.image(fig)               # wraps to the next row
+    canvas.markdown(notes, h="auto")  # h='auto' is preserved, not forced to slot
+```
+
+`grid(cols=n)` lays uniform `slot=(width, height)` cells out `cols` per row.
+`column(width=…)` and `row(height=…)` flow along one axis and let each panel keep
+its **natural size** on the other — so a strip of mixed controls (a label, a few
+buttons, a slider) isn't squashed to one height:
+
+```python
+with canvas.column(width=320, gap=12, origin=(40, 40)):
+    canvas.label("status", "ready")
+    canvas.button("start")            # each keeps its own height
+    canvas.slider("learning rate", min=0, max=1, step=0.01)
+```
+
+`gap` is the spacing and `origin` the top-left corner. An explicit position or a
+`below=`/`right_of=` anchor still wins for a given panel, and blocks can be
+sequenced or nested to place columns of charts beside columns of media.
 
 Every component has a unique **`name`** — its first constructor argument (pass
 `name=` to `insert` to override). That `name` is the component's identity: the
@@ -722,6 +783,45 @@ panel you can **sort** (click a header — numeric columns sort numerically),
 toggle reveals a per-column mini-chart — a histogram for numeric columns, a
 top-values bar chart for categorical ones. It's all client-side inside the
 sandboxed panel, so it needs no extra dependencies and `update(data)` re-renders.
+
+## Tracking an ML training run
+
+There's no logging framework to learn — the panels above already are the
+dashboard. Make each one once, keep the handle, and push to it from your loop:
+
+```python
+import pycanvas
+
+canvas = pycanvas.Canvas()
+
+loss    = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6)
+weights = canvas.histogram("weights", bins=40)        # distribution over time
+canvas.table({"lr": 3e-4, "batch": 64, "optimizer": "adam"})  # hparams -> table
+
+@canvas.background
+def train():
+    for step in range(steps):
+        loss.push({"train": train_loss, "val": val_loss}, x=step)
+        if step % 50 == 0:
+            weights.add(model.fc1.weight, step=step)          # a histogram row
+            canvas.show(make_grid(batch), name="samples")     # latest predictions
+
+canvas.serve()
+```
+
+`live_plot` overlays related series on one chart (push any trace key, declared or
+not), and `smoothing=` adds the TensorBoard smoothed-over-raw line. `histogram`
+shows a distribution shifting across steps. A flat dict renders as a key/value
+**table** — the natural home for hyperparameters — and `canvas.show(value)` drops
+any figure/array/DataFrame onto the board. Because PyCanvas is bidirectional, the
+same loop can read *controls* TensorBoard can't offer — a pause button, a live
+learning-rate slider — and `canvas.grid` / `column` / `row` arrange the panels
+without hand-placing each. `live_plot`/`histogram` need `plotly`; rendering a
+Matplotlib figure needs `matplotlib`.
+
+See [`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py)
+for the full board — scalar curves, a weight histogram, a sample-image grid, a
+run log, and pause/reset/learning-rate controls.
 
 ## Hot reloading (auto-restart on save)
 
@@ -1068,6 +1168,7 @@ python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video
 python examples/repl_inspector.py     # on-canvas Python REPL + component/globals inspectors
+python training_dashboard/train_dashboard.py  # TensorBoard-style training tracker (native panels)
 python examples/chat_room.py          # shared chat room with editable viewer names
 python examples/public_tunnel.py      # share a canvas worldwide via a public HTTPS tunnel
 python examples/remote_control.py     # ⚠ stream this PC's screen + control it remotely (Windows)

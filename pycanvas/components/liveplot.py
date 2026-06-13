@@ -6,6 +6,11 @@ them with ``Plotly.react`` on a chart that stays mounted — smooth at high rate
 
     plot = canvas.insert(pycanvas.LivePlot("servos", traces=["s1", "s2"]))
     plot.push({"s1": 90, "s2": 45})   # call repeatedly from your loop
+
+Traces don't have to be declared up front: ``push`` a key it hasn't seen and a
+new trace appears automatically, so ``traces=`` is just an optional way to fix
+the legend order. ``smoothing`` adds a TensorBoard-style smoothed line over a
+faint raw one.
 """
 
 from collections import deque
@@ -17,6 +22,29 @@ _DEFAULT_LAYOUT = {
     "showlegend": True,
     "legend": {"orientation": "h"},
 }
+
+# Stable per-trace colours so a trace's raw (faint) and smoothed (bold) lines
+# share a hue when ``smoothing`` is on. Plotly's own default qualitative set.
+_PALETTE = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+]
+
+
+def _ema(values, weight):
+    """Exponential moving average with debiasing (matches TensorBoard).
+
+    ``weight`` in [0, 1): higher is smoother. The debias term divides out the
+    cold-start bias toward zero so the first points aren't dragged down.
+    """
+    smoothed = []
+    last = 0.0
+    debias = 0.0
+    for v in values:
+        last = last * weight + (1 - weight) * v
+        debias = debias * weight + (1 - weight)
+        smoothed.append(last / debias if debias else v)
+    return smoothed
 
 
 class LivePlot(BaseComponent):
@@ -31,15 +59,19 @@ class LivePlot(BaseComponent):
         max_points=300,
         mode="lines",
         layout=None,
+        smoothing=0.0,
         w=None,
         h=None,
         label=None,
     ):
+        if not 0 <= smoothing < 1:
+            raise ValueError(f"smoothing must be in [0, 1), got {smoothing!r}")
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, **size)
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}
+        self._smoothing = smoothing
         self._traces = []
         self._x = {}
         self._y = {}
@@ -56,7 +88,8 @@ class LivePlot(BaseComponent):
     def push(self, sample, x=None):
         """Append one sample per trace, e.g. ``push({"s1": 90, "s2": 45})``.
 
-        ``x`` defaults to an auto-incrementing sample index.
+        A key not seen before starts a new trace on the fly. ``x`` defaults to an
+        auto-incrementing sample index (pass it to use a real step/epoch number).
         """
         with self._lock:
             self._counter += 1
@@ -75,6 +108,20 @@ class LivePlot(BaseComponent):
         """Alias for :meth:`push` — append one sample per trace."""
         return self.push(sample, x)
 
+    @property
+    def smoothing(self):
+        """EMA weight for the smoothed overlay (0 disables); settable live."""
+        return self._smoothing
+
+    @smoothing.setter
+    def smoothing(self, weight):
+        if not 0 <= weight < 1:
+            raise ValueError(f"smoothing must be in [0, 1), got {weight!r}")
+        with self._lock:
+            self._smoothing = weight
+            payload = self._payload()
+        self._send_update({"plot": payload})
+
     def clear(self):
         with self._lock:
             for name in self._traces:
@@ -84,17 +131,38 @@ class LivePlot(BaseComponent):
         self._send_update({"plot": payload})
 
     def _payload(self):
-        data = [
-            {
-                "x": list(self._x[name]),
-                "y": list(self._y[name]),
-                "name": name,
-                "mode": self._mode,
-                "type": "scatter",
-            }
-            for name in self._traces
-        ]
+        data = []
+        for i, name in enumerate(self._traces):
+            xs = list(self._x[name])
+            ys = list(self._y[name])
+            if self._smoothing > 0:
+                # Faint raw line + bold smoothed line, sharing a palette colour —
+                # the TensorBoard scalar look. Both built server-side, so the
+                # frontend stays a dumb Plotly.react sink (no rebuild needed).
+                color = _PALETTE[i % len(_PALETTE)]
+                data.append({
+                    "x": xs, "y": ys, "name": name, "mode": self._mode,
+                    "type": "scatter", "line": {"color": color, "width": 1},
+                    "opacity": 0.3, "showlegend": False, "hoverinfo": "skip",
+                })
+                data.append({
+                    "x": xs, "y": _ema(ys, self._smoothing), "name": name,
+                    "mode": self._mode, "type": "scatter",
+                    "line": {"color": color, "width": 2},
+                })
+            else:
+                data.append({
+                    "x": xs, "y": ys, "name": name,
+                    "mode": self._mode, "type": "scatter",
+                })
         layout = {**_DEFAULT_LAYOUT, **self._layout}
+        # A title needs head-room, or Plotly draws it on top of the plot. The
+        # tight default top margin suits the usual title-less plot (the panel's
+        # card header captions it), so only reserve the space when a title is set.
+        if layout.get("title"):
+            margin = dict(layout.get("margin", {}))
+            margin["t"] = max(margin.get("t", 0), 40)
+            layout["margin"] = margin
         return {"data": data, "layout": layout}
 
     def state_payload(self):

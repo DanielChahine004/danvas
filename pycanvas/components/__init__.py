@@ -14,6 +14,7 @@ from .table import Table
 from .toggle import Toggle
 from .plot import Plot
 from .liveplot import LivePlot
+from .histogram import Histogram
 from .repl import Repl
 from .inspector import Inspector
 from .webview import WebView
@@ -35,6 +36,7 @@ __all__ = [
     "Toggle",
     "Plot",
     "LivePlot",
+    "Histogram",
     "Repl",
     "Inspector",
     "WebView",

@@ -6,13 +6,37 @@ import { COMPONENT_TO_SHAPE } from './canvas'
 let editor = null
 let ws = null
 
-// Cascade newly registered components so they don't stack on one spot.
-let placeIndex = 0
-function nextPosition() {
-  const col = placeIndex % 3
-  const row = Math.floor(placeIndex / 3)
-  placeIndex += 1
-  return { x: 80 + col * 280, y: 80 + row * 200 }
+// Auto-place panels that arrive without an explicit x/y. We flow them
+// left-to-right, top-to-bottom and pack by each panel's *real* size (+ a gap),
+// so they never overlap — unlike a fixed-step grid, which collided whenever a
+// panel was wider/taller than the step (plots, video, custom panels all are).
+// Uniform panels still read as a tidy grid; mixed sizes pack like masonry.
+const FLOW_GAP = 24
+const FLOW_X0 = 80
+const FLOW_Y0 = 80
+const FLOW_MAX_W = 1500 // wrap to a new row past this width (keeps rows readable)
+let flowX = FLOW_X0
+let flowY = FLOW_Y0
+let flowRowH = 0
+function nextPosition(w, h) {
+  w = typeof w === 'number' ? w : 240
+  h = typeof h === 'number' ? h : 96
+  // Wrap to the next row when this panel wouldn't fit (but never wrap a panel
+  // that's already at the row start, or a too-wide one would loop forever).
+  if (flowX > FLOW_X0 && flowX + w > FLOW_X0 + FLOW_MAX_W) {
+    flowX = FLOW_X0
+    flowY += flowRowH + FLOW_GAP
+    flowRowH = 0
+  }
+  const pos = { x: flowX, y: flowY }
+  flowX += w + FLOW_GAP
+  flowRowH = Math.max(flowRowH, h)
+  return pos
+}
+function resetFlow() {
+  flowX = FLOW_X0
+  flowY = FLOW_Y0
+  flowRowH = 0
 }
 
 // component id <-> tldraw shape id helpers.
@@ -401,11 +425,11 @@ function clearManaged() {
   liveHandlers.clear()
   liveBuffer.clear()
   setUiInspectorOpen(false)
-  // Rewind the auto-placement cascade so panels without an explicit x/y land in
+  // Rewind the auto-placement flow so panels without an explicit x/y land in
   // the same spots after the reload as before it. The server replays components
-  // in stable insertion order, so from 0 the same panels get the same slots;
-  // without this the counter keeps climbing and they drift each reload.
-  placeIndex = 0
+  // in stable insertion order, so from the start the same panels get the same
+  // slots; without this the cursor keeps advancing and they drift each reload.
+  resetFlow()
 }
 
 function removeComponent(id) {
@@ -450,7 +474,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   let px = x
   let py = y
   if (typeof px !== 'number' || typeof py !== 'number') {
-    const auto = nextPosition()
+    const auto = nextPosition(props.w, props.h)
     if (typeof px !== 'number') px = auto.x
     if (typeof py !== 'number') py = auto.y
   }

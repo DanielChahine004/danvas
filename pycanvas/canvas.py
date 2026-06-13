@@ -18,6 +18,7 @@ from .components import (
     Chat,
     Custom,
     FileBrowser,
+    Histogram,
     Image,
     Inspector,
     Label,
@@ -42,6 +43,70 @@ from .kernel import Kernel
 # here (not in every constructor) so all factories accept it uniformly.
 _INSERT_KEYS = ("x", "y", "w", "h", "rotation", "queue",
                 "below", "above", "right_of", "left_of", "gap", *LAYOUT_FLAGS)
+
+
+class _FlowLayout:
+    """Auto-placer for panels inserted inside its ``with`` block.
+
+    Created by :meth:`Canvas.grid` / :meth:`Canvas.column` / :meth:`Canvas.row`.
+    While active (pushed on ``canvas._layout_stack``) it hands a position to any
+    insert that didn't get an explicit one — see ``Canvas.insert``.
+
+    A ``grid`` lays uniform ``slot`` cells out ``cols`` per row. A ``column`` /
+    ``row`` flows along one axis and lets each panel keep its *natural* size on
+    the other (a slider stays slider-tall, a button button-tall), advancing the
+    cursor by the size the panel actually occupies — so a mixed control strip
+    isn't squashed to one height.
+    """
+
+    def __init__(self, canvas, kind, *, cols=1, slot=(None, None), gap=16,
+                 origin=(40, 40)):
+        self._canvas = canvas
+        self._kind = kind                 # "grid" | "column" | "row"
+        self._cols = cols
+        self._slot_w, self._slot_h = slot  # either may be None (= natural)
+        self._gap = gap
+        self._ox, self._oy = origin
+        self._i = 0
+        self._cursor = list(origin)        # running (x, y) for column/row flow
+
+    def __enter__(self):
+        self._canvas._layout_stack.append(self)
+        return self
+
+    def __exit__(self, *exc):
+        # Only unwind ourselves; nested `with` blocks pop in LIFO order anyway.
+        if self._canvas._layout_stack and self._canvas._layout_stack[-1] is self:
+            self._canvas._layout_stack.pop()
+        return False
+
+    def _place(self, component, w, h, auto_h):
+        """Return ``(x, y, w, h)`` for the next panel inside this container.
+
+        The slot fills in only dimensions the caller left blank (a ``None`` slot
+        dimension keeps the component's own size); an ``h="auto"`` panel keeps
+        fitting its content rather than being pinned to the slot height.
+        """
+        if w is None and self._slot_w is not None:
+            w = self._slot_w
+        if h is None and self._slot_h is not None and not auto_h:
+            h = self._slot_h
+        # The footprint this panel occupies, for advancing a column/row cursor:
+        # the size it'll actually get (explicit or slot), else its own default.
+        occ_w = w if w is not None else component.w
+        occ_h = h if h is not None else component.h
+        if self._kind == "grid":
+            col, row = self._i % self._cols, self._i // self._cols
+            x = self._ox + col * (self._slot_w + self._gap)
+            y = self._oy + row * (self._slot_h + self._gap)
+        elif self._kind == "column":
+            x, y = self._ox, self._cursor[1]
+            self._cursor[1] += occ_h + self._gap
+        else:  # "row"
+            x, y = self._cursor[0], self._oy
+            self._cursor[0] += occ_w + self._gap
+        self._i += 1
+        return x, y, w, h
 
 
 class Canvas:
@@ -76,6 +141,10 @@ class Canvas:
         self._background = []
         # Counter behind the auto-generated names for unnamed show() panels.
         self._show_seq = 0
+        # Stack of active auto-layout containers (grid/column/row). The innermost
+        # one places any panel inserted inside its `with` block that didn't get an
+        # explicit x/y or relative anchor. Empty = panels auto-cascade as before.
+        self._layout_stack = []
 
     def enable_repl(self, namespace=None):
         """Bind the namespace that ``Repl`` cells execute against.
@@ -375,7 +444,8 @@ class Canvas:
         # fits the panel height to its rendered content: flag the component (its
         # iframe then reports content height; the frontend resizes to fit) and
         # fall back to the default height until the first measurement lands.
-        if h == "auto":
+        auto_h = h == "auto"
+        if auto_h:
             if hasattr(component, "_auto_h"):
                 component._auto_h = True
             else:
@@ -398,6 +468,11 @@ class Canvas:
                 x = rx
             if y is None:
                 y = ry
+        # Auto-layout: inside a `with canvas.grid(...)`/`column`/`row` block, a
+        # panel given neither an explicit position nor a relative anchor takes the
+        # next slot (and the layout's default slot size, unless w/h were given).
+        if self._layout_stack and x is None and y is None:
+            x, y, w, h = self._layout_stack[-1]._place(component, w, h, auto_h)
         if name is None:
             name = component.name
         if name is None:
@@ -682,10 +757,65 @@ class Canvas:
         """Insert a :class:`~pycanvas.LivePlot`.
 
         Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,
-        ``width``, ``height``, ``label``) and :meth:`insert` placement options
-        both go in ``kw``; they don't overlap.
+        ``smoothing``, ``w``, ``h``, ``label``) and :meth:`insert` placement
+        options both go in ``kw``; they don't overlap. ``traces`` only fixes the
+        legend order — pushing an unseen key adds a trace on the fly.
         """
         return self._make(LivePlot, name=name, **kw)
+
+    def histogram(self, name="histogram", **kw):
+        """Insert a :class:`~pycanvas.Histogram` — a distribution-over-time panel.
+
+        Constructor kwargs (``bins``, ``mode``, ``value_range``, ``max_steps``,
+        ``label``, ``w``, ``h``) and :meth:`insert` placement options both go in
+        ``kw``. Feed it with ``panel.add(values, step)``; needs ``plotly``.
+        """
+        return self._make(Histogram, name=name, **kw)
+
+    def grid(self, cols=2, slot=(520, 360), gap=24, origin=(40, 40)):
+        """Auto-arrange panels added inside a ``with`` block into a grid.
+
+        Inside the block, any panel inserted without an explicit ``x``/``y`` (or a
+        ``below=``/``right_of=`` anchor) drops into the next cell — left to right,
+        top to bottom, ``cols`` per row — taking the slot size unless you pass
+        ``w``/``h``::
+
+            with canvas.grid(cols=2, slot=(560, 300)):
+                canvas.live_plot("loss")
+                canvas.live_plot("accuracy")
+                canvas.image(fig)            # next row
+
+        ``slot`` is each cell's ``(width, height)``, ``gap`` the spacing between
+        cells, ``origin`` the grid's top-left canvas coordinate. An explicit
+        position or relative anchor still wins for that panel. Nest or sequence
+        blocks freely to build columns of charts beside columns of media. For a
+        strip of mixed-height controls, prefer :meth:`column` / :meth:`row`,
+        which keep each panel's natural size instead of a uniform cell.
+        """
+        return _FlowLayout(self, "grid", cols=cols, slot=slot, gap=gap,
+                           origin=origin)
+
+    def column(self, width=None, gap=16, origin=(40, 40)):
+        """Auto-stack panels added inside a ``with`` block into one column.
+
+        Each panel keeps its **natural height** (a slider stays slider-tall, a
+        button button-tall), so a mixed control strip isn't squashed to one
+        height. ``width`` sets a common width (``None`` keeps each panel's own);
+        ``gap`` is the vertical spacing, ``origin`` the top-left corner. An
+        explicit position or relative anchor still wins for that panel.
+        """
+        return _FlowLayout(self, "column", slot=(width, None), gap=gap,
+                           origin=origin)
+
+    def row(self, height=None, gap=16, origin=(40, 40)):
+        """Auto-arrange panels added inside a ``with`` block into one row.
+
+        The horizontal counterpart of :meth:`column`: panels flow left to right,
+        each keeping its **natural width**. ``height`` sets a common height
+        (``None`` keeps each panel's own); ``gap`` is the horizontal spacing.
+        """
+        return _FlowLayout(self, "row", slot=(None, height), gap=gap,
+                           origin=origin)
 
     def repl(self, name="repl", label=None, **place):
         """Insert a :class:`~pycanvas.Repl`. See :meth:`insert` for ``place``.

@@ -108,6 +108,12 @@ class Custom(BaseComponent):
                 "st.textContent='html,body{height:auto !important;"
                 "min-height:0 !important;overflow:hidden !important}';"
                 "document.head.appendChild(st);"
+                # Expose an auto-height hook on <body> so content whose layout
+                # is normally pinned to the panel height (a full-height flex
+                # column with an inner scroll area, e.g. Table) can switch to
+                # sizing *from* its content instead — otherwise the measured
+                # height depends on the panel height and the fit loop oscillates.
+                "if(document.body)document.body.classList.add('pc-auto-h');"
                 "fit();"
                 "if(window.ResizeObserver){"
                 "new ResizeObserver(fit).observe(document.body);}"

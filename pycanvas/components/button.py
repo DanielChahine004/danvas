@@ -24,6 +24,14 @@ class Button(BaseComponent):
         super().__init__(name=name, label=label, text=caption)
         self._value = 0  # number of clicks seen
 
+    def update(self, text):
+        """Change the button's face text, live (e.g. Start ⇄ Pause).
+
+        Stored on the panel so a reconnecting client replays the current face.
+        """
+        self._props["text"] = text
+        self._send_update({"text": text})
+
     def on_click(self, fn):
         """Decorator: register a handler fired (with no args) on each click."""
         self._callbacks.append(fn)

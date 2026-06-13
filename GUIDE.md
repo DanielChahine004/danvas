@@ -98,7 +98,8 @@ this object. Here's the map of what `canvas` can do, so you know what's coming:
 
 | Category | Methods |
 |---|---|
-| **Add panels** | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `plot`, `live_plot`, `image`, `table`, `markdown`, `chat`, `custom`, `react`, `webview`, `file_browser`, `repl`, `inspector`, `show`, and the generic `insert` |
+| **Add panels** | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `plot`, `live_plot`, `histogram`, `image`, `table`, `markdown`, `chat`, `custom`, `react`, `webview`, `file_browser`, `repl`, `inspector`, `show`, and the generic `insert` |
+| **Auto-layout** | `grid`, `column`, `row` (context managers) |
 | **Connect** | `connect`, `disconnect` |
 | **Remove** | `remove` |
 | **Look up** | `canvas.<name>`, `canvas["<name>"]`, `canvas.components`, `canvas.arrows`, `canvas.viewers` |
@@ -170,7 +171,7 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 |---|---|---|---|
 | **Slider** | `canvas.slider(name, min=0, max=100, default=None, step=1)` | `.value` (number) | `@on_change` |
 | **Toggle** | `canvas.toggle(name, options, default=None)` | `.value` (chosen string) | `@on_change` |
-| **Button** | `canvas.button(name, text=None)` | `.value` (click count) | `@on_click` |
+| **Button** | `canvas.button(name, text=None)` | `.value` (click count) | `@on_click`; `update(text)` relabels it live |
 
 #### Outputs — Python drives the display
 
@@ -179,20 +180,34 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 | **Label** | `canvas.label(name, value="")` | `update(text)` |
 | **Markdown** | `canvas.markdown(text="")` | `update(text)` |
 | **Image** | `canvas.image(src, fit="contain")` | `update(src)` — path / URL / bytes / Matplotlib / PIL / NumPy array |
-| **Table** | `canvas.table(data)` | interactive: sort / filter / per-column distributions. `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns |
+| **Table** | `canvas.table(data)` | interactive: sort / filter / per-column distributions. `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns / flat dict (→ key/value) |
 | **Plot** | `canvas.plot(name="plot")` | `update(fig)` — a Plotly figure or HTML string |
 
 #### Streaming — high-rate feeds
 
 | Component | Factory | Drive it with |
 |---|---|---|
-| **LivePlot** | `canvas.live_plot(traces=None, max_points=300, mode="lines")` | `push({"trace": y})` every loop; `clear()` |
+| **LivePlot** | `canvas.live_plot(traces=None, max_points=300, mode="lines", smoothing=0)` | `push({"trace": y})` every loop; `clear()` |
+| **Histogram** | `canvas.histogram(name, bins=30, mode="heatmap")` | `add(values, step)` — a distribution over training |
 | **VideoFeed** | `canvas.video(name, quality=70)` | `update(frame)` — OpenCV BGR NumPy array |
 | **AudioFeed** | `canvas.audio(name, sample_rate=16000, channels=1)` | `update(pcm)` — int16 PCM samples |
 
 > **Plot vs LivePlot.** `Plot` re-renders a whole Plotly figure each update —
 > simple, good for occasional charts. `LivePlot` keeps a mounted chart and
 > streams only new data points — smooth at high rates. Use `push()` in a loop.
+> A `LivePlot` trace appears the first time you `push` its key (so `traces=` only
+> fixes the legend order), `x=` plots against a real step, and `smoothing=`
+> overlays a smoothed line on the raw one. `Histogram` is its distribution
+> cousin: `add(values, step)` records a distribution and the panel shows it
+> shift over training (needs `plotly`).
+
+> **Tracking ML training.** No logging framework needed — these panels *are* the
+> dashboard. Make each once and push to it from your loop: a `LivePlot` per metric
+> (`loss.push({"train": …, "val": …}, x=step)`), a `Histogram` for a weight/grad
+> distribution (`weights.add(layer.weight, step=epoch)`), and `canvas.table(hparams)`
+> for the run config (a flat dict renders as a key/value table). `canvas.grid` /
+> `column` / `row` (see §6) arrange them. Full board:
+> [`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py).
 
 > **Matplotlib figures don't leak.** `Image` releases a figure from pyplot's
 > global registry after rasterizing it, so `img.update(fig)` with a fresh
@@ -464,7 +479,11 @@ comp.rotation = 30       # degrees, clockwise
 ```
 
 `x / y / w / h / rotation` are all readable and assignable. Omit `x`/`y` at
-insert and the frontend auto-cascades the panel into view.
+insert and the frontend auto-arranges the panel: unpositioned panels flow
+left-to-right, top-to-bottom, packed by their real size with a small gap, so
+they never overlap (uniform panels read as a tidy grid; mixed sizes pack like
+masonry). For deterministic placement instead, give `x`/`y`, use a relative
+anchor, or a `with canvas.grid(...)` block (§6).
 
 Sizing text by eye is fiddly, so the Custom-based panels (`markdown`,
 `custom`, `table`, `image`, …) accept **`h="auto"`**: the height fits the
@@ -488,6 +507,23 @@ t      = canvas.slider("t", min=0, max=1, step=0.01, below=plot)   # under the p
 notes  = canvas.markdown("…", right_of=plot, gap=24)               # beside it
 go     = canvas.button("go", below=t, right_of=plot)               # grid corner
 ```
+
+Or, for a dashboard of many panels, skip coordinates entirely: open a
+`with canvas.grid(...)` block (or `column` / `row`) and each panel inserted
+inside it drops into the next cell, taking the slot size unless you pass `w`/`h`:
+
+```python
+with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
+    canvas.live_plot("loss")
+    canvas.live_plot("accuracy")        # next column
+    canvas.image(fig)                   # wraps to the next row
+```
+
+`grid(cols=n)` lays uniform `slot=(w, h)` cells out `cols` per row;
+`column(width=…)` and `row(height=…)` flow along one axis and keep each panel's
+**natural size** on the other, so a strip of mixed controls (a label, buttons, a
+slider) isn't squashed to one height. An explicit `x`/`y` or a relative anchor
+still overrides placement for that one panel, so you can mix the two freely.
 
 ### Locking — five independent controls
 

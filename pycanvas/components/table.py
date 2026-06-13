@@ -37,6 +37,11 @@ _TABLE_CSS = (
     ".pc-btn.on{background:#2563eb;color:#fff;border-color:#2563eb}"
     ".pc-count{color:#64748b;font-size:11px;white-space:nowrap}"
     ".pc-scroll{overflow:auto;flex:1}"
+    # Auto-height (h="auto"): size the table to its content instead of pinning it
+    # to the panel height — the wrap stops filling 100vh and the scroll area
+    # grows naturally, so the measured height converges (no fit-loop flutter).
+    "body.pc-auto-h .pc-wrap{height:auto}"
+    "body.pc-auto-h .pc-scroll{overflow:visible;flex:none}"
     "table{border-collapse:collapse;width:100%}"
     "th,td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;"
     "white-space:nowrap}"
@@ -132,6 +137,11 @@ class Table(Custom):
 
 
 # -- input normalization -----------------------------------------------------
+def _is_seq(v):
+    """True for a column-like value: iterable but not a string/bytes scalar."""
+    return hasattr(v, "__iter__") and not isinstance(v, (str, bytes))
+
+
 def _normalize(data):
     """Coerce any supported input to ``(columns, rows)`` with string headers.
 
@@ -153,12 +163,18 @@ def _normalize(data):
             cols = [getattr(index, "name", None) or ""] + cols
             rows = [[i] + r for i, r in zip(list(index), rows)]
         return cols, rows
-    # dict of columns: {col: [values...]}.
     if isinstance(data, dict):
-        cols = [str(c) for c in data.keys()]
-        rows = ([list(r) for r in zip(*[list(data[c]) for c in data])]
-                if cols else [])
-        return cols, rows
+        values = list(data.values())
+        # Dict of columns: {col: [values...]} — every value is a (non-string)
+        # sequence, so the keys are headers and the sequences are the columns.
+        if values and all(_is_seq(v) for v in values):
+            cols = [str(c) for c in data.keys()]
+            rows = [list(r) for r in zip(*[list(data[c]) for c in data])]
+            return cols, rows
+        # Otherwise a flat mapping (e.g. hyperparameters {"lr": 3e-4, ...}) —
+        # render it as a two-column key/value table, which reads far better than
+        # a one-row wide table.
+        return ["key", "value"], [[str(k), v] for k, v in data.items()]
     # list of dicts -> union of keys in first-seen order.
     if isinstance(data, (list, tuple)) and data and isinstance(data[0], dict):
         cols = []
