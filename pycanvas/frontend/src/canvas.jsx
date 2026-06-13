@@ -513,6 +513,12 @@ function CustomView({ shape }) {
       sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
       style={{
         flex: 1,
+        // An iframe's intrinsic height is 150px and a flex item defaults to
+        // min-height:auto, so without this the frame refuses to shrink below
+        // 150px in a shorter panel — it overflows and the card clips its bottom
+        // (e.g. a centered image looks top-padded). minHeight:0 lets flex:1 fit
+        // the frame to the card body.
+        minHeight: 0,
         width: '100%',
         border: 'none',
         borderRadius: 4,
@@ -617,6 +623,7 @@ export class WebViewShapeUtil extends PcShapeUtil {
           referrerPolicy="strict-origin-when-cross-origin"
           style={{
             flex: 1,
+            minHeight: 0, // let flex:1 shrink the frame below its 150px intrinsic height
             width: '100%',
             border: 'none',
             borderRadius: 4,
