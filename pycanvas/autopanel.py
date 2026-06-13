@@ -168,14 +168,22 @@ class CellCapture:
         pins_position = "x" in directive and "y" in directive
         if prev is not None and prev.x is not None:
             # Re-run: start from the panel's live geometry (user moves included).
-            place.update(x=prev.x, y=prev.y, w=prev.w, h=prev.h,
+            place.update(x=prev.x, y=prev.y, w=prev.w,
                          rotation=prev.rotation, locked=prev.locked,
                          draggable=prev.draggable, resizable=prev.resizable,
                          operable=prev.operable)
+            # Pin height only for a fixed-height panel (incl. one the user
+            # resized — that turns auto-height off). A content-sized/auto-height
+            # panel is left to re-fit, so its height tracks the new output.
+            if not getattr(prev, "_auto_h", False):
+                place["h"] = prev.h
         else:
-            # First appearance: capture-level default size + lock/interaction
+            # First appearance: uniform grid column width + lock/interaction
             # state, and the next grid slot unless the directive pins position.
-            place.update(w=self.slot_w, h=self.slot_h, **self._lock_defaults)
+            # Height is left to the panel itself (content-sized by panel_for, or
+            # auto-fitting) — slot_h is only the grid's row pitch, not a forced
+            # height — so a small value doesn't swim in a tall box.
+            place.update(w=self.slot_w, **self._lock_defaults)
             if not pins_position:
                 x, y = self._place(result)
                 place.update(x=x, y=y)
@@ -220,13 +228,17 @@ class CellCapture:
         notebook-registered rich reps are honoured. ``label`` overrides the
         default source-line caption (from a ``# pycanvas: label=...`` directive);
         ``None`` keeps the default.
+
+        Width is fixed to ``slot_w`` for tidy grid columns; height is left to the
+        dispatcher (``h=None``) so it sizes to content — row-sized tables,
+        natural-fit reprs/JSON, short scalars — instead of a fixed slot box.
         """
         from .dispatch import panel_for
 
         caption = label if label is not None else self._caption(result)
         formatter = getattr(self._ip, "display_formatter", None)
         return panel_for(out, name=name, label=caption, w=self.slot_w,
-                         h=self.slot_h, formatter=formatter)
+                         h=None, formatter=formatter)
 
     def _caption(self, result):
         """A short panel caption derived from the cell's source (or its id)."""
@@ -323,7 +335,9 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     call :meth:`CellCapture.stop` (or :meth:`Canvas.stop_capturing_cells`) to
     stop.
 
-    ``cols`` is the grid width; ``slot_w``/``slot_h`` the panel size in pixels;
+    ``cols`` is the grid width; ``slot_w`` the panel (and column) width;
+    ``slot_h`` the grid's row pitch (panels size their *height* to content, so
+    ``slot_h`` spaces the rows rather than forcing every panel that tall);
     ``gap`` the spacing between panels; ``origin`` the top-left canvas
     coordinate of the grid. ``include_source=False`` drops the source-line
     caption from each panel.
