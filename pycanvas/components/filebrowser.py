@@ -9,7 +9,8 @@ for is resolved **inside a fixed ``root``** — a viewer can't ``..`` its way ou
 onto the rest of the disk (important once you ``serve(host="0.0.0.0")`` or
 tunnel).
 
-Built on :class:`Custom`, so it needs no new frontend shape and no ``npm`` build.
+Rendered as a native React panel (no ``npm`` build — the JSX is compiled in the
+browser), so its text stays sharp when the canvas is zoomed.
 
     files = canvas.file_browser("files", root="./data")
 
@@ -22,100 +23,76 @@ import fnmatch
 import os
 import traceback
 
-from .custom import Custom
+from .react import React
 
 
-# The iframe UI: a header (current path + an "up" button) over a scrolling list
-# of entries. It owns no filesystem knowledge — it renders whatever listing
-# Python pushes and reports clicks back by name. Folders sort first.
-_FILE_BROWSER_HTML = """
-<style>
-  :root { color-scheme: dark; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: #0f172a;
-         color: #e2e8f0; font-size: 13px; height: 100vh; display: flex;
-         flex-direction: column; }
-  #bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
-         background: #1e293b; border-bottom: 1px solid #334155; flex: none; }
-  #up { cursor: pointer; border: 1px solid #475569; background: #0f172a;
-        color: #e2e8f0; border-radius: 4px; padding: 2px 8px; line-height: 1.4; }
-  #up[disabled] { opacity: .35; cursor: default; }
-  #cwd { font-family: ui-monospace, monospace; color: #94a3b8; overflow: hidden;
-         text-overflow: ellipsis; white-space: nowrap; direction: rtl;
-         text-align: left; flex: 1; }
-  #list { flex: 1; overflow-y: auto; }
-  .row { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
-         cursor: pointer; user-select: none; }
-  .row:hover { background: #1e293b; }
-  .row.sel { background: #1d4ed8; }
-  .ico { width: 16px; text-align: center; flex: none; }
-  .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .sz { color: #64748b; font-variant-numeric: tabular-nums; flex: none; }
-  .row.sel .sz { color: #cbd5e1; }
-  #empty { padding: 12px; color: #64748b; }
-</style>
-
-<div id="bar">
-  <button id="up" title="up one level">..</button>
-  <span id="cwd">/</span>
-</div>
-<div id="list"></div>
-
-<script>
-  const upBtn = document.getElementById('up')
-  const cwdEl = document.getElementById('cwd')
-  const listEl = document.getElementById('list')
-
-  upBtn.addEventListener('click', () => canvas.send({ event: 'up' }))
-
-  function fmtSize(n) {
-    if (!n) return ''
-    const u = ['B', 'KB', 'MB', 'GB', 'TB']
-    let i = 0
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
-    return (i ? n.toFixed(1) : n) + ' ' + u[i]
-  }
-
-  function render(state) {
-    cwdEl.textContent = state.cwd
-    upBtn.disabled = state.atRoot
-    listEl.innerHTML = ''
-    if (!state.entries.length) {
-      const e = document.createElement('div')
-      e.id = 'empty'
-      e.textContent = '(empty)'
-      listEl.appendChild(e)
-      return
-    }
-    for (const ent of state.entries) {
-      const row = document.createElement('div')
-      row.className = 'row'
-      if (!ent.dir && ent.name === state.selected) row.className += ' sel'
-      const ico = document.createElement('span')
-      ico.className = 'ico'
-      ico.textContent = ent.dir ? '\\u{1F4C1}' : '\\u{1F4C4}'
-      const nm = document.createElement('span')
-      nm.className = 'nm'
-      nm.textContent = ent.name
-      const sz = document.createElement('span')
-      sz.className = 'sz'
-      sz.textContent = ent.dir ? '' : fmtSize(ent.size)
-      row.append(ico, nm, sz)
-      // Python is authoritative: it decides whether the name is a folder to
-      // enter or a file to select, so the row just reports what was clicked.
-      row.addEventListener('click', () => canvas.send({ event: 'open', name: ent.name }))
-      listEl.appendChild(row)
-    }
-  }
-
-  canvas.onPush(render)
-  // Ask for the first listing once the receive side is wired up. Re-fires after
-  // a reconnect, since the iframe reloads and re-runs this script.
-  canvas.send({ event: 'ready' })
-</script>
+# The UI: a header (current path + an "up" button) over a scrolling list of
+# entries. It owns no filesystem knowledge — it renders whatever listing Python
+# pushes (the `value` prop) and reports clicks back by name via canvas.send;
+# Python decides whether a name is a folder to enter or a file to select. On
+# mount (incl. a reconnect remount) it asks for the first listing. Written as a
+# plain string so its JSX braces survive; only __CSS__ is substituted.
+_FB_CSS = """
+.pc-fb{height:100%;box-sizing:border-box;display:flex;flex-direction:column;
+ font-family:system-ui,sans-serif;font-size:13px;background:#0f172a;color:#e2e8f0}
+.pc-fb-bar{display:flex;align-items:center;gap:6px;padding:6px 8px;
+ background:#1e293b;border-bottom:1px solid #334155;flex:none}
+.pc-fb-up{cursor:pointer;border:1px solid #475569;background:#0f172a;
+ color:#e2e8f0;border-radius:4px;padding:2px 8px;line-height:1.4}
+.pc-fb-up:disabled{opacity:.35;cursor:default}
+.pc-fb-cwd{font-family:ui-monospace,monospace;color:#94a3b8;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;flex:1}
+.pc-fb-list{flex:1;overflow-y:auto}
+.pc-fb-row{display:flex;align-items:center;gap:8px;padding:4px 10px;
+ cursor:pointer;user-select:none}
+.pc-fb-row:hover{background:#1e293b}
+.pc-fb-row.sel{background:#1d4ed8}
+.pc-fb-ico{width:16px;text-align:center;flex:none}
+.pc-fb-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.pc-fb-sz{color:#64748b;font-variant-numeric:tabular-nums;flex:none}
+.pc-fb-row.sel .pc-fb-sz{color:#cbd5e1}
+.pc-fb-empty{padding:12px;color:#64748b}
 """
 
+_FB_SOURCE = """
+function Component({ canvas, value }) {
+  React.useEffect(() => { canvas.send({ event: "ready" }); }, []);
+  const state = value || { cwd: "/", atRoot: true, selected: null, entries: [] };
+  function fmtSize(n) {
+    if (!n) return "";
+    const u = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i ? n.toFixed(1) : n) + " " + u[i];
+  }
+  return (
+    <div className="pc-fb">
+      <style>{`__CSS__`}</style>
+      <div className="pc-fb-bar">
+        <button className="pc-fb-up" disabled={state.atRoot} title="up one level"
+                onClick={() => canvas.send({ event: "up" })}>..</button>
+        <span className="pc-fb-cwd">{state.cwd}</span>
+      </div>
+      <div className="pc-fb-list">
+        {state.entries.length === 0
+          ? <div className="pc-fb-empty">(empty)</div>
+          : state.entries.map((ent, i) => (
+              <div key={i}
+                   className={"pc-fb-row" + (!ent.dir && ent.name === state.selected ? " sel" : "")}
+                   onClick={() => canvas.send({ event: "open", name: ent.name })}>
+                <span className="pc-fb-ico">{ent.dir ? "📁" : "📄"}</span>
+                <span className="pc-fb-nm">{ent.name}</span>
+                <span className="pc-fb-sz">{ent.dir ? "" : fmtSize(ent.size)}</span>
+              </div>
+            ))}
+      </div>
+    </div>
+  );
+}
+""".replace("__CSS__", _FB_CSS)
 
-class FileBrowser(Custom):
+
+class FileBrowser(React):
     """A sandboxed directory browser whose file selections fire Python callbacks.
 
     Point it at a ``root`` directory; the user navigates folders inside it and
@@ -127,14 +104,12 @@ class FileBrowser(Custom):
     :func:`os.path.realpath` and rejected if they escape it (symlinks included).
     """
 
-    component = "Custom"  # rendered as a Custom panel; no bespoke frontend shape
     default_w = 320
     default_h = 420
 
     def __init__(self, root=".", name="files", label=None, w=None, h=None,
                  pattern=None, show_hidden=False):
-        super().__init__(html=_FILE_BROWSER_HTML, name=name, label=label,
-                         w=w, h=h)
+        super().__init__(source=_FB_SOURCE, name=name, label=label, w=w, h=h)
         # Resolve the sandbox root once; every later path is checked against it.
         self._root = os.path.realpath(root)
         self._cwd = self._root
@@ -145,7 +120,7 @@ class FileBrowser(Custom):
         self._select_cbs = []
         self._nav_cbs = []
         self._value = None
-        # Wire the iframe protocol onto Custom's event router.
+        # Wire the panel protocol onto React's event router (canvas.send events).
         self.on("ready")(self._on_ready)
         self.on("up")(self._on_up)
         self.on("open")(self._on_open)
@@ -222,7 +197,7 @@ class FileBrowser(Custom):
                     traceback.print_exc()
 
     # ``.value`` is the selected file path, set above — not the raw inbound
-    # message — so we route without the value-stashing Custom does by default.
+    # message — so we route without the value-stashing React does by default.
     def _handle_input(self, payload):
         event = payload.get(self._event_key) if isinstance(payload, dict) else None
         handlers = list(self._routes.get(event, []))

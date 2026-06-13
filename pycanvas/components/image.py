@@ -10,18 +10,33 @@ import base64
 import io
 import sys
 
-from .custom import Custom
-from ._doc import document
+from .react import React
 
-_IMG_CSS = (
-    "html,body{height:100%}"
-    "body{padding:0;display:flex;align-items:center;justify-content:center;"
-    "background:#0b0f17}"
-)
+# Native React panel (not an iframe) so a vector/SVG or high-resolution image
+# stays sharp when the canvas is zoomed — an iframe is rasterised then scaled.
+# Scoped under `.pc-img`; the image is centred and never upscaled past natural
+# size (``max-*:100%``), with ``object-fit`` deciding contain vs cover.
+_IMG_CSS = """
+.pc-img{width:100%;height:100%;box-sizing:border-box;display:flex;
+ align-items:center;justify-content:center;background:#0b0f17}
+.pc-img img{max-width:100%;max-height:100%;display:block}
+"""
+
+_IMG_SOURCE = """
+function Component({ props }) {
+  return (
+    <div className="pc-img">
+      <style>{`__CSS__`}</style>
+      {props.src
+        ? <img src={props.src} alt="" style={{ objectFit: props.fit || "contain" }} />
+        : null}
+    </div>
+  );
+}
+""".replace("__CSS__", _IMG_CSS)
 
 
-class Image(Custom):
-    component = "Custom"
+class Image(React):
     default_w = 420
     default_h = 320
 
@@ -30,25 +45,17 @@ class Image(Custom):
         # ``fit`` is the CSS object-fit: "contain" (default, whole image) or
         # "cover" (fill, cropping overflow).
         self._fit = fit
-        super().__init__(html=self._render(src), name=name, label=label,
-                         w=w, h=h)
+        super().__init__(source=_IMG_SOURCE, name=name, label=label, w=w, h=h,
+                         props={"src": _to_data_uri(src), "fit": fit})
 
     def update(self, src):
-        """Replace the image, live.
+        """Replace the image, live (the ``src`` prop swaps — no shape reload).
 
         A Matplotlib figure is auto-released from pyplot's registry after
         rendering, so calling this in a loop with fresh figures doesn't leak —
         no manual ``plt.close()`` needed.
         """
-        super().update(self._render(src))
-
-    def _render(self, src):
-        uri = _to_data_uri(src)
-        body = (
-            f"<img style='max-width:100%;max-height:100%;object-fit:{self._fit}' "
-            f"src='{uri}'>"
-        )
-        return document(body, _IMG_CSS)
+        super().update(src=_to_data_uri(src))
 
 
 def _to_data_uri(src):

@@ -84,6 +84,8 @@ def test_dispatch_png_repr_to_image_html():
         def _repr_png_(self):
             return b"\x89PNG\r\n\x1a\nfake"
 
+    # A bare _repr_png_ (no module hint) is a rich-repr Custom panel wrapping the
+    # data-URI <img> — not the Image component — so its html carries the URI.
     panel = panel_for(Fig())
     assert "data:image/png;base64," in panel.register_props()["html"]
 
@@ -93,14 +95,13 @@ def test_existing_component_passes_through():
     assert panel_for(lbl) is lbl
 
 
-def test_label_renders_as_escaped_custom_panel():
-    # Label is a Custom-based panel (so it can fit its height with h="auto") that
-    # shows its value as escaped plain text, not markup — markup is markdown's job.
+def test_label_renders_value_as_plain_text():
+    # Label is a native React panel showing its value as plain text (React escapes
+    # at render); markup is markdown's job. The raw value rides in the data prop.
     lbl = Label("status", value="a < b & **not bold**")
-    assert isinstance(lbl, Custom)
-    html = lbl.register_props()["html"]
-    assert "a &lt; b &amp; **not bold**" in html   # escaped, asterisks left literal
-    assert "<strong>" not in html
+    data = json.loads(lbl.register_props()["data"])
+    assert data["text"] == "a < b & **not bold**"   # stored raw, not HTML
+    assert "<strong>" not in lbl.register_props()["source"]  # source does no markdown
 
 
 def test_label_auto_height_enabled_via_insert():
@@ -152,8 +153,8 @@ def test_table_from_dict_of_columns():
 
 
 def test_image_from_bytes_sniffs_mime():
-    html = Image(b"\xff\xd8\xff\x00jpeg").register_props()["html"]
-    assert "data:image/jpeg;base64," in html
+    data = json.loads(Image(b"\xff\xd8\xff\x00jpeg").register_props()["data"])
+    assert data["src"].startswith("data:image/jpeg;base64,")
 
 
 def test_show_inserts_with_unique_names_and_replaces():

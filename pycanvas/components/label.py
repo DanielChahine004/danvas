@@ -1,48 +1,49 @@
-"""Label: an output-only text/number display.
+"""Label: an output-only text/number display, rendered as a native React panel.
 
-Rendered inside a sandboxed ``Custom`` iframe (rather than as a native node) so
-it inherits the content-measuring machinery: a label **defaults to ``h="auto"``**
-(its content is a short line, so the panel fits its height to the text and
-re-fits when the value changes or the panel is narrowed) — pass an explicit
-``h`` to pin it instead. Live updates stream in via :meth:`Custom.push` — the text node is
-swapped in place, so the iframe is never reloaded (no flicker, fine for a status
-line updated every loop iteration).
-
-The document is built with the shared :func:`document` helper (the same
-top-aligned, theme-aware page Markdown uses) rather than ``Custom.compose`` —
-compose centers content in a ``min-height:100vh`` body, which on a fixed-height
-label pushes the text below the panel's viewport. The live-update script rides in
-the body, so no ``css``/``js`` is passed to ``Custom`` and compose is never used.
+Native (not a sandboxed iframe) so the text stays sharp at every zoom level and
+follows the canvas theme directly through the ``--pc-*`` variables. A label
+**defaults to ``h="auto"``** (its content is a short line, so the panel fits its
+height to the text) unless the caller pins an explicit ``h``. Live updates stream
+in via :meth:`push` — the value prop swaps, so React re-renders just the text
+node (no shape-prop churn, fine for a status line updated every loop iteration).
 """
 
-import html as _html
+from .react import React
 
-from .custom import Custom
-from ._doc import document
+# Scoped under `.pc-label`; the text colour follows the canvas theme.
+_LABEL_CSS = """
+.pc-label{box-sizing:border-box;width:100%;padding:8px;font-weight:600;
+ font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;
+ color:var(--pc-text);white-space:pre-wrap;word-break:break-word}
+"""
 
-# document(theme=True) already supplies the theme-aware text colour and padding;
-# here we only set the label's own type (a touch bolder than body prose).
-_LABEL_CSS = (
-    ".pc-label{font-weight:600;white-space:pre-wrap;word-break:break-word;}"
-)
+# Renders the latest pushed value (``value``), falling back to the initial value
+# carried in ``props.text`` (also what a reconnecting client replays). Written as
+# a plain string so its JSX braces survive; only __CSS__ is substituted.
+_LABEL_SOURCE = """
+function Component({ value, props }) {
+  const text = value != null ? value : (props.text != null ? props.text : "");
+  return (
+    <>
+      <style>{`__CSS__`}</style>
+      <div className="pc-label">{text}</div>
+    </>
+  );
+}
+""".replace("__CSS__", _LABEL_CSS)
 
-# Receive pushed values and swap the text in place — no reload. The ResizeObserver
-# Custom arms for h="auto" then re-fits the panel height to the new text. window.canvas
-# is defined by Custom._wrap's helper, which is prepended ahead of this document.
-_LABEL_JS = (
-    "var el=document.getElementById('pc-label');"
-    "canvas.onPush(function(v){el.textContent=v;});"
-)
+
+def _str(v):
+    return "" if v is None else str(v)
 
 
-class Label(Custom):
-    component = "Custom"
+class Label(React):
     default_w = 240
     default_h = 84
 
     def __init__(self, name, value="", label=None, w=None, h=None):
-        super().__init__(html=self._render(value), name=name, label=label,
-                         w=w, h=h)
+        super().__init__(source=_LABEL_SOURCE, name=name, label=label, w=w, h=h,
+                         props={"text": _str(value)})
         self._value = value
         # A label holds a short line or number, so default to fitting the panel
         # to its content (no tall, mostly-empty box) unless the caller pinned an
@@ -50,28 +51,11 @@ class Label(Custom):
         if h is None:
             self._auto_h = True
 
-    def register_props(self):
-        # Blend into the canvas theme (transparent body, text colour following the
-        # light/dark toggle) instead of rendering as a white notebook box. Same
-        # hint Markdown uses.
-        props = super().register_props()
-        props["themed"] = True
-        return props
-
     def update(self, value):
-        """Push a new string/number to display (live, without reloading)."""
-        with self._lock:
-            self._value = value
-            # Keep the baked document current too, so a later full render (re-insert
-            # under the same name, or a client connecting after this update) shows
-            # the latest value rather than the one passed at construction.
-            self._html = self._render(value)
-        self.push(str(value))
-
-    @staticmethod
-    def _render(value):
-        body = (
-            f"<div id='pc-label' class='pc-label'>{_html.escape(str(value))}</div>"
-            f"<script>{_LABEL_JS}</script>"
-        )
-        return document(body, _LABEL_CSS, theme=True)
+        """Push a new string/number to display (live, without re-rendering the
+        shape). The value streams in over the push channel; the baked prop is kept
+        current too, so a client connecting after this update shows the latest
+        value rather than the one passed at construction."""
+        self._value = value
+        self._data["text"] = _str(value)
+        self.push(_str(value))

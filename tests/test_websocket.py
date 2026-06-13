@@ -42,13 +42,14 @@ def test_register_messages_sent_on_connect():
 
     types = [(m["type"], m.get("component")) for m in msgs]
     # The Slider yields a register followed by an initial-state update. The Label
-    # renders inside a Custom iframe — its value rides in the register props, so it
-    # registers as Custom with no separate initial-state update (three msgs total).
+    # is a native React panel — its value rides in the register props (the JSON
+    # `data` prop), so it registers with no separate initial-state update (three
+    # msgs total).
     assert ("register", "Slider") in types
-    assert ("register", "Custom") in types
+    assert ("register", "React") in types
     regs = {m["id"]: m for m in msgs if m["type"] == "register"}
     assert regs[slider.id]["props"]["max"] == 180
-    assert "idle" in regs[label.id]["props"]["html"]   # initial value baked in
+    assert "idle" in regs[label.id]["props"]["data"]   # initial value baked in
 
 
 def test_register_message_carries_initial_locks():
