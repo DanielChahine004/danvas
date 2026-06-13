@@ -139,6 +139,30 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `Chat`      | bidirectional  | shared chat across all viewers; editable names; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select` (file path), `@on_navigate`, `.value`, `pattern=` |
 
+### The three data verbs: `update` vs `push` vs `add`
+
+Sending data to a panel uses one of three methods, and which one a panel takes
+follows from *what kind of data it holds* — learn the rule once and you can
+guess any panel's verb:
+
+| Verb | Means | Replayed on reconnect? | Panels |
+|------|-------|:----------------------:|--------|
+| **`.update(value)`** | **replace** the panel's whole current state with a new value | ✅ yes — the latest value is the panel's state | `Label`, `Image`, `Table`, `Markdown`, `Plot`, `Slider`, `Toggle`, `Button` (`text`), `VideoFeed`, `AudioFeed` |
+| **`.push(sample)`** | **append** one sample to a live, mounted stream, applied incrementally (no full re-render) | ❌ no — it's high-rate telemetry, not state | `LivePlot`, `Custom`, `React` |
+| **`.add(values, step)`** | **record** one distribution snapshot at `step`, accumulating a history shown across steps | ✅ yes — the recorded rows are the panel's state | `Histogram` |
+
+The distinction is **replace vs. append vs. record a snapshot**. `update` is
+state (so a reconnecting browser gets the latest one); `push` is a firehose you
+don't want replayed; `add` is the one special case — a histogram keeps every
+snapshot you `add` and shows how the distribution shifts over training, so it
+needs both the values *and* the `step` they belong to.
+
+```python
+label.update("ready")                          # replace: the label IS this text
+plot.push({"train": loss}, x=step)             # append: one more point on a live curve
+weights.add(layer.weight, step=epoch)          # record: one distribution row at this step
+```
+
 ### Plot vs LivePlot
 
 - **`Plot`** renders a full Plotly figure in an iframe — great for occasional,
@@ -451,7 +475,10 @@ See [`examples/fixed_view.py`](examples/fixed_view.py).
 ## Layout: position, size, rotation
 
 Pass placement to `insert`, or change it live at any time. `x`/`y` are canvas
-coordinates, `w`/`h` are pixels, `rotation` is in degrees (clockwise). Omit
+coordinates, `w`/`h` are pixels, `rotation` is in degrees (clockwise). `width`
+and `height` are accepted as aliases for `w`/`h` everywhere a panel takes a
+size, so you can use the same spelling as the `column(width=…)` / `row(height=…)`
+containers (pass one spelling per axis, not both). Omit
 `x`/`y` and the panel is **auto-arranged** — unpositioned panels flow
 left-to-right, top-to-bottom, packed by their real size with a small gap so they
 never overlap (uniform panels read as a tidy grid; mixed sizes pack like
@@ -484,6 +511,20 @@ in sync:
 ```python
 notes = canvas.markdown("# Heading\n\nas tall as this text, no taller", h="auto")
 ```
+
+It's also a **live property**, so you can flip a panel into (or out of)
+auto-height any time after it's placed — the same as the insert-time form:
+
+```python
+notes.h = "auto"     # start fitting the height to the content now
+notes.h = 240        # back to a fixed 240px (assigning a number turns auto off)
+```
+
+Auto-height is a Custom-panel feature: setting `h="auto"` on a non-Custom panel
+(a `Slider`, a `Label`, …) warns and leaves its height unchanged, rather than
+silently shipping the string to the frontend. (Use `comp.h = "auto"` — the live
+property — not `comp.update(h="auto")`; `update()` carries a panel's *value*,
+not its layout.)
 
 The fit lands right after the panel first renders (until then it uses the
 default height), so a panel placed `below=` an auto-height anchor is positioned
@@ -525,7 +566,8 @@ with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
 ```
 
 `grid(cols=n)` lays uniform `slot=(width, height)` cells out `cols` per row.
-`column(width=…)` and `row(height=…)` flow along one axis and let each panel keep
+`column(width=…)` and `row(height=…)` (the cross-axis size also accepts the
+`w`/`h` spelling) flow along one axis and let each panel keep
 its **natural size** on the other — so a strip of mixed controls (a label, a few
 buttons, a slider) isn't squashed to one height:
 

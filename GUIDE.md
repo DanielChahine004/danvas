@@ -378,17 +378,31 @@ through a few hooks — `register_props()`, `state_payload()`, `update()`, and
 
 This is the two-directions-of-data model in practice.
 
-### Python → browser: `update()` / `push()`
+### Python → browser: the three data verbs
+
+Sending data into a panel uses one of **three** methods, and which a panel takes
+follows from *what kind of data it holds*. Learn the rule once — **replace vs.
+append vs. record a snapshot** — and you can guess any panel's verb:
 
 ```python
-slider.update(42)              # move the slider from Python
-label.update("ready")          # set the label text
-toggle.update("on")            # set the toggle
-liveplot.push({"temp": 21.5})  # stream a data point
+slider.update(42)              # replace: move the slider from Python
+label.update("ready")          # replace: set the label text
+liveplot.push({"temp": 21.5})  # append: one more point on a live stream
+weights.add(layer.weight, step=epoch)  # record: one distribution snapshot
 ```
 
-`update()` carries state — a reconnecting browser replays the latest value
-automatically. `push()` is for high-rate streams that you don't need replayed.
+| Verb | Means | Replayed on reconnect? | Panels |
+|---|---|:---:|---|
+| **`.update(value)`** | **replace** the panel's whole state with a new value | ✅ — the latest value *is* the state | `Label`, `Image`, `Table`, `Markdown`, `Plot`, `Slider`, `Toggle`, `VideoFeed`, `AudioFeed` |
+| **`.push(sample)`** | **append** a sample to a live, mounted stream (applied incrementally, no re-render) | ❌ — high-rate telemetry, not state | `LivePlot`, `Custom`, `React` |
+| **`.add(values, step)`** | **record** one distribution snapshot at `step`, building a history shown across steps | ✅ — the recorded rows are the state | `Histogram` |
+
+The why behind the split: `update()` carries **state**, so a reconnecting
+browser replays the latest value automatically. `push()` is a **firehose** of
+points you don't want replayed. `add()` is the one special case — a `Histogram`
+keeps *every* snapshot you record (not just the last), so it needs both the
+`values` and the `step` they belong to, and shows how the distribution shifts
+over training.
 
 ### Browser → Python: callbacks
 
@@ -478,7 +492,10 @@ comp.resize(w=400, h=200)
 comp.rotation = 30       # degrees, clockwise
 ```
 
-`x / y / w / h / rotation` are all readable and assignable. Omit `x`/`y` at
+`x / y / w / h / rotation` are all readable and assignable. `width` and `height`
+are accepted as aliases for `w`/`h` at insert time, matching the
+`column(width=…)` / `row(height=…)` container spelling (pass one per axis, not
+both). Omit `x`/`y` at
 insert and the frontend auto-arranges the panel: unpositioned panels flow
 left-to-right, top-to-bottom, packed by their real size with a small gap, so
 they never overlap (uniform panels read as a tidy grid; mixed sizes pack like
@@ -494,6 +511,12 @@ Width stays yours:
 ```python
 canvas.markdown("# Notes\n\nexactly as tall as this text", h="auto")
 ```
+
+`h="auto"` is also a live property — `comp.h = "auto"` switches a placed
+Custom-based panel into content-fit mode, and assigning a number
+(`comp.h = 240`) switches it back. On a non-Custom panel (a `Slider`, `Label`,
+…) it warns and leaves the height alone. Set it as a property, not via
+`update()` — `update()` carries a panel's *value*, not its layout.
 
 Or skip coordinates entirely and place panels **relative to each other** with
 `below=` / `above=` / `right_of=` / `left_of=` (an already-placed component or
@@ -520,7 +543,8 @@ with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
 ```
 
 `grid(cols=n)` lays uniform `slot=(w, h)` cells out `cols` per row;
-`column(width=…)` and `row(height=…)` flow along one axis and keep each panel's
+`column(width=…)` and `row(height=…)` (the cross-axis size also takes the `w`/`h`
+spelling) flow along one axis and keep each panel's
 **natural size** on the other, so a strip of mixed controls (a label, buttons, a
 slider) isn't squashed to one height. An explicit `x`/`y` or a relative anchor
 still overrides placement for that one panel, so you can mix the two freely.

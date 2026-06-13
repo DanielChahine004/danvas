@@ -67,7 +67,7 @@ canvas = pycanvas.Canvas()
 # --- controls: a left column of panels we drive the run with ----------------
 # `canvas.column(...)` auto-stacks whatever we insert, each keeping its natural
 # height, so we never hand-place a control.
-with canvas.column(width=320, gap=12, origin=(40, 40)):
+with canvas.column(w=320, gap=12, origin=(40, 40)):
     status = canvas.label("status", "ready — press start")
     start = canvas.button("start / pause", text="Start")
     reset = canvas.button("reset", text="Reset")
@@ -75,12 +75,12 @@ with canvas.column(width=320, gap=12, origin=(40, 40)):
 
 # --- charts: make each panel once, then push to it in the loop --------------
 loss = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6, x=440, y=40, w=580, h=280)
-acc = canvas.live_plot("accuracy", traces=["train", "val"], smoothing=0.6,below=loss, w=580, h=280)
-lr_plot = canvas.live_plot("learning rate", below=acc, w=580, h=220)  # unsmoothed
+acc = canvas.live_plot("accuracy", traces=["train", "val"], smoothing=0.6, below=loss, w=580, h=280)
+lr_plot = canvas.live_plot("lr_plot", label="learning rate", below=acc, w=580, h=220)  # unsmoothed
 weights = canvas.histogram("weights", bins=40, below=lr_plot, w=580, h=300)
 
 # --- run summary: hyperparameters, sample predictions, a text log -----------
-with canvas.column(width=460, gap=16, origin=(1060, 40)):
+with canvas.column(w=460, gap=16, origin=(1060, 40)):
     canvas.table(HPARAMS, name="hparams", h="auto")        # flat dict -> table
     preds = canvas.image(sample_grid(0), name="predictions", h="auto")
     log = canvas.markdown("### run log\n\n_waiting to start…_", name="run log", h="auto")

@@ -173,6 +173,31 @@ class Custom(BaseComponent):
             self._js = js
         self._send_update({"html": self._wrap(self._document())})
 
+    def _set_auto_h(self):
+        """Enable content-fit height live (``comp.h = "auto"``).
+
+        Flips the panel into auto-height and re-sends the document so the iframe
+        starts measuring its content and reporting the height back — the same
+        machinery as passing ``h="auto"`` at insert, but available any time. A
+        no-op if already auto. (To go back to a fixed height, assign a number:
+        ``comp.h = 240``.)
+        """
+        if self._auto_h:
+            return
+        self._auto_h = True
+        # Re-wrap with the fit script so the running iframe begins reporting its
+        # height. Safe before serving — _send_update is a no-op with no bridge,
+        # and register_props picks up the flag on first render.
+        self._send_update({"html": self._wrap(self._document())})
+
+    def _set_fixed_h(self, value):
+        """Pin the height to a number, leaving auto-height mode if it was on (so
+        the value isn't immediately overridden by the iframe's content fit)."""
+        if self._auto_h:
+            self._auto_h = False
+            self._send_update({"html": self._wrap(self._document())})
+        self.set_layout(h=value)
+
     def push(self, data):
         """Stream live data into the panel's iframe *without* reloading it.
 

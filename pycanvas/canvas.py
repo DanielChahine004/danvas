@@ -41,7 +41,7 @@ from .kernel import Kernel
 # the component itself (set in its constructor), not a placement option. The lock
 # /chrome flags come straight from the shared LAYOUT_FLAGS table. ``queue`` lives
 # here (not in every constructor) so all factories accept it uniformly.
-_INSERT_KEYS = ("x", "y", "w", "h", "rotation", "queue",
+_INSERT_KEYS = ("x", "y", "w", "h", "width", "height", "rotation", "queue",
                 "below", "above", "right_of", "left_of", "gap", *LAYOUT_FLAGS)
 
 
@@ -361,12 +361,15 @@ class Canvas:
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=True,
                grabbable=True, frame=True, name=None, queue=None,
-               below=None, above=None, right_of=None, left_of=None, gap=16):
+               below=None, above=None, right_of=None, left_of=None, gap=16,
+               width=None, height=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
         let the frontend auto-cascade. ``w``/``h`` set its size in pixels;
-        omit them to use the component's default size.
+        omit them to use the component's default size. ``width``/``height`` are
+        accepted as aliases for ``w``/``h`` (matching the ``column(width=…)`` /
+        ``row(height=…)`` spelling) — pass one spelling or the other, not both.
 
         Instead of absolute coordinates, place the panel relative to one
         already on the canvas: ``below=`` / ``above=`` / ``right_of=`` /
@@ -440,6 +443,17 @@ class Canvas:
                 "'127.0.0.1', or pass allow_remote_exec=True to serve() if you "
                 "really intend remote code execution on a trusted network."
             )
+        # ``width``/``height`` alias ``w``/``h`` so the panel spelling matches the
+        # container one (``column(width=…)``). Fold them in before any sizing
+        # logic runs; passing both spellings of an axis is a mistake.
+        if width is not None:
+            if w is not None:
+                raise TypeError("pass either w= or width=, not both")
+            w = width
+        if height is not None:
+            if h is not None:
+                raise TypeError("pass either h= or height=, not both")
+            h = height
         # ``h="auto"`` (Custom-based panels: markdown, custom, table, image…)
         # fits the panel height to its rendered content: flag the component (its
         # iframe then reports content height; the frontend resizes to fit) and
@@ -795,25 +809,35 @@ class Canvas:
         return _FlowLayout(self, "grid", cols=cols, slot=slot, gap=gap,
                            origin=origin)
 
-    def column(self, width=None, gap=16, origin=(40, 40)):
+    def column(self, width=None, gap=16, origin=(40, 40), w=None):
         """Auto-stack panels added inside a ``with`` block into one column.
 
         Each panel keeps its **natural height** (a slider stays slider-tall, a
         button button-tall), so a mixed control strip isn't squashed to one
         height. ``width`` sets a common width (``None`` keeps each panel's own);
         ``gap`` is the vertical spacing, ``origin`` the top-left corner. An
-        explicit position or relative anchor still wins for that panel.
+        explicit position or relative anchor still wins for that panel. ``w`` is
+        accepted as an alias for ``width``.
         """
+        if w is not None:
+            if width is not None:
+                raise TypeError("pass either width= or w=, not both")
+            width = w
         return _FlowLayout(self, "column", slot=(width, None), gap=gap,
                            origin=origin)
 
-    def row(self, height=None, gap=16, origin=(40, 40)):
+    def row(self, height=None, gap=16, origin=(40, 40), h=None):
         """Auto-arrange panels added inside a ``with`` block into one row.
 
         The horizontal counterpart of :meth:`column`: panels flow left to right,
         each keeping its **natural width**. ``height`` sets a common height
         (``None`` keeps each panel's own); ``gap`` is the horizontal spacing.
+        ``h`` is accepted as an alias for ``height``.
         """
+        if h is not None:
+            if height is not None:
+                raise TypeError("pass either height= or h=, not both")
+            height = h
         return _FlowLayout(self, "row", slot=(None, height), gap=gap,
                            origin=origin)
 

@@ -3,6 +3,7 @@
 import math
 import threading
 import traceback
+import warnings
 
 from .._flags import LAYOUT_FLAGS
 
@@ -134,6 +135,34 @@ class BaseComponent:
 
     @h.setter
     def h(self, value):
+        # ``comp.h = "auto"`` is the live form of ``h="auto"`` at insert: fit the
+        # height to the rendered content rather than shipping the literal string
+        # to the frontend (which expects a number). Only Custom-based panels can
+        # measure their content, so the base implementation just explains why it
+        # can't and leaves the height unchanged.
+        if value == "auto":
+            self._set_auto_h()
+        else:
+            self._set_fixed_h(value)
+
+    def _set_auto_h(self):
+        """Turn on content-fit height (``h="auto"``).
+
+        Overridden by :class:`~pycanvas.Custom` (and its subclasses — markdown,
+        table, image, …), the only panels whose content is measurable in the
+        browser. The base panel has a fixed height it can't fit, so this warns
+        and leaves the height as-is rather than failing or silently breaking.
+        """
+        warnings.warn(
+            f"h='auto' is only supported on Custom-based panels (custom, "
+            f"markdown, table, image, …); {type(self).__name__} keeps its "
+            f"current height", stacklevel=3,
+        )
+
+    def _set_fixed_h(self, value):
+        """Set an explicit pixel height. Custom-based panels override this to
+        also leave auto-height mode, so a numeric assignment after ``h="auto"``
+        sticks instead of being overridden by the iframe's fit loop."""
         self.set_layout(h=value)
 
     @property
