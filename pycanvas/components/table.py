@@ -1,191 +1,280 @@
-"""Table: show tabular data as an interactive panel.
+"""Table: show tabular data as an interactive, native (React) canvas panel.
 
 Accepts a pandas DataFrame/Series, a list of dicts, a list of rows
 (lists/tuples), or a dict of columns. pandas is duck-typed, so it isn't a hard
-dependency. The rendered panel is interactive in the browser:
+dependency. The panel is a **native React subtree** (not a sandboxed iframe), so
+it re-renders sharp at every zoom level — an iframe is rasterised and then scaled
+when the canvas zooms, which blurs dense text. It is interactive in the browser:
 
 - **column profile** under each header — the inferred dtype (``int``, ``float``,
   ``bool``, ``str``, ``mixed``) and a red ``n% null`` badge when values are
   missing; hover the header for fuller stats (unique count, min/max/mean/median);
 - **click a header** to sort by that column (cycles ascending → descending →
   original order); numeric columns sort numerically, everything else by text;
-- **filter box** hides rows that don't contain the typed text;
-- **distributions toggle** reveals a per-column mini-chart under each header — a
-  histogram for numeric columns, a top-values bar chart for categorical ones —
-  computed in Python and drawn as inline SVG. **Click a bar** to filter the table
-  to that bin (numeric) or category (text); a chip in the toolbar shows the
-  active filter and clears it on click.
+- **filter box** hides rows that don't contain the typed text (across the whole
+  dataset, not just the visible page);
+- **pagination** for large tables: rows are shown ``PAGE_SIZE`` at a time with
+  prev/next arrows and a typable page field (its up/down spinners step a page).
+  Sorting and filtering apply to *all* rows, including those on other pages;
+- **per-column distributions** under each header — a histogram for numeric
+  columns, a top-values bar chart for categorical ones — always shown. Numeric
+  charts caption their min, mean, and max; hovering a bar shows its count and the
+  share of the column it represents. **Click a bar** to filter the table to that
+  bin (numeric) or category (text); a chip in the toolbar shows the active filter
+  and clears it on click.
 
-Everything runs inside the sandboxed ``Custom`` iframe with no extra
-dependencies; ``update(data)`` re-renders with fresh data.
+Python normalises the data and computes the per-column profiles/distributions,
+then hands the columns, rows, and that metadata to the React component as props;
+the browser owns sort/filter/pagination over the full dataset. ``update(data)``
+re-renders with fresh data.
 """
 
-import html as _html
 from collections import Counter
 
-from .custom import Custom
-from ._doc import document
+from .react import React
 
-# Beyond this, only the first MAX_ROWS are rendered (the panel stays responsive);
-# distributions are still computed over the full data so they stay accurate.
-MAX_ROWS = 2000
+# The full dataset is shipped to the panel and the browser renders one
+# PAGE_SIZE-row page into the DOM at a time (a 600k-row table is far too much
+# DOM to render at once). Sorting and filtering run over the whole dataset in
+# React — not just the rendered page — so they cover unseen rows; pagination
+# controls page through the result.
+PAGE_SIZE = 2000
 
-_TABLE_CSS = (
-    "body{margin:0;padding:0}"
-    ".pc-wrap{display:flex;flex-direction:column;height:100vh;font-size:12px}"
-    ".pc-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;"
-    "border-bottom:1px solid #e2e8f0;flex:none}"
-    ".pc-filter{flex:1;min-width:60px;padding:3px 6px;border:1px solid #cbd5e1;"
-    "border-radius:4px;font-size:12px}"
-    ".pc-btn{padding:3px 8px;border:1px solid #cbd5e1;border-radius:4px;"
-    "background:#f8fafc;cursor:pointer;font-size:11px;color:#334155}"
-    ".pc-btn.on{background:#2563eb;color:#fff;border-color:#2563eb}"
-    ".pc-count{color:#64748b;font-size:11px;white-space:nowrap}"
-    ".pc-scroll{overflow:auto;flex:1}"
-    # Auto-height (h="auto"): size the table to its content instead of pinning it
-    # to the panel height — the wrap stops filling 100vh and the scroll area
-    # grows naturally, so the measured height converges (no fit-loop flutter).
-    "body.pc-auto-h .pc-wrap{height:auto}"
-    "body.pc-auto-h .pc-scroll{overflow:visible;flex:none}"
-    "table{border-collapse:collapse;width:100%}"
-    "th,td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;"
-    "white-space:nowrap}"
-    "thead th{position:sticky;top:0;background:#f8fafc;font-weight:600;"
-    "cursor:pointer;user-select:none}"
-    ".pc-th-meta{font-weight:400;color:#94a3b8;font-size:10px;margin-top:1px;"
-    "white-space:nowrap}"
-    ".pc-th-null{color:#e11d48}"
-    "thead tr.pc-dist th{position:static;background:#fff;cursor:default;"
-    "font-weight:400;padding:3px 6px;vertical-align:bottom}"
-    "tr:nth-child(even) td{background:#f8fafc}"
-    "td{font-variant-numeric:tabular-nums}"
-    ".pc-arrow{color:#94a3b8;font-size:10px;margin-left:3px}"
-    ".pc-spark{width:100%;height:28px;display:block}"
-    ".pc-spark rect{fill:#60a5fa;cursor:pointer}"
-    ".pc-spark rect:hover{fill:#3b82f6}"
-    ".pc-spark rect.pc-sel{fill:#1d4ed8}"
-    ".pc-cap{color:#94a3b8;font-size:9px;margin-top:1px;display:flex;"
-    "justify-content:space-between;gap:6px}"
-    ".pc-note{padding:4px 8px;color:#94a3b8;font-size:11px;flex:none}"
-    ".pc-hidden{display:none}"
-)
-
-# Plain string (not an f-string) so the braces don't need escaping. Operates on
-# the single table in the iframe: sort on header click, live filter, toggle the
-# distribution row. Sorting reorders the tbody rows; the original order is kept
-# so a third click on a column restores it.
-_TABLE_JS = """
-(function(){
-  var tbl = document.querySelector('table'); if(!tbl) return;
-  var tbody = tbl.tBodies[0];
-  var rows = Array.prototype.slice.call(tbody.rows);
-  var heads = Array.prototype.slice.call(tbl.querySelectorAll('thead tr.pc-head th'));
-  var state = {col:-1, dir:0};
-  function val(tr, i, num){
-    var t = (tr.cells[i] ? tr.cells[i].textContent : '');
-    return num ? parseFloat(t) : t.toLowerCase();
-  }
-  heads.forEach(function(th, i){
-    th.addEventListener('click', function(){
-      var num = th.getAttribute('data-num') === '1';
-      if(state.col !== i){ state.col = i; state.dir = 1; }
-      else { state.dir = state.dir === 1 ? -1 : (state.dir === -1 ? 0 : 1); }
-      heads.forEach(function(h){ var a=h.querySelector('.pc-arrow'); if(a) a.textContent=''; });
-      if(state.dir === 0){ state.col = -1; rows.forEach(function(r){ tbody.appendChild(r); }); return; }
-      var arrow = th.querySelector('.pc-arrow'); if(arrow) arrow.textContent = state.dir===1?'\\u25B2':'\\u25BC';
-      var s = rows.slice().sort(function(a,b){
-        var va=val(a,i,num), vb=val(b,i,num);
-        if(num){ if(isNaN(va)) va=-Infinity; if(isNaN(vb)) vb=-Infinity; }
-        if(va<vb) return -state.dir; if(va>vb) return state.dir; return 0;
-      });
-      s.forEach(function(r){ tbody.appendChild(r); });
-    });
-  });
-  var filter = document.querySelector('.pc-filter');
-  var count = document.querySelector('.pc-count');
-  var chip = document.querySelector('.pc-chip');
-  var total = rows.length;
-  function setCount(v){ count.textContent = (v===total ? total+' rows' : v+' / '+total); }
-  // colFilter: an optional column-aware predicate set by clicking a dist bar.
-  // null when inactive; otherwise {col, num, lo, hi} or {col, val}.
-  var colFilter = null, selRect = null;
-  function apply(){
-    var q = filter ? filter.value.toLowerCase() : '', vis = 0;
-    rows.forEach(function(r){
-      var show = !q || r.textContent.toLowerCase().indexOf(q) >= 0;
-      if(show && colFilter){
-        var cell = r.cells[colFilter.col];
-        var t = cell ? cell.textContent : '';
-        if(colFilter.num){
-          var v = parseFloat(t);
-          show = !isNaN(v) && v >= colFilter.lo && v <= colFilter.hi;
-        } else { show = (t === colFilter.val); }
-      }
-      r.classList.toggle('pc-hidden', !show); if(show) vis++;
-    });
-    setCount(vis);
-  }
-  function clearColFilter(){
-    colFilter = null;
-    if(selRect){ selRect.classList.remove('pc-sel'); selRect = null; }
-    if(chip){ chip.classList.add('pc-hidden'); chip.classList.remove('on'); }
-    apply();
-  }
-  if(filter) filter.addEventListener('input', apply);
-  if(chip) chip.addEventListener('click', clearColFilter);
-  // Click a distribution bar to filter the column to that bin / category.
-  Array.prototype.forEach.call(tbl.querySelectorAll('.pc-spark rect'), function(rect){
-    if(rect.getAttribute('data-col') === null) return;
-    rect.addEventListener('click', function(){
-      if(selRect === rect){ clearColFilter(); return; }
-      if(selRect) selRect.classList.remove('pc-sel');
-      selRect = rect; rect.classList.add('pc-sel');
-      var col = +rect.getAttribute('data-col');
-      var nm = rect.getAttribute('data-name') || ('col ' + col);
-      var label;
-      if(rect.getAttribute('data-num') === '1'){
-        var lo = parseFloat(rect.getAttribute('data-lo'));
-        var hi = parseFloat(rect.getAttribute('data-hi'));
-        colFilter = {col:col, num:true, lo:lo, hi:hi};
-        label = nm + ' \\u2208 [' + rect.getAttribute('data-lo') + ', ' + rect.getAttribute('data-hi') + ']';
-      } else {
-        var val = rect.getAttribute('data-val');
-        colFilter = {col:col, num:false, val:val};
-        label = nm + ' = ' + val;
-      }
-      if(chip){ chip.textContent = label + '  \\u2715'; chip.classList.remove('pc-hidden'); chip.classList.add('on'); }
-      apply();
-    });
-  });
-  setCount(total);
-  var distRow = tbl.querySelector('thead tr.pc-dist');
-  var distBtn = document.querySelector('.pc-dist');
-  if(distBtn && distRow){
-    distBtn.addEventListener('click', function(){
-      var hidden = distRow.classList.toggle('pc-hidden');
-      distBtn.classList.toggle('on', !hidden);
-    });
-  }
-})();
+# Scoped under `.pc-tbl` (a native node shares the page, so bare `table`/`th`
+# selectors would leak). The grid keeps its own light "notebook" look rather than
+# following the canvas theme, matching how the same data renders in a notebook.
+_TABLE_CSS = """
+.pc-tbl{display:flex;flex-direction:column;height:100%;font-size:12px;
+ background:#fff;color:#0f172a;border-radius:4px;overflow:hidden;box-sizing:border-box}
+.pc-tbl .pc-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;
+ border-bottom:1px solid #e2e8f0;flex:none}
+.pc-tbl .pc-filter{flex:1;min-width:60px;padding:3px 6px;border:1px solid #cbd5e1;
+ border-radius:4px;font-size:12px}
+.pc-tbl .pc-btn{padding:3px 8px;border:1px solid #cbd5e1;border-radius:4px;
+ background:#f8fafc;cursor:pointer;font-size:11px;color:#334155}
+.pc-tbl .pc-btn.on{background:#2563eb;color:#fff;border-color:#2563eb}
+.pc-tbl .pc-count{color:#64748b;font-size:11px;white-space:nowrap}
+.pc-tbl .pc-scroll{overflow:auto;flex:1}
+.pc-tbl table{border-collapse:collapse;width:100%}
+.pc-tbl th,.pc-tbl td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;
+ white-space:nowrap}
+.pc-tbl thead th{position:sticky;top:0;background:#f8fafc;font-weight:600;
+ cursor:pointer;user-select:none}
+.pc-tbl .pc-th-meta{font-weight:400;color:#94a3b8;font-size:10px;margin-top:1px;
+ white-space:nowrap}
+.pc-tbl .pc-th-null{color:#e11d48}
+.pc-tbl thead tr.pc-dist th{position:static;background:#fff;cursor:default;
+ font-weight:400;padding:3px 6px;vertical-align:bottom}
+.pc-tbl tbody tr:nth-child(even) td{background:#f8fafc}
+.pc-tbl td{font-variant-numeric:tabular-nums}
+.pc-tbl .pc-arrow{color:#94a3b8;font-size:10px;margin-left:3px}
+.pc-tbl .pc-spark{width:100%;height:28px;display:block}
+.pc-tbl .pc-spark rect{fill:#60a5fa;cursor:pointer}
+.pc-tbl .pc-spark rect:hover{fill:#3b82f6}
+.pc-tbl .pc-spark rect.pc-sel{fill:#1d4ed8}
+.pc-tbl .pc-cap{color:#94a3b8;font-size:9px;margin-top:1px;display:flex;
+ justify-content:space-between;gap:6px}
+.pc-tbl .pc-pager{display:flex;align-items:center;gap:3px;flex:none}
+.pc-tbl .pc-pg{border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;
+ cursor:pointer;color:#334155;font-size:13px;line-height:1;padding:1px 7px}
+.pc-tbl .pc-pg:hover{background:#eef2f7}
+.pc-tbl .pc-page{width:46px;padding:3px 4px;border:1px solid #cbd5e1;
+ border-radius:4px;font-size:11px;text-align:right}
+.pc-tbl .pc-pages{color:#64748b;font-size:11px;white-space:nowrap}
 """
 
+# The React component. Written as a plain string (no str.format/f-string) so its
+# JSX braces are left intact; only the __CSS__ marker is substituted below. props
+# carries cols / numeric / rows (display strings) / profiles / dists / pageSize;
+# all sort/filter/pagination state lives in React, operating over the full data.
+_TABLE_SOURCE = """
+function Component({ props }) {
+  const cols = props.cols || [];
+  const numeric = props.numeric || [];
+  const rows = props.rows || [];
+  const profiles = props.profiles || [];
+  const dists = props.dists || [];
+  const PAGE = props.pageSize || 2000;
+  const total = rows.length;
 
-class Table(Custom):
-    component = "Custom"
+  const [sortCol, setSortCol] = React.useState(-1);
+  const [sortDir, setSortDir] = React.useState(0);  // 1 asc, -1 desc, 0 none
+  const [q, setQ] = React.useState("");
+  const [colFilter, setColFilter] = React.useState(null);
+  const [page, setPage] = React.useState(1);
+
+  // One lowercased haystack per row for the free-text filter. The \\u0001
+  // separator keeps a query from matching across a cell boundary.
+  const hay = React.useMemo(
+    () => rows.map((r) => r.join("\\u0001").toLowerCase()), [rows]);
+
+  // view: the row indices left after filtering, in sorted order. Recomputed only
+  // when an input changes, then a page of it is rendered.
+  const view = React.useMemo(() => {
+    const ql = q.toLowerCase();
+    const idx = [];
+    for (let i = 0; i < total; i++) {
+      if (ql && hay[i].indexOf(ql) < 0) continue;
+      if (colFilter) {
+        let t = rows[i][colFilter.col];
+        if (t == null) t = "";
+        if (colFilter.num) {
+          const v = parseFloat(t);
+          if (isNaN(v) || v < colFilter.lo || v > colFilter.hi) continue;
+        } else if (t !== colFilter.val) continue;
+      }
+      idx.push(i);
+    }
+    if (sortCol >= 0 && sortDir !== 0) {
+      const c = sortCol, num = numeric[c], dir = sortDir;
+      idx.sort((a, b) => {
+        let va = rows[a][c], vb = rows[b][c];
+        if (num) {
+          va = parseFloat(va); vb = parseFloat(vb);
+          if (isNaN(va)) va = -Infinity;
+          if (isNaN(vb)) vb = -Infinity;
+        } else { va = ("" + va).toLowerCase(); vb = ("" + vb).toLowerCase(); }
+        if (va < vb) return -dir;
+        if (va > vb) return dir;
+        return 0;
+      });
+    }
+    return idx;
+  }, [q, colFilter, sortCol, sortDir, rows, hay, numeric, total]);
+
+  const npages = Math.max(1, Math.ceil(view.length / PAGE));
+  const pg = Math.min(Math.max(1, page), npages);  // clamp for render
+  const pageRows = view.slice((pg - 1) * PAGE, (pg - 1) * PAGE + PAGE);
+
+  function clickHeader(i) {
+    if (sortCol !== i) { setSortCol(i); setSortDir(1); return; }
+    const nd = sortDir === 1 ? -1 : (sortDir === -1 ? 0 : 1);
+    setSortDir(nd);
+    if (nd === 0) setSortCol(-1);
+  }
+  function pickBar(c, bar, num) {
+    const name = cols[c];
+    const cf = num
+      ? { col: c, num: true, lo: Number(bar.lo), hi: Number(bar.hi),
+          label: name + " \\u2208 [" + bar.lo + ", " + bar.hi + "]" }
+      : { col: c, num: false, val: bar.val, label: name + " = " + bar.val };
+    setColFilter((p) => (p && p.col === c && p.label === cf.label) ? null : cf);
+    setPage(1);
+  }
+  function barSelected(c, bar, num) {
+    if (!colFilter || colFilter.col !== c) return false;
+    return num
+      ? (colFilter.num && colFilter.lo === Number(bar.lo) && colFilter.hi === Number(bar.hi))
+      : (!colFilter.num && colFilter.val === bar.val);
+  }
+  function gotoPage(v) { if (!isNaN(v)) setPage(Math.min(npages, Math.max(1, v))); }
+
+  function spark(c, dist) {
+    if (!dist || !dist.bars || !dist.bars.length) return null;
+    const n = dist.bars.length, bw = 120 / n;
+    return (
+      <svg className="pc-spark" viewBox="0 0 120 28" preserveAspectRatio="none">
+        {dist.bars.map((bar, i) => {
+          const bh = Math.max(1, bar.h * 26);
+          return (
+            <rect key={i} x={i * bw} y={28 - bh} width={Math.max(1, bw - 1)} height={bh}
+                  className={barSelected(c, bar, dist.num) ? "pc-sel" : ""}
+                  onClick={() => pickBar(c, bar, dist.num)}>
+              <title>{bar.title}</title>
+            </rect>
+          );
+        })}
+      </svg>
+    );
+  }
+
+  const count = view.length === total
+    ? total.toLocaleString() + " rows"
+    : view.length.toLocaleString() + " / " + total.toLocaleString();
+
+  return (
+    <div className="pc-tbl">
+      <style>{`__CSS__`}</style>
+      <div className="pc-bar">
+        <input className="pc-filter" placeholder="filter rows\\u2026" value={q}
+               onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+        {colFilter
+          ? <button className="pc-btn pc-chip on" onClick={() => { setColFilter(null); setPage(1); }}>
+              {colFilter.label + "  \\u2715"}
+            </button>
+          : null}
+        <span className="pc-count">{count}</span>
+        {npages > 1
+          ? <div className="pc-pager">
+              <button className="pc-pg" title="previous page"
+                      onClick={() => gotoPage(pg - 1)}>{"\\u2039"}</button>
+              <input className="pc-page" type="number" min={1} max={npages} value={pg}
+                     title="page \\u2014 type a number or use the up/down arrows"
+                     onChange={(e) => gotoPage(parseInt(e.target.value, 10))} />
+              <span className="pc-pages">{"/ " + npages.toLocaleString()}</span>
+              <button className="pc-pg" title="next page"
+                      onClick={() => gotoPage(pg + 1)}>{"\\u203a"}</button>
+            </div>
+          : null}
+      </div>
+      <div className="pc-scroll">
+        <table>
+          <thead>
+            <tr className="pc-head">
+              {cols.map((c, i) => (
+                <th key={i} data-num={numeric[i] ? 1 : 0}
+                    title={profiles[i] ? profiles[i].tip : ""}
+                    onClick={() => clickHeader(i)}>
+                  {c}
+                  <span className="pc-arrow">
+                    {sortCol === i ? (sortDir === 1 ? "\\u25B2" : sortDir === -1 ? "\\u25BC" : "") : ""}
+                  </span>
+                  <div className="pc-th-meta"
+                       dangerouslySetInnerHTML={{ __html: profiles[i] ? profiles[i].meta : "" }} />
+                </th>
+              ))}
+            </tr>
+            <tr className="pc-dist">
+              {cols.map((c, i) => (
+                <th key={i}>
+                  {spark(i, dists[i])}
+                  {dists[i] && dists[i].cap
+                    ? <div className="pc-cap">
+                        {dists[i].cap.map((s, k) => <span key={k}>{s}</span>)}
+                      </div>
+                    : null}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((ri) => (
+              <tr key={ri}>
+                {rows[ri].map((cell, ci) => <td key={ci}>{cell == null ? "" : cell}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+""".replace("__CSS__", _TABLE_CSS)
+
+
+class Table(React):
     default_w = 520
     default_h = 360
 
     def __init__(self, data, name="table", label=None, w=None, h=None):
-        super().__init__(html=self._render(data), name=name, label=label,
-                         w=w, h=h)
+        cols, rows = _normalize(data)
+        super().__init__(source=_TABLE_SOURCE, name=name, label=label, w=w, h=h,
+                         props=_table_props(cols, rows))
 
     def update(self, data):
         """Replace the table contents, live."""
-        super().update(self._render(data))
-
-    def _render(self, data):
         cols, rows = _normalize(data)
-        return document(_table_body(cols, rows), _TABLE_CSS)
+        super().update(**_table_props(cols, rows))
 
 
 # -- input normalization -----------------------------------------------------
@@ -244,9 +333,19 @@ def _normalize(data):
     raise TypeError(f"can't render {type(data).__name__} as a table")
 
 
-# -- rendering ---------------------------------------------------------------
-def _cell(v):
-    return _html.escape("" if v is None else str(v))
+# -- props (Python computes everything the React panel needs) ----------------
+def _str(v):
+    """A cell's display string. The browser renders it via React (text nodes are
+    escaped), so the payload carries raw strings, not HTML."""
+    return "" if v is None else str(v)
+
+
+def _pct(p):
+    """Format a percentage: whole numbers at/above 1% (and exactly 0), one
+    decimal in between (so a tiny but non-zero share doesn't round to ``0``)."""
+    if p == 0 or p >= 1:
+        return f"{p:.0f}"
+    return f"{p:.1f}"
 
 
 def _is_number(v):
@@ -263,13 +362,41 @@ def _is_number(v):
     return False
 
 
+def _table_props(cols, rows):
+    """Build the prop dict the React table renders from: headers, the numeric
+    flags, every row as display strings, and each column's profile + distribution.
+    """
+    cols = [str(c) for c in cols]
+    ncol = len(cols)
+    # Classify each column: numeric if the majority of its non-empty cells parse
+    # as numbers. Drives numeric sorting and which distribution chart to draw.
+    numeric = []
+    for i in range(ncol):
+        present = [r[i] for r in rows if i < len(r) and r[i] not in (None, "")]
+        numeric.append(bool(present)
+                       and sum(_is_number(v) for v in present) >= 0.6 * len(present))
+    profiles = [
+        _column_profile([r[i] for r in rows if i < len(r)], numeric[i])
+        for i in range(ncol)
+    ]
+    dists = [
+        _distribution([r[i] for r in rows if i < len(r)], numeric[i])
+        for i in range(ncol)
+    ]
+    data_rows = [[_str(r[i]) if i < len(r) else "" for i in range(ncol)]
+                 for r in rows]
+    return {"cols": cols, "numeric": numeric, "rows": data_rows,
+            "profiles": profiles, "dists": dists, "pageSize": PAGE_SIZE}
+
+
 def _column_profile(values, numeric):
     """Summarize one column for the header: a compact ``meta`` line shown under
     the column name and a fuller ``tip`` string surfaced on hover.
 
-    ``meta`` carries the inferred dtype plus a missing-value badge; ``tip`` adds
-    unique counts and (for numeric columns) min/max/mean/median. Never raises —
-    a single odd column shouldn't break the header.
+    ``meta`` carries the inferred dtype plus a missing-value badge (a small HTML
+    fragment, rendered into the header); ``tip`` adds unique counts and (for
+    numeric columns) min/max/mean/median. Never raises — a single odd column
+    shouldn't break the header.
     """
     try:
         total = len(values)
@@ -282,8 +409,7 @@ def _column_profile(values, numeric):
         tip = [f"{dtype}", f"{unique:,} unique", f"{len(present):,} / {total:,} filled"]
         if missing:
             pct = missing / total * 100 if total else 0
-            shown = f"{pct:.0f}" if pct >= 1 else f"{pct:.1f}"
-            meta += f' · <span class="pc-th-null">{shown}% null</span>'
+            meta += f' · <span class="pc-th-null">{_pct(pct)}% null</span>'
             tip.append(f"{missing:,} null")
 
         if numeric:
@@ -328,100 +454,25 @@ def _dtype_label(present, numeric):
     return "str" if types <= {"str"} else "mixed"
 
 
-def _table_body(cols, rows):
-    ncol = len(cols)
-    # Classify each column: numeric if the majority of its non-empty cells parse
-    # as numbers. Drives numeric sorting and which distribution chart to draw.
-    numeric = []
-    for i in range(ncol):
-        present = [r[i] for r in rows if i < len(r) and r[i] not in (None, "")]
-        numeric.append(bool(present)
-                       and sum(_is_number(v) for v in present) >= 0.6 * len(present))
+# -- per-column distribution data (rendered as inline SVG in the panel) -------
+def _distribution(values, numeric):
+    """A compact summary of one column's values for the React panel to draw.
 
-    profiles = [
-        _column_profile([r[i] for r in rows if i < len(r)], numeric[i])
-        for i in range(ncol)
-    ]
-    head_cells = "".join(
-        f'<th data-num="{1 if numeric[i] else 0}" title="{_cell(profiles[i]["tip"])}">'
-        f'{_cell(c)}<span class="pc-arrow"></span>'
-        f'<div class="pc-th-meta">{profiles[i]["meta"]}</div></th>'
-        for i, c in enumerate(cols)
-    )
-    dist_cells = "".join(
-        f"<th>{_distribution([r[i] for r in rows if i < len(r)], numeric[i], i, cols[i])}</th>"
-        for i in range(ncol)
-    )
-
-    shown = rows[:MAX_ROWS]
-    body_rows = "".join(
-        "<tr>" + "".join(
-            f"<td>{_cell(r[i]) if i < len(r) else ''}</td>" for i in range(ncol)
-        ) + "</tr>"
-        for r in shown
-    )
-    note = (f'<div class="pc-note">showing first {MAX_ROWS:,} of '
-            f'{len(rows):,} rows</div>' if len(rows) > MAX_ROWS else "")
-
-    return (
-        '<div class="pc-wrap">'
-        '<div class="pc-bar">'
-        '<input class="pc-filter" placeholder="filter rows…">'
-        '<button class="pc-btn pc-dist">distributions</button>'
-        '<button class="pc-btn pc-chip pc-hidden"></button>'
-        '<span class="pc-count"></span>'
-        '</div>'
-        + note +
-        '<div class="pc-scroll"><table>'
-        f'<thead><tr class="pc-head">{head_cells}</tr>'
-        f'<tr class="pc-dist pc-hidden">{dist_cells}</tr></thead>'
-        f'<tbody>{body_rows}</tbody>'
-        '</table></div>'
-        '</div>'
-        f'<script>{_TABLE_JS}</script>'
-    )
-
-
-# -- per-column distribution charts (inline SVG) -----------------------------
-def _distribution(values, numeric, col, name):
-    """A compact SVG chart summarizing one column's values.
-
-    Numeric columns get a histogram; everything else a top-values bar chart.
-    ``col``/``name`` are threaded onto each bar as data attributes so the
-    frontend can turn a bar click into a column-aware filter. Returns an empty
-    string on any failure so a single odd column never breaks the whole table.
+    Numeric columns get a histogram (with a min/mean/max caption); everything
+    else a top-values bar chart. Returns ``{num, bars, cap}`` where each bar has
+    its height (0..1), a hover ``title`` (count + share), and the predicate a
+    click turns into a column filter (``lo``/``hi`` for bins, ``val`` for
+    categories). ``None`` on any failure, so an odd column never breaks the table.
     """
     try:
         if numeric:
-            return _numeric_hist(values, col, name)
-        return _category_bars(values, col, name)
+            return _numeric_hist(values)
+        return _category_bars(values)
     except Exception:
-        return ""
+        return None
 
 
-def _bars_svg(heights, titles, width=120, height=28, attrs=None):
-    """Render bar heights (0..1) as a stretch-to-fit SVG, one ``<title>`` each.
-
-    ``attrs[i]`` is an optional pre-built attribute string (``data-*`` etc.)
-    appended to bar ``i``'s ``<rect>``, carrying the filter predicate for clicks.
-    """
-    n = len(heights) or 1
-    bw = width / n
-    rects = []
-    for i, hgt in enumerate(heights):
-        bh = max(1.0, hgt * (height - 2))
-        x = i * bw
-        title = f"<title>{_cell(titles[i])}</title>" if i < len(titles) else ""
-        attr = f" {attrs[i]}" if attrs and i < len(attrs) else ""
-        rects.append(
-            f'<rect x="{x:.1f}" y="{height - bh:.1f}" width="{max(1.0, bw - 1):.1f}" '
-            f'height="{bh:.1f}"{attr}>{title}</rect>'
-        )
-    return (f'<svg class="pc-spark" viewBox="0 0 {width} {height}" '
-            f'preserveAspectRatio="none">{"".join(rects)}</svg>')
-
-
-def _numeric_hist(values, col, name, bins=12):
+def _numeric_hist(values, bins=12):
     nums = []
     for v in values:
         if v in (None, ""):
@@ -431,44 +482,40 @@ def _numeric_hist(values, col, name, bins=12):
         except (TypeError, ValueError):
             pass
     if not nums:
-        return ""
-    nm = _cell(name)
+        return None
     lo, hi = min(nums), max(nums)
+    total = len(nums)
+    mean = sum(nums) / total
     if hi == lo:
-        attrs = [f'data-col="{col}" data-num="1" data-lo="{lo:g}" data-hi="{hi:g}" '
-                 f'data-name="{nm}"']
-        svg = _bars_svg([1.0], [f"{lo:g} × {len(nums)}"], attrs=attrs)
-        return svg + f'<div class="pc-cap"><span>{lo:g}</span></div>'
+        return {"num": True, "cap": [f"{lo:g}"],
+                "bars": [{"h": 1.0, "lo": f"{lo:g}", "hi": f"{hi:g}",
+                          "title": f"{lo:g}: {total} (100%)"}]}
     counts = [0] * bins
     span = hi - lo
     for v in nums:
-        idx = int((v - lo) / span * bins)
-        counts[min(idx, bins - 1)] += 1
+        counts[min(int((v - lo) / span * bins), bins - 1)] += 1
     mx = max(counts) or 1
-    heights = [c / mx for c in counts]
-    titles = [str(c) for c in counts]
-    # Each bin carries its [lo, hi] edges so a click filters rows to that range.
-    attrs = []
+    bars = []
     for i in range(bins):
         blo = lo + span * i / bins
         bhi = lo + span * (i + 1) / bins
-        attrs.append(f'data-col="{col}" data-num="1" data-lo="{blo:g}" '
-                     f'data-hi="{bhi:g}" data-name="{nm}"')
-    cap = f'<div class="pc-cap"><span>{lo:g}</span><span>{hi:g}</span></div>'
-    return _bars_svg(heights, titles, attrs=attrs) + cap
+        c = counts[i]
+        bars.append({"h": c / mx, "lo": f"{blo:g}", "hi": f"{bhi:g}",
+                     "title": f"{blo:g} – {bhi:g}: {c} ({_pct(c / total * 100)}%)"})
+    # Caption: min (left), mean (centre), max (right) — the histogram's x-axis
+    # ends are the min/max, with the mean called out between them.
+    return {"num": True, "bars": bars,
+            "cap": [f"{lo:g}", f"μ {mean:g}", f"{hi:g}"]}
 
 
-def _category_bars(values, col, name, top=8):
+def _category_bars(values, top=8):
     counts = Counter(str(v) for v in values if v not in (None, ""))
     if not counts:
-        return ""
-    nm = _cell(name)
+        return None
+    total = sum(counts.values())
     common = counts.most_common(top)
     mx = common[0][1] or 1
-    heights = [c / mx for _, c in common]
-    titles = [f"{label}: {c}" for label, c in common]
-    # Each bar carries its exact category value so a click filters to that value.
-    attrs = [f'data-col="{col}" data-val="{_cell(label)}" data-name="{nm}"'
-             for label, _ in common]
-    cap = (f'<div class="pc-cap"><span>{len(counts):,} unique</span></div>')
-    return _bars_svg(heights, titles, attrs=attrs) + cap
+    bars = [{"h": c / mx, "val": str(label),
+             "title": f"{label}: {c} ({_pct(c / total * 100)}%)"}
+            for label, c in common]
+    return {"num": False, "bars": bars, "cap": [f"{len(counts):,} unique"]}

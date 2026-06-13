@@ -1,5 +1,7 @@
 """Tests for the value -> panel dispatcher and the display components."""
 
+import json
+
 import pycanvas
 from pycanvas import Image, Label, Markdown, Table, panel_for
 from pycanvas.components import Custom
@@ -133,16 +135,20 @@ def test_markdown_renders_headings_and_lists():
 
 
 def test_table_from_records_has_header_and_cells():
-    html = Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()["html"]
-    assert ">name<" in html and "<td>a</td>" in html
-    # The interactive table flags the numeric column, marks sortable headers,
-    # and embeds a per-column distribution chart.
-    assert 'data-num="1"' in html and 'class="pc-head"' in html and "<svg" in html
+    props = Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()
+    # The table is a native React panel: headers + cells (as display strings)
+    # ride in the JSON `data` prop, which the browser renders/paginates.
+    data = json.loads(props["data"])
+    assert data["cols"] == ["name", "v"] and ["a", "1"] in data["rows"]
+    # The numeric column is flagged, and the JSX carries sortable headers + the
+    # per-column distribution SVG.
+    assert data["numeric"] == [False, True]
+    assert "pc-head" in props["source"] and "<svg" in props["source"]
 
 
 def test_table_from_dict_of_columns():
-    html = Table({"x": [1, 2], "y": [3, 4]}).register_props()["html"]
-    assert ">x<" in html and "<td>4</td>" in html
+    data = json.loads(Table({"x": [1, 2], "y": [3, 4]}).register_props()["data"])
+    assert data["cols"] == ["x", "y"] and ["2", "4"] in data["rows"]
 
 
 def test_image_from_bytes_sniffs_mime():

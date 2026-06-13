@@ -1,4 +1,6 @@
-"""Table rendering and the h='auto' fit-loop fix."""
+"""Table normalization, profiles/distributions, and the native React panel."""
+
+import json
 
 import pycanvas
 from pycanvas.components.table import _normalize, _column_profile
@@ -45,51 +47,53 @@ def test_column_profile_floats_and_categoricals():
     assert "2 unique" in cat["tip"]
 
 
-def test_table_renders_column_profile_meta():
-    t = pycanvas.Table([{"x": 1}, {"x": 2}])
-    html = t.register_props()["html"]
-    assert "pc-th-meta" in html
+def test_table_is_a_native_react_panel_with_data():
+    # The table renders as a native React component (sharp at any zoom): its
+    # headers/rows/profiles ride in the JSON `data` prop, the interactive JSX in
+    # `source`.
+    props = pycanvas.Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()
+    assert "source" in props and "data" in props and "html" not in props
+    data = json.loads(props["data"])
+    assert data["cols"] == ["name", "v"]
+    assert ["a", "1"] in data["rows"]          # cells are display strings
+    assert data["numeric"] == [False, True]    # v is the numeric column
+    assert "pc-th-meta" in props["source"] and "pc-head" in props["source"]
 
 
-def test_distribution_bars_carry_clickable_filter_attrs():
-    # Each dist bar embeds the predicate a click turns into a column filter:
-    # numeric bins carry data-lo/data-hi, categorical bars carry data-val.
-    t = pycanvas.Table([{"cat": "a", "n": 1}, {"cat": "b", "n": 2},
-                        {"cat": "a", "n": 9}])
-    html = t.register_props()["html"]
-    assert 'data-num="1" data-lo=' in html      # numeric histogram bin
-    assert "data-val=" in html                   # categorical bar
-    assert "pc-chip" in html                      # active-filter clear chip
+def test_distribution_data_carries_clickable_predicates():
+    # Each column's distribution rides in `data`: numeric bins carry lo/hi (a
+    # click filters to that range), categorical bars carry their value. The JSX
+    # holds the active-filter chip.
+    props = pycanvas.Table([{"cat": "a", "n": 1}, {"cat": "b", "n": 2},
+                            {"cat": "a", "n": 9}]).register_props()
+    data = json.loads(props["data"])
+    cat, num = data["dists"][0], data["dists"][1]
+    assert num["num"] is True and "lo" in num["bars"][0] and "hi" in num["bars"][0]
+    assert cat["num"] is False and cat["bars"][0]["val"] == "a"
+    assert "pc-chip" in props["source"]
 
 
-def test_table_renders_filter_and_distribution_hooks():
-    t = pycanvas.Table([{"x": 1}, {"x": 2}])
-    html = t.register_props()["html"]
-    assert "pc-filter" in html and "pc-dist" in html
+def test_numeric_distribution_caption_has_min_mean_max():
+    data = json.loads(pycanvas.Table({"n": [1, 5, 9]}).register_props()["data"])
+    cap = data["dists"][0]["cap"]
+    assert cap[0] == "1" and cap[-1] == "9" and cap[1].startswith("μ")
 
 
-def test_auto_height_table_sizes_from_content_not_panel():
-    # Regression: under h="auto" the wrap must stop filling 100vh, else the
-    # measured height tracks the panel height and the fit loop oscillates. The
-    # CSS carries the `body.pc-auto-h` override that breaks that feedback...
-    t = pycanvas.Table([{"x": 1}])
-    html = t.register_props()["html"]
-    assert "body.pc-auto-h .pc-wrap{height:auto}" in html
-    assert "body.pc-auto-h .pc-scroll{overflow:visible" in html
+def test_table_renders_filter_and_pagination_hooks():
+    src = pycanvas.Table([{"x": 1}, {"x": 2}]).register_props()["source"]
+    assert "pc-filter" in src and "pc-dist" in src and "pc-pager" in src
 
 
-def test_auto_height_panels_expose_the_hook_class():
-    # ...and an h="auto" panel's injected fit script adds that class on <body>.
+def test_table_auto_height_sets_the_react_flag():
+    # h="auto" flows through insert to the React auto-height flag (autoH) — the
+    # native counterpart to the old iframe fit machinery.
     canvas = pycanvas.Canvas()
     t = canvas.table([{"x": 1}], name="data", h="auto")
-    html = t.register_props()["html"]
-    assert "classList.add('pc-auto-h')" in html
     assert t._auto_h is True
+    assert t.register_props()["autoH"] is True
 
 
-def test_non_auto_table_still_has_the_rule_but_no_hook_class():
-    # The CSS rule is harmless when inactive; without h="auto" the class that
-    # activates it is never added, so fixed-height tables keep their scroll area.
-    t = pycanvas.Table([{"x": 1}])           # not auto-height
-    html = t.register_props()["html"]
-    assert "classList.add('pc-auto-h')" not in html
+def test_table_default_is_not_auto_height():
+    t = pycanvas.Table([{"x": 1}])           # no h="auto"
+    assert t._auto_h is False
+    assert t.register_props()["autoH"] is False

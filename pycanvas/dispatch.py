@@ -346,9 +346,10 @@ def _dunder_bundle(value):
 # canvas.custom(...) are untouched — only the inferred sizes here change.
 
 # Card/table furniture, calibrated from the rendered panel (toolbar ~35, header
-# row ~43 with the per-column profile line, data row ~27) plus a small buffer so
-# a snug table doesn't show a scrollbar over a pixel or two.
-_TBL_CHROME, _TBL_BAR, _TBL_HEAD, _TBL_ROW = 34, 36, 46, 28
+# row ~43 with the per-column profile line, the always-shown distribution row
+# ~44, data row ~27) plus a small buffer so a snug table doesn't show a
+# scrollbar over a pixel or two.
+_TBL_CHROME, _TBL_BAR, _TBL_HEAD, _TBL_DIST, _TBL_ROW = 34, 36, 46, 44, 28
 _IMG_CHROME = 34  # card label bar above the image area
 
 
@@ -371,8 +372,8 @@ def _table_panel(value, name, label, w, h):
         except TypeError:
             n = None
         if n is not None:
-            h = min(_TBL_CHROME + _TBL_BAR + _TBL_HEAD + n * _TBL_ROW + 6,
-                    Table.default_h)
+            h = min(_TBL_CHROME + _TBL_BAR + _TBL_HEAD + _TBL_DIST
+                    + n * _TBL_ROW + 6, Table.default_h)
     return Table(value, name=name, label=label, w=w, h=h)
 
 
