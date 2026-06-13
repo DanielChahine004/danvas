@@ -1,9 +1,10 @@
 """Label: an output-only text/number display.
 
 Rendered inside a sandboxed ``Custom`` iframe (rather than as a native node) so
-it inherits the content-measuring machinery: pass ``h="auto"`` and the panel
-fits its height to the text, re-fitting when the value changes or the panel is
-narrowed. Live updates stream in via :meth:`Custom.push` — the text node is
+it inherits the content-measuring machinery: a label **defaults to ``h="auto"``**
+(its content is a short line, so the panel fits its height to the text and
+re-fits when the value changes or the panel is narrowed) — pass an explicit
+``h`` to pin it instead. Live updates stream in via :meth:`Custom.push` — the text node is
 swapped in place, so the iframe is never reloaded (no flicker, fine for a status
 line updated every loop iteration).
 
@@ -43,6 +44,11 @@ class Label(Custom):
         super().__init__(html=self._render(value), name=name, label=label,
                          w=w, h=h)
         self._value = value
+        # A label holds a short line or number, so default to fitting the panel
+        # to its content (no tall, mostly-empty box) unless the caller pinned an
+        # explicit height. ``insert`` honours this flag for layout/placement too.
+        if h is None:
+            self._auto_h = True
 
     def register_props(self):
         # Blend into the canvas theme (transparent body, text colour following the

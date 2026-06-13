@@ -89,3 +89,24 @@ def test_auto_height_panel_keeps_fitting_in_a_grid():
     # Grid positions it, but h='auto' is preserved (not forced to slot height).
     assert (md.x, md.y) == (0, 0)
     assert md._auto_h is True
+
+
+def test_label_defaults_to_auto_height():
+    # A standalone label fits its content (no tall empty box)...
+    canvas = pycanvas.Canvas()
+    a = canvas.label("a")
+    assert a._auto_h is True
+    # ...but an explicit height pins it (auto-height off).
+    b = canvas.label("b", h=120)
+    assert b._auto_h is False
+    assert b.h == 120
+
+
+def test_label_default_auto_height_yields_to_grid_slot():
+    # Unlike an explicit h="auto", a label's *default* auto-height defers to a
+    # grid slot height so the grid stays uniform.
+    canvas = pycanvas.Canvas()
+    with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)):
+        a = canvas.label("a")
+    assert a.h == 50
+    assert a._auto_h is False

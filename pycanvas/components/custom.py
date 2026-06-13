@@ -100,8 +100,15 @@ class Custom(BaseComponent):
             helper += (
                 "<script>(function(){"
                 "var fit=function(){"
+                # Measure the *body's* content height, not documentElement's.
+                # We force `html,body{height:auto;overflow:hidden}` below, but
+                # <html> still fills the iframe viewport, so its scrollHeight is
+                # pinned at the frame height (>= its clientHeight) and the panel
+                # could never shrink below its starting size. The body, with
+                # height:auto, reports the true content height; fall back to
+                # documentElement only if there's no body yet.
                 "var b=document.body,d=document.documentElement;"
-                "var h=Math.ceil(Math.max(b?b.scrollHeight:0,d?d.scrollHeight:0));"
+                "var h=Math.ceil(b?b.scrollHeight:(d?d.scrollHeight:0));"
                 f"parent.postMessage({{__pycanvas_fit:{{id:{cid},h:h}}}},'*');"
                 "};"
                 "var arm=function(){"

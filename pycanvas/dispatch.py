@@ -17,6 +17,8 @@ import base64
 import json
 import os
 import re
+import struct
+from urllib.parse import unquote as _unquote
 
 from .components import BaseComponent, Custom, Image, Label, Markdown, Plot, Table
 from .components._doc import document
@@ -53,26 +55,30 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
         return plot
 
     if _is_image_like(value):
-        return Image(value, name=name, label=label, w=w, h=h)
+        return _image_panel(value, name, label, w, h)
 
     if _is_tabular(value):
-        return Table(value, name=name, label=label, w=w, h=h)
+        return _table_panel(value, name, label, w, h)
 
     html = _rich_html(value, formatter)
     if html is not None:
-        return Custom(html=html, name=name, label=label, w=w, h=h)
+        # A notebook-style rich repr is content-bounded: fit the panel height.
+        return _mark_auto(Custom(html=html, name=name, label=label, w=w, h=h))
 
     if isinstance(value, (dict, list, tuple, set)):
         body = (
             "<pre style='margin:0;white-space:pre-wrap;font-size:12px'>"
             f"{_escape(_as_json(value))}</pre>"
         )
-        return Custom(html=document(body), name=name, label=label, w=w, h=h)
+        # A JSON tree is a finite block — fit the panel to it instead of a tall
+        # mostly-empty default.
+        return _mark_auto(Custom(html=document(body), name=name, label=label,
+                                 w=w, h=h))
 
     # Raw bytes that look like an image (PNG/JPEG/GIF/…) render as the image;
     # anything else falls through to a repr label.
     if isinstance(value, (bytes, bytearray, memoryview)) and _is_image_bytes(value):
-        return Image(bytes(value), name=name, label=label, w=w, h=h)
+        return _image_panel(bytes(value), name, label, w, h)
 
     if isinstance(value, str):
         return _string_panel(value, name, label, w, h, formatter)
@@ -101,18 +107,20 @@ def _string_panel(s, name, label, w, h, formatter):
 
     # A URL/URI pointing at an image renders as the image.
     if _is_image_url(s):
-        return Image(s, name=name, label=label, w=w, h=h)
+        return _image_panel(s, name, label, w, h)
 
-    # A bare web URL becomes a clickable link rather than dead text.
+    # A bare web URL becomes a clickable link rather than dead text — one line,
+    # so fit the panel height to it.
     if "\n" not in s and len(s) <= 2048 and s.startswith(("http://", "https://")):
-        return Markdown(f"[{s}]({s})", name=name, label=label, w=w, h=h)
+        return _mark_auto(Markdown(f"[{s}]({s})", name=name, label=label,
+                                   w=w, h=h))
 
     # Literal HTML renders as HTML (wrapped for base styling unless it's already
-    # a full document).
+    # a full document); fit the panel to the content.
     if _looks_like_html(s):
         full = re.match(r"\s*<(?:!doctype|html)\b", s, re.I)
-        return Custom(html=s if full else document(s),
-                      name=name, label=label, w=w, h=h)
+        return _mark_auto(Custom(html=s if full else document(s),
+                                 name=name, label=label, w=w, h=h))
 
     # Markdown syntax (at any length) renders as Markdown.
     if _looks_like_markdown(s):
@@ -131,7 +139,7 @@ def _path_panel(path, name, label, w, h, formatter):
     ext = os.path.splitext(path)[1].lower()
     try:
         if ext in _IMAGE_EXT:
-            return Image(path, name=name, label=label, w=w, h=h)
+            return _image_panel(path, name, label, w, h)
         if ext == ".csv":
             return _csv_table(path, name, label, w, h)
         if ext in (".md", ".markdown"):
@@ -327,6 +335,158 @@ def _dunder_bundle(value):
         except Exception:
             pass
     return out
+
+
+# -- default sizing for auto-rendered panels ---------------------------------
+# show()/dispatch builds the panel for a value, so it also picks the size. The
+# defaults below fit the panel to its content instead of dropping small content
+# into a big fixed box: content-bounded panels (JSON, rich repr, HTML, the URL
+# link) get auto-height; tables get a height computed from their row count and
+# capped; images size to their natural dimensions. Explicit canvas.table(...) /
+# canvas.custom(...) are untouched — only the inferred sizes here change.
+
+# Card/table furniture, calibrated from the rendered panel (toolbar ~35, header
+# row ~43 with the per-column profile line, data row ~27) plus a small buffer so
+# a snug table doesn't show a scrollbar over a pixel or two.
+_TBL_CHROME, _TBL_BAR, _TBL_HEAD, _TBL_ROW = 34, 36, 46, 28
+_IMG_CHROME = 34  # card label bar above the image area
+
+
+def _mark_auto(component):
+    """Opt a content-bounded auto-rendered panel into height-fits-content.
+
+    ``insert`` treats a component carrying ``_auto_h=True`` as default
+    auto-height: it fits the content but still yields to a grid/column slot.
+    """
+    component._auto_h = True
+    return component
+
+
+def _table_panel(value, name, label, w, h):
+    """A Table sized (when no height was given) to its rows, capped at the
+    component default so a huge table stays scrollable instead of giant."""
+    if h is None:
+        try:
+            n = max(1, len(value))
+        except TypeError:
+            n = None
+        if n is not None:
+            h = min(_TBL_CHROME + _TBL_BAR + _TBL_HEAD + n * _TBL_ROW + 6,
+                    Table.default_h)
+    return Table(value, name=name, label=label, w=w, h=h)
+
+
+def _image_panel(src, name, label, w, h):
+    """An Image sized (when no size was given) to the picture's natural
+    dimensions, scaled into a panel-friendly range so it neither swims in a big
+    box nor overflows. Falls back to the component default when the size can't
+    be determined (e.g. a remote URL)."""
+    if w is None and h is None:
+        dims = _image_dims(src)
+        size = _image_panel_size(*dims) if dims else None
+        if size:
+            w, h = size[0], size[1] + _IMG_CHROME
+    return Image(src, name=name, label=label, w=w, h=h)
+
+
+def _image_panel_size(w, h, max_w=560, max_h=440, min_w=160):
+    """Clamp a natural ``(w, h)`` into a panel-friendly box, preserving aspect."""
+    if not w or not h or w <= 0 or h <= 0:
+        return None
+    ratio = h / w
+    width = max(min_w, min(float(w), max_w))
+    height = width * ratio
+    if height > max_h:
+        height = max_h
+        width = height / ratio
+    return (int(round(width)), int(round(height)))
+
+
+def _image_dims(src):
+    """Best-effort natural ``(width, height)`` of an image source, or ``None``.
+
+    Covers the sources :class:`~pycanvas.Image` accepts — PIL, NumPy, Matplotlib,
+    raw bytes, a file path, and data URIs — by reading the object's own size or
+    sniffing the image header. Remote URLs return ``None`` (no fetch)."""
+    try:
+        # PIL image: .size + .mode.
+        if hasattr(src, "size") and hasattr(src, "mode"):
+            return (int(src.size[0]), int(src.size[1]))
+        # Matplotlib axes -> figure -> inches * dpi.
+        fig = getattr(src, "get_figure", None)
+        if callable(fig):
+            src = fig()
+        if hasattr(src, "get_size_inches"):
+            w_in, h_in = src.get_size_inches()
+            dpi = getattr(src, "dpi", None) or 100
+            return (int(w_in * dpi), int(h_in * dpi))
+        # NumPy array: shape is (H, W[, C]).
+        if hasattr(src, "shape") and hasattr(src, "dtype") and len(src.shape) >= 2:
+            return (int(src.shape[1]), int(src.shape[0]))
+        if isinstance(src, str):
+            if src.startswith("data:"):
+                head, _, payload = src.partition(",")
+                if "svg" in head:
+                    raw = (base64.b64decode(payload).decode("utf-8", "replace")
+                           if ";base64" in head else _unquote(payload))
+                    return _svg_dims(raw)
+                data = (base64.b64decode(payload) if ";base64" in head
+                        else _unquote(payload).encode("latin-1", "replace"))
+                return _raster_dims(data)
+            if src.startswith(("http://", "https://")):
+                return None  # remote: size unknown without fetching
+            with open(src, "rb") as f:
+                head = f.read(2048)
+            if head.lstrip()[:4] == b"<svg" or head[:5] == b"<?xml":
+                return _svg_dims(head.decode("utf-8", "replace"))
+            return _raster_dims(head)
+        if isinstance(src, (bytes, bytearray, memoryview)):
+            b = bytes(src)
+            if b.lstrip()[:4] == b"<svg":
+                return _svg_dims(b.decode("utf-8", "replace"))
+            return _raster_dims(b)
+    except Exception:
+        return None
+    return None
+
+
+def _raster_dims(b):
+    """``(w, h)`` from PNG / GIF / JPEG header bytes, or ``None``."""
+    if b[:8] == b"\x89PNG\r\n\x1a\n":
+        return tuple(struct.unpack(">II", b[16:24]))
+    if b[:6] in (b"GIF87a", b"GIF89a"):
+        return tuple(struct.unpack("<HH", b[6:10]))
+    if b[:2] == b"\xff\xd8":  # JPEG: walk segment markers to the start-of-frame
+        i, n = 2, len(b)
+        while i + 9 < n:
+            if b[i] != 0xFF:
+                i += 1
+                continue
+            marker = b[i + 1]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h, w = struct.unpack(">HH", b[i + 5:i + 9])
+                return (w, h)
+            i += 2 + struct.unpack(">H", b[i + 2:i + 4])[0]
+    return None
+
+
+def _svg_dims(text):
+    """``(w, h)`` from an SVG's width/height attrs, else its viewBox, else None."""
+    m = re.search(r"<svg\b[^>]*>", text, re.I)
+    tag = m.group(0) if m else text[:512]
+
+    def num(name):
+        mm = re.search(rf'{name}\s*=\s*["\']?\s*([\d.]+)', tag, re.I)
+        return float(mm.group(1)) if mm else None
+
+    w, h = num("width"), num("height")
+    if w and h:
+        return (int(w), int(h))
+    vb = re.search(r'viewBox\s*=\s*["\']?\s*[-\d.]+[ ,]+[-\d.]+[ ,]+'
+                   r'([\d.]+)[ ,]+([\d.]+)', tag, re.I)
+    if vb:
+        return (int(float(vb.group(1))), int(float(vb.group(2))))
+    return None
 
 
 # -- small helpers -----------------------------------------------------------

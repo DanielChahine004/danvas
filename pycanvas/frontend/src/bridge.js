@@ -547,7 +547,8 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   // Use the position Python supplied; cascade only the axes left unspecified.
   let px = x
   let py = y
-  if (typeof px !== 'number' || typeof py !== 'number') {
+  const autoPlaced = typeof px !== 'number' || typeof py !== 'number'
+  if (autoPlaced) {
     const auto = nextPosition(props.w, props.h)
     if (typeof px !== 'number') px = auto.x
     if (typeof py !== 'number') py = auto.y
@@ -568,6 +569,13 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
     shape.meta = lockMeta({}, movable, resizable, interactive, selectable, frame)
   }
   applyRemote(() => editor.createShape(shape))
+  // Record an auto-assigned position back to Python so the panel keeps it on the
+  // next viewer/reconnect instead of being re-flowed. Without this, a panel that
+  // was placed by the masonry flow stays x=None in Python; once *other* panels
+  // get a concrete position (a user move, or an auto-height fit), they skip the
+  // flow on reconnect while this one re-flows from the origin — and they collide.
+  // Pinning every auto-placed panel the same way keeps positions stable for all.
+  if (autoPlaced) sendRaw({ type: 'layout', id, x: px, y: py })
 }
 
 // Draw a tldraw arrow bound to two existing panels. The bindings make the
@@ -939,15 +947,10 @@ function fitFromIframe(sourceWin, fit) {
   applyRemote(() =>
     editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
   )
-  sendRaw({
-    type: 'layout',
-    id: fit.id,
-    x: shape.x,
-    y: shape.y,
-    rotation: shape.rotation,
-    w: shape.props.w,
-    h,
-  })
+  // Report only the height: a fit never moves the panel, and echoing x/y would
+  // pin an auto-arranged panel (x=None in Python) to a number — which then makes
+  // it skip the placement flow on the next viewer and collide with others.
+  sendRaw({ type: 'layout', id: fit.id, h })
 }
 
 // Auto-height for native panels (the React `h="auto"` path). The iframe version
@@ -968,15 +971,9 @@ export function fitNative(componentId, contentH, hostEl) {
   applyRemote(() =>
     editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
   )
-  sendRaw({
-    type: 'layout',
-    id: componentId,
-    x: shape.x,
-    y: shape.y,
-    rotation: shape.rotation,
-    w: shape.props.w,
-    h,
-  })
+  // Height only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
+  // and break the placement flow for the next viewer.
+  sendRaw({ type: 'layout', id: componentId, h })
 }
 
 // Global helper available on the top-level page (non-iframe Custom usage).

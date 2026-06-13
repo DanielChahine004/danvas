@@ -489,8 +489,14 @@ class Canvas:
         # fits the panel height to its rendered content: flag the component (its
         # iframe then reports content height; the frontend resizes to fit) and
         # fall back to the default height until the first measurement lands.
-        auto_h = h == "auto"
-        if auto_h:
+        # Auto-height fits the panel to its rendered content (the frontend
+        # measures and resizes; comp.h syncs back). Two ways to get it: the caller
+        # asks with h="auto", or the component defaults to it (e.g. Label, whose
+        # content is always short). They differ around layout containers — an
+        # explicit h="auto" overrides a grid slot / row height, a *default* one
+        # yields to it (so grids stay uniform). An explicit numeric h pins either.
+        if h == "auto":
+            user_auto = True
             if hasattr(component, "_auto_h"):
                 component._auto_h = True
             else:
@@ -499,6 +505,17 @@ class Canvas:
                     "(custom, markdown, table, image, …); using the default "
                     "height", stacklevel=2,
                 )
+        else:
+            user_auto = False
+            if h is not None and getattr(component, "_auto_h", False):
+                component._auto_h = False  # explicit numeric h pins the panel
+        # A component fitting its own content with no height imposed by the caller.
+        # It still accepts a slot/row height in _place below; only then is its
+        # auto-height switched off (see the placement block).
+        default_auto = h is None and getattr(component, "_auto_h", False)
+        # Only an explicit h="auto" makes the layout skip its slot height.
+        auto_h = user_auto
+        if user_auto:
             h = None
         # Relative placement: derive x/y from an anchor panel's live geometry.
         # Resolved before the swap-in-place logic below, so an explicit relative
@@ -518,6 +535,11 @@ class Canvas:
         # next slot (and the layout's default slot size, unless w/h were given).
         if self._layout_stack and x is None and y is None:
             x, y, w, h = self._layout_stack[-1]._place(component, w, h, auto_h)
+            # A grid slot / row common-height just imposed a concrete height on a
+            # panel that was only *default* auto-height (e.g. a Label): honor that
+            # height instead of fitting, so the grid stays uniform.
+            if default_auto and h is not None:
+                component._auto_h = False
         if name is None:
             name = component.name
         if name is None:
