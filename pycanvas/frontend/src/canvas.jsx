@@ -85,11 +85,19 @@ function cardStyle(shape) {
 // and iframes alike). Python can opt a panel out with ``selectable=False``
 // (meta.noGrab): no cover, content live from the first hover, body clicks
 // never select the panel.
-function Card({ shape, children, grab = false }) {
+function Card({ shape, children, grab = false, ghostable = false }) {
   const editor = useEditor()
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
   const noGrab = !!shape.meta?.noGrab
+  // A panel that can neither be selected (noGrab) nor operated (lockInput, from
+  // operable=False) is purely decorative: it should be click-through so the
+  // pointer reaches whatever sits underneath it on the canvas. A full lock
+  // (isLocked) is excluded — that deliberately swallows the event instead. Only
+  // `ghostable` panels qualify: those whose content we also make pointer-inert
+  // (the Custom iframe). For everything else the input overlay must keep
+  // catching the pointer, or operable=False would stop blocking its controls.
+  const ghost = ghostable && noGrab && !!shape.meta?.lockInput && !fullyLocked
   const selected = useValue(
     'pc-selected',
     () => editor.getSelectedShapeIds().includes(shape.id),
@@ -107,9 +115,12 @@ function Card({ shape, children, grab = false }) {
       )}
       {blockInput && (
         <div
-          style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'default' }}
-          // Full lock swallows the event; input-only lock lets it bubble so
-          // tldraw's move/select/resize still obey the panel's own permissions.
+          // A ghost (decorative) panel takes no pointer at all, so clicks fall
+          // through to panels beneath it. Otherwise the overlay catches the
+          // pointer: full lock swallows it (stopPropagation); input-only lock
+          // lets it bubble so tldraw's move/select/resize still obey the panel's
+          // own permissions.
+          style={{ position: 'absolute', inset: 0, pointerEvents: ghost ? 'none' : 'all', cursor: 'default' }}
           onPointerDown={fullyLocked ? (e) => e.stopPropagation() : undefined}
         />
       )}
@@ -440,7 +451,9 @@ export class HtmlShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape} grab>
+      // ghostable: grabbable=False + operable=False makes the iframe (and the
+      // input overlay) click-through, so the panel is purely decorative.
+      <Card shape={shape} grab ghostable>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <CardLabel shape={shape} />
         <CustomView shape={shape} />
@@ -465,6 +478,10 @@ function CustomView({ shape }) {
   // `color-scheme` matching tldraw's theme so the doc's prefers-color-scheme
   // query (which colours its text) tracks the dark/light toggle, not the OS.
   const dark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
+  // Decorative panels (grabbable=False + operable=False) are click-through: the
+  // iframe takes no pointer, so clicks pass to whatever sits underneath on the
+  // canvas. See Card's `ghost`.
+  const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
 
   useEffect(() => {
     const post = (data) => {
@@ -503,10 +520,11 @@ function CustomView({ shape }) {
         // Themed (Markdown) panels propagate the canvas theme into the sandboxed
         // doc; everything else renders on its own (light) document.
         colorScheme: shape.props.themed ? (dark ? 'dark' : 'light') : undefined,
-        pointerEvents: 'all',
+        pointerEvents: ghost ? 'none' : 'all',
       }}
-      // Keep tldraw from hijacking drags/zoom meant for the iframe content.
-      onPointerDown={(e) => e.stopPropagation()}
+      // Keep tldraw from hijacking drags/zoom meant for the iframe content. A
+      // ghost panel wants the opposite — let the pointer fall through entirely.
+      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
     />
   )
 }
@@ -533,7 +551,9 @@ export class ReactShapeUtil extends PcShapeUtil {
 
   component(shape) {
     return (
-      <Card shape={shape} grab>
+      // ghostable: grabbable=False + operable=False makes the host (and the
+      // input overlay) click-through, so the panel is purely decorative.
+      <Card shape={shape} grab ghostable>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <CardLabel shape={shape} />
         <Suspense

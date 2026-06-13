@@ -602,6 +602,17 @@ Pair them for a free-floating live widget:
 canvas.custom(name="gauge", html=…, frame=False, grabbable=False)
 ```
 
+Add **`operable=False`** as well for a purely decorative panel. A `Custom`
+panel that can be neither selected (`grabbable=False`) nor operated
+(`operable=False`) becomes *click-through*: its iframe takes no pointer at all,
+so clicks pass straight to whatever sits beneath it on the canvas. Handy for an
+overlay that follows the cursor without stealing clicks (see
+`examples/moving_widget.py`):
+
+```python
+canvas.custom(name="orb", html=…, frame=False, grabbable=False, operable=False)
+```
+
 ### Arrows — connect panels
 
 Arrows are first-class, managed like components, and reroute automatically as

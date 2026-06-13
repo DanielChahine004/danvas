@@ -111,14 +111,19 @@ export default function ReactHost({ shape }) {
   const entry = build(shape.props.source || '')
   if (entry.error) return <ErrorBox error={entry.error} />
   const Comp = entry.Comp
+  // Decorative panels (grabbable=False + operable=False) are click-through: the
+  // host takes no pointer, so clicks pass to whatever sits underneath on the
+  // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.
+  const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
   return (
     // pointerEvents:'all' + stopPropagation claim the pointer for the hosted
     // component; without this tldraw treats a press as a move/resize of the
     // panel and the component never sees the click. The Card header (the label)
-    // keeps no pointerEvents, so it stays the panel's drag handle.
+    // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
+    // wants the opposite — let the pointer fall through to the canvas entirely.
     <div
-      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: 'all' }}
-      onPointerDown={(e) => e.stopPropagation()}
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
+      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
     >
       <Boundary resetKey={Comp}>
         <Comp canvas={canvas} value={streamed} props={userProps} />

@@ -22,24 +22,19 @@ ORB = 60         # emoji panel size (px)
 EMOJI = ["🛸", "🐙", "🦊", "🐢", "🦋", "🐝", "🦀", "🐳", "🦜", "🐧", "🦥", "🐲"]
 
 canvas = pycanvas.Canvas()
-speed = canvas.slider("speed", min=1, max=30, default=10, x=40, y=40,
+speed = canvas.slider("speed", min=0.1, max=30, step=0.1, default=10, x=40, y=40,
                       label="orbit speed")
 
 
 def _orb_html(emoji):
+    # The orb is purely decorative — see the custom() call below, which makes the
+    # panel itself click-through (grabbable=False + operable=False). user-select
+    # none just stops the emoji being highlightable as you drag past it.
     return f"""
       <div style="width:100%;height:100%;display:flex;align-items:center;
                   justify-content:center;font-size:34px;
                   filter:drop-shadow(0 0 10px #38bdf8);
-                  
-                  /* Makes it non-clickable (clicks pass through) */
-                  pointer-events: none;
-                  
-                  /* Makes it non-highlightable */
-                  user-select: none;
-                  -webkit-user-select: none;
-                  -moz-user-select: none;
-                  -ms-user-select: none;">{emoji}</div>
+                  user-select:none;-webkit-user-select:none;">{emoji}</div>
     """
 
 
@@ -77,7 +72,8 @@ def orbit():
             if panel is None:                 # first sighting -> spawn their emoji
                 panel = canvas.custom(
                     name=f"orb_{vid}", x=x, y=y, w=ORB, h=ORB,
-                    frame=False, grabbable=False, html=_orb_html(_emoji_for(vid)),
+                    frame=False, grabbable=False, operable=False,
+                    html=_orb_html(_emoji_for(vid)),
                 )
                 panels[vid] = panel
             else:

@@ -735,6 +735,16 @@ completely untouchable by the user:
 canvas.custom(name="gauge", html=..., frame=False, grabbable=False)
 ```
 
+Add `operable=False` for a panel that's *click-through* too. A `Custom` panel
+that's neither selectable (`grabbable=False`) nor operable (`operable=False`) is
+treated as purely decorative: its iframe takes no pointer, so clicks fall
+through to whatever sits underneath it on the canvas — perfect for a cursor-
+following overlay that must never swallow a click (`examples/moving_widget.py`):
+
+```python
+canvas.custom(name="orb", html=..., frame=False, grabbable=False, operable=False)
+```
+
 ## Saving & loading
 
 Persist the whole board — the panel formation **and** the user's freehand
