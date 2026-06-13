@@ -1220,6 +1220,7 @@ python examples/hello_world.py        # slider + label
 python examples/frontend_backend_tour.py  # interactive tour of the wire protocol, with a live frame tap
 python examples/sensor_dashboard.py   # live VideoFeed + worker thread
 python examples/custom_html.py        # hand-written HTML panel, bidirectional
+python examples/custom_binary_stream.py  # high-rate binary telemetry into a Custom panel (push_binary)
 python examples/custom_styled_component.py  # uiverse.io HTML+CSS widget pasted into a Custom panel
 python examples/react_styled_component.py   # uiverse.io React widget via React.from_uiverse
 python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
