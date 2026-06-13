@@ -950,6 +950,35 @@ function fitFromIframe(sourceWin, fit) {
   })
 }
 
+// Auto-height for native panels (the React `h="auto"` path). The iframe version
+// (fitFromIframe) reads the iframe's document height over postMessage; here the
+// panel is a native React subtree, so ReactHost measures its content directly
+// and calls this with the content height and the host element that fills the
+// card's body. Overhead (card header/padding) is `shape.h - hostEl.offsetHeight`,
+// in layout px — the same read-back path as a user resize, keeping `comp.h` in
+// sync.
+export function fitNative(componentId, contentH, hostEl) {
+  if (!editor || typeof contentH !== 'number' || !hostEl) return
+  const shapeId = createShapeId(componentId)
+  const shape = editor.getShape(shapeId)
+  if (!shape) return
+  const overhead = Math.max(0, shape.props.h - hostEl.offsetHeight)
+  const h = Math.max(40, Math.ceil(contentH + overhead))
+  if (Math.abs(h - shape.props.h) < 3) return // settled — don't ping-pong
+  applyRemote(() =>
+    editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
+  )
+  sendRaw({
+    type: 'layout',
+    id: componentId,
+    x: shape.x,
+    y: shape.y,
+    rotation: shape.rotation,
+    w: shape.props.w,
+    h,
+  })
+}
+
 // Global helper available on the top-level page (non-iframe Custom usage).
 if (typeof window !== 'undefined') {
   window.canvas = {

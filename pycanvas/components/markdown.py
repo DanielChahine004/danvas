@@ -1,56 +1,83 @@
-"""Markdown: render Markdown text as a panel.
+"""Markdown: render Markdown text as a native (React) canvas panel.
 
-Uses the ``markdown`` or ``markdown-it-py`` package if either is installed
-(richer output: tables, fenced code, etc.); otherwise falls back to a small
-built-in converter covering headings, bold/italic, inline code, fenced code,
-links, lists and paragraphs — enough for notes and labels on the canvas.
+Markdown is converted to HTML in Python (using the ``markdown`` or
+``markdown-it-py`` package if either is installed — richer output: tables,
+fenced code, etc. — otherwise a small built-in converter covering headings,
+bold/italic, inline code, fenced code, links, lists and paragraphs). The HTML is
+then mounted as a **native React subtree** rather than inside a sandboxed iframe.
+
+Why native rather than an iframe: an iframe gets *rasterised* and then scaled
+when the canvas is zoomed, so dense text looks blurry/pixelated at anything but
+100%. A native node re-renders sharp at every zoom level, and — being in the
+app's own document — the prose follows the canvas theme directly through the
+``--pc-*`` CSS variables (no iframe ``color-scheme`` shim needed).
+
+The converted HTML is injected with ``dangerouslySetInnerHTML``, which does not
+execute ``<script>``; the markup is the user's own script-authored content, the
+same trust level as the rest of their PyCanvas app.
 """
 
 import html as _html
 import re
 
-from .custom import Custom
-from ._doc import document
+from .react import React
 
-# Colours use translucent greys (not fixed light slate) so code blocks, tables,
-# and borders read correctly on both the light and dark canvas themes the panel
-# now follows. See _doc._THEMED_CSS for how the text colour tracks the theme.
-_MD_CSS = (
-    "h1,h2,h3{margin:.4em 0 .3em;line-height:1.25}"
-    "h1{font-size:1.5em}h2{font-size:1.3em}h3{font-size:1.1em}"
-    "p{margin:.4em 0}ul,ol{margin:.4em 0;padding-left:1.4em}"
-    "pre{background:rgba(127,127,127,.15);border-radius:6px;padding:8px;overflow:auto}"
-    "code{background:rgba(127,127,127,.15);border-radius:4px;padding:1px 4px}"
-    "pre code{background:none;padding:0}"
-    "table{border-collapse:collapse}th,td{border:1px solid rgba(127,127,127,.4);padding:3px 8px}"
-)
+# CSS scoped under `.pc-md`, driven by the canvas theme variables so the prose
+# tracks dark/light automatically. `max-height:100%` + `overflow:auto` gives a
+# scrollbar when a fixed-height panel is shorter than its content; in h="auto"
+# mode the host's height is indefinite, so `max-height:100%` resolves to "none"
+# and the panel just grows to fit (no scrollbar, no clipping of the measurement).
+_MD_CSS = """
+.pc-md{width:100%;max-height:100%;overflow:auto;box-sizing:border-box;padding:8px;
+ font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;
+ color:var(--pc-text)}
+.pc-md h1,.pc-md h2,.pc-md h3{margin:.4em 0 .3em;line-height:1.25}
+.pc-md h1{font-size:1.5em}.pc-md h2{font-size:1.3em}.pc-md h3{font-size:1.1em}
+.pc-md p{margin:.4em 0}.pc-md ul,.pc-md ol{margin:.4em 0;padding-left:1.4em}
+.pc-md a{color:var(--pc-accent)}
+.pc-md img{display:block;max-width:100%}
+.pc-md pre{background:var(--pc-code-bg);border-radius:6px;padding:8px;overflow:auto}
+.pc-md code{background:var(--pc-code-bg);border-radius:4px;padding:1px 4px;
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.pc-md pre code{background:none;padding:0}
+.pc-md table{border-collapse:collapse}
+.pc-md th,.pc-md td{border:1px solid var(--pc-border);padding:3px 8px}
+"""
+
+# The JSX component: drop the Python-rendered HTML into a native node. The CSS is
+# carried in a <style> tag (its braces are escaped to {{ }} so str.format leaves
+# them alone; only the {css} placeholder is filled).
+_MD_SOURCE = """
+function Component({{ props }}) {{
+  return (
+    <>
+      <style>{{`{css}`}}</style>
+      <div className="pc-md"
+           dangerouslySetInnerHTML={{{{ __html: props.html || "" }}}} />
+    </>
+  );
+}}
+""".format(css=_MD_CSS)
 
 
-class Markdown(Custom):
-    component = "Custom"
+class Markdown(React):
     default_w = 380
     default_h = 240
 
     def __init__(self, text="", name="markdown", label=None, w=None, h=None):
         self._text = text
-        super().__init__(html=self._render(text), name=name, label=label,
-                         w=w, h=h)
+        super().__init__(source=_MD_SOURCE, name=name, label=label, w=w, h=h,
+                         props={"html": _md_to_html(text or "")})
+
+    @property
+    def html(self):
+        """The Markdown rendered to HTML (what the panel displays)."""
+        return self._data.get("html", "")
 
     def update(self, text):
         """Replace the rendered Markdown, live."""
         self._text = text
-        super().update(self._render(text))
-
-    def register_props(self):
-        # `themed` tells the frontend to blend this panel into the canvas theme
-        # (transparent body + theme-following text) rather than render it as a
-        # white notebook document the way Image/Table do.
-        props = super().register_props()
-        props["themed"] = True
-        return props
-
-    def _render(self, text):
-        return document(_md_to_html(text or ""), _MD_CSS, theme=True)
+        super().update(html=_md_to_html(text or ""))
 
 
 def _md_to_html(text):

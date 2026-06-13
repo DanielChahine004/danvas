@@ -14,7 +14,7 @@
 // React (with hooks) is in scope as `React`.
 import * as Babel from '@babel/standalone'
 import React from 'react'
-import { sendInput, registerLive, unregisterLive, componentIdOf } from './bridge'
+import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative } from './bridge'
 
 // Compile + evaluate a source string into a component function, memoised so a
 // re-render (or many panels sharing one source) compiles only once. The source
@@ -108,6 +108,28 @@ export default function ReactHost({ shape }) {
     userProps = {}
   }
 
+  // h="auto": fit the panel height to the rendered content. The content sits in
+  // its own box (sized to content) so we can measure it; the host fills the
+  // card body so its offsetHeight gives the chrome overhead (see fitNative).
+  const autoH = !!shape.props.autoH
+  const hostRef = React.useRef(null)
+  const contentRef = React.useRef(null)
+  React.useEffect(() => {
+    if (!autoH) return
+    const host = hostRef.current
+    const content = contentRef.current
+    if (!host || !content) return
+    const measure = () => fitNative(id, content.scrollHeight, host)
+    measure()
+    let ro
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measure)
+      ro.observe(content) // content height changes
+      ro.observe(host) // width changes that reflow content
+    }
+    return () => ro && ro.disconnect()
+  }, [autoH, id, shape.props.source, shape.props.data])
+
   const entry = build(shape.props.source || '')
   if (entry.error) return <ErrorBox error={entry.error} />
   const Comp = entry.Comp
@@ -122,12 +144,18 @@ export default function ReactHost({ shape }) {
     // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
     // wants the opposite — let the pointer fall through to the canvas entirely.
     <div
+      ref={hostRef}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
     >
-      <Boundary resetKey={Comp}>
-        <Comp canvas={canvas} value={streamed} props={userProps} />
-      </Boundary>
+      {/* In auto-height mode the content sizes to itself (measurable); otherwise
+          it's a transparent pass-through (display:contents) so existing React
+          panels that fill 100% height behave exactly as before. */}
+      <div ref={contentRef} style={autoH ? { flex: '0 0 auto', minWidth: 0 } : { display: 'contents' }}>
+        <Boundary resetKey={Comp}>
+          <Comp canvas={canvas} value={streamed} props={userProps} />
+        </Boundary>
+      </div>
     </div>
   )
 }

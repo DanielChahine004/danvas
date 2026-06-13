@@ -508,7 +508,9 @@ function CustomView({ shape }) {
       srcDoc={shape.props.html}
       // allow-scripts lets interactive content (e.g. Plotly) run.
       // No allow-same-origin keeps the user HTML sandboxed from the app.
-      sandbox="allow-scripts allow-popups allow-forms"
+      // allow-popups-to-escape-sandbox lets a link (target=_blank) open as a
+      // normal browser tab instead of a sandboxed frame that many sites refuse.
+      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
       style={{
         flex: 1,
         width: '100%',
@@ -543,10 +545,11 @@ export class ReactShapeUtil extends PcShapeUtil {
     label: T.string,
     source: T.string, // JSX defining `function Component(...)`
     data: T.string, // JSON props from Python (update()/props=)
+    autoH: T.boolean, // h="auto": fit the panel height to the rendered content
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'react', source: '', data: '{}' }
+    return { w: 380, h: 320, label: 'react', source: '', data: '{}', autoH: false }
   }
 
   component(shape) {

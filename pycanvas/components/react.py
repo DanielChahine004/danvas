@@ -71,12 +71,38 @@ class React(BaseComponent):
         # the ``None`` slot holds catch-all handlers (``on_message`` / ``on()``).
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
+        # h="auto": fit the panel height to the rendered React content. Unlike
+        # Custom (which measures inside its iframe), a native React panel is
+        # measured by ReactHost, which reports the content height back to resize
+        # the shape. The flag rides along in register_props as ``autoH``.
+        self._auto_h = False
 
     def register_props(self):
         props = dict(self._props)  # label, w, h
         props["source"] = self._source
         props["data"] = json.dumps(self._data)
+        props["autoH"] = self._auto_h
         return props
+
+    def _set_auto_h(self):
+        """Enable content-fit height live (``comp.h = "auto"``).
+
+        Flips the panel into auto-height and tells the running ReactHost to start
+        measuring and reporting its content height. A no-op if already auto. (To
+        pin a fixed height again, assign a number: ``comp.h = 240``.)
+        """
+        if self._auto_h:
+            return
+        self._auto_h = True
+        self._send_update({"autoH": True})
+
+    def _set_fixed_h(self, value):
+        """Pin the height to a number, leaving auto-height mode if it was on (so
+        the value isn't immediately overridden by the content fit)."""
+        if self._auto_h:
+            self._auto_h = False
+            self._send_update({"autoH": False})
+        self.set_layout(h=value)
     
     @staticmethod
     def compose(jsx="", css=""):

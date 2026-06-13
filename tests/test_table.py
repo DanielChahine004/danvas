@@ -1,7 +1,7 @@
 """Table rendering and the h='auto' fit-loop fix."""
 
 import pycanvas
-from pycanvas.components.table import _normalize
+from pycanvas.components.table import _normalize, _column_profile
 
 
 def test_normalize_list_of_dicts_unions_keys():
@@ -27,6 +27,39 @@ def test_dict_of_sequences_stays_columnar():
 
 def test_empty_dict_is_an_empty_key_value_table():
     assert _normalize({}) == (["key", "value"], [])
+
+
+def test_column_profile_reports_dtype_and_missing():
+    # Integer column with one missing value: dtype is int, and the null badge
+    # reflects the share that's empty; the hover tip carries the stats.
+    p = _column_profile([1, 2, None, 4], numeric=True)
+    assert p["meta"].startswith("int")
+    assert "25% null" in p["meta"]
+    assert "min 1" in p["tip"] and "max 4" in p["tip"]
+
+
+def test_column_profile_floats_and_categoricals():
+    assert _column_profile([1.5, 2.0], numeric=True)["meta"] == "float"
+    cat = _column_profile(["a", "b", "a"], numeric=False)
+    assert cat["meta"] == "str"
+    assert "2 unique" in cat["tip"]
+
+
+def test_table_renders_column_profile_meta():
+    t = pycanvas.Table([{"x": 1}, {"x": 2}])
+    html = t.register_props()["html"]
+    assert "pc-th-meta" in html
+
+
+def test_distribution_bars_carry_clickable_filter_attrs():
+    # Each dist bar embeds the predicate a click turns into a column filter:
+    # numeric bins carry data-lo/data-hi, categorical bars carry data-val.
+    t = pycanvas.Table([{"cat": "a", "n": 1}, {"cat": "b", "n": 2},
+                        {"cat": "a", "n": 9}])
+    html = t.register_props()["html"]
+    assert 'data-num="1" data-lo=' in html      # numeric histogram bin
+    assert "data-val=" in html                   # categorical bar
+    assert "pc-chip" in html                      # active-filter clear chip
 
 
 def test_table_renders_filter_and_distribution_hooks():

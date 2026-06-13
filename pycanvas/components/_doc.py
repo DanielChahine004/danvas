@@ -41,7 +41,12 @@ def document(body, css="", theme=False):
     should blend into the canvas); the default is the white notebook-style page.
     """
     base = _THEMED_CSS if theme else _BASE_CSS
+    # `<base target=_blank>` makes links open in a new browser tab rather than
+    # trying to navigate inside the sandboxed iframe (where X-Frame-Options would
+    # leave them dead). The iframe's `allow-popups-to-escape-sandbox` lets that
+    # tab load as a normal page.
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
+        "<base target='_blank'>"
         f"<style>{base}{css}</style></head><body>{body}</body></html>"
     )

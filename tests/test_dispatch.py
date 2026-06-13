@@ -121,9 +121,15 @@ def test_label_update_streams_without_reload():
 
 
 def test_markdown_renders_headings_and_lists():
-    html = Markdown("# Title\n\n- a\n- b\n\n**b** and `c`").register_props()["html"]
+    # Markdown is a native React panel now; the rendered HTML is exposed via
+    # `.html` (and carried to the frontend inside the JSON `data` prop).
+    md = Markdown("# Title\n\n- a\n- b\n\n**b** and `c`")
+    html = md.html
     assert "<h1>" in html and "<li>" in html
     assert "<strong>b</strong>" in html and "<code>c</code>" in html
+    # It renders natively (React), and the HTML rides along in the data prop.
+    assert md.component == "React"
+    assert "<h1>" in md.register_props()["data"]
 
 
 def test_table_from_records_has_header_and_cells():
