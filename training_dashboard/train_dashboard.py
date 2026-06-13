@@ -72,11 +72,12 @@ with canvas.column(w=320, gap=12, origin=(40, 40)):
     start = canvas.button("start / pause", text="Start")
     reset = canvas.button("reset", text="Reset")
     lr = canvas.slider("learning rate", min=0.0005, max=0.05, default=0.01, step=0.0005)
+    smooth = canvas.slider("smoothing", min=0.0, max=0.95, default=0.6, step=0.05)
 
 # --- charts: make each panel once, then push to it in the loop --------------
-loss = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6, x=440, y=40, w=580, h=280)
-acc = canvas.live_plot("accuracy", traces=["train", "val"], smoothing=0.6, below=loss, w=580, h=280)
-lr_plot = canvas.live_plot("lr_plot", label="learning rate", below=acc, w=580, h=220)  # unsmoothed
+loss = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6, max_points=None, x=440, y=40, w=580, h=280)
+acc = canvas.live_plot("accuracy", traces=["train", "val"], smoothing=0.6, max_points=None, below=loss, w=580, h=280)
+lr_plot = canvas.live_plot("lr_plot", label="learning rate", max_points=None, below=acc, w=580, h=220)  # unsmoothed
 weights = canvas.histogram("weights", bins=40, below=lr_plot, w=580, h=300)
 
 # --- run summary: hyperparameters, sample predictions, a text log -----------
@@ -103,6 +104,12 @@ def _reset():
     for plot in (loss, acc, lr_plot):
         plot.clear()
     status.update("reset — press start")
+
+
+@smooth.on_change
+def _set_smoothing(value):
+    loss.smoothing = value
+    acc.smoothing = value
 
 
 @canvas.background

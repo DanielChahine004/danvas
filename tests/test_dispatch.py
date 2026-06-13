@@ -91,6 +91,35 @@ def test_existing_component_passes_through():
     assert panel_for(lbl) is lbl
 
 
+def test_label_renders_as_escaped_custom_panel():
+    # Label is a Custom-based panel (so it can fit its height with h="auto") that
+    # shows its value as escaped plain text, not markup — markup is markdown's job.
+    lbl = Label("status", value="a < b & **not bold**")
+    assert isinstance(lbl, Custom)
+    html = lbl.register_props()["html"]
+    assert "a &lt; b &amp; **not bold**" in html   # escaped, asterisks left literal
+    assert "<strong>" not in html
+
+
+def test_label_auto_height_enabled_via_insert():
+    # h="auto" must flag the panel (insert() keys off `_auto_h`); on the old native
+    # Label it warned and did nothing.
+    canvas = pycanvas.Canvas()
+    lbl = canvas.label("status", "ready", h="auto")
+    assert lbl._auto_h is True
+
+
+def test_label_update_streams_without_reload():
+    # update() pushes into the live iframe ({"post": ...}) instead of replacing the
+    # html, so a per-loop status line never reloads the frame.
+    sent = []
+    lbl = Label("status", value="idle")
+    lbl._send_update = lambda payload, *a, **k: sent.append(payload)
+    lbl.update("running")
+    assert sent == [{"post": "running"}]
+    assert lbl.value == "running"
+
+
 def test_markdown_renders_headings_and_lists():
     html = Markdown("# Title\n\n- a\n- b\n\n**b** and `c`").register_props()["html"]
     assert "<h1>" in html and "<li>" in html

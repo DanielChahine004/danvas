@@ -177,7 +177,7 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 
 | Component | Factory | Drive it with |
 |---|---|---|
-| **Label** | `canvas.label(name, value="")` | `update(text)` |
+| **Label** | `canvas.label(name, value="", h="auto")` | `update(text)` — escaped plain text/number; `h="auto"` fits its height |
 | **Markdown** | `canvas.markdown(text="")` | `update(text)` |
 | **Image** | `canvas.image(src, fit="contain")` | `update(src)` — path / URL / bytes / Matplotlib / PIL / NumPy array |
 | **Table** | `canvas.table(data)` | interactive: sort / filter / per-column distributions. `update(data)` — DataFrame / Series / list-of-dicts / dict-of-columns / flat dict (→ key/value) |
@@ -503,7 +503,7 @@ masonry). For deterministic placement instead, give `x`/`y`, use a relative
 anchor, or a `with canvas.grid(...)` block (§6).
 
 Sizing text by eye is fiddly, so the Custom-based panels (`markdown`,
-`custom`, `table`, `image`, …) accept **`h="auto"`**: the height fits the
+`custom`, `table`, `image`, `label`, …) accept **`h="auto"`**: the height fits the
 rendered content, re-fits when it reflows (you narrow the panel, or
 `update()` changes the text), and is reported back so `comp.h` stays in sync.
 Width stays yours:
@@ -514,7 +514,7 @@ canvas.markdown("# Notes\n\nexactly as tall as this text", h="auto")
 
 `h="auto"` is also a live property — `comp.h = "auto"` switches a placed
 Custom-based panel into content-fit mode, and assigning a number
-(`comp.h = 240`) switches it back. On a non-Custom panel (a `Slider`, `Label`,
+(`comp.h = 240`) switches it back. On a non-Custom panel (a `Slider`, `Toggle`,
 …) it warns and leaves the height alone. Set it as a property, not via
 `update()` — `update()` carries a panel's *value*, not its layout.
 

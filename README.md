@@ -124,7 +124,7 @@ gain = canvas.slider("gain", min=0, max=1, step=0.1, on_release=True)
 | `Slider`    | bidirectional  | `.value`, `@on_change`, `.update(v)` |
 | `Toggle`    | bidirectional  | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
 | `Button`    | input          | momentary action; `@on_click`, `.value` (click count); `text=`, `.update(text)` to relabel live |
-| `Label`     | output         | `.update(text)` |
+| `Label`     | output         | escaped plain text/number; `.update(text)`; fits its height with `h="auto"` |
 | `VideoFeed` | output         | `.update(bgr_frame)` (OpenCV → binary JPEG over WS) |
 | `AudioFeed` | output         | `.update(pcm_chunk)` (PCM → Web Audio playback) |
 | `Plot`      | output         | `.update(fig_or_html)` (Plotly figure or HTML) |
@@ -502,7 +502,7 @@ servo.set_layout(x=120, y=90, rotation=30)   # any combination in one message
 ### Auto height (`h="auto"`)
 
 Text-y panels are hard to size by eye. On the Custom-based panels (`markdown`,
-`custom`, `table`, `image`, …) pass `h="auto"` and the panel's height fits its
+`custom`, `table`, `image`, `label`, …) pass `h="auto"` and the panel's height fits its
 rendered content — measured in the browser after layout, and re-fitted when
 the content reflows (e.g. you narrow the panel, or `update()` changes the
 text). Width stays yours; the fitted height is reported back so `comp.h` stays
@@ -521,7 +521,7 @@ notes.h = 240        # back to a fixed 240px (assigning a number turns auto off)
 ```
 
 Auto-height is a Custom-panel feature: setting `h="auto"` on a non-Custom panel
-(a `Slider`, a `Label`, …) warns and leaves its height unchanged, rather than
+(a `Slider`, a `Toggle`, …) warns and leaves its height unchanged, rather than
 silently shipping the string to the frontend. (Use `comp.h = "auto"` — the live
 property — not `comp.update(h="auto")`; `update()` carries a panel's *value*,
 not its layout.)

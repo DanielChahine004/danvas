@@ -22,9 +22,9 @@ carry breaking changes (called out below).
   without looping back into itself. A connection line — `viewer 'X' connected
   (replayed N panels, M arrows)` / `disconnected` — is always printed.
 - **Auto height.** Custom-based panels (`markdown`, `custom`, `table`,
-  `image`, …) accept `h="auto"`: the panel's height fits its rendered content,
-  re-fits when the content reflows (narrowing the panel, `update()`), and the
-  fitted height is reported back so `comp.h` stays in sync.
+  `image`, `label`, …) accept `h="auto"`: the panel's height fits its rendered
+  content, re-fits when the content reflows (narrowing the panel, `update()`),
+  and the fitted height is reported back so `comp.h` stays in sync.
 - **New example.** `examples/frontend_backend_tour.py` — an interactive tour of
   how the frontend talks to the backend, mirroring the live protocol frames
   onto a wire-tap panel (via `canvas.on_frame`) while you interact.
@@ -37,6 +37,15 @@ carry breaking changes (called out below).
 - **`queue=` at creation.** The send-queue policy can now be passed to
   `insert()` and every factory (`canvas.image(fig, queue="latest")`) instead of
   only being set afterwards via the `comp.queue` property.
+
+### Changed
+- **`Label` now supports `h="auto"`.** Labels render inside the same sandboxed
+  `Custom` iframe as `markdown`/`table`/`image`, so they fit their height to the
+  text (`canvas.label("status", "…", h="auto")`) and re-fit when the value
+  changes. The value is HTML-escaped and shown as plain text — use `markdown`
+  for formatting. Live `update()`s stream into the iframe without reloading it,
+  so a per-loop status line stays flicker-free. On the wire a Label now
+  registers as a `Custom` panel and its updates carry a `post` payload.
 
 ### Fixed
 - **Matplotlib figures no longer accumulate in pyplot's registry.** `Image`

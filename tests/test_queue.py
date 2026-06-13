@@ -25,7 +25,9 @@ def test_default_is_fifo_plain_broadcast():
     label._bind("l1", bridge)
     label.update("hello")
     assert bridge.conflated == []
-    assert bridge.plain and bridge.plain[0]["payload"] == {"value": "hello"}
+    # Label updates via Custom.push now, which streams into the live iframe as a
+    # {"post": ...} message rather than a {"value": ...} prop update.
+    assert bridge.plain and bridge.plain[0]["payload"] == {"post": "hello"}
 
 
 def test_latest_routes_dict_updates_to_conflated():
@@ -36,7 +38,7 @@ def test_latest_routes_dict_updates_to_conflated():
     label.update("hello")
     assert bridge.plain == []
     comp_id, msg, data = bridge.conflated[0]
-    assert comp_id == "l1" and msg["payload"] == {"value": "hello"} and data is None
+    assert comp_id == "l1" and msg["payload"] == {"post": "hello"} and data is None
 
 
 def test_invalid_queue_rejected():

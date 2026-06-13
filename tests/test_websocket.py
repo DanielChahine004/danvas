@@ -38,14 +38,17 @@ def test_register_messages_sent_on_connect():
     canvas, slider, label, app = build_client()
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            msgs = [_recv(ws) for _ in range(4)]
+            msgs = [_recv(ws) for _ in range(3)]
 
     types = [(m["type"], m.get("component")) for m in msgs]
-    # Each component yields a register followed by an initial-state update.
+    # The Slider yields a register followed by an initial-state update. The Label
+    # renders inside a Custom iframe — its value rides in the register props, so it
+    # registers as Custom with no separate initial-state update (three msgs total).
     assert ("register", "Slider") in types
-    assert ("register", "Label") in types
+    assert ("register", "Custom") in types
     regs = {m["id"]: m for m in msgs if m["type"] == "register"}
     assert regs[slider.id]["props"]["max"] == 180
+    assert "idle" in regs[label.id]["props"]["html"]   # initial value baked in
 
 
 def test_register_message_carries_initial_locks():
@@ -81,7 +84,7 @@ def test_input_message_updates_python_value():
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
             # drain initial register/update traffic
-            for _ in range(4):
+            for _ in range(3):
                 _recv(ws)
             ws.send_json({"type": "input", "id": slider.id, "payload": {"value": 150}})
             # give the server loop a moment to route the message
@@ -106,7 +109,7 @@ def test_rapid_inputs_processed_in_order():
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            for _ in range(4):
+            for _ in range(3):
                 _recv(ws)
             for v in (10, 20, 30, 40, 50):
                 ws.send_json({"type": "input", "id": slider.id,
@@ -127,7 +130,7 @@ def test_layout_message_syncs_python_geometry():
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            for _ in range(4):
+            for _ in range(3):
                 _recv(ws)
             # User dragged/resized the panel in the browser.
             ws.send_json(
@@ -149,7 +152,7 @@ def test_snapshot_request_response():
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            for _ in range(4):
+            for _ in range(3):
                 _recv(ws)
 
             # request_snapshot blocks the caller, so run it off-thread and
