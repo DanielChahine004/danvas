@@ -3,6 +3,11 @@
 import numpy as np
 import pytest
 
+# Histogram builds its figure with Plotly (an optional dependency) eagerly on
+# add(), so the whole module needs it. CI installs plotly; elsewhere these skip.
+pytest.importorskip("plotly")
+import plotly.graph_objects as go
+
 import pycanvas
 
 
@@ -32,13 +37,12 @@ def test_max_steps_bounds_the_buffer():
 
 
 def test_figure_builds_for_both_modes():
-    plotly = pytest.importorskip("plotly")
     for mode in ("heatmap", "overlay"):
         h = pycanvas.Histogram("w", bins=6, value_range=(0, 1), mode=mode)
         h.add(np.random.random(50), step=0)
         h.add(np.random.random(50), step=1)
         fig = h._figure()
-        assert isinstance(fig, plotly.graph_objects.Figure)
+        assert isinstance(fig, go.Figure)
         assert len(fig.data) >= 1
 
 

@@ -1,4 +1,10 @@
 import numpy as np
+import pytest
+
+# VideoFeed(encode=True) encodes frames with OpenCV, an optional (~90 MB)
+# dependency. Skip the whole module when it's absent rather than failing — CI
+# deliberately doesn't install the heavy video extra.
+pytest.importorskip("cv2")
 
 import pycanvas
 from pycanvas.bridge import BINARY_VIDEO
