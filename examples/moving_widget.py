@@ -30,7 +30,16 @@ def _orb_html(emoji):
     return f"""
       <div style="width:100%;height:100%;display:flex;align-items:center;
                   justify-content:center;font-size:34px;
-                  filter:drop-shadow(0 0 10px #38bdf8)">{emoji}</div>
+                  filter:drop-shadow(0 0 10px #38bdf8);
+                  
+                  /* Makes it non-clickable (clicks pass through) */
+                  pointer-events: none;
+                  
+                  /* Makes it non-highlightable */
+                  user-select: none;
+                  -webkit-user-select: none;
+                  -moz-user-select: none;
+                  -ms-user-select: none;">{emoji}</div>
     """
 
 
