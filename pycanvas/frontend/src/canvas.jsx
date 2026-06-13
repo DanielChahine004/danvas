@@ -469,9 +469,16 @@ function CustomView({ shape }) {
   useEffect(() => {
     const post = (data) => {
       const el = ref.current
-      if (el && el.contentWindow) {
-        el.contentWindow.postMessage({ __pycanvas: data }, '*')
-      }
+      if (!el || !el.contentWindow) return
+      // A binary push (push_binary) arrives as an ArrayBuffer; transfer it into
+      // the iframe (zero-copy) rather than structured-cloning the whole buffer
+      // on every frame — the win that keeps binary Custom panels close to the
+      // native VideoFeed path. handleBinary slices a fresh buffer per frame and
+      // nothing reads it after this single handler, so detaching it is safe. A
+      // JSON push() is a plain value with nothing transferable.
+      const transfer = data instanceof ArrayBuffer ? [data]
+        : ArrayBuffer.isView(data) ? [data.buffer] : []
+      el.contentWindow.postMessage({ __pycanvas: data }, '*', transfer)
     }
     registerLive(id, post)
     return () => unregisterLive(id)
