@@ -44,11 +44,17 @@ export function componentIdOf(shapeId) {
   return String(shapeId).replace(/^shape:/, '')
 }
 
+// The mounted editor, for overlays that need to map page<->screen coords.
+export function getEditor() {
+  return editor
+}
+
 export function setEditor(e) {
   editor = e
   setupGeometrySync(e)
   setupSelectionFilter(e)
   setupDrawSync(e)
+  setupCursorReporting(e)
   // The view config usually arrives (in `welcome`) just after mount, but if it
   // was already known before this editor instance existed, apply it now.
   if (viewConfig) setViewConfig(viewConfig)
@@ -65,6 +71,62 @@ function applyRemote(fn) {
 // Send any message to Python over the shared socket.
 function sendRaw(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+}
+
+// --- cursor reporting: stream this viewer's pointer to Python ----------------
+// Off until the server enables it (welcome.cursors — gated to a private bind by
+// default). When on, report the pointer in *page* coords (zoom/pan-independent,
+// so Python's canvas.viewers[i].cursor lines up with panel x/y). Throttled to one
+// send per animation frame and dead-banded to skip sub-pixel jitter, so a moving
+// mouse can't flood the socket.
+let cursorsEnabled = false
+function setupCursorReporting(e) {
+  const container = e.getContainer()
+  let pending = false
+  let lastClient = null
+  let lastSent = null
+  const flush = () => {
+    pending = false
+    if (!cursorsEnabled || !lastClient) return
+    const p = e.screenToPage(lastClient)
+    if (lastSent && Math.abs(p.x - lastSent.x) < 0.5 &&
+        Math.abs(p.y - lastSent.y) < 0.5) return  // dead-band
+    lastSent = p
+    sendRaw({ type: 'cursor', x: p.x, y: p.y })
+  }
+  container.addEventListener('pointermove', (ev) => {
+    if (!cursorsEnabled) return
+    lastClient = { x: ev.clientX, y: ev.clientY }
+    if (!pending) { pending = true; requestAnimationFrame(flush) }
+  })
+}
+function setCursorsEnabled(on) { cursorsEnabled = !!on }
+
+// --- peer cursors: render other viewers' pointers ----------------------------
+// The server relays each viewer's cursor (with their id/name/colour) to the
+// others; we cache the latest per viewer and notify subscribers (the overlay).
+const peerCursors = new Map() // id -> { id, x, y, color, name }
+const peerCursorListeners = new Set()
+
+function emitPeerCursors() {
+  const list = [...peerCursors.values()]
+  for (const cb of peerCursorListeners) cb(list)
+}
+function setPeerCursor(c) {
+  peerCursors.set(c.id, c)
+  emitPeerCursors()
+}
+function removePeerCursor(id) {
+  if (peerCursors.delete(id)) emitPeerCursors()
+}
+function clearPeerCursors() {
+  if (peerCursors.size) { peerCursors.clear(); emitPeerCursors() }
+}
+
+export function subscribePeerCursors(cb) {
+  peerCursorListeners.add(cb)
+  cb([...peerCursors.values()]) // prime with the latest known set
+  return () => peerCursorListeners.delete(cb)
 }
 
 // Reserved component id Python uses for the native-UI ephemeral Inspector
@@ -321,6 +383,10 @@ function handle(msg) {
   } else if (msg.type === 'presence') {
     setPresence(msg.count || 0)
     setRoster(msg.viewers || [])
+  } else if (msg.type === 'cursor') {
+    setPeerCursor(msg)            // a peer moved — render their cursor
+  } else if (msg.type === 'cursor_gone') {
+    removePeerCursor(msg.id)      // a peer left — drop their cursor
   } else if (msg.type === 'view') {
     applyLiveView(msg.view || {})
   } else if (msg.type === 'welcome') {
@@ -334,10 +400,12 @@ function handle(msg) {
     if (msg.reload || (lastRunId !== null && msg.runId && msg.runId !== lastRunId)) {
       console.info('[pycanvas] backend is a new run; clearing the previous run\'s panels')
       clearManaged()
+      clearPeerCursors()   // stale peers from the previous run shouldn't linger
     }
     if (msg.runId) lastRunId = msg.runId
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
+    setCursorsEnabled(!!msg.cursors)
     setViewConfig(msg.view || null)
   } else if (msg.type === 'chat') {
     pushChat(msg)

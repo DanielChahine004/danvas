@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
-import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig } from './bridge'
+import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig, subscribePeerCursors, getEditor } from './bridge'
 
 export default function App() {
   // `hideUi` is a <Tldraw> prop (decided before/at render), unlike the camera
@@ -17,6 +17,7 @@ export default function App() {
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <PresenceBadge />
+      <CursorLayer />
       {/* The Inspector button is part of the app's UI chrome, so a `ui: false`
           view (chrome-free surface) hides it alongside tldraw's own toolbars. */}
       {!hideUi && <InspectorButton />}
@@ -101,6 +102,74 @@ function PresenceBadge() {
         }}
       />
       {count} {count === 1 ? 'viewer' : 'viewers'}
+    </div>
+  )
+}
+
+// Renders other viewers' live cursors. Peer positions arrive (in page coords)
+// over the bridge; we map each to screen coords via the editor and draw a small
+// coloured pointer + name. A rAF loop re-renders while any cursor is present so
+// the markers track the camera as the local viewer pans/zooms. pointerEvents is
+// off throughout, so it never intercepts canvas gestures. The local viewer's own
+// cursor is not echoed back, so only *other* people show up here.
+function CursorLayer() {
+  const [cursors, setCursors] = useState([])
+  const [, rerender] = useReducer((n) => n + 1, 0)
+  useEffect(() => subscribePeerCursors(setCursors), [])
+  // Follow the camera: re-read page->screen each frame while cursors exist.
+  useEffect(() => {
+    if (!cursors.length) return
+    let raf = requestAnimationFrame(function loop() {
+      rerender()
+      raf = requestAnimationFrame(loop)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [cursors.length])
+
+  const editor = getEditor()
+  if (!editor || !cursors.length) return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 400 }}>
+      {cursors.map((c) => {
+        const p = editor.pageToScreen({ x: c.x, y: c.y })
+        return (
+          <div
+            key={c.id}
+            style={{
+              position: 'absolute',
+              left: p.x,
+              top: p.y,
+              transform: 'translate(-2px, -2px)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 4,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24"
+                 style={{ filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,0.45))' }}>
+              <path d="M4 2 L4 19 L9 14.5 L12.3 21 L15 19.7 L11.8 13.5 L18.5 13 Z"
+                    fill={c.color || '#3b82f6'} stroke="white" strokeWidth="1.3"
+                    strokeLinejoin="round" />
+            </svg>
+            <span
+              style={{
+                marginTop: 12,
+                background: c.color || '#3b82f6',
+                color: 'white',
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: 'system-ui, sans-serif',
+                padding: '1px 6px',
+                borderRadius: 6,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }}
+            >
+              {c.name}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -414,6 +414,26 @@ def log(entry): print(entry["name"], entry["text"])
 A small badge at the top of the canvas shows the live viewer count. See
 [`examples/chat_room.py`](examples/chat_room.py).
 
+### Live viewer cursors
+
+With `serve(cursors=True)` every viewer reports their pointer, so viewers see
+each other's live cursors (each in their roster colour) and **Python can read
+every pointer** off the roster as `canvas.viewers[i]["cursor"]` — a
+`{"x", "y"}` in canvas coords, or `None` until they move it:
+
+```python
+tip = canvas.viewers[0]["cursor"]            # {"x": ..., "y": ...} or None
+```
+
+It's the *latest* position (so a loop can sample it at its own rate), and there's
+a streaming form too — `@canvas.on_cursor def _(viewer): ...` fires on each move
+with the viewer dict. Positions are throttled and dead-banded client-side, then
+conflated per viewer, so a moving mouse can't flood the socket. Because it's
+viewer telemetry (the host sees every pointer), it's gated like the Inspector:
+**default on only for a private local bind**, `cursors=True`/`False` to override.
+See [`examples/moving_widget.py`](examples/moving_widget.py) — a unique emoji
+figure-8s around each viewer's cursor.
+
 ### Inspector from the toolbar
 
 You don't have to add an `Inspector` in code to peek at the canvas. A toolbar

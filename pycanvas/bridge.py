@@ -73,6 +73,10 @@ class Bridge:
         # sends (e.g. updating a debug panel) is not re-tapped, so a tap that
         # drives a component can't recurse.
         self._frame_taps = []
+        # Observers of viewer cursor moves (canvas.on_cursor). Kept separate from
+        # frame taps: cursors are high-rate and intentionally off the wire-tap
+        # path, so they neither flood debug logs nor pay the frame-tap guard.
+        self._cursor_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
         # One asyncio.Lock per live connection. The websockets legacy protocol
@@ -104,6 +108,11 @@ class Bridge:
         # the welcome frame so the button only shows where it's allowed.
         self._canvas = None
         self._ui_inspector = False
+        # When True, browsers report their pointer position (in canvas/page
+        # coords) so Python can read it off the roster as ``viewer["cursor"]``.
+        # Advertised in the welcome frame; gated like ``_ui_inspector`` (default
+        # on only for a private local bind) since it's viewer telemetry.
+        self._cursors = False
         # True when this process is a hot-reload restart (serve sets it). It rides
         # the welcome frame so a reconnecting browser — whose page never reloaded,
         # only its socket — drops the previous run's panels before this run's are
@@ -151,6 +160,27 @@ class Bridge:
     def remove_frame_tap(self, fn):
         if fn in self._frame_taps:
             self._frame_taps.remove(fn)
+
+    def add_cursor_tap(self, fn):
+        """Register ``fn(viewer)`` to observe viewer cursor moves (on_cursor).
+
+        ``viewer`` is a snapshot dict with ``id``/``name``/``color`` and the new
+        ``cursor`` (``{"x", "y"}`` in canvas coords). Runs off the event loop on
+        the input-dispatch thread, but it is high-rate — keep it cheap.
+        """
+        self._cursor_taps.append(fn)
+        return fn
+
+    def remove_cursor_tap(self, fn):
+        if fn in self._cursor_taps:
+            self._cursor_taps.remove(fn)
+
+    def _tap_cursor(self, viewer):
+        for fn in list(self._cursor_taps):
+            try:
+                fn(viewer)
+            except Exception:
+                traceback.print_exc()
 
     def _tap_frame(self, direction, msg):
         """Hand one frame to every tap, guarding against tap-driven recursion."""
@@ -264,6 +294,7 @@ class Bridge:
                 view_for_client = self._view
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
+                                  "cursors": self._cursors,
                                   "view": view_for_client,
                                   "runId": self._run_id,
                                   "reload": self._reload})
@@ -318,6 +349,9 @@ class Bridge:
             # again — drop it so the map doesn't grow unbounded.
             if gone is not None:
                 self._view_per_client.pop(gone["id"], None)
+                # Tell peers to drop this viewer's rendered cursor.
+                if self._cursors:
+                    self.broadcast({"type": "cursor_gone", "id": gone["id"]})
                 print(f"[pycanvas] viewer '{gone['name']}' disconnected")
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
@@ -332,7 +366,11 @@ class Bridge:
             name = f"{animal} {n}"
             n += 1
         color = random.choice(_VIEWER_COLORS)
-        return {"id": uuid.uuid4().hex[:8], "name": name, "color": color}
+        # ``cursor`` is the viewer's last-known pointer position in canvas/page
+        # coords (``{"x", "y"}``), or None until they move it (and only ever
+        # populated when cursor reporting is enabled). Read it via canvas.viewers.
+        return {"id": uuid.uuid4().hex[:8], "name": name, "color": color,
+                "cursor": None}
 
     def _broadcast_roster(self):
         """Push the live-viewer roster (and count) to every connected browser.
@@ -460,6 +498,33 @@ class Bridge:
         kind = msg.get("type")
         if kind == "heartbeat":
             return  # liveness only; timestamp already refreshed above
+        if kind == "cursor":
+            # High-rate pointer telemetry: return *before* the frame tap so cursor
+            # spam never floods debug logs or on_frame taps. Already throttled +
+            # dead-banded client-side; the server conflates per sender per viewer.
+            if self._cursors:
+                v = self._viewers.get(ws)
+                x, y = msg.get("x"), msg.get("y")
+                if v is not None and isinstance(x, (int, float)) \
+                        and isinstance(y, (int, float)):
+                    x, y = float(x), float(y)
+                    # 1) Store newest on the roster entry for Python to read.
+                    v["cursor"] = {"x": x, "y": y}
+                    # 2) Relay to *other* viewers for peer rendering, tagged with
+                    #    the sender's identity/colour. Conflated per sender (a slow
+                    #    viewer only gets the latest); tap=False keeps the relay off
+                    #    the wire-debug path.
+                    self.broadcast_conflated(
+                        f"cursor:{v['id']}", exclude=ws, tap=False,
+                        msg={"type": "cursor", "id": v["id"], "x": x, "y": y,
+                             "color": v["color"], "name": v["name"]},
+                    )
+                    # 3) Fan out to Python cursor observers off the loop thread.
+                    if self._cursor_taps:
+                        self._dispatch.submit(
+                            lambda vv=dict(v): self._tap_cursor(vv)
+                        )
+            return
         self._tap_frame("in", msg)
         if kind == "set_name":
             self._rename_viewer(ws, msg.get("name"))
@@ -643,7 +708,8 @@ class Bridge:
                 existing[k] = v
         return existing
 
-    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None):
+    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None,
+                            tap=True):
         """Broadcast an update under the ``latest`` queue policy.
 
         Keeps only the most recent pending value per viewer for this component,
@@ -656,10 +722,13 @@ class Bridge:
         """
         if self._loop is None:
             return
-        if data is not None:
-            self._tap_binary(data)
-        else:
-            self._tap_frame("out", msg)
+        # tap=False suppresses wire-debug observation for high-rate internal
+        # relays (cursor positions) that would otherwise flood on_frame/debug.
+        if tap:
+            if data is not None:
+                self._tap_binary(data)
+            else:
+                self._tap_frame("out", msg)
         kind = "bin" if data is not None else "msg"
         for ws in list(self._connections):
             if ws is exclude:

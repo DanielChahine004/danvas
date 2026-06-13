@@ -735,9 +735,17 @@ viewer; omit it to broadcast to everyone.
 ### Multiple viewers
 
 `canvas.viewers` is the live roster of connected browsers — each a dict with
-`id`, `name`, and `color`. The `id` is what `set_view(..., client_id=…)` expects.
-The list reflects who's connected *right now*. Pair it with `Chat` for a shared
-room.
+`id`, `name`, `color`, and `cursor`. The `id` is what `set_view(..., client_id=…)`
+expects. The list reflects who's connected *right now*. Pair it with `Chat` for a
+shared room.
+
+With `serve(cursors=True)`, viewers see each other's live cursors (in their
+roster colour) and each entry's `cursor` carries that viewer's latest pointer as
+`{"x", "y"}` in canvas coords (or `None` until they move it) — so Python can read
+every pointer, e.g. `canvas.viewers[0]["cursor"]`. There's a streaming form too,
+`@canvas.on_cursor def _(viewer): ...`. It's throttled + conflated per viewer, and
+gated like the Inspector (default on only for a private local bind) since it's
+viewer telemetry. See [`examples/moving_widget.py`](examples/moving_widget.py).
 
 ### Hot reload (auto-restart on save)
 

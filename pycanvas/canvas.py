@@ -243,10 +243,18 @@ class Canvas:
         """Return the currently connected viewers as a list of dicts.
 
         Each entry has ``id`` (an opaque per-connection identifier), ``name``
-        (the viewer's editable display name) and ``color`` (their roster
-        colour). The ``id`` is what :meth:`set_view` expects for its
-        ``client_id`` argument, e.g. to point one viewer's camera at something
-        without moving everyone else::
+        (the viewer's editable display name), ``color`` (their roster colour),
+        and ``cursor`` — their last-known pointer position in canvas/page
+        coords as ``{"x", "y"}``, or ``None`` until they move it. ``cursor`` is
+        only populated when cursor reporting is on (``serve(cursors=True)``;
+        default on for a private local bind), and reads the *latest* position,
+        so a loop can sample it at its own rate::
+
+            tip = canvas.viewers[0]["cursor"]   # {"x": ..., "y": ...} or None
+
+        The ``id`` is what :meth:`set_view` expects for its ``client_id``
+        argument, e.g. to point one viewer's camera at something without moving
+        everyone else::
 
             for v in canvas.viewers:
                 canvas.set_view(x=0, y=0, client_id=v["id"])
@@ -281,6 +289,29 @@ class Canvas:
     def off_frame(self, fn):
         """Remove a frame observer registered with :meth:`on_frame`."""
         self._bridge.remove_frame_tap(fn)
+
+    def on_cursor(self, fn):
+        """Stream viewer cursor moves: ``fn(viewer)``. Decorator-friendly.
+
+        Fires whenever a viewer moves their pointer, with a snapshot dict of that
+        viewer — ``id``/``name``/``color`` plus ``cursor`` (``{"x", "y"}`` in
+        canvas coords). Requires cursor reporting to be on (``serve(cursors=True)``;
+        default on for a private local bind)::
+
+            @canvas.on_cursor
+            def _(v):
+                print(v["name"], "at", v["cursor"])
+
+        It's a high-rate stream (throttled + dead-banded client-side, but still
+        many per second per viewer), so keep the handler cheap — for steady
+        sampling, polling ``canvas.viewers[i]["cursor"]`` from a loop is often
+        simpler. Remove with :meth:`off_cursor`.
+        """
+        return self._bridge.add_cursor_tap(fn)
+
+    def off_cursor(self, fn):
+        """Remove a cursor observer registered with :meth:`on_cursor`."""
+        self._bridge.remove_cursor_tap(fn)
 
     def _debug_frame(self, direction, msg):
         """The ``serve(debug=True)`` tap: print one console line per frame."""
@@ -1120,7 +1151,7 @@ class Canvas:
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
-              view=None, desktop=None, window_title="PyCanvas",
+              cursors=None, view=None, desktop=None, window_title="PyCanvas",
               window_size=(1200, 800), password=None, hot_reload=False,
               debug=False):
         """Start the server and open the browser.
@@ -1170,6 +1201,12 @@ class Canvas:
         a local bind (``127.0.0.1``) with no tunnel. Pass ``ui_inspector=True``
         to force it on for a shared/tunneled canvas, or ``False`` to hide it
         entirely.
+
+        ``cursors`` enables viewer pointer reporting: each browser streams its
+        cursor position (throttled, in canvas coords) so Python can read it as
+        ``canvas.viewers[i]["cursor"]``. It's viewer telemetry — the host sees
+        every viewer's pointer — so it's gated like ``ui_inspector``: default on
+        only for a private local bind, ``cursors=True``/``False`` to override.
 
         ``password`` gates access to the whole canvas: when set, a visitor is
         shown a small password page first and the WebSocket is refused until they
@@ -1258,6 +1295,13 @@ class Canvas:
         local = host in ("127.0.0.1", "localhost")
         self._bridge._ui_inspector = (
             bool(ui_inspector) if ui_inspector is not None
+            else (local and not tunnel)
+        )
+        # Cursor reporting is viewer telemetry (the host can read every viewer's
+        # pointer via canvas.viewers), so gate it like the Inspector: default on
+        # only for a private, non-tunneled bind; an explicit cursors= overrides.
+        self._bridge._cursors = (
+            bool(cursors) if cursors is not None
             else (local and not tunnel)
         )
         # Wire logging: a frame tap that prints every JSON frame (and binary
