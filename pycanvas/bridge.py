@@ -616,6 +616,16 @@ class Bridge:
             diff = msg.get("diff") or {}
             self._apply_draw(diff)
             self.broadcast({"type": "draw", "diff": diff})
+        elif kind == "request":
+            # A panel's ``canvas.request(data)`` — the awaitable twin of input.
+            # Answer it off the loop (a slow handler can't stall rendering) and
+            # reply correlated by reqId.
+            comp = self._components.get(msg.get("id"))
+            if comp is not None:
+                self._dispatch.submit(
+                    lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
+                    self._dispatch_request(c, r, d)
+                )
         elif kind == "snapshot":
             # Reply to a request_snapshot; hand the document to the waiter.
             waiter = self._snapshot_waiters.get(msg.get("reqId"))
@@ -639,6 +649,38 @@ class Bridge:
             self.broadcast(
                 {"type": "update", "id": comp.id, "payload": state}, exclude=ws
             )
+
+    def _dispatch_request(self, comp, req_id, data):
+        """Answer a panel's ``canvas.request`` (off the loop) and reply by reqId.
+
+        Runs the component's request handler on the dispatch thread, then
+        broadcasts a ``response`` correlated by ``reqId`` — the requesting tab
+        resolves its Promise; other tabs (which don't hold that reqId) ignore it.
+        A panel with no request handler, a handler that raises, or a return value
+        that isn't JSON-serialisable all come back as an ``error`` (rejecting the
+        Promise) rather than hanging the caller.
+        """
+        handle = getattr(comp, "_handle_request", None)
+        if handle is None:
+            self._reply(req_id, error="this panel does not accept requests")
+            return
+        try:
+            result = handle(data)
+            json.dumps(result)  # surface a non-serialisable reply as a clean error
+        except Exception as exc:
+            traceback.print_exc()
+            self._reply(req_id, error=repr(exc))
+            return
+        self._reply(req_id, result=result)
+
+    def _reply(self, req_id, result=None, error=None):
+        """Broadcast a ``response`` for ``req_id`` (the frontend correlates it)."""
+        msg = {"type": "response", "reqId": req_id}
+        if error is not None:
+            msg["error"] = error
+        else:
+            msg["result"] = result
+        self.broadcast(msg)
 
     def _dispatch_layout(self, comp, msg):
         """Apply a user move/resize (off the loop) and echo the new geometry.

@@ -372,7 +372,8 @@ The `canvas` prop is the full bridge handle:
 
 | `canvas.…` | What it does |
 | --- | --- |
-| `send(data)` | panel → Python, routed to your `@on(event)` / `@on_message` handlers |
+| `send(data)` | panel → Python, routed to your `@on(event)` / `@on_message` handlers (fire-and-forget) |
+| `request(data)` | the **awaitable** twin of `send` — `const r = await canvas.request({event:'…', …})` resolves with the return value of the panel's matching `@on_request` handler (rejects if it raises). For ask-Python-and-use-the-answer flows: validate a field, fetch a row, compute server-side |
 | `onFrame(cb)` | subscribe (in a `useEffect`) to the `push()` / `push_binary()` stream with **no re-render**; `cb` gets each value (an `ArrayBuffer` for binary). Use this *or* the `value` prop, not both |
 | `viewport(cb)` | `cb` is called now and on every camera move with the live `{ x, y, zoom }` of the canvas centre (the numbers `serve(view=…)` takes); returns an unsubscribe |
 | `setView({x, y, zoom})` | the write-twin of `viewport` — pan/zoom the canvas to centre a point (any subset of keys; omitted axes stay put) |

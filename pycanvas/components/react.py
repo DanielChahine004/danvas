@@ -18,6 +18,9 @@ The component must be named ``Component`` and receives three props:
 The ``canvas`` handle exposes:
 
   * ``send(data)`` — panel → Python, routed to your ``@on`` / ``on_message`` handlers;
+  * ``request(data)`` — the **awaitable** twin of ``send``: returns a Promise that
+    resolves with the return value of the matching :meth:`on_request` handler
+    (``const r = await canvas.request({event:'…', …})``);
   * ``onFrame(cb)`` — subscribe (in a ``useEffect``) to the :meth:`push` /
     :meth:`push_binary` stream without re-rendering; ``cb`` gets each value (an
     ``ArrayBuffer`` for binary). Use this *or* the ``value`` prop, not both;
@@ -94,6 +97,10 @@ class React(BaseComponent):
         # the ``None`` slot holds catch-all handlers (``on_message`` / ``on()``).
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
+        # Request/response handlers for ``canvas.request(data)`` (see on_request):
+        # event value -> the single handler whose *return value* is the reply.
+        # Unlike ``_routes`` exactly one handler answers, so it's not a list.
+        self._request_routes = {}
         # h="auto"/w="auto": fit the panel height/width to the rendered React
         # content. Unlike Custom (which measures inside its iframe), a native
         # React panel is measured by ReactHost, which reports the content size
@@ -299,6 +306,43 @@ class React(BaseComponent):
         """Decorator: handle *every* inbound message (a catch-all ``on()``)."""
         self._routes.setdefault(None, []).append(fn)
         return fn
+
+    def on_request(self, event=None):
+        """Decorator: *answer* a panel's ``await canvas.request(data)`` call.
+
+        Where :meth:`on` is fire-and-forget, this is request/response: the handler
+        receives the request ``data`` and its **return value** is sent back to
+        resolve the panel's Promise — for ask-Python-and-use-the-answer flows
+        (validate a field, fetch a row, compute server-side). Routed by
+        ``data[event_key]`` like :meth:`on` (``@panel.on_request("validate")``);
+        ``@panel.on_request()`` is the catch-all. Exactly one handler answers (the
+        keyed one, else the catch-all), so registering the same key again replaces
+        it. A handler that raises rejects the Promise with the error; the return
+        value must be JSON-serialisable.
+
+            @panel.on_request("factorize")
+            def _(req): return {"factors": factorize(req["n"])}
+            # in JSX:  const { factors } = await canvas.request({event:'factorize', n})
+        """
+        def deco(fn):
+            self._request_routes[event] = fn
+            return fn
+        return deco
+
+    def _handle_request(self, data):
+        """Resolve a ``canvas.request`` payload to a reply value (bridge entry).
+
+        Returns the matching handler's value; raises if none is registered — the
+        bridge turns the return into a ``response`` (resolving the panel's Promise)
+        and an exception into an error ``response`` (rejecting it).
+        """
+        event = data.get(self._event_key) if isinstance(data, dict) else None
+        handler = self._request_routes.get(event)
+        if handler is None:
+            handler = self._request_routes.get(None)
+        if handler is None:
+            raise LookupError(f"no on_request handler for event {event!r}")
+        return handler(data)
 
     def _handle_input(self, payload):
         with self._lock:

@@ -1,6 +1,8 @@
 import json
 import struct
 
+import pytest
+
 import pycanvas
 from pycanvas.bridge import BINARY_REACT
 
@@ -37,6 +39,34 @@ def test_update_merges_props_and_sends_json():
     assert json.loads(panel.register_props()["data"]) == {"label": "Hits", "extra": 1}
     sent = json.loads(panel._bridge.plain[-1]["payload"]["data"])
     assert sent == {"label": "Hits", "extra": 1}
+
+
+def test_on_request_routes_by_event_and_returns_value():
+    panel = _panel()
+
+    @panel.on_request("sum")
+    def _(req):
+        return req["a"] + req["b"]
+
+    # _handle_request is the bridge entry point; its return is the reply value.
+    assert panel._handle_request({"event": "sum", "a": 2, "b": 3}) == 5
+
+
+def test_on_request_catch_all_handles_unkeyed():
+    panel = _panel()
+
+    @panel.on_request()
+    def _(req):
+        return {"echoed": req.get("msg")}
+
+    assert panel._handle_request({"msg": "hi"}) == {"echoed": "hi"}
+
+
+def test_on_request_missing_handler_raises():
+    panel = _panel()
+    # No handler registered -> bridge turns this into a rejected Promise.
+    with pytest.raises(LookupError):
+        panel._handle_request({"event": "nope"})
 
 
 def test_push_streams_without_prop_churn():

@@ -265,3 +265,45 @@ def test_presence_count_broadcast():
                 assert _wait_presence(ws2) == 2
             # ws2 left the with-block; ws1 should see the count fall back to 1.
             assert _wait_presence(ws1) == 1
+
+
+def _rpc_app(event, fn):
+    """A canvas with one React panel whose @on_request(event) handler is fn."""
+    canvas = pycanvas.Canvas()
+    panel = canvas.insert(
+        pycanvas.React(source="function Component(){ return null }", name="rpc")
+    )
+    panel.on_request(event)(fn)
+    return canvas, panel, server.create_app(canvas._bridge, open_browser=False)
+
+
+def test_request_response_round_trip():
+    """canvas.request -> @on_request handler's return -> response, by reqId."""
+    canvas, panel, app = _rpc_app("echo", lambda req: {"echoed": req["msg"]})
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            _recv(ws)  # drain the panel's register
+            ws.send_json({"type": "request", "id": panel.id, "reqId": "r1",
+                          "data": {"event": "echo", "msg": "hi"}})
+            resp = _wait_type(ws, "response")
+
+    assert resp["reqId"] == "r1"
+    assert resp["result"] == {"echoed": "hi"}
+
+
+def test_request_handler_error_replies_with_error():
+    """A handler that raises rejects the panel's Promise (an error response)."""
+    def boom(req):
+        raise ValueError("nope")
+
+    canvas, panel, app = _rpc_app("boom", boom)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            _recv(ws)
+            ws.send_json({"type": "request", "id": panel.id, "reqId": "r2",
+                          "data": {"event": "boom"}})
+            resp = _wait_type(ws, "response")
+
+    assert resp["reqId"] == "r2"
+    assert "result" not in resp
+    assert "nope" in resp["error"]

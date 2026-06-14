@@ -8,9 +8,11 @@
 // React panel appears, exactly like the Monaco-backed Repl.
 //
 // The user writes a component named `Component`; it receives three props:
-//   canvas  - { send(data), onFrame(cb), chat, viewport(cb), setView(v) }:
-//             send routes to @on handlers; onFrame is a no-re-render subscription
-//             to the push() stream for high-rate/binary data the component paints
+//   canvas  - { send(data), request(data), onFrame(cb), chat, viewport(cb),
+//             setView(v) }: send routes to @on handlers (fire-and-forget) and
+//             request is its awaitable twin (resolves with an @on_request
+//             handler's return value); onFrame is a no-re-render subscription to
+//             the push() stream for high-rate/binary data the component paints
 //             itself; chat is the canvas-wide shared room (send/setName/history/
 //             subscribe/identity) that powers the Chat panel; viewport(cb) reports
 //             live canvas-centre x/y/zoom (powers the Inspector) and setView(v)
@@ -23,7 +25,7 @@
 import * as Babel from '@babel/standalone'
 import React from 'react'
 import { useEditor } from 'tldraw'
-import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
+import { sendInput, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 
 // Compile a source string into a *factory* — `(React, libs) => Component` —
@@ -204,6 +206,11 @@ export default function ReactHost({ shape }) {
   const canvas = React.useMemo(
     () => ({
       send: (data) => sendInput(id, data),
+      // The awaitable twin of send: `const r = await canvas.request(data)`
+      // resolves with the return value of the panel's matching @on_request
+      // handler (rejects if it raises or times out). For ask-Python-and-use-the-
+      // answer flows — validate a field, fetch a row, compute server-side.
+      request: (data) => requestData(id, data),
       // Subscribe to every push() without re-rendering; returns an unsubscribe.
       // The payload is whatever Python pushed (an ArrayBuffer for binary, handed
       // over zero-copy). Call from a useEffect and return its result to clean up.

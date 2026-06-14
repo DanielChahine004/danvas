@@ -488,6 +488,8 @@ function handle(msg) {
     pushChat(msg)
   } else if (msg.type === 'complete_result') {
     resolveCompletion(msg.reqId, msg.completions)
+  } else if (msg.type === 'response') {
+    resolveRequest(msg.reqId, msg.result, msg.error)
   }
 }
 
@@ -520,6 +522,42 @@ function resolveCompletion(reqId, completions) {
   clearTimeout(pending.timer)
   pendingCompletions.delete(reqId)
   pending.resolve(completions || [])
+}
+
+// --- request/response RPC (canvas.request from a React panel) ----------------
+// The awaitable twin of sendInput: a panel asks Python a question and gets the
+// matching @on_request handler's return value back. Generalises the completions
+// round-trip and component-routes it — { type:'request', id, reqId, data } gets a
+// { type:'response', reqId, result|error } back, correlated by reqId. reqId is
+// namespaced by a per-tab nonce so a broadcast response never resolves another
+// tab's pending request. The Promise rejects on a handler error or timeout.
+const pendingRequests = new Map() // reqId -> { resolve, reject, timer }
+const REQUEST_NONCE = Math.random().toString(36).slice(2)
+let requestSeq = 0
+
+export function requestData(id, data, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('not connected'))
+      return
+    }
+    const reqId = `${REQUEST_NONCE}:${++requestSeq}`
+    const timer = setTimeout(() => {
+      pendingRequests.delete(reqId)
+      reject(new Error('canvas.request timed out'))
+    }, timeoutMs)
+    pendingRequests.set(reqId, { resolve, reject, timer })
+    sendRaw({ type: 'request', id, reqId, data })
+  })
+}
+
+function resolveRequest(reqId, result, error) {
+  const pending = pendingRequests.get(reqId)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  pendingRequests.delete(reqId)
+  if (error !== undefined && error !== null) pending.reject(new Error(error))
+  else pending.resolve(result)
 }
 
 // Collect tldraw "content" for everything on the page except the pycanvas
