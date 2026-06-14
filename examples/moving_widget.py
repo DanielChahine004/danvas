@@ -31,6 +31,7 @@ def _orb_html(emoji):
     # panel itself click-through (grabbable=False + operable=False). user-select
     # none just stops the emoji being highlightable as you drag past it.
     return f"""
+      <style>html,body{{margin:0;overflow:hidden}}</style>
       <div style="width:100%;height:100%;display:flex;align-items:center;
                   justify-content:center;font-size:34px;
                   filter:drop-shadow(0 0 10px #38bdf8);
