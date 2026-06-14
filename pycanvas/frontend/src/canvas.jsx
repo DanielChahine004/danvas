@@ -605,11 +605,12 @@ export class ReactShapeUtil extends PcShapeUtil {
     source: T.string, // JSX defining `function Component(...)`
     data: T.string, // JSON props from Python (update()/props=)
     autoH: T.boolean, // h="auto": fit the panel height to the rendered content
+    autoW: T.boolean, // w="auto": fit the panel width to the rendered content
     libs: T.string, // JSON array of library names to load (Python `scope=[...]`)
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'react', source: '', data: '{}', autoH: false, libs: '[]' }
+    return { w: 380, h: 320, label: 'react', source: '', data: '{}', autoH: false, autoW: false, libs: '[]' }
   }
 
   component(shape) {

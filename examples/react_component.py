@@ -78,12 +78,13 @@ threading.Thread(target=retitle, daemon=True).start()
 
 # `scope=` pulls third-party libraries (loaded as ESM in the browser, no npm
 # build) into the component as the `libs` global — here d3 for a quick scale.
+# h="auto"/w="auto" shrink the panel to hug the rendered content on each axis.
 canvas.react('''
 function Component() {
   const x = libs.d3.scaleLinear().domain([0, 100]).range([0, 200])
-  return <div style={{ color: 'var(--pc-text)' }}>d3 maps 50 → {x(50)}</div>
+  return <div style={{ color: 'var(--pc-text)', whiteSpace: 'nowrap' }}>d3 maps 50 → {x(50)}</div>
 }
-''', scope=["d3"], x=80, y=300, h='auto')
+''', scope=["d3"], x=80, y=300, h='auto', w='auto')
 
 # High-rate binary telemetry: `push_binary` sends packed bytes on a binary
 # WebSocket frame (no JSON, no base64); `canvas.onFrame(cb)` receives it as a

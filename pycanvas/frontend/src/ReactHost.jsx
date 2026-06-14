@@ -227,28 +227,36 @@ export default function ReactHost({ shape }) {
   }, [shape.props.libs])
   const { libs, ready: libsReady, error: libsError } = useLibs(libNames)
 
-  // h="auto": fit the panel height to the rendered content. The content sits in
-  // its own box (sized to content) so we can measure it; the host fills the
-  // card body so its offsetHeight gives the chrome overhead (see fitNative).
+  // h="auto" / w="auto": fit the panel height/width to the rendered content. The
+  // content sits in its own box (sized to content) so we can measure it; the host
+  // fills the card body so its offset* gives the chrome overhead (see fitNative).
+  // For width-fit the content box is laid out at `max-content` (see below), so
+  // scrollWidth is the content's *natural* width, independent of the card width —
+  // which keeps the fit from oscillating as the panel resizes to match it.
   const autoH = !!shape.props.autoH
+  const autoW = !!shape.props.autoW
   const hostRef = React.useRef(null)
   const contentRef = React.useRef(null)
   React.useEffect(() => {
-    if (!autoH) return
+    if (!autoH && !autoW) return
     const host = hostRef.current
     const content = contentRef.current
     if (!host || !content) return
-    const measure = () => fitNative(id, content.scrollHeight, host)
+    const measure = () =>
+      fitNative(id, host, {
+        h: autoH ? content.scrollHeight : undefined,
+        w: autoW ? content.scrollWidth : undefined,
+      })
     measure()
     let ro
     if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(measure)
-      ro.observe(content) // content height changes
-      ro.observe(host) // width changes that reflow content
+      ro.observe(content) // content size changes
+      ro.observe(host) // card-size changes that reflow content
     }
     return () => ro && ro.disconnect()
     // libsReady: re-measure once libraries load and the content reflows.
-  }, [autoH, id, shape.props.source, shape.props.data, libsReady])
+  }, [autoH, autoW, id, shape.props.source, shape.props.data, libsReady])
 
   // Compile (memoised by source), then bind the factory with React + the loaded
   // libs. Binding runs the user's module-level code and can throw (or omit
@@ -304,10 +312,24 @@ export default function ReactHost({ shape }) {
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
     >
-      {/* In auto-height mode the content sizes to itself (measurable); otherwise
-          it's a transparent pass-through (display:contents) so existing React
-          panels that fill 100% height behave exactly as before. */}
-      <div ref={contentRef} style={autoH ? { flex: '0 0 auto', minWidth: 0 } : { display: 'contents' }}>
+      {/* When fitting either axis the content sizes to itself (measurable);
+          otherwise it's a transparent pass-through (display:contents) so existing
+          React panels that fill 100% height/width behave exactly as before. For
+          width-fit the box is laid out at `max-content` and left-aligned, so its
+          scrollWidth is the content's natural width (see the measure effect). */}
+      <div
+        ref={contentRef}
+        style={
+          autoH || autoW
+            ? {
+                flex: '0 0 auto',
+                ...(autoW
+                  ? { width: 'max-content', maxWidth: 'none', alignSelf: 'flex-start' }
+                  : { minWidth: 0 }),
+              }
+            : { display: 'contents' }
+        }
+      >
         <Boundary resetKey={Comp}>
           <Comp canvas={canvas} value={streamed} props={userProps} />
         </Boundary>

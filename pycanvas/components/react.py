@@ -80,17 +80,20 @@ class React(BaseComponent):
         # the ``None`` slot holds catch-all handlers (``on_message`` / ``on()``).
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
-        # h="auto": fit the panel height to the rendered React content. Unlike
-        # Custom (which measures inside its iframe), a native React panel is
-        # measured by ReactHost, which reports the content height back to resize
-        # the shape. The flag rides along in register_props as ``autoH``.
+        # h="auto"/w="auto": fit the panel height/width to the rendered React
+        # content. Unlike Custom (which measures inside its iframe), a native
+        # React panel is measured by ReactHost, which reports the content size
+        # back to resize the shape. The flags ride along in register_props as
+        # ``autoH``/``autoW``.
         self._auto_h = False
+        self._auto_w = False
 
     def register_props(self):
         props = dict(self._props)  # label, w, h
         props["source"] = self._source
         props["data"] = json.dumps(self._data)
         props["autoH"] = self._auto_h
+        props["autoW"] = self._auto_w
         props["libs"] = json.dumps(self._libs)
         return props
 
@@ -113,7 +116,28 @@ class React(BaseComponent):
             self._auto_h = False
             self._send_update({"autoH": False})
         self.set_layout(h=value)
-    
+
+    def _set_auto_w(self):
+        """Enable content-fit width live (``comp.w = "auto"``).
+
+        The width twin of :meth:`_set_auto_h`: flips the panel into auto-width
+        and tells the running ReactHost to measure the content's natural width
+        and report it back. A no-op if already auto. (To pin a fixed width again,
+        assign a number: ``comp.w = 320``.)
+        """
+        if self._auto_w:
+            return
+        self._auto_w = True
+        self._send_update({"autoW": True})
+
+    def _set_fixed_w(self, value):
+        """Pin the width to a number, leaving auto-width mode if it was on (so
+        the value isn't immediately overridden by the content fit)."""
+        if self._auto_w:
+            self._auto_w = False
+            self._send_update({"autoW": False})
+        self.set_layout(w=value)
+
     @staticmethod
     def compose(jsx="", css=""):
         """Wrap a JSX expression (plus optional CSS) into a full ``Component``.

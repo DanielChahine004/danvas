@@ -1049,28 +1049,39 @@ function fitFromIframe(sourceWin, fit) {
   if (flowItems.has(shapeId)) scheduleRelayout()
 }
 
-// Auto-height for native panels (the React `h="auto"` path). The iframe version
-// (fitFromIframe) reads the iframe's document height over postMessage; here the
-// panel is a native React subtree, so ReactHost measures its content directly
-// and calls this with the content height and the host element that fills the
-// card's body. Overhead (card header/padding) is `shape.h - hostEl.offsetHeight`,
-// in layout px — the same read-back path as a user resize, keeping `comp.h` in
-// sync.
-export function fitNative(componentId, contentH, hostEl) {
-  if (!editor || typeof contentH !== 'number' || !hostEl) return
+// Content-fit for native panels (the React `h="auto"` / `w="auto"` path). The
+// native twin of fitFromIframe: where that reads an iframe's document size over
+// postMessage, here the panel is a native React subtree, so ReactHost measures
+// its content directly and calls this with `fit = { h?, w? }` and the host
+// element that fills the card's body. Overhead (card header/padding) is
+// `shape.<axis> - hostEl.offset<Axis>`, in layout px — the same read-back path
+// as a user resize, keeping `comp.w`/`comp.h` in sync. Each axis is applied
+// independently; pass only the axis the panel is fitting.
+export function fitNative(componentId, hostEl, fit) {
+  if (!editor || !hostEl || !fit) return
   const shapeId = createShapeId(componentId)
   const shape = editor.getShape(shapeId)
   if (!shape) return
-  const overhead = Math.max(0, shape.props.h - hostEl.offsetHeight)
-  const h = Math.max(40, Math.ceil(contentH + overhead))
-  if (Math.abs(h - shape.props.h) < 3) return // settled — don't ping-pong
+  const props = {}
+  const report = { type: 'layout', id: componentId }
+  if (typeof fit.h === 'number') {
+    const overhead = Math.max(0, shape.props.h - hostEl.offsetHeight)
+    const h = Math.max(40, Math.ceil(fit.h + overhead))
+    if (Math.abs(h - shape.props.h) >= 3) { props.h = h; report.h = h } // else settled
+  }
+  if (typeof fit.w === 'number') {
+    const overhead = Math.max(0, shape.props.w - hostEl.offsetWidth)
+    const w = Math.max(40, Math.ceil(fit.w + overhead))
+    if (Math.abs(w - shape.props.w) >= 3) { props.w = w; report.w = w } // else settled
+  }
+  if (props.h === undefined && props.w === undefined) return // both settled — don't ping-pong
   applyRemote(() =>
-    editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
+    editor.updateShape({ id: shapeId, type: shape.type, props })
   )
-  // Height only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
+  // Size only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
   // and break the placement flow for the next viewer.
-  sendRaw({ type: 'layout', id: componentId, h })
-  // The panel grew/shrank — re-pack the auto-flow around its real height.
+  sendRaw(report)
+  // The panel grew/shrank — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
 }
 

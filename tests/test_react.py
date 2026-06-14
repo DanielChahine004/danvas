@@ -60,6 +60,20 @@ def test_push_binary_sends_binary_frame_with_react_type():
     assert data[2 + id_len:] == payload
 
 
+def test_auto_width_setter_toggles_and_pins():
+    panel = _panel()
+    assert panel.register_props()["autoW"] is False
+    # comp.w = "auto" turns on content-fit width and tells the frontend.
+    panel.w = "auto"
+    assert panel._auto_w is True
+    assert panel.register_props()["autoW"] is True
+    assert panel._bridge.plain[-1]["payload"] == {"autoW": True}
+    # A numeric width leaves auto-width mode (so the fit can't override it).
+    panel.w = 320
+    assert panel._auto_w is False
+    assert {"autoW": False} in [m["payload"] for m in panel._bridge.plain]
+
+
 def test_on_routes_by_event_field_and_catch_all():
     panel = _panel()
     keyed, every = [], []

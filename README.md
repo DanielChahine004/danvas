@@ -353,7 +353,9 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
 Because it's a real subtree (not a cover-it-to-grab iframe), a React panel stays
 interactive from the first hover — cursors, `:hover` and controls respond with no
 click-to-arm step — and a small grip fades in on the panel's top-right to drag or
-select it without stealing pointers from the content.
+select it without stealing pointers from the content. Pass `h="auto"` and/or
+`w="auto"` (or assign `panel.h = "auto"` live) to shrink the panel to hug its
+rendered content on that axis, just like `show()`/`Custom`.
 
 `push(data)` reaches the component as the `value` prop (a re-render). For
 high-rate streams, subscribe imperatively with `canvas.onFrame(cb)` inside a
