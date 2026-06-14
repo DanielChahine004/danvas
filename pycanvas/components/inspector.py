@@ -20,6 +20,12 @@ The panel also has a name-search box and a type filter (both client-side).
 Refresh from the panel's button, from Python via :meth:`refresh`, or
 automatically with ``refresh=<seconds>``. Click any row to drill into that
 object's fields and attributes in a detail view.
+
+Rendered as a native React panel (mounted by ReactHost): the table, drill-down
+detail, search/filter and source dropdown are a React component authored here in
+JSX. State is the per-panel channel — Python pushes ``rows``/``cols``/``detail``/
+``source`` as props and the panel sends ``{action: …}`` back — so unlike Chat it
+needs no shared-room API, only ``canvas.viewport`` for the live view readout.
 """
 
 import json
@@ -27,11 +33,229 @@ import threading
 import traceback
 import types
 
-from .base import BaseComponent
+from .react import React
 
 # Column sets sent to the frontend per source; the table renders exactly these.
 _COMPONENT_COLS = ["name", "label", "type", "value", "x", "y", "w", "h"]
 _GLOBALS_COLS = ["name", "type", "value"]
+
+# The React component: a port of the former native InspectorView/DetailView,
+# driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
+# live framing readout) instead of the tldraw editor. Authored as a plain string
+# so its JSX braces survive — nothing is substituted. Reads the table/detail data
+# Python pushes as ``props.rows``/``props.cols``/``props.detail``/``props.source``
+# (each a JSON string, matching the former shape props).
+_INSPECTOR_SOURCE = r"""
+function ViewReadout({ canvas }) {
+  // The current viewport (canvas centre + zoom) — the x/y/zoom serve(view=...)
+  // and set_view() take. canvas.viewport calls back live as the camera moves.
+  const [v, setV] = React.useState(null);
+  React.useEffect(() => (canvas.viewport ? canvas.viewport(setV) : undefined), []);
+  if (!v) return null;
+  return (
+    <div
+      style={{
+        marginTop: 6, fontSize: 11, fontFamily: "ui-monospace, monospace",
+        color: "var(--pc-muted)", userSelect: "text", WebkitUserSelect: "text",
+        cursor: "text",
+      }}
+      title="current viewport — pass these to serve(view=...) or canvas.set_view() to fix this view"
+    >
+      view: x={v.x} y={v.y} zoom={v.zoom.toFixed(2)}
+    </div>
+  );
+}
+
+// Drill-down: an object's type/repr header plus a field/type/value table.
+function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
+  const [query, setQuery] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState("all");
+  // Reset filters when drilling into a different object.
+  React.useEffect(() => { setQuery(""); setTypeFilter("all"); }, [selected]);
+
+  const allFields = detail && Array.isArray(detail.fields) ? detail.fields : [];
+  const types = ["all", ...Array.from(new Set(allFields.map((f) => f.type))).sort()];
+  const selectable = { userSelect: "text", WebkitUserSelect: "text", cursor: "text" };
+  const q = query.toLowerCase();
+  const fields = allFields.filter(
+    (f) =>
+      (typeFilter === "all" || f.type === typeFilter) &&
+      (!q || String(f.field ?? "").toLowerCase().includes(q))
+  );
+  const filtered = q !== "" || typeFilter !== "all";
+  return (
+    <>
+      <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+        <button style={{ ...controlStyle, cursor: "pointer" }} onClick={onBack}>← back</button>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected}
+          {detail && <span style={{ fontWeight: 400, color: "var(--pc-faint)" }}> : {detail.type}</span>}
+        </span>
+        <button style={{ ...controlStyle, cursor: "pointer" }} onClick={onRefresh}>Refresh</button>
+      </div>
+      {detail && !detail.missing && allFields.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <input placeholder="search field…" value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ ...controlStyle, flex: 1, minWidth: 0 }} />
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>
+            {types.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {!detail ? (
+          <div style={{ fontSize: 12, color: "var(--pc-faint2)", padding: 6 }}>loading…</div>
+        ) : detail.missing ? (
+          <div style={{ fontSize: 12, color: "var(--pc-faint2)", padding: 6 }}>no longer available</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, fontFamily: "ui-monospace, monospace",
+              color: "var(--pc-detail-text)", background: "var(--pc-detail-bg)",
+              border: "1px solid var(--pc-detail-border)", borderRadius: 4,
+              padding: "4px 6px", marginBottom: 6, wordBreak: "break-all", ...selectable }}>
+              {detail.repr}
+            </div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  {["field", "type", "value"].map((c) => (
+                    <th key={c} style={{ textAlign: "left", padding: "2px 6px",
+                      borderBottom: "1px solid var(--pc-border-mid)", color: "var(--pc-muted)",
+                      position: "sticky", top: 0, background: "var(--pc-bg)" }}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fields.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} style={{ padding: 6, color: "var(--pc-faint2)", fontStyle: "italic" }}>
+                      {filtered ? "no matching fields" : "no fields — see repr above"}
+                    </td>
+                  </tr>
+                ) : (
+                  fields.map((f, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)", ...selectable }}>{f.field}</td>
+                      <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)", color: "var(--pc-faint)" }}>{f.type}</td>
+                      <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)",
+                        fontFamily: "ui-monospace, monospace", ...selectable }}>{f.value}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function Component({ canvas, props }) {
+  const [query, setQuery] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState("all");
+  // Which row is drilled into (its key), or null for the table view.
+  const [selected, setSelected] = React.useState(null);
+
+  let rows = [];
+  try { rows = JSON.parse(props.rows) || []; } catch { rows = []; }
+  let cols = ["name", "label", "type", "value", "x", "y", "w", "h"];
+  try {
+    const parsed = JSON.parse(props.cols);
+    if (Array.isArray(parsed) && parsed.length) cols = parsed;
+  } catch { /* keep default */ }
+
+  const controlStyle = {
+    fontSize: 12, padding: "3px 6px", border: "1px solid var(--pc-border-mid)",
+    borderRadius: 6, background: "var(--pc-input-bg)", color: "var(--pc-text)",
+  };
+
+  // --- detail (drill-down) view -------------------------------------------
+  if (selected != null) {
+    let detail = null;
+    try { detail = JSON.parse(props.detail || "null"); } catch { detail = null; }
+    // Only show detail once it's arrived for the row we clicked (avoid stale).
+    const ready = detail && detail.key === selected;
+    return (
+      <DetailView
+        selected={selected}
+        detail={ready ? detail : null}
+        onBack={() => { setSelected(null); canvas.send({ action: "detail", key: null }); }}
+        onRefresh={() => canvas.send({ action: "detail", key: selected })}
+        controlStyle={controlStyle} />
+    );
+  }
+
+  const types = ["all", ...Array.from(new Set(rows.map((r) => r.type))).sort()];
+  const q = query.toLowerCase();
+  const shown = rows.filter(
+    (r) =>
+      (typeFilter === "all" || r.type === typeFilter) &&
+      (!q || String(r.name ?? "").toLowerCase().includes(q))
+  );
+
+  const openDetail = (r) => {
+    const key = r.key ?? r.name;
+    if (!key) return;
+    setSelected(key);
+    canvas.send({ action: "detail", key });
+  };
+
+  const source = props.source || "components";
+  const switchSource = (next) => {
+    if (next === source) return;
+    setTypeFilter("all"); // the type set differs between the two views
+    setQuery("");
+    canvas.send({ action: "source", source: next });
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+        <select value={source} onChange={(e) => switchSource(e.target.value)} style={controlStyle} title="what to inspect">
+          <option value="components">panels</option>
+          <option value="globals">globals</option>
+        </select>
+        <input placeholder="search name…" value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ ...controlStyle, flex: 1, minWidth: 0 }} />
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>
+          {types.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button style={{ ...controlStyle, cursor: "pointer" }} onClick={() => canvas.send({ action: "refresh" })}>Refresh</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {cols.map((c) => (
+                <th key={c} style={{ textAlign: "left", padding: "2px 6px",
+                  borderBottom: "1px solid var(--pc-border-mid)", color: "var(--pc-muted)",
+                  position: "sticky", top: 0, background: "var(--pc-bg)" }}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r, i) => (
+              <tr key={i} onClick={() => openDetail(r)} style={{ cursor: "pointer" }} title="click to inspect fields">
+                {cols.map((c) => (
+                  <td key={c} style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)",
+                    fontFamily: c === "value" ? "ui-monospace, monospace" : "inherit" }}>
+                    {String(r[c] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ViewReadout canvas={canvas} />
+    </>
+  );
+}
+"""
 
 
 def _short(value, limit=80):
@@ -108,8 +332,7 @@ def _object_fields(obj):
     return fields
 
 
-class Inspector(BaseComponent):
-    component = "Inspector"
+class Inspector(React):
     default_w = 520
     default_h = 320
 
@@ -126,9 +349,13 @@ class Inspector(BaseComponent):
         if source not in ("components", "globals"):
             raise ValueError("source must be 'components' or 'globals'")
         cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
-        super().__init__(name=name, label=label, rows="[]", cols=json.dumps(cols),
-                         detail="", source=source)
-        self._source = source
+        # The table/detail data rides in the React props (``data`` JSON blob),
+        # replayed on reconnect. ``source`` here is the *view mode*, distinct from
+        # React's own ``source`` (the JSX); tracked internally as ``self._view``.
+        super().__init__(source=_INSPECTOR_SOURCE, name=name, label=label,
+                         props={"rows": "[]", "cols": json.dumps(cols),
+                                "detail": "", "source": source})
+        self._view = source
         self._canvas = None  # injected by Canvas.insert
         self._namespace = namespace  # injected by Canvas.insert if left None
         self._refresh_interval = refresh
@@ -143,8 +370,10 @@ class Inspector(BaseComponent):
         self._open_detail_key = None
 
     def register_props(self):
-        self._props["rows"] = self._build()
-        return dict(self._props)
+        # Build the table fresh at register time so a (re)connecting client sees
+        # current state baked into the React ``data`` prop.
+        self._data["rows"] = self._build()
+        return super().register_props()
 
     def refresh(self):
         """Rebuild the table from current state and push it, live.
@@ -155,7 +384,7 @@ class Inspector(BaseComponent):
         payload = {"rows": self._build()}
         if self._open_detail_key:
             payload["detail"] = self._build_detail(self._open_detail_key)
-        self._send_update(payload)
+        self.update(**payload)
 
     # -- auto-refresh ticker (started/stopped via Canvas attach hooks) --------
     def _on_attached(self):
@@ -190,36 +419,30 @@ class Inspector(BaseComponent):
         if action == "refresh":
             self.refresh()
         elif action == "source":
-            self._set_source(payload.get("source"))
+            self._set_view(payload.get("source"))
         elif action == "detail":
             # key=None means the browser closed the detail view (hit back); stop
             # tracking it so the ticker no longer rebuilds a hidden detail.
             key = payload.get("key")
             self._open_detail_key = key or None
             if key:
-                self._send_update({"detail": self._build_detail(key)})
+                self.update(detail=self._build_detail(key))
 
-    def _set_source(self, source):
+    def _set_view(self, source):
         """Switch the live view between "components" and "globals" and rebuild.
 
-        Driven by the frontend's header dropdown; sends the new source, its
-        column set and freshly built rows in one update.
+        Driven by the frontend's header dropdown; sends the new view, its column
+        set and freshly built rows in one update.
         """
-        if source not in ("components", "globals") or source == self._source:
+        if source not in ("components", "globals") or source == self._view:
             return
-        self._source = source
+        self._view = source
         self._open_detail_key = None
-        self._props["source"] = source
         cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
-        self._props["cols"] = json.dumps(cols)
-        self._send_update({
-            "source": source,
-            "cols": self._props["cols"],
-            "rows": self._build(),
-        })
+        self.update(source=source, cols=json.dumps(cols), rows=self._build())
 
     def _build(self):
-        if self._source == "globals":
+        if self._view == "globals":
             return self._build_globals()
         return self._build_components()
 
@@ -307,7 +530,7 @@ class Inspector(BaseComponent):
         name since the table was built, so re-resolve by name there; in
         components mode use the row-key map captured during the last build.
         """
-        if self._source == "globals":
+        if self._view == "globals":
             ns = self._resolve_namespace() or {}
             if key in ns:
                 obj, found = ns[key], True

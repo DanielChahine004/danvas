@@ -8,11 +8,12 @@
 // React panel appears, exactly like the Monaco-backed Repl.
 //
 // The user writes a component named `Component`; it receives three props:
-//   canvas  - { send(data), onFrame(cb), chat }: panel -> Python (send, routed
-//             to @on handlers), a no-re-render subscription to the push() stream
-//             (onFrame) for high-rate/binary data the component paints itself,
-//             and `chat` — the canvas-wide shared room (send/setName/history/
-//             subscribe/identity) that powers the Chat panel
+//   canvas  - { send(data), onFrame(cb), chat, viewport }: panel -> Python
+//             (send, routed to @on handlers), a no-re-render subscription to the
+//             push() stream (onFrame) for high-rate/binary data the component
+//             paints itself, `chat` — the canvas-wide shared room (send/setName/
+//             history/subscribe/identity) that powers the Chat panel, and
+//             `viewport(cb)` — live canvas-centre x/y/zoom (powers the Inspector)
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
 //             (skipped while an onFrame subscriber is active — pick one channel)
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
@@ -20,6 +21,7 @@
 // `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
 import * as Babel from '@babel/standalone'
 import React from 'react'
+import { useEditor } from 'tldraw'
 import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 
@@ -167,6 +169,10 @@ function ErrorBox({ error }) {
 
 export default function ReactHost({ shape }) {
   const id = componentIdOf(shape.id)
+  // The tldraw editor, used only to expose live viewport info to the hosted
+  // component (canvas.viewport). ReactHost always renders inside a shape, so the
+  // editor context is present.
+  const editor = useEditor()
   // Latest value streamed via push() (Custom's `post` live channel, reused).
   const [streamed, setStreamed] = React.useState(undefined)
 
@@ -217,8 +223,20 @@ export default function ReactHost({ shape }) {
         subscribe: (cb) => subscribeChat(cb),
         identity: (cb) => subscribeIdentity(cb),
       },
+      // Live viewport readout (the canvas point at screen centre + zoom) — the
+      // x/y/zoom that serve(view=...) / set_view() take. Calls `cb` once now and
+      // again on every camera change; returns an unsubscribe. Lets a React panel
+      // (the Inspector) surface the framing without tldraw editor access.
+      viewport: (cb) => {
+        const read = () => {
+          const c = editor.getViewportPageBounds().center
+          return { x: Math.round(c.x), y: Math.round(c.y), zoom: editor.getZoomLevel() }
+        }
+        cb(read())
+        return editor.store.listen(() => cb(read()), { scope: 'session' })
+      },
     }),
-    [id]
+    [id, editor]
   )
 
   // Props from Python (update()/initial props=), carried as a JSON string prop so
