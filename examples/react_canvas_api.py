@@ -74,8 +74,14 @@ function Component({ canvas }) {
 canvas = pycanvas.Canvas()
 
 # A few panels scattered across the canvas to give the camera somewhere to fly.
-canvas.label("alpha", value="panel @ (0, 0)", x=0, y=0)
-canvas.label("beta", value="panel @ (900, 600)", x=900, y=600)
+# Each re-captions itself with its live position when you drag it: `on_layout`
+# fires (with the component) after the browser moves or resizes a panel.
+for _name, (_x, _y) in {"alpha": (0, 0), "beta": (900, 600)}.items():
+    _lbl = canvas.label(_name, value=f"{_name} @ ({_x}, {_y})", x=_x, y=_y)
+
+    @_lbl.on_layout
+    def _(c):
+        c.update(f"{c.name} @ ({int(c.x)}, {int(c.y)})")
 
 canvas.react(HUD, name="hud", label="canvas API (viewport / setView / chat)",
              x=300, y=120, w=320, h=240)
