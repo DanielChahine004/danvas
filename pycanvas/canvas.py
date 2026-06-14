@@ -784,18 +784,21 @@ class Canvas:
                           pattern=pattern, show_hidden=show_hidden, **place)
 
     def react(self, source=None, path=None, jsx=None, css=None, name="react",
-              label=None, props=None, **place):
+              label=None, props=None, scope=None, **place):
         """Insert a :class:`~pycanvas.React` panel. See :meth:`insert` for ``place``.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
         file with ``path=``); alternatively pass just ``jsx`` markup plus
         optional ``css`` and the Component wrapper is added under the hood. Use
         :meth:`React.from_uiverse` to convert a uiverse.io styled-components
-        snippet into ``source``. ``props`` is the initial props dict. Size it
-        with ``w``/``h`` in ``place``.
+        snippet into ``source``. ``props`` is the initial props dict. ``scope``
+        is a list of third-party library names (e.g. ``["d3"]``) loaded as ESM
+        in the browser and exposed to the component as the ``libs`` global. Size
+        it with ``w``/``h`` in ``place``.
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
-                          name=name, label=label, props=props, **place)
+                          name=name, label=label, props=props, scope=scope,
+                          **place)
 
     def markdown(self, text="", name="markdown", label=None, **place):
         """Insert a :class:`~pycanvas.Markdown` panel. See :meth:`insert` for ``place``."""

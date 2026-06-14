@@ -44,8 +44,8 @@ class React(BaseComponent):
     default_h = 320
 
     def __init__(self, source=None, path=None, jsx=None, css=None, name="react",
-                 label=None, w=None, h=None, props=None, event_key="event",
-                 queue="fifo"):
+                 label=None, w=None, h=None, props=None, scope=None,
+                 event_key="event", queue="fifo"):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         if path is not None:
@@ -63,6 +63,14 @@ class React(BaseComponent):
             raise ValueError("css= only applies to jsx=; a full source= "
                              "component should carry its own <style>")
         self._source = source or ""
+        # Optional third-party libraries to make available to the component as
+        # the ``libs`` global. Each name is loaded as ESM from a CDN in the
+        # browser on demand (so listing none costs nothing); friendly names
+        # (``d3``, ``lodash``, ``framer-motion`` / ``motion``, ``lucide`` /
+        # ``lucide-react``, ``date-fns``) map to pinned, React-externalised
+        # builds, and any other name is passed through to esm.sh. The component
+        # reads them as ``libs`` (e.g. ``const d3 = libs.d3``).
+        self._libs = [str(s) for s in (scope or [])]
         # Props handed to the component (and merged by ``update``). Carried to the
         # browser as a JSON string prop so they persist in the shape and replay to
         # a reconnecting client.
@@ -82,6 +90,7 @@ class React(BaseComponent):
         props["source"] = self._source
         props["data"] = json.dumps(self._data)
         props["autoH"] = self._auto_h
+        props["libs"] = json.dumps(self._libs)
         return props
 
     def _set_auto_h(self):

@@ -76,6 +76,16 @@ def retitle():
 
 threading.Thread(target=retitle, daemon=True).start()
 
+# `scope=` pulls third-party libraries (loaded as ESM in the browser, no npm
+# build) into the component as the `libs` global — here d3 for a quick scale.
+canvas.react('''
+function Component() {
+  const x = libs.d3.scaleLinear().domain([0, 100]).range([0, 200])
+  return <div style={{ color: 'var(--pc-text)' }}>d3 maps 50 → {x(50)}</div>
+}
+''', scope=["d3"], x=80, y=300, h='auto')
+
+
 print("Click ping; watch the streamed clock and the title change after 3s. "
       "All user code — no npm build.")
 canvas.serve(port=8000)

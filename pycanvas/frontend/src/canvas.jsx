@@ -85,7 +85,55 @@ function cardStyle(shape) {
 // and iframes alike). Python can opt a panel out with ``selectable=False``
 // (meta.noGrab): no cover, content live from the first hover, body clicks
 // never select the panel.
-function Card({ shape, children, grab = false, ghostable = false }) {
+// A small grip that gives a guaranteed drag/select point for a body-interactive
+// panel (React) without covering its body. It carries no pointer handler and
+// never stopPropagation, so a press/drag bubbles to tldraw, which selects and
+// (on drag) moves the topmost panel — exactly like the `grab` cover, but
+// confined to its own corner so the rest of the body stays live (hover, cursor,
+// controls work from the first pointer-over). Hidden until the panel is hovered
+// (see .pc-drag-handle in theme.css). Sits in the top-right so it clears the
+// header label in the top-left.
+function DragHandle() {
+  return (
+    <div
+      className="pc-drag-handle"
+      title="drag to move · click to select"
+      style={{
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 18,
+        height: 18,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 5,
+        background: 'var(--pc-bg)',
+        border: '1px solid var(--pc-border)',
+        boxShadow: '0 1px 2px var(--pc-shadow)',
+        cursor: 'grab',
+        pointerEvents: 'all',
+        zIndex: 2,
+      }}
+    >
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--pc-muted)" aria-hidden="true">
+        <circle cx="2.5" cy="2" r="1" />
+        <circle cx="7.5" cy="2" r="1" />
+        <circle cx="2.5" cy="5" r="1" />
+        <circle cx="7.5" cy="5" r="1" />
+        <circle cx="2.5" cy="8" r="1" />
+        <circle cx="7.5" cy="8" r="1" />
+      </svg>
+    </div>
+  )
+}
+
+// ``handle``: like ``grab`` but instead of a full-body cover lay only a small
+// hover-revealed grip (DragHandle). Use it for body-interactive native panels
+// whose content should stay live from the first pointer-over (no click-to-arm
+// cover) — currently the React host. The cover and the handle are mutually
+// exclusive; pick one per panel.
+function Card({ shape, children, grab = false, ghostable = false, handle = false }) {
   const editor = useEditor()
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
@@ -104,8 +152,13 @@ function Card({ shape, children, grab = false, ghostable = false }) {
     [editor, shape.id]
   )
   return (
-    <HTMLContainer style={cardStyle(shape)}>
+    <HTMLContainer className="pc-card" style={cardStyle(shape)}>
       {children}
+      {/* A persistent grip (stays up while selected, unlike the grab cover) so a
+          body-interactive panel always has a drag/select point even when its
+          content claims every pointer. Suppressed when the panel can't be
+          moved/selected anyway (noGrab) or its input is locked. */}
+      {handle && !noGrab && !blockInput && <DragHandle />}
       {grab && !noGrab && !selected && !blockInput && (
         <div
           // No handler / no stopPropagation: the event bubbles to tldraw, which
@@ -552,17 +605,21 @@ export class ReactShapeUtil extends PcShapeUtil {
     source: T.string, // JSX defining `function Component(...)`
     data: T.string, // JSON props from Python (update()/props=)
     autoH: T.boolean, // h="auto": fit the panel height to the rendered content
+    libs: T.string, // JSON array of library names to load (Python `scope=[...]`)
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'react', source: '', data: '{}', autoH: false }
+    return { w: 380, h: 320, label: 'react', source: '', data: '{}', autoH: false, libs: '[]' }
   }
 
   component(shape) {
     return (
-      // ghostable: grabbable=False + operable=False makes the host (and the
-      // input overlay) click-through, so the panel is purely decorative.
-      <Card shape={shape} grab ghostable>
+      // handle (not grab): a hover-revealed grip moves/selects the panel, so the
+      // hosted component stays interactive from the first pointer-over instead of
+      // sitting under a click-to-arm cover. ghostable: grabbable=False +
+      // operable=False makes the host (and the input overlay) click-through, so
+      // the panel is purely decorative.
+      <Card shape={shape} handle ghostable>
         {/* Header has no pointerEvents, so dragging it moves the panel. */}
         <CardLabel shape={shape} />
         <Suspense

@@ -11,18 +11,22 @@
 //   canvas  - { send(data) }            : panel -> Python (routed to @on handlers)
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
-// React (with hooks) is in scope as `React`.
+// React (with hooks) is in scope as `React`; any libraries requested via Python
+// `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
 import * as Babel from '@babel/standalone'
 import React from 'react'
 import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative } from './bridge'
 
-// Compile + evaluate a source string into a component function, memoised so a
-// re-render (or many panels sharing one source) compiles only once. The source
-// is transformed from JSX, then evaluated with `React` in scope; it must define
-// a function named `Component`.
-const cache = new Map() // source -> { Comp } | { error }
+// Compile a source string into a *factory* — `(React, libs) => Component` —
+// memoised by source so a re-render (or many panels sharing one source) runs
+// Babel only once. The factory is invoked per-render with the live `React` and
+// the loaded `libs` bundle (see useLibs); binding is cheap, so libraries can
+// arrive after the first compile without recompiling. The source is transformed
+// from JSX, then evaluated with `React` and `libs` in scope; it must define a
+// function named `Component`.
+const cache = new Map() // source -> { factory } | { error }
 
-function build(source) {
+function compile(source) {
   if (cache.has(source)) return cache.get(source)
   let entry
   try {
@@ -30,17 +34,87 @@ function build(source) {
       presets: [['react', { runtime: 'classic' }]],
     }).code
     // eslint-disable-next-line no-new-func
-    const factory = new Function('React', `${code}\n; return Component;`)
-    const Comp = factory(React)
-    if (typeof Comp !== 'function') {
-      throw new Error('source must define a function named `Component`')
-    }
-    entry = { Comp }
+    const factory = new Function('React', 'libs', `${code}\n; return Component;`)
+    entry = { factory }
   } catch (error) {
     entry = { error }
   }
   cache.set(source, entry)
   return entry
+}
+
+// --- optional third-party libraries (Python `scope=[...]`) ------------------
+// A panel can ask for libraries by name; we fetch them as ESM from a CDN on
+// demand and hand them to the component as the `libs` global. Nothing is
+// bundled — the cost (a network fetch) is paid only by panels that opt in — so
+// the common case (no scope) loads nothing and behaves exactly as before.
+//
+// Friendly names map to pinned, React-externalised URLs so React-dependent libs
+// (framer-motion, lucide) share this app's single React instance instead of
+// pulling their own (which breaks hooks). Any other name is passed straight to
+// esm.sh, still externalising react/react-dom.
+const LIB_URLS = {
+  d3: 'https://esm.sh/d3@7',
+  lodash: 'https://esm.sh/lodash-es@4',
+  'date-fns': 'https://esm.sh/date-fns@4',
+  motion: 'https://esm.sh/framer-motion@11?external=react,react-dom',
+  'framer-motion': 'https://esm.sh/framer-motion@11?external=react,react-dom',
+  lucide: 'https://esm.sh/lucide-react@0.460.0?external=react',
+  'lucide-react': 'https://esm.sh/lucide-react@0.460.0?external=react',
+}
+
+function libUrl(name) {
+  return LIB_URLS[name] || `https://esm.sh/${name}?external=react,react-dom`
+}
+
+// One in-flight/resolved promise per URL, shared across panels and reconnects.
+const moduleCache = new Map() // url -> Promise<module namespace>
+
+function loadLib(name) {
+  const url = libUrl(name)
+  if (!moduleCache.has(url)) {
+    // @vite-ignore: a runtime URL, not a build-time import to pre-bundle.
+    moduleCache.set(url, import(/* @vite-ignore */ url))
+  }
+  return moduleCache.get(url)
+}
+
+// Resolve a list of names into a `{ name: export }` bundle. A module that only
+// carries a default export (e.g. lodash) is unwrapped to that default; one with
+// named exports (d3, framer-motion) is handed over as its namespace, so the
+// component can `const d3 = libs.d3` or `const { motion } = libs['framer-motion']`.
+function pickExport(mod) {
+  const keys = Object.keys(mod)
+  if (keys.length === 1 && keys[0] === 'default') return mod.default
+  return mod
+}
+
+function useLibs(names) {
+  const key = names.join(',')
+  const [state, setState] = React.useState(() =>
+    names.length ? { ready: false, libs: {}, error: null } : { ready: true, libs: {}, error: null }
+  )
+  React.useEffect(() => {
+    if (!names.length) {
+      setState({ ready: true, libs: {}, error: null })
+      return
+    }
+    let cancelled = false
+    setState({ ready: false, libs: {}, error: null })
+    Promise.all(names.map((n) => loadLib(n).then((mod) => [n, pickExport(mod)])))
+      .then((entries) => {
+        if (cancelled) return
+        setState({ ready: true, libs: Object.fromEntries(entries), error: null })
+      })
+      .catch((error) => {
+        if (!cancelled) setState({ ready: false, libs: {}, error })
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return state
 }
 
 // Keep a thrown render error inside the panel instead of letting it unmount the
@@ -108,6 +182,19 @@ export default function ReactHost({ shape }) {
     userProps = {}
   }
 
+  // Optional libraries the panel asked for (Python `scope=[...]`), loaded as ESM
+  // from a CDN and handed to the component as the `libs` global. Empty by
+  // default, so the common case loads nothing.
+  const libNames = React.useMemo(() => {
+    try {
+      const v = JSON.parse(shape.props.libs || '[]')
+      return Array.isArray(v) ? v.filter((n) => typeof n === 'string') : []
+    } catch {
+      return []
+    }
+  }, [shape.props.libs])
+  const { libs, ready: libsReady, error: libsError } = useLibs(libNames)
+
   // h="auto": fit the panel height to the rendered content. The content sits in
   // its own box (sized to content) so we can measure it; the host fills the
   // card body so its offsetHeight gives the chrome overhead (see fitNative).
@@ -128,11 +215,48 @@ export default function ReactHost({ shape }) {
       ro.observe(host) // width changes that reflow content
     }
     return () => ro && ro.disconnect()
-  }, [autoH, id, shape.props.source, shape.props.data])
+    // libsReady: re-measure once libraries load and the content reflows.
+  }, [autoH, id, shape.props.source, shape.props.data, libsReady])
 
-  const entry = build(shape.props.source || '')
-  if (entry.error) return <ErrorBox error={entry.error} />
-  const Comp = entry.Comp
+  // Compile (memoised by source), then bind the factory with React + the loaded
+  // libs. Binding runs the user's module-level code and can throw (or omit
+  // `Component`), so it's guarded; it re-binds when libs arrive. All hooks above
+  // run unconditionally — only the render result branches below.
+  const compiled = compile(shape.props.source || '')
+  const bound = React.useMemo(() => {
+    if (compiled.error) return { error: compiled.error }
+    try {
+      const Comp = compiled.factory(React, libs)
+      if (typeof Comp !== 'function') {
+        throw new Error('source must define a function named `Component`')
+      }
+      return { Comp }
+    } catch (error) {
+      return { error }
+    }
+  }, [compiled, libs])
+
+  if (libsError) {
+    return <ErrorBox error={new Error(`failed to load libraries: ${libsError.message || libsError}`)} />
+  }
+  if (!libsReady) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--pc-faint)',
+          fontSize: 13,
+        }}
+      >
+        loading libraries…
+      </div>
+    )
+  }
+  if (bound.error) return <ErrorBox error={bound.error} />
+  const Comp = bound.Comp
   // Decorative panels (grabbable=False + operable=False) are click-through: the
   // host takes no pointer, so clicks pass to whatever sits underneath on the
   // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.

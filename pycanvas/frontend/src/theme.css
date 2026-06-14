@@ -30,6 +30,18 @@
   --pc-video-bg: #111111;
 }
 
+/* Hover-revealed drag grip for body-interactive native panels (React). It gives
+ * a guaranteed point to select/move the panel without laying a cover over the
+ * whole body — so the hosted component's :hover, cursor and controls stay live
+ * from the first pointer-over (no click-to-arm step). Invisible until the panel
+ * is hovered; brightens on the grip itself. */
+.pc-drag-handle {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.pc-card:hover .pc-drag-handle { opacity: 0.5; }
+.pc-drag-handle:hover { opacity: 1; }
+
 .tl-container.tl-theme__dark {
   --pc-bg: #27272b;
   --pc-border: #3a3a40;

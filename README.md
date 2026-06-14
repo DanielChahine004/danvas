@@ -350,6 +350,27 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
                        css='button { font-size: 18px; }')
 ```
 
+Because it's a real subtree (not a cover-it-to-grab iframe), a React panel stays
+interactive from the first hover — cursors, `:hover` and controls respond with no
+click-to-arm step — and a small grip fades in on the panel's top-right to drag or
+select it without stealing pointers from the content.
+
+Reach for third-party libraries with `scope=[...]`: each name is loaded as ESM
+from a CDN in the browser (nothing is bundled, so listing none costs nothing) and
+handed to the component as the `libs` global. Friendly names (`d3`, `lodash`,
+`date-fns`, `framer-motion`/`motion`, `lucide`/`lucide-react`) map to pinned,
+React-externalised builds so hook-based libs share the app's React; any other
+name passes through to esm.sh.
+
+```python
+panel = canvas.react('''
+  function Component() {
+    const x = libs.d3.scaleLinear().domain([0, 100]).range([0, 200])
+    return <div>d3 maps 50 → {x(50)}</div>
+  }
+''', scope=["d3"])
+```
+
 uiverse.io exports its React widgets with `styled-components`, which needs an
 npm build — `React.from_uiverse(raw)` rewrites such a snippet into plain
 React + CSS that the in-browser pipeline accepts:
