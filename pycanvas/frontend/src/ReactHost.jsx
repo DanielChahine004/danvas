@@ -240,8 +240,19 @@ export default function ReactHost({ shape }) {
           const c = editor.getViewportPageBounds().center
           return { x: Math.round(c.x), y: Math.round(c.y), zoom: editor.getZoomLevel() }
         }
-        cb(read())
-        return editor.store.listen(() => cb(read()), { scope: 'session' })
+        // session-scope changes (selection, hover, pointer) fire this listener
+        // too, not just camera moves — and `read()` is a fresh object each time,
+        // so calling cb unconditionally would re-render the panel on every click
+        // or hover. Emit only when x/y/zoom actually change.
+        let last = null
+        const emit = () => {
+          const v = read()
+          if (last && v.x === last.x && v.y === last.y && v.zoom === last.zoom) return
+          last = v
+          cb(v)
+        }
+        emit()
+        return editor.store.listen(emit, { scope: 'session' })
       },
       // The write-twin of `viewport`: pan/zoom the canvas to centre a point at a
       // zoom. Takes the same { x, y, zoom } shape (any subset; omitted axes keep
