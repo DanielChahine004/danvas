@@ -2,10 +2,11 @@
 //
 // This is the native counterpart to the sandboxed-iframe Custom panel: the user
 // ships JSX *source* from Python, and here — in the main page, with full theme
-// and bridge access — we compile it with Babel and mount the result as an
-// ordinary React subtree inside the panel's Card. Babel is ~3 MB, so this whole
-// module is lazily imported (see ReactShapeUtil) and only loaded the first time a
-// React panel appears, exactly like the Monaco-backed Repl.
+// and bridge access — we transform the JSX with Sucrase and mount the result as
+// an ordinary React subtree inside the panel's Card. Sucrase is a tiny, fast
+// JSX transform (~tens of KB, vs ~3 MB for a full compiler): it assumes a modern
+// browser and only rewrites JSX, which is all pycanvas needs. The module is still
+// code-split (see ReactShapeUtil) so it loads the first time a React panel appears.
 //
 // The user writes a component named `Component`; it receives three props:
 //   canvas  - { send(data), request(data), onFrame(cb), chat, viewport(cb),
@@ -22,28 +23,35 @@
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
 // React (with hooks) is in scope as `React`; any libraries requested via Python
 // `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
-import * as Babel from '@babel/standalone'
+import { transform as transformJsx } from 'sucrase'
 import React from 'react'
 import { useEditor } from 'tldraw'
 import { sendInput, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 
 // Compile a source string into a *factory* — `(React, libs) => Component` —
-// memoised by source so a re-render (or many panels sharing one source) runs
-// Babel only once. The factory is invoked per-render with the live `React` and
-// the loaded `libs` bundle (see useLibs); binding is cheap, so libraries can
-// arrive after the first compile without recompiling. The source is transformed
-// from JSX, then evaluated with `React` and `libs` in scope; it must define a
-// function named `Component`.
+// memoised by source so a re-render (or many panels sharing one source) runs the
+// JSX transform only once. The factory is invoked per-render with the live
+// `React` and the loaded `libs` bundle (see useLibs); binding is cheap, so
+// libraries can arrive after the first compile without recompiling. The source
+// is transformed from JSX (classic runtime -> React.createElement), then
+// evaluated with `React` and `libs` in scope; it must define a function named
+// `Component`.
 const cache = new Map() // source -> { factory } | { error }
 
 function compile(source) {
   if (cache.has(source)) return cache.get(source)
   let entry
   try {
-    const code = Babel.transform(source, {
-      presets: [['react', { runtime: 'classic' }]],
-    }).code
+    // Sucrase only rewrites JSX (modern syntax passes through untouched), so the
+    // output is the same React.createElement calls a classic-runtime Babel
+    // preset would emit. Syntax errors throw here with a (line:col) position,
+    // surfaced in the ErrorBox below.
+    const { code } = transformJsx(source, {
+      transforms: ['jsx'],
+      jsxRuntime: 'classic',
+      production: true,
+    })
     // eslint-disable-next-line no-new-func
     const factory = new Function('React', 'libs', `${code}\n; return Component;`)
     entry = { factory }
