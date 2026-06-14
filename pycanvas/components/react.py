@@ -10,12 +10,26 @@ Python with no ``npm`` build.
 
 The component must be named ``Component`` and receives three props:
 
-  * ``canvas`` — ``{ send(data) }``: panel → Python, routed to your handlers;
+  * ``canvas`` — the bridge handle (see below);
   * ``value``  — the latest :meth:`push` data: Python → panel, no reload;
   * ``props``  — the dict from :meth:`update` / the ``props=`` arg: Python → panel,
     replayed on reconnect.
 
-``React`` (with hooks) is in scope as ``React``.
+The ``canvas`` handle exposes:
+
+  * ``send(data)`` — panel → Python, routed to your ``@on`` / ``on_message`` handlers;
+  * ``onFrame(cb)`` — subscribe (in a ``useEffect``) to the :meth:`push` /
+    :meth:`push_binary` stream without re-rendering; ``cb`` gets each value (an
+    ``ArrayBuffer`` for binary). Use this *or* the ``value`` prop, not both;
+  * ``viewport(cb)`` — ``cb`` is called now and on every camera move with the live
+    ``{ x, y, zoom }`` of the canvas centre (the numbers ``serve(view=…)`` takes);
+  * ``setView({ x, y, zoom })`` — the write-twin of ``viewport``: pan/zoom the canvas
+    to centre a point (any subset of the keys; omitted axes stay put);
+  * ``chat`` — the canvas-wide shared room: ``send(text)``, ``setName(name)``,
+    ``history()``, ``subscribe(cb)`` (returns an unsubscribe), ``identity(cb)``.
+
+``React`` (with hooks) is in scope as ``React``; libraries named in ``scope=[…]`` are
+in scope as ``libs`` (e.g. ``const d3 = libs.d3``).
 
     counter = canvas.react('''
       function Component({ canvas, value, props }) {

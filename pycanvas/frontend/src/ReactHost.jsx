@@ -8,12 +8,13 @@
 // React panel appears, exactly like the Monaco-backed Repl.
 //
 // The user writes a component named `Component`; it receives three props:
-//   canvas  - { send(data), onFrame(cb), chat, viewport }: panel -> Python
-//             (send, routed to @on handlers), a no-re-render subscription to the
-//             push() stream (onFrame) for high-rate/binary data the component
-//             paints itself, `chat` — the canvas-wide shared room (send/setName/
-//             history/subscribe/identity) that powers the Chat panel, and
-//             `viewport(cb)` — live canvas-centre x/y/zoom (powers the Inspector)
+//   canvas  - { send(data), onFrame(cb), chat, viewport(cb), setView(v) }:
+//             send routes to @on handlers; onFrame is a no-re-render subscription
+//             to the push() stream for high-rate/binary data the component paints
+//             itself; chat is the canvas-wide shared room (send/setName/history/
+//             subscribe/identity) that powers the Chat panel; viewport(cb) reports
+//             live canvas-centre x/y/zoom (powers the Inspector) and setView(v)
+//             pans/zooms the canvas to a { x, y, zoom } (the write-twin)
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
 //             (skipped while an onFrame subscriber is active — pick one channel)
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
@@ -22,7 +23,7 @@
 import * as Babel from '@babel/standalone'
 import React from 'react'
 import { useEditor } from 'tldraw'
-import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative } from './bridge'
+import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 
 // Compile a source string into a *factory* — `(React, libs) => Component` —
@@ -235,6 +236,11 @@ export default function ReactHost({ shape }) {
         cb(read())
         return editor.store.listen(() => cb(read()), { scope: 'session' })
       },
+      // The write-twin of `viewport`: pan/zoom the canvas to centre a point at a
+      // zoom. Takes the same { x, y, zoom } shape (any subset; omitted axes keep
+      // the current camera), so `canvas.setView(canvas.viewport-reading)` round-
+      // trips. Lets a panel drive the canvas — a minimap, "jump to" buttons.
+      setView: (v) => applyCameraFrom(v || {}),
     }),
     [id, editor]
   )

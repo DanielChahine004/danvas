@@ -368,6 +368,20 @@ packed bytes on a binary WebSocket frame (no JSON, no base64 — the same fast p
 [`examples/react_component.py`](examples/react_component.py) for a binary
 `onFrame` waveform.
 
+The `canvas` prop is the full bridge handle:
+
+| `canvas.…` | What it does |
+| --- | --- |
+| `send(data)` | panel → Python, routed to your `@on(event)` / `@on_message` handlers |
+| `onFrame(cb)` | subscribe (in a `useEffect`) to the `push()` / `push_binary()` stream with **no re-render**; `cb` gets each value (an `ArrayBuffer` for binary). Use this *or* the `value` prop, not both |
+| `viewport(cb)` | `cb` is called now and on every camera move with the live `{ x, y, zoom }` of the canvas centre (the numbers `serve(view=…)` takes); returns an unsubscribe |
+| `setView({x, y, zoom})` | the write-twin of `viewport` — pan/zoom the canvas to centre a point (any subset of keys; omitted axes stay put) |
+| `chat` | the canvas-wide shared room: `send(text)`, `setName(name)`, `history()`, `subscribe(cb)` (returns an unsubscribe), `identity(cb)` — the same room the `Chat` panel shows |
+
+`viewport`/`setView`/`chat` let a panel be canvas-aware or collaborative — a minimap,
+"jump to" buttons, a custom chat UI. See
+[`examples/react_canvas_api.py`](examples/react_canvas_api.py).
+
 Reach for third-party libraries with `scope=[...]`: each name is loaded as ESM
 from a CDN in the browser (nothing is bundled, so listing none costs nothing) and
 handed to the component as the `libs` global. Friendly names (`d3`, `lodash`,
@@ -1304,6 +1318,7 @@ python examples/custom_html.py        # hand-written HTML panel, bidirectional
 python examples/custom_binary_stream.py  # high-rate binary telemetry into a Custom panel (push_binary)
 python examples/custom_styled_component.py  # uiverse.io HTML+CSS widget pasted into a Custom panel
 python examples/react_styled_component.py   # uiverse.io React widget via React.from_uiverse
+python examples/react_canvas_api.py   # React panel: canvas.viewport / setView / chat (canvas-aware + collaborative)
 python examples/matplotlib_panel.py   # slider re-renders a matplotlib figure
 python examples/plotly_panel.py       # interactive Plotly chart in a panel
 python examples/robot_control.py      # everything: sliders, toggle, plot, video

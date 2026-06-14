@@ -886,7 +886,7 @@ function applyViewOptions() {
 // centre is `-camera.x + vsb.w/z/2`, so to put (x, y) there we invert that.
 // `force` overrides a locked camera (lock is applied separately), `immediate`
 // skips the animation. setCameraOptions may clamp zoom, so call this after it.
-function applyCameraFrom(src) {
+export function applyCameraFrom(src) {
   const hasX = typeof src.x === 'number'
   const hasY = typeof src.y === 'number'
   const hasZ = typeof src.zoom === 'number'
