@@ -29,16 +29,29 @@ class Custom(BaseComponent):
     component = "Custom"
     default_w = 380
     default_h = 320
+    # Bounds for ``w="auto"`` content-fit width (content box, px): a panel may
+    # shrink to be snug around its content but not collapse to a sliver, nor
+    # sprawl wider than a readable column. See ``_fit_script``.
+    _AUTO_W_MIN = 180
+    _AUTO_W_MAX = 680
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, event_key="event"):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
-        # reports the result back, so ``comp.h`` syncs). Width stays yours —
-        # narrow the panel and the height re-fits to the reflowed content.
+        # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
+        # reflow, so narrowing the panel grows the height to match.
         self._auto_h = h == "auto"
         if self._auto_h:
             h = None  # default height until the first content measurement lands
+        # ``w="auto"`` fits the panel's *width* to its content's natural width.
+        # Unlike height this is a one-shot at load (the iframe measures the
+        # content's max-content width once and the frontend resizes), so the
+        # panel opens sized to its content but a later manual resize isn't
+        # snapped back. Re-showing a value rebuilds the iframe and re-measures.
+        self._auto_w = w == "auto"
+        if self._auto_w:
+            w = None  # default width until the first content measurement lands
         # ``w``/``h`` are optional overrides; when omitted the panel falls back
         # to ``default_w``/``default_h`` (set per subclass) via BaseComponent.
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
@@ -90,49 +103,97 @@ class Custom(BaseComponent):
             "},{passive:false,capture:true});"
             "</script>"
         )
+        if self._auto_h or self._auto_w:
+            helper += self._fit_script(cid)
+        return helper + html
+
+    def _fit_script(self, cid):
+        """The in-iframe content-fit script for ``h="auto"`` / ``w="auto"``.
+
+        Height (when on) is measured continuously: the iframe reports its
+        document's natural height and a ResizeObserver re-fits on every reflow,
+        so narrowing the panel grows the height to match. Width (when on) is a
+        one-shot at load: the body is briefly shrink-wrapped to its content's
+        ``max-content`` width — measured independently of the current frame
+        width — reported once, then restored so the body fills the frame again
+        and content can still reflow on a later manual resize. The parent
+        applies both (see ``fitFromIframe``).
+        """
+        parts = ["<script>(function(){"]
         if self._auto_h:
-            # h="auto": measure the document's natural height and report it to
-            # the parent (which resizes the shape — see fitFromIframe). The
-            # height overrides neutralize full-viewport styling (compose() sets
-            # body min-height:100vh) that would otherwise peg the measurement at
-            # the frame height; a ResizeObserver re-fits when content reflows
-            # (e.g. the user narrows the panel).
-            helper += (
-                "<script>(function(){"
-                "var fit=function(){"
-                # Measure the *body's* content height, not documentElement's.
-                # We force `html,body{height:auto;overflow:hidden}` below, but
-                # <html> still fills the iframe viewport, so its scrollHeight is
-                # pinned at the frame height (>= its clientHeight) and the panel
-                # could never shrink below its starting size. The body, with
-                # height:auto, reports the true content height; fall back to
-                # documentElement only if there's no body yet.
+            # Measure the *body's* content height, not documentElement's. We
+            # force `html,body{height:auto;overflow:hidden}` in arm() below, but
+            # <html> still fills the iframe viewport, so its scrollHeight is
+            # pinned at the frame height (>= its clientHeight) and the panel
+            # could never shrink below its starting size. The body, with
+            # height:auto, reports the true content height; fall back to
+            # documentElement only if there's no body yet.
+            parts.append(
+                "var fitH=function(){"
                 "var b=document.body,d=document.documentElement;"
                 "var h=Math.ceil(b?b.scrollHeight:(d?d.scrollHeight:0));"
                 f"parent.postMessage({{__pycanvas_fit:{{id:{cid},h:h}}}},'*');"
                 "};"
-                "var arm=function(){"
+            )
+        if self._auto_w:
+            # max-content ignores the available (frame) width, so the body's
+            # scrollWidth under it is the content's true preferred width — the
+            # SVG/figure's intrinsic width, the widest JSON line — regardless of
+            # how wide the panel currently is. Restore the inline width right
+            # after so the body goes back to filling the frame (block default),
+            # leaving the panel freely resizable and its content able to reflow.
+            #
+            # Clamp to a sane panel range: the raw preferred width can collapse
+            # to a sliver — a list of short numbers is one token per line, a
+            # small inline SVG can report next to nothing — narrower than even
+            # the panel's own header label. MIN keeps it readable (and the label
+            # legible); MAX stops a wide widget sprawling across the canvas.
+            parts.append(
+                "var fitW=function(){"
+                "var b=document.body;if(!b)return;"
+                "var prev=b.style.width;b.style.width='max-content';"
+                "var w=b.scrollWidth;b.style.width=prev;"
+                f"w=Math.min({self._AUTO_W_MAX},"
+                f"Math.max({self._AUTO_W_MIN},Math.ceil(w)));"
+                f"parent.postMessage({{__pycanvas_fit:{{id:{cid},w:w}}}},'*');"
+                "};"
+            )
+        parts.append("var arm=function(){")
+        if self._auto_h:
+            parts.append(
                 "var st=document.createElement('style');"
                 "st.textContent='html,body{height:auto !important;"
                 "min-height:0 !important;overflow:hidden !important}';"
                 "document.head.appendChild(st);"
-                # Expose an auto-height hook on <body> so content whose layout
-                # is normally pinned to the panel height (a full-height flex
-                # column with an inner scroll area, e.g. Table) can switch to
-                # sizing *from* its content instead — otherwise the measured
-                # height depends on the panel height and the fit loop oscillates.
+                # Expose an auto-height hook on <body> so content whose layout is
+                # normally pinned to the panel height (a full-height flex column
+                # with an inner scroll area, e.g. Table) can switch to sizing
+                # *from* its content instead — otherwise the measured height
+                # depends on the panel height and the fit loop oscillates.
                 "if(document.body)document.body.classList.add('pc-auto-h');"
-                "fit();"
-                "if(window.ResizeObserver){"
-                "new ResizeObserver(fit).observe(document.body);}"
-                "};"
-                "if(document.readyState==='loading'){"
-                "document.addEventListener('DOMContentLoaded',arm);}"
-                "else{arm();}"
-                "window.addEventListener('load',fit);"
-                "})();</script>"
             )
-        return helper + html
+        # Width before height: a one-shot fit at the content's natural width so
+        # the height (when it also auto-fits) is then measured without wrapping.
+        if self._auto_w:
+            parts.append("fitW();")
+        if self._auto_h:
+            parts.append(
+                "fitH();"
+                "if(window.ResizeObserver){"
+                "new ResizeObserver(fitH).observe(document.body);}"
+            )
+        parts.append("};")
+        parts.append(
+            "if(document.readyState==='loading'){"
+            "document.addEventListener('DOMContentLoaded',arm);}"
+            "else{arm();}"
+        )
+        # On load (images/fonts settled) re-run the one-shot pieces.
+        on_load = ("fitW();" if self._auto_w else "") + \
+                  ("fitH();" if self._auto_h else "")
+        parts.append(f"window.addEventListener('load',function(){{{on_load}}});")
+        parts.append("})();</script>")
+        return "".join(parts)
 
     @staticmethod
     def compose(html="", css="", js=""):
@@ -205,6 +266,26 @@ class Custom(BaseComponent):
             self._auto_h = False
             self._send_update({"html": self._wrap(self._document())})
         self.set_layout(h=value)
+
+    def _set_auto_w(self):
+        """Enable content-fit width live (``comp.w = "auto"``).
+
+        Re-sends the document so the running iframe performs the one-shot
+        natural-width measurement and reports it back. A no-op if already auto.
+        (To go back to a fixed width, assign a number: ``comp.w = 320``.)
+        """
+        if self._auto_w:
+            return
+        self._auto_w = True
+        self._send_update({"html": self._wrap(self._document())})
+
+    def _set_fixed_w(self, value):
+        """Pin the width to a number, leaving auto-width mode if it was on (so a
+        later content rebuild doesn't re-fit over the value)."""
+        if self._auto_w:
+            self._auto_w = False
+            self._send_update({"html": self._wrap(self._document())})
+        self.set_layout(w=value)
 
     def push(self, data):
         """Stream live data into the panel's iframe *without* reloading it.

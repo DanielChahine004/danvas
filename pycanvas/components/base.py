@@ -127,6 +127,30 @@ class BaseComponent:
 
     @w.setter
     def w(self, value):
+        # ``comp.w = "auto"`` is the live form of ``w="auto"`` at insert: fit the
+        # width to the content's natural width rather than shipping the literal
+        # string to the frontend. Only Custom-based panels can measure their
+        # content, so the base implementation explains why it can't.
+        if value == "auto":
+            self._set_auto_w()
+        else:
+            self._set_fixed_w(value)
+
+    def _set_auto_w(self):
+        """Turn on content-fit width (``w="auto"``).
+
+        Overridden by :class:`~pycanvas.Custom`, the only panel whose content is
+        measurable in the browser. The base panel can't fit its width, so this
+        warns and leaves the width as-is.
+        """
+        warnings.warn(
+            f"w='auto' is only supported on Custom-based panels; "
+            f"{type(self).__name__} keeps its current width", stacklevel=3,
+        )
+
+    def _set_fixed_w(self, value):
+        """Set an explicit pixel width. Custom overrides this to also leave
+        auto-width mode, so a numeric assignment after ``w="auto"`` sticks."""
         self.set_layout(w=value)
 
     @property

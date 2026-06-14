@@ -509,10 +509,27 @@ class Canvas:
             user_auto = False
             if h is not None and getattr(component, "_auto_h", False):
                 component._auto_h = False  # explicit numeric h pins the panel
+        # Width auto-fit, mirroring the height handling above: an explicit
+        # w="auto" opts in (Custom panels measure their content's natural width),
+        # an explicit numeric w pins it, and a Custom panel flagged _auto_w by
+        # show()/dispatch fits by default until a grid/column slot imposes a
+        # width (handled in the placement block, like default auto-height).
+        if w == "auto":
+            if hasattr(component, "_auto_w"):
+                component._auto_w = True
+            else:
+                warnings.warn(
+                    "w='auto' is only supported on Custom-based panels; "
+                    "using the default width", stacklevel=2,
+                )
+            w = None
+        elif w is not None and getattr(component, "_auto_w", False):
+            component._auto_w = False  # explicit numeric w pins the panel
         # A component fitting its own content with no height imposed by the caller.
         # It still accepts a slot/row height in _place below; only then is its
         # auto-height switched off (see the placement block).
         default_auto = h is None and getattr(component, "_auto_h", False)
+        default_auto_w = w is None and getattr(component, "_auto_w", False)
         # Only an explicit h="auto" makes the layout skip its slot height.
         auto_h = user_auto
         if user_auto:
@@ -540,6 +557,11 @@ class Canvas:
             # height instead of fitting, so the grid stays uniform.
             if default_auto and h is not None:
                 component._auto_h = False
+            # Likewise a slot width pins a default auto-width panel, keeping grid
+            # columns uniform (autopanel passes an explicit slot_w, so its tidy
+            # columns are preserved; show() outside a layout keeps fitting).
+            if default_auto_w and w is not None:
+                component._auto_w = False
         if name is None:
             name = component.name
         if name is None:

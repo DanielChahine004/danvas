@@ -354,12 +354,19 @@ _IMG_CHROME = 34  # card label bar above the image area
 
 
 def _mark_auto(component):
-    """Opt a content-bounded auto-rendered panel into height-fits-content.
+    """Opt a content-bounded auto-rendered panel into fits-content sizing.
 
     ``insert`` treats a component carrying ``_auto_h=True`` as default
     auto-height: it fits the content but still yields to a grid/column slot.
+    Custom (iframe) panels — the rich-repr / SVG / HTML / JSON outputs — also
+    get ``_auto_w=True``, so ``show()`` sizes their *width* to the content's
+    natural width (a one-shot fit at load), the way their height already fits.
+    The React display panels (Markdown/Image/Table) measure differently and are
+    left to their own width handling.
     """
     component._auto_h = True
+    if isinstance(component, Custom):
+        component._auto_w = True
     return component
 
 

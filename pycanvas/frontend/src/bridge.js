@@ -33,10 +33,78 @@ function nextPosition(w, h) {
   flowRowH = Math.max(flowRowH, h)
   return pos
 }
+
+// Shape ids (insertion order) of panels placed by the flow and not since moved
+// or resized by the user. nextPosition() gives each a sane spot the instant it
+// registers; relayoutFlow() then re-packs the whole set once the content-fit
+// sizes have settled (see scheduleRelayout) — the registration-time size is the
+// panel's *default*, before auto-width/height shrink it, so the first pass alone
+// would leave big gaps. A user gesture drops the panel from the set (see
+// setupGeometrySync), pinning it where they put it.
+const flowItems = new Set()
+let relayoutTimer = null
+
+// Shortest-column masonry: balance the panels across columns by running height,
+// placing each (in insertion order) into the currently-shortest column. The
+// column width is the widest panel, so none overflows its column (no horizontal
+// overlap); the column count derives from FLOW_MAX_W. Mixed heights pack tight
+// like masonry instead of a tall panel reserving a tall row for its neighbours.
+function packMasonry(items, { x0 = FLOW_X0, y0 = FLOW_Y0, gap = FLOW_GAP, maxRowW = FLOW_MAX_W } = {}) {
+  const pos = new Map()
+  if (!items.length) return pos
+  const colW = Math.max(...items.map((it) => it.w))
+  const cols = Math.max(1, Math.floor((maxRowW + gap) / (colW + gap)))
+  const colH = new Array(cols).fill(y0)
+  for (const it of items) {
+    let j = 0
+    for (let k = 1; k < cols; k++) if (colH[k] < colH[j] - 0.5) j = k
+    pos.set(it.id, { x: x0 + j * (colW + gap), y: colH[j] })
+    colH[j] += it.h + gap
+  }
+  return pos
+}
+
+// Re-pack every still-auto-placed panel by its *current* (post-fit) size. Runs
+// as a remote change so it neither echoes back through the user-move handler nor
+// re-drops the panels from the flow; the new positions are reported to Python so
+// they persist across reconnects (mirrors nextPosition's pin).
+function relayoutFlow() {
+  relayoutTimer = null
+  if (!editor || flowItems.size === 0) return
+  const items = []
+  for (const shapeId of flowItems) {
+    const shape = editor.getShape(shapeId)
+    if (!shape) { flowItems.delete(shapeId); continue }
+    items.push({ id: shapeId, w: shape.props.w, h: shape.props.h })
+  }
+  if (!items.length) return
+  const pos = packMasonry(items)
+  const moves = []
+  applyRemote(() => {
+    for (const it of items) {
+      const shape = editor.getShape(it.id)
+      const p = pos.get(it.id)
+      if (!shape || (Math.abs(shape.x - p.x) < 0.5 && Math.abs(shape.y - p.y) < 0.5)) continue
+      editor.updateShape({ id: it.id, type: shape.type, x: p.x, y: p.y })
+      moves.push({ id: componentIdOf(it.id), x: p.x, y: p.y })
+    }
+  })
+  for (const m of moves) sendRaw({ type: 'layout', ...m })
+}
+
+// Debounced: a burst of content fits lands over a short window after load, so
+// re-pack once they've settled rather than on every individual resize.
+function scheduleRelayout() {
+  if (relayoutTimer) clearTimeout(relayoutTimer)
+  relayoutTimer = setTimeout(relayoutFlow, 150)
+}
+
 function resetFlow() {
   flowX = FLOW_X0
   flowY = FLOW_Y0
   flowRowH = 0
+  flowItems.clear()
+  if (relayoutTimer) { clearTimeout(relayoutTimer); relayoutTimer = null }
 }
 
 // component id <-> tldraw shape id helpers.
@@ -160,6 +228,10 @@ function setupGeometrySync(ed) {
       prev.props.w !== next.props.w ||
       prev.props.h !== next.props.h
     if (!moved) return
+    // A user gesture pins the panel: drop it from the auto-flow so a later
+    // re-pack (another panel's fit settling) never yanks it from where they
+    // dragged or sized it.
+    flowItems.delete(next.id)
     // Debounce: a drag fires many changes; report the settled position once.
     dirtyShapes.add(next.id)
     if (flushTimer) clearTimeout(flushTimer)
@@ -575,7 +647,12 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
   // get a concrete position (a user move, or an auto-height fit), they skip the
   // flow on reconnect while this one re-flows from the origin — and they collide.
   // Pinning every auto-placed panel the same way keeps positions stable for all.
-  if (autoPlaced) sendRaw({ type: 'layout', id, x: px, y: py })
+  if (autoPlaced) {
+    sendRaw({ type: 'layout', id, x: px, y: py })
+    // Track it for the masonry re-pack once its content-fit size settles.
+    flowItems.add(shapeId)
+    scheduleRelayout()
+  }
 }
 
 // Draw a tldraw arrow bound to two existing panels. The bindings make the
@@ -933,7 +1010,7 @@ function zoomFromIframe(sourceWin, w) {
 // is measured via offsetHeight, which is in layout px (CSS transforms don't
 // affect it), i.e. already in shape units.
 function fitFromIframe(sourceWin, fit) {
-  if (!editor || typeof fit.h !== 'number') return
+  if (!editor) return
   const iframe = [...document.querySelectorAll('iframe')].find(
     (f) => f.contentWindow === sourceWin
   )
@@ -941,16 +1018,32 @@ function fitFromIframe(sourceWin, fit) {
   const shapeId = createShapeId(fit.id)
   const shape = editor.getShape(shapeId)
   if (!shape) return
-  const overhead = Math.max(0, shape.props.h - iframe.offsetHeight)
-  const h = Math.max(40, Math.ceil(fit.h + overhead))
-  if (Math.abs(h - shape.props.h) < 3) return // settled — don't ping-pong
+  // A fit may carry a height (h="auto", measured continuously), a width
+  // (w="auto", a one-shot at load), or both. Apply each axis independently;
+  // the card chrome around the iframe (header/padding) is its overhead in that
+  // axis, measured via offset* in layout px (already in shape units).
+  const props = {}
+  const report = { type: 'layout', id: fit.id }
+  if (typeof fit.h === 'number') {
+    const overhead = Math.max(0, shape.props.h - iframe.offsetHeight)
+    const h = Math.max(40, Math.ceil(fit.h + overhead))
+    if (Math.abs(h - shape.props.h) >= 3) { props.h = h; report.h = h } // else settled
+  }
+  if (typeof fit.w === 'number') {
+    const overhead = Math.max(0, shape.props.w - iframe.offsetWidth)
+    const w = Math.max(40, Math.ceil(fit.w + overhead))
+    if (Math.abs(w - shape.props.w) >= 3) { props.w = w; report.w = w } // else settled
+  }
+  if (!props.h && !props.w) return // both settled — don't ping-pong
   applyRemote(() =>
-    editor.updateShape({ id: shapeId, type: shape.type, props: { h } })
+    editor.updateShape({ id: shapeId, type: shape.type, props })
   )
-  // Report only the height: a fit never moves the panel, and echoing x/y would
+  // Report only the size: a fit never moves the panel, and echoing x/y would
   // pin an auto-arranged panel (x=None in Python) to a number — which then makes
   // it skip the placement flow on the next viewer and collide with others.
-  sendRaw({ type: 'layout', id: fit.id, h })
+  sendRaw(report)
+  // The panel's footprint changed — re-pack the auto-flow around its real size.
+  if (flowItems.has(shapeId)) scheduleRelayout()
 }
 
 // Auto-height for native panels (the React `h="auto"` path). The iframe version
@@ -974,6 +1067,8 @@ export function fitNative(componentId, contentH, hostEl) {
   // Height only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
   // and break the placement flow for the next viewer.
   sendRaw({ type: 'layout', id: componentId, h })
+  // The panel grew/shrank — re-pack the auto-flow around its real height.
+  if (flowItems.has(shapeId)) scheduleRelayout()
 }
 
 // Global helper available on the top-level page (non-iframe Custom usage).
