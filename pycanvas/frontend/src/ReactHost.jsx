@@ -8,9 +8,11 @@
 // React panel appears, exactly like the Monaco-backed Repl.
 //
 // The user writes a component named `Component`; it receives three props:
-//   canvas  - { send(data), onFrame(cb) }: panel -> Python (send, routed to @on
-//             handlers) and a no-re-render subscription to the push() stream
-//             (onFrame) for high-rate/binary data the component paints itself
+//   canvas  - { send(data), onFrame(cb), chat }: panel -> Python (send, routed
+//             to @on handlers), a no-re-render subscription to the push() stream
+//             (onFrame) for high-rate/binary data the component paints itself,
+//             and `chat` — the canvas-wide shared room (send/setName/history/
+//             subscribe/identity) that powers the Chat panel
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
 //             (skipped while an onFrame subscriber is active — pick one channel)
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
@@ -19,6 +21,7 @@
 import * as Babel from '@babel/standalone'
 import React from 'react'
 import { sendInput, registerLive, unregisterLive, componentIdOf, fitNative } from './bridge'
+import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 
 // Compile a source string into a *factory* — `(React, libs) => Component` —
 // memoised by source so a re-render (or many panels sharing one source) runs
@@ -200,6 +203,19 @@ export default function ReactHost({ shape }) {
       onFrame: (cb) => {
         framesRef.current.add(cb)
         return () => framesRef.current.delete(cb)
+      },
+      // The shared chat room (server-stamped identity + cross-viewer relay), the
+      // one thing that isn't per-component state. Unlike send/onFrame this isn't
+      // routed to this panel's @on handlers — it's the canvas-wide channel every
+      // viewer shares, exposed so a React panel (the Chat component) can be a
+      // window onto it. `subscribe`/`identity` return an unsubscribe; `send` is
+      // stamped with the viewer's identity by the server, not this component's id.
+      chat: {
+        send: (text) => sendChat(text),
+        setName: (name) => setMyName(name),
+        history: () => getChatLog(),
+        subscribe: (cb) => subscribeChat(cb),
+        identity: (cb) => subscribeIdentity(cb),
       },
     }),
     [id]

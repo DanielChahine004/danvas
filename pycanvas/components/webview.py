@@ -1,10 +1,9 @@
 """WebView: panel an external website/URL in an embedded iframe.
 
-Unlike :class:`Custom` (which sandboxes arbitrary user HTML *away* from its own
-origin), WebView loads a real URL straight into its iframe with
-``allow-same-origin`` — so interactive embeds that need access to their own
-origin (YouTube's player, maps, most web apps) actually run instead of rendering
-a blank/black frame.
+Now a native React panel (mounted by ReactHost) whose body is a single
+``<iframe>`` pointed at a real URL — so interactive embeds that need access to
+their own origin (YouTube's player, maps, most web apps) actually run instead of
+rendering a blank/black frame.
 
 Embedding still only works for sites that permit being framed. Pages that send
 ``X-Frame-Options: DENY`` or a CSP ``frame-ancestors`` directive (Google,
@@ -15,19 +14,36 @@ rewritten to their embeddable ``/embed/`` form automatically.
 
 from urllib.parse import parse_qs, urlparse
 
-from .base import BaseComponent
+from .react import React
+
+_WEBVIEW_CSS = """
+.pc-webview{width:100%;height:100%;border:0;display:block;background:#fff}
+"""
+
+# A single iframe filling the panel. ``props.url`` swaps live (and replays on
+# reconnect), so navigating just re-renders with a new src.
+_WEBVIEW_SOURCE = """
+function Component({ props }) {
+  return (
+    <>
+      <style>{`__CSS__`}</style>
+      <iframe className="pc-webview" src={props.url}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        allowFullScreen />
+    </>
+  );
+}
+""".replace("__CSS__", _WEBVIEW_CSS)
 
 
-class WebView(BaseComponent):
-    component = "WebView"
+class WebView(React):
     default_w = 800
     default_h = 600
 
     def __init__(self, url, name="web", label=None, w=None, h=None):
-        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
-        super().__init__(name=name, label=label if label is not None else url,
-                         **size)
-        self._url = self._normalize(url)
+        super().__init__(source=_WEBVIEW_SOURCE, name=name,
+                         label=label if label is not None else url, w=w, h=h,
+                         props={"url": self._normalize(url)})
 
     @staticmethod
     def _normalize(url):
@@ -57,12 +73,6 @@ class WebView(BaseComponent):
             embed += f"?start={start.rstrip('s')}"
         return embed
 
-    def register_props(self):
-        props = dict(self._props)  # label, w, h
-        props["url"] = self._url
-        return props
-
     def navigate(self, url):
         """Point the panel at a new ``url``, live (reloads the iframe)."""
-        self._url = self._normalize(url)
-        self._send_update({"url": self._url})
+        self.update(url=self._normalize(url))

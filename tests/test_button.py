@@ -1,3 +1,5 @@
+import json
+
 import pycanvas
 
 
@@ -25,11 +27,16 @@ def test_on_click_fires_with_no_args_and_counts():
     assert btn.value == 2  # running click count
 
 
+def _face(btn):
+    """The button's face text, read out of the React `data` JSON prop."""
+    return json.loads(btn.register_props()["data"])["text"]
+
+
 def test_text_defaults_to_name_and_is_a_shape_prop():
     btn = pycanvas.Button("save")
-    assert btn.register_props()["text"] == "save"
+    assert _face(btn) == "save"
     btn2 = pycanvas.Button("x", text="Save now")
-    assert btn2.register_props()["text"] == "Save now"
+    assert _face(btn2) == "Save now"
 
 
 def test_update_changes_the_face_text_live_and_persists():
@@ -39,15 +46,17 @@ def test_update_changes_the_face_text_live_and_persists():
 
     btn.update("Pause")
 
-    # Pushed to the browser as a `text` prop update...
-    assert bridge.sent[-1] == {"type": "update", "id": "b1",
-                               "payload": {"text": "Pause"}}
+    # Pushed to the browser as a React props (`data`) update...
+    assert bridge.sent[-1]["type"] == "update"
+    assert bridge.sent[-1]["id"] == "b1"
+    assert json.loads(bridge.sent[-1]["payload"]["data"])["text"] == "Pause"
     # ...and stored, so a reconnecting client replays the current face.
-    assert btn.register_props()["text"] == "Pause"
+    assert _face(btn) == "Pause"
 
 
 def test_button_factory_inserts_and_places():
     canvas = pycanvas.Canvas()
     btn = canvas.button("go", text="Start", x=10, y=20)
-    assert btn.component == "Button"
+    # Button is now a native React panel (mounted by ReactHost).
+    assert btn.component == "React"
     assert btn.x == 10 and btn.y == 20
