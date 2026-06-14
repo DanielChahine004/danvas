@@ -1,17 +1,20 @@
 import json
+import struct
 
 import pycanvas
+from pycanvas.bridge import BINARY_REACT
 
 
 class FakeBridge:
     def __init__(self):
         self.plain = []
+        self.binary = []
 
     def broadcast(self, msg, exclude=None):
         self.plain.append(msg)
 
     def broadcast_binary(self, data):
-        pass
+        self.binary.append(data)
 
 
 def _panel(**kw):
@@ -40,6 +43,21 @@ def test_push_streams_without_prop_churn():
     panel = _panel()
     panel.push({"t": 90})
     assert panel._bridge.plain[-1]["payload"] == {"post": {"t": 90}}
+
+
+def test_push_binary_sends_binary_frame_with_react_type():
+    panel = _panel()  # React defaults to the fifo queue -> plain binary broadcast
+    payload = struct.pack("<2f", 0.5, -0.25)
+    panel.push_binary(payload)
+
+    assert panel._bridge.plain == []  # no JSON update for a binary push
+    assert len(panel._bridge.binary) == 1
+    data = panel._bridge.binary[0]
+    # Header: [type][idLen][id bytes], then the raw payload, unencoded.
+    assert data[0] == BINARY_REACT
+    id_len = data[1]
+    assert data[2:2 + id_len] == b"c1"
+    assert data[2 + id_len:] == payload
 
 
 def test_on_routes_by_event_field_and_catch_all():

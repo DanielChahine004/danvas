@@ -68,6 +68,7 @@ _REAP_INTERVAL = 10.0
 BINARY_VIDEO = 1   # payload: JPEG-encoded frame bytes
 BINARY_AUDIO = 2   # payload: little-endian int16 PCM samples (interleaved)
 BINARY_CUSTOM = 3  # payload: opaque user bytes -> Custom.push_binary -> canvas.onPush
+BINARY_REACT = 4   # payload: opaque user bytes -> React.push_binary -> canvas.onFrame
 
 
 def encode_binary_frame(type_code, comp_id, payload):

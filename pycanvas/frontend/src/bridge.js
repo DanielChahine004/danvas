@@ -409,6 +409,7 @@ function connect() {
 const BIN_VIDEO = 1
 const BIN_AUDIO = 2
 const BIN_CUSTOM = 3
+const BIN_REACT = 4
 const frameDecoder = new TextDecoder()
 
 // Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its
@@ -428,7 +429,9 @@ function handleBinary(buf) {
   // Video (JPEG) / audio (int16 PCM) feed their decoders; a Custom panel's
   // push_binary lands on the same liveHandler as its JSON push(), forwarding the
   // ArrayBuffer straight into the iframe (canvas.onPush receives it untouched).
-  if (type === BIN_VIDEO || type === BIN_AUDIO || type === BIN_CUSTOM) {
+  // React.push_binary is the native equivalent: the same liveHandler is the one
+  // ReactHost registered, so the ArrayBuffer reaches its canvas.onFrame untouched.
+  if (type === BIN_VIDEO || type === BIN_AUDIO || type === BIN_CUSTOM || type === BIN_REACT) {
     const handler = liveHandlers.get(id)
     if (handler) handler(payload)
   }

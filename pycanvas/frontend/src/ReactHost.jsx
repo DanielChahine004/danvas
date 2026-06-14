@@ -8,8 +8,11 @@
 // React panel appears, exactly like the Monaco-backed Repl.
 //
 // The user writes a component named `Component`; it receives three props:
-//   canvas  - { send(data) }            : panel -> Python (routed to @on handlers)
+//   canvas  - { send(data), onFrame(cb) }: panel -> Python (send, routed to @on
+//             handlers) and a no-re-render subscription to the push() stream
+//             (onFrame) for high-rate/binary data the component paints itself
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
+//             (skipped while an onFrame subscriber is active — pick one channel)
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
 // React (with hooks) is in scope as `React`; any libraries requested via Python
 // `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
@@ -164,14 +167,43 @@ export default function ReactHost({ shape }) {
   // Latest value streamed via push() (Custom's `post` live channel, reused).
   const [streamed, setStreamed] = React.useState(undefined)
 
+  // Imperative push subscribers (canvas.onFrame). A component that paints a
+  // high-rate stream itself — to a <canvas>/<img>, with zero-copy binary —
+  // registers here instead of reading the `value` prop, so each frame skips a
+  // React re-render of the whole component.
+  const framesRef = React.useRef(new Set())
+
   React.useEffect(() => {
-    const onPush = (data) => setStreamed(data)
+    const onPush = (data) => {
+      // When the component drives its own painting via onFrame, deliver straight
+      // to those callbacks and skip setStreamed entirely (no re-render). The two
+      // are mutually exclusive: read `value` for declarative/low-rate updates, or
+      // subscribe onFrame for high-rate streams — not both.
+      if (framesRef.current.size) {
+        for (const cb of framesRef.current) cb(data)
+      } else {
+        setStreamed(data)
+      }
+    }
     registerLive(id, onPush)
     return () => unregisterLive(id)
   }, [id])
 
-  // Stable bridge handle so the user component can post back to Python.
-  const canvas = React.useMemo(() => ({ send: (data) => sendInput(id, data) }), [id])
+  // Stable bridge handle so the user component can post back to Python and
+  // subscribe to the raw push() stream imperatively.
+  const canvas = React.useMemo(
+    () => ({
+      send: (data) => sendInput(id, data),
+      // Subscribe to every push() without re-rendering; returns an unsubscribe.
+      // The payload is whatever Python pushed (an ArrayBuffer for binary, handed
+      // over zero-copy). Call from a useEffect and return its result to clean up.
+      onFrame: (cb) => {
+        framesRef.current.add(cb)
+        return () => framesRef.current.delete(cb)
+      },
+    }),
+    [id]
+  )
 
   // Props from Python (update()/initial props=), carried as a JSON string prop so
   // they persist in the shape and replay on reconnect.

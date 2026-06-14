@@ -355,6 +355,17 @@ interactive from the first hover — cursors, `:hover` and controls respond with
 click-to-arm step — and a small grip fades in on the panel's top-right to drag or
 select it without stealing pointers from the content.
 
+`push(data)` reaches the component as the `value` prop (a re-render). For
+high-rate streams, subscribe imperatively with `canvas.onFrame(cb)` inside a
+`useEffect` and paint each frame yourself (to a `<canvas>`/`<img>`) — that skips
+the per-frame re-render the `value` prop would trigger. Use one channel or the
+other, not both. For frame- or array-grade telemetry, `push_binary(bytes)` sends
+packed bytes on a binary WebSocket frame (no JSON, no base64 — the same fast path
+`VideoFeed`/`Custom.push_binary` use); `onFrame` receives it as a zero-copy
+`ArrayBuffer` to wrap in a typed array (e.g. `new Float32Array(buf)`). See
+[`examples/react_component.py`](examples/react_component.py) for a binary
+`onFrame` waveform.
+
 Reach for third-party libraries with `scope=[...]`: each name is loaded as ESM
 from a CDN in the browser (nothing is bundled, so listing none costs nothing) and
 handed to the component as the `libs` global. Friendly names (`d3`, `lodash`,
