@@ -1,11 +1,57 @@
-"""VideoFeed: streams OpenCV frames to the browser as binary JPEG."""
+"""VideoFeed: streams OpenCV frames to the browser as binary JPEG.
 
-from .base import BaseComponent
+Rendered as a native React panel (mounted by ReactHost): each frame rides a
+*binary* WebSocket frame (no base64, no JSON, no shape-prop churn) and the panel
+paints it with ``canvas.onFrame`` — wrapping each ``ArrayBuffer`` in a Blob ->
+object URL -> ``<img>`` and revoking the previous URL once the next frame paints,
+so the stream can't leak memory and never triggers a React re-render. The Python
+side (OpenCV JPEG encoding, or pre-encoded bytes) is unchanged.
+"""
+
+from .react import React
 from ..bridge import BINARY_VIDEO
 
+# The panel: subscribe to the binary push stream and paint each JPEG frame to an
+# <img>. ``onFrame`` delivers each frame as a zero-copy ArrayBuffer (no React
+# re-render); we revoke the prior frame's object URL once the next one paints.
+# Authored as a plain string so its JSX braces survive — nothing is substituted.
+_VIDEO_SOURCE = r"""
+function Component({ canvas }) {
+  const imgRef = React.useRef(null);
+  const urlRef = React.useRef(null);
+  const [live, setLive] = React.useState(false);
+  React.useEffect(() => {
+    const off = canvas.onFrame((d) => {
+      if (!(d instanceof ArrayBuffer)) return;
+      const el = imgRef.current;
+      if (!el) return;
+      const url = URL.createObjectURL(new Blob([d], { type: "image/jpeg" }));
+      const prev = urlRef.current;
+      // Revoke the prior frame's URL only after the new one has painted.
+      el.onload = () => { if (prev) URL.revokeObjectURL(prev); };
+      urlRef.current = url;
+      el.src = url;
+      setLive(true);  // React bails if already true, so this is cheap per frame
+    });
+    return () => {
+      off();
+      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; }
+    };
+  }, [canvas]);
+  return (
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--pc-video-bg, #000)", borderRadius: 4, overflow: "hidden", height: "100%" }}>
+      <img ref={imgRef} draggable={false}
+        style={{ width: "100%", height: "100%", objectFit: "contain",
+          pointerEvents: "none", display: live ? "block" : "none" }} />
+      {!live && <span style={{ color: "var(--pc-muted)", fontSize: 13 }}>no signal</span>}
+    </div>
+  );
+}
+"""
 
-class VideoFeed(BaseComponent):
-    component = "VideoFeed"
+
+class VideoFeed(React):
     default_w = 340
     default_h = 280
 
@@ -13,7 +59,7 @@ class VideoFeed(BaseComponent):
         # Live video defaults to the ``latest`` queue policy: if a viewer falls
         # behind, stale frames are dropped so latency stays bounded rather than
         # piling up. Pass ``queue="fifo"`` to instead deliver every frame.
-        super().__init__(name=name, label=label, queue=queue)
+        super().__init__(source=_VIDEO_SOURCE, name=name, label=label, queue=queue)
         self._quality = int(quality)
         self._encode = bool(encode)
 
@@ -24,7 +70,7 @@ class VideoFeed(BaseComponent):
         to JPEG here. With ``encode=False`` ``frame`` must already be **JPEG
         bytes** — e.g. produced by a hardware encoder (NVJPG/GStreamer) — and is
         sent as-is, skipping ``cv2.imencode`` entirely. Either way the bytes ride
-        a binary frame (no base64, no JSON), fed straight into a Blob.
+        a binary frame (no base64, no JSON), painted by the panel's ``onFrame``.
         """
         if self._encode:
             try:

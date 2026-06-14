@@ -287,11 +287,4 @@ function seedDemo(editor) {
     y: 80,
     props: { label: 'status', value: 'idle' },
   })
-  editor.createShape({
-    id: createShapeId('demo_video'),
-    type: 'pcVideo',
-    x: 80,
-    y: 220,
-    props: { label: 'camera' },
-  })
 }

@@ -518,10 +518,10 @@ canvas.markdown("# Notes\n\nexactly as tall as this text", h="auto")
 ```
 
 `h="auto"` is also a live property — `comp.h = "auto"` switches a placed
-Custom-based panel into content-fit mode, and assigning a number
-(`comp.h = 240`) switches it back. On a non-Custom panel (a `Slider`, `Toggle`,
-…) it warns and leaves the height alone. Set it as a property, not via
-`update()` — `update()` carries a panel's *value*, not its layout.
+Custom- or React-based panel into content-fit mode, and assigning a number
+(`comp.h = 240`) switches it back. On one of the few native panels (a `LivePlot`,
+an `AudioFeed`, a `Repl`) it warns and leaves the height alone. Set it as a
+property, not via `update()` — `update()` carries a panel's *value*, not its layout.
 
 Or skip coordinates entirely and place panels **relative to each other** with
 `below=` / `above=` / `right_of=` / `left_of=` (an already-placed component or

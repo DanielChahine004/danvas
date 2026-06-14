@@ -571,8 +571,8 @@ servo.set_layout(x=120, y=90, rotation=30)   # any combination in one message
 
 ### Auto height (`h="auto"`)
 
-Text-y panels are hard to size by eye. On the Custom-based panels (`markdown`,
-`custom`, `table`, `image`, `label`, …) pass `h="auto"` and the panel's height fits its
+Text-y panels are hard to size by eye. On the Custom- and React-based panels
+(`markdown`, `custom`, `table`, `image`, `label`, …) pass `h="auto"` and the panel's height fits its
 rendered content — measured in the browser after layout, and re-fitted when
 the content reflows (e.g. you narrow the panel, or `update()` changes the
 text). Width stays yours; the fitted height is reported back so `comp.h` stays
@@ -590,9 +590,11 @@ notes.h = "auto"     # start fitting the height to the content now
 notes.h = 240        # back to a fixed 240px (assigning a number turns auto off)
 ```
 
-Auto-height is a Custom-panel feature: setting `h="auto"` on a non-Custom panel
-(a `Slider`, a `Toggle`, …) warns and leaves its height unchanged, rather than
-silently shipping the string to the frontend. (Use `comp.h = "auto"` — the live
+Auto-height works on the panels that can measure their content — the Custom- and
+React-based ones (which now includes the controls: `slider`, `toggle`, `button`,
+…). On one of the few remaining native panels (a `LivePlot`, an `AudioFeed`, a
+`Repl`) `h="auto"` warns and leaves its height unchanged, rather than silently
+shipping the string to the frontend. (Use `comp.h = "auto"` — the live
 property — not `comp.update(h="auto")`; `update()` carries a panel's *value*,
 not its layout.)
 
