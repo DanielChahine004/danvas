@@ -26,7 +26,15 @@ from .components import (
 )
 from .dispatch import panel_for
 
-__version__ = "0.1.0"
+# Single source of truth is the installed package metadata (pyproject `version`).
+# Fall back to 0.0.0 when running straight from a source tree that was never
+# installed, so the import never fails just to read a version string.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _version
+
+    __version__ = _version("pycanvas")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 __all__ = [
     "Canvas",
