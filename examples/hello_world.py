@@ -15,4 +15,4 @@ def on_servo(value):
     status.update(f"servo at {value}")
 
 
-canvas.serve(port=8000)
+canvas.serve(port=8000, tunnel=True)

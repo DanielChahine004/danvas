@@ -64,7 +64,7 @@ class Repl(BaseComponent):
     def register_props(self):
         return dict(self._props)  # label, w, h, code, output, result
 
-    def _handle_input(self, payload):
+    def _handle_input(self, payload, viewer=None):
         if payload.get("action") == "complete":
             self._complete(payload.get("reqId"), payload.get("text", ""))
             return

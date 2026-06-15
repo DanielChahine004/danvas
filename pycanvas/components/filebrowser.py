@@ -198,16 +198,12 @@ class FileBrowser(React):
 
     # ``.value`` is the selected file path, set above — not the raw inbound
     # message — so we route without the value-stashing React does by default.
-    def _handle_input(self, payload):
+    def _handle_input(self, payload, viewer=None):
         event = payload.get(self._event_key) if isinstance(payload, dict) else None
         handlers = list(self._routes.get(event, []))
         if event is not None:
             handlers += self._routes.get(None, [])
-        for cb in handlers:
-            try:
-                cb(payload)
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(handlers, (payload,), viewer)
 
     # -- helpers -------------------------------------------------------------
     def _within_root(self, path):

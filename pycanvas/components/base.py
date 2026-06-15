@@ -1,5 +1,6 @@
 """Base class shared by all PyCanvas components."""
 
+import inspect
 import math
 import threading
 import traceback
@@ -57,6 +58,11 @@ class BaseComponent:
         self._value = None
         self._callbacks = []
         self._layout_callbacks = []
+        # Role-based access: _roles limits which viewer roles see this panel;
+        # empty means all roles. _lock_for makes the panel non-interactive for
+        # the listed roles on connect (operable=False sent per-client).
+        self._roles = []
+        self._lock_for = []
         self._bridge = None
         self._lock = threading.Lock()
         # Optional canvas placement (x, y) in canvas coordinates; None = let the
@@ -403,15 +409,37 @@ class BaseComponent:
         self._callbacks.append(fn)
         return fn
 
-    def _handle_input(self, payload):
+    def _dispatch_callbacks(self, callbacks, call_args, viewer):
+        """Call each callback, appending viewer as a final arg when its signature accepts it.
+
+        Detects whether the callback has more explicit positional parameters
+        than ``call_args`` supplies — if so, passes ``viewer`` (a dict with
+        ``id``, ``name``, ``color``, ``role``) as the extra argument. Backwards
+        compatible: existing one-arg handlers are never changed.
+        """
+        for cb in callbacks:
+            try:
+                try:
+                    params = [
+                        p for p in inspect.signature(cb).parameters.values()
+                        if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                      inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    ]
+                    wants_viewer = len(params) > len(call_args)
+                except (ValueError, TypeError):
+                    wants_viewer = False
+                if wants_viewer:
+                    cb(*call_args, viewer or {})
+                else:
+                    cb(*call_args)
+            except Exception:
+                traceback.print_exc()
+
+    def _handle_input(self, payload, viewer=None):
         if "value" in payload:
             with self._lock:
                 self._value = payload["value"]
-        for cb in self._callbacks:
-            try:
-                cb(self.value)
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(self._callbacks, (self.value,), viewer)
 
 
 def _flag_property(name, flag):

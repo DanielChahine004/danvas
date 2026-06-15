@@ -344,15 +344,11 @@ class React(BaseComponent):
             raise LookupError(f"no on_request handler for event {event!r}")
         return handler(data)
 
-    def _handle_input(self, payload):
+    def _handle_input(self, payload, viewer=None):
         with self._lock:
             self._value = payload
         event = payload.get(self._event_key) if isinstance(payload, dict) else None
         handlers = list(self._routes.get(event, []))
         if event is not None:
             handlers += self._routes.get(None, [])
-        for cb in handlers:
-            try:
-                cb(payload)
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(handlers, (payload,), viewer)

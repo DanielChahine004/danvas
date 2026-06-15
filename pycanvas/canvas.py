@@ -42,7 +42,8 @@ from .kernel import Kernel
 # /chrome flags come straight from the shared LAYOUT_FLAGS table. ``queue`` lives
 # here (not in every constructor) so all factories accept it uniformly.
 _INSERT_KEYS = ("x", "y", "w", "h", "width", "height", "rotation", "queue",
-                "below", "above", "right_of", "left_of", "gap", *LAYOUT_FLAGS)
+                "below", "above", "right_of", "left_of", "gap",
+                "roles", "lock_for", *LAYOUT_FLAGS)
 
 
 class _FlowLayout:
@@ -393,7 +394,7 @@ class Canvas:
                locked=False, draggable=True, resizable=True, operable=True,
                grabbable=True, frame=True, name=None, queue=None,
                below=None, above=None, right_of=None, left_of=None, gap=16,
-               width=None, height=None):
+               width=None, height=None, roles=None, lock_for=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -634,6 +635,10 @@ class Canvas:
                 setattr(component, flag.attr, bool(value))
         if queue is not None:
             component.queue = queue  # property setter validates the policy
+        if roles is not None:
+            component._roles = list(roles)
+        if lock_for is not None:
+            component._lock_for = list(lock_for)
         component_id = uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
@@ -1235,8 +1240,8 @@ class Canvas:
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               cursors=None, view=None, desktop=None, window_title="PyCanvas",
-              window_size=(1200, 800), password=None, hot_reload=False,
-              debug=False):
+              window_size=(1200, 800), password=None, passwords=None,
+              hot_reload=False, debug=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1411,12 +1416,13 @@ class Canvas:
             else bool(desktop)
         if use_desktop:
             self._serve_desktop(port, host, tunnel, tunnel_provider,
-                                window_title, window_size, password)
+                                window_title, window_size, password,
+                                passwords=passwords)
             return self
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host,
-                password=password,
+                password=password, passwords=passwords,
             )
             if wait:
                 self._wait_until_ready()
@@ -1429,12 +1435,12 @@ class Canvas:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host, password=password)
+                       host=host, password=password, passwords=passwords)
         finally:
             self._stop_tunnel()
 
     def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
-                       password=None):
+                       password=None, passwords=None):
         """Serve in the background and show the canvas in a native window.
 
         Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
@@ -1453,7 +1459,7 @@ class Canvas:
                 self._start_tunnel(port, tunnel_provider)
             try:
                 server.run(self._bridge, port=port, open_browser=True, host=host,
-                           password=password)
+                           password=password, passwords=passwords)
             finally:
                 self._stop_tunnel()
             return
@@ -1462,7 +1468,7 @@ class Canvas:
         # window closes; tear the server down afterwards.
         self._server = server.run_background(
             self._bridge, port=port, open_browser=False, host=host,
-            password=password,
+            password=password, passwords=passwords,
         )
         self._wait_until_ready()
         self._serving = True

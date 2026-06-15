@@ -79,13 +79,13 @@ class Slider(React):
         self._data["value"] = value
         self.push(value)
 
-    def _handle_input(self, payload):
+    def state_payload(self):
+        v = self._value
+        return {"post": v} if v is not None else None
+
+    def _handle_input(self, payload, viewer=None):
         if "value" in payload:
             with self._lock:
                 self._value = payload["value"]
-        for cb in self._callbacks:
-            try:
-                cb(self.value)
-            except Exception:
-                import traceback
-                traceback.print_exc()
+            self._data["value"] = self._value  # keep baked props current for reconnects
+        self._dispatch_callbacks(self._callbacks, (self.value,), viewer)

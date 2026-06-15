@@ -414,7 +414,7 @@ class Inspector(React):
             except Exception:
                 traceback.print_exc()
 
-    def _handle_input(self, payload):
+    def _handle_input(self, payload, viewer=None):
         action = payload.get("action")
         if action == "refresh":
             self.refresh()

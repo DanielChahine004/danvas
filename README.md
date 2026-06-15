@@ -528,6 +528,40 @@ session cookie carries them (the password is never stored in the cookie):
 canvas.serve(port=8000, host="0.0.0.0", password="let-me-in")
 ```
 
+**Roles** — serve different views to different users from the same port. Use
+`passwords=` (a `{role: password}` dict) instead of `password=`; mark panels
+with `roles=` to restrict visibility; use `lock_for=` to show a panel but make
+it non-interactive for certain roles; receive `viewer` as an optional second
+argument in any callback to see who triggered it:
+
+```python
+# Only "admin" sees the control panel; everyone sees the display.
+controls = canvas.react(CONTROLS_SOURCE, name="controls", roles=["admin"])
+display  = canvas.react(DISPLAY_SOURCE,  name="display")
+
+# This slider is visible to all but only draggable by admins.
+speed = canvas.slider("speed", min=0, max=100, lock_for=["viewer"])
+
+@controls.on_message
+def on_action(msg, viewer):           # viewer has id, name, color, role
+    print(f"{viewer['name']} ({viewer['role']}) sent {msg}")
+
+canvas.serve(
+    port=8000,
+    host="0.0.0.0",
+    passwords={
+        "admin":  "secret-admin-pw",
+        "viewer": "public-view-pw",
+    },
+)
+```
+
+Roles work on the same port: the password typed at login determines which panels
+a client receives and whether callbacks identify them as `"admin"` or `"viewer"`.
+`roles=["admin"]` hides a panel from everyone else; `lock_for=["viewer"]` sends it
+to viewers but with `operable=False` so they can't interact. `password=` still
+works as before (all viewers get `role=None`).
+
 **Tunnel** — expose to the whole internet over public HTTPS; keeps the bind on
 `127.0.0.1` and prints a shareable `https://…` URL:
 

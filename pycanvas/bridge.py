@@ -308,27 +308,45 @@ class Bridge:
         return msg
 
     def register_live(self, component):
-        """Broadcast a newly-added component to already-connected clients.
+        """Push a newly-added component to connected clients who may see it.
 
-        Used for components inserted after the server is already running (e.g.
-        from a Jupyter cell). Fresh connections still get the full replay via
-        ``handle_connection``; this covers clients already on the page.
+        Role-aware: clients whose role is not in the component's ``_roles``
+        list are skipped. Used for components inserted after the server is
+        already running (e.g. from a Jupyter cell). Fresh connections still get
+        the full replay via ``handle_connection``; this covers live clients.
         """
-        self.broadcast(self.register_message(component))
+        roles = getattr(component, "_roles", [])
+        lock_for = getattr(component, "_lock_for", [])
+        reg = self.register_message(component)
         state = component.state_payload()
-        if state:
-            self.broadcast(
-                {"type": "update", "id": component.id, "payload": state}
-            )
+        if self._loop is None:
+            return
+        for ws, viewer in list(self._viewers.items()):
+            role = viewer.get("role")
+            if roles and role not in roles:
+                continue
+            asyncio.run_coroutine_threadsafe(self._safe_send(ws, reg), self._loop)
+            if state:
+                asyncio.run_coroutine_threadsafe(
+                    self._safe_send(ws, {"type": "update", "id": component.id,
+                                         "payload": state}),
+                    self._loop,
+                )
+            if lock_for and role in lock_for:
+                asyncio.run_coroutine_threadsafe(
+                    self._safe_send(ws, {"type": "update", "id": component.id,
+                                         "payload": {"operable": False}}),
+                    self._loop,
+                )
 
     # -- connection lifecycle (runs in the event loop) -----------------------
-    async def handle_connection(self, ws):
+    async def handle_connection(self, ws, role=None):
         await ws.accept()
         self._connections.add(ws)
         self._any_connected.set()
         self._send_locks[ws] = asyncio.Lock()
         self._last_seen[ws] = time.monotonic()
-        viewer = self._make_viewer()
+        viewer = self._make_viewer(role=role)
         self._viewers[ws] = viewer
         self._broadcast_roster()  # tell everyone a viewer joined
         try:
@@ -348,13 +366,22 @@ class Bridge:
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)
-            # Replay full state to the freshly connected client.
+            # Replay full state to the freshly connected client, filtered by role.
             for comp in self._components.values():
+                roles = getattr(comp, "_roles", [])
+                if roles and role not in roles:
+                    continue  # this panel is not visible to this role
                 await self._send(ws, self.register_message(comp))
                 state = comp.state_payload()
                 if state:
                     await self._send(
                         ws, {"type": "update", "id": comp.id, "payload": state}
+                    )
+                lock_for = getattr(comp, "_lock_for", [])
+                if lock_for and role in lock_for:
+                    await self._send(
+                        ws, {"type": "update", "id": comp.id,
+                             "payload": {"operable": False}}
                     )
             # Arrows bind to panels, so replay them after every panel exists.
             for arrow in self._arrows.values():
@@ -409,8 +436,8 @@ class Bridge:
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
-    def _make_viewer(self):
-        """Mint a fresh viewer identity (id + friendly editable name + color)."""
+    def _make_viewer(self, role=None):
+        """Mint a fresh viewer identity (id + friendly editable name + color + role)."""
         existing = {v["name"] for v in self._viewers.values()}
         animal = random.choice(_VIEWER_ANIMALS)
         name = animal
@@ -422,8 +449,9 @@ class Bridge:
         # ``cursor`` is the viewer's last-known pointer position in canvas/page
         # coords (``{"x", "y"}``), or None until they move it (and only ever
         # populated when cursor reporting is enabled). Read it via canvas.viewers.
+        # ``role`` is the access level granted at login (None when no passwords set).
         return {"id": uuid.uuid4().hex[:8], "name": name, "color": color,
-                "cursor": None}
+                "cursor": None, "role": role}
 
     def _broadcast_roster(self):
         """Push the live-viewer roster (and count) to every connected browser.
@@ -640,14 +668,12 @@ class Bridge:
     def _dispatch_input(self, comp, payload, ws):
         """Run a component's input handler (off the loop) and echo its state.
 
-        Called on the dispatch thread. Echoes the resulting state to the *other*
-        clients so a second browser (or a merge host aggregating this canvas)
-        stays in sync with a browser-driven change. Output-only components return
-        None and are left alone. The originating browser is excluded: it already
-        shows the value, and echoing back mid-drag would fight the live thumb with
-        stale values.
+        Called on the dispatch thread. Passes the viewer dict (which includes
+        ``role``) to ``_handle_input`` so callbacks can inspect who triggered
+        the action. Echoes resulting state to other clients.
         """
-        comp._handle_input(payload)
+        viewer = self._viewers.get(ws, {})
+        comp._handle_input(payload, viewer)
         state = comp.state_payload()
         if state:
             self.broadcast(

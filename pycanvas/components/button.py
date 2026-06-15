@@ -68,11 +68,7 @@ class Button(React):
         self._callbacks.append(fn)
         return fn
 
-    def _handle_input(self, _payload):
+    def _handle_input(self, _payload, viewer=None):
         with self._lock:
             self._value = (self._value or 0) + 1
-        for cb in self._callbacks:
-            try:
-                cb()
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(self._callbacks, (), viewer)

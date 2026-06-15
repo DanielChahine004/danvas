@@ -132,10 +132,18 @@ def _cookie_token(request_or_ws):
     return request_or_ws.cookies.get(_AUTH_COOKIE)
 
 
-def create_app(bridge, port=8000, open_browser=True, password=None):
+def create_app(bridge, port=8000, open_browser=True, password=None,
+               passwords=None):
+    """Create the FastAPI app.
+
+    ``passwords`` is a ``{role: password}`` dict that enables role-based access:
+    the role a visitor authenticates with is stored in their session and passed
+    to the bridge so per-role panel filtering and viewer callbacks work.
+    ``password`` (a single string) keeps backward compatibility — all viewers
+    get ``role=None``. If both are given, ``passwords`` takes precedence.
+    """
     @asynccontextmanager
     async def lifespan(app):
-        # Capture the running loop so cross-thread broadcasts can target it.
         bridge.set_loop(asyncio.get_running_loop())
         if open_browser:
             url = f"http://127.0.0.1:{port}"
@@ -144,35 +152,59 @@ def create_app(bridge, port=8000, open_browser=True, password=None):
 
     app = FastAPI(lifespan=lifespan)
 
-    # Valid auth session tokens (only used when a password is set). A token is
-    # minted when a visitor passes the password page and stored here; cookies
-    # carry the token, never the password.
-    sessions = set()
+    # Normalise: passwords= dict takes precedence over the legacy password= str.
+    # role_map: {role: password} when roles are in use; None otherwise.
+    # single_pw: plain password string when no roles needed; None otherwise.
+    if passwords is not None:
+        role_map = passwords
+        single_pw = None
+    elif password is not None:
+        role_map = None
+        single_pw = password
+    else:
+        role_map = None
+        single_pw = None
+
+    auth_required = role_map is not None or single_pw is not None
+
+    # Sessions store: token -> role (role is None when single_pw is used).
+    sessions = {}
 
     def _authed(scope_obj):
-        return password is None or _cookie_token(scope_obj) in sessions
+        return not auth_required or _cookie_token(scope_obj) in sessions
 
-    if password is not None:
+    def _role_of(scope_obj):
+        return sessions.get(_cookie_token(scope_obj))
+
+    if auth_required:
         @app.post("/__auth__")
         async def authenticate(request: Request):
-            # Parse the urlencoded form body by hand so we don't pull in the
-            # optional python-multipart dependency just for one field.
             from urllib.parse import parse_qs
             body = (await request.body()).decode("utf-8", "replace")
             given = parse_qs(body).get("password", [""])[0]
-            if secrets.compare_digest(str(given), str(password)):
+            if role_map is not None:
+                # Find which role this password matches (constant-time per entry).
+                matched_role = None
+                for role, pw in role_map.items():
+                    if secrets.compare_digest(str(given), str(pw)):
+                        matched_role = role
+                        break
+                if matched_role is None:
+                    return HTMLResponse(_login_page(error=True), status_code=401)
                 token = secrets.token_urlsafe(24)
-                sessions.add(token)
-                resp = RedirectResponse(url="/", status_code=303)
-                resp.set_cookie(_AUTH_COOKIE, token, httponly=True,
-                                samesite="lax", max_age=86400)
-                return resp
-            return HTMLResponse(_login_page(error=True), status_code=401)
+                sessions[token] = matched_role
+            else:
+                if not secrets.compare_digest(str(given), str(single_pw)):
+                    return HTMLResponse(_login_page(error=True), status_code=401)
+                token = secrets.token_urlsafe(24)
+                sessions[token] = None
+            resp = RedirectResponse(url="/", status_code=303)
+            resp.set_cookie(_AUTH_COOKIE, token, httponly=True,
+                            samesite="lax", max_age=86400)
+            return resp
 
         @app.middleware("http")
         async def gate(request, call_next):
-            # The auth endpoint must stay reachable; everything else needs a valid
-            # session cookie, else the password page is served in its place.
             if request.url.path == "/__auth__" or _authed(request):
                 return await call_next(request)
             return HTMLResponse(_login_page(), status_code=401)
@@ -180,9 +212,9 @@ def create_app(bridge, port=8000, open_browser=True, password=None):
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket):
         if not _authed(ws):
-            await ws.close(code=1008)  # policy violation: not authenticated
+            await ws.close(code=1008)
             return
-        await bridge.handle_connection(ws)
+        await bridge.handle_connection(ws, role=_role_of(ws))
 
     # Any other WebSocket path would otherwise fall through to the StaticFiles
     # mount, which only handles HTTP and raises AssertionError. Reject cleanly.
@@ -197,9 +229,10 @@ def create_app(bridge, port=8000, open_browser=True, password=None):
     return app
 
 
-def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None):
+def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
+        passwords=None):
     app = create_app(bridge, port=port, open_browser=open_browser,
-                     password=password)
+                     password=password, passwords=passwords)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning",
                             **_WS_OPTS)
     server = uvicorn.Server(config)
@@ -208,7 +241,7 @@ def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None):
 
 
 def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
-                   password=None):
+                   password=None, passwords=None):
     """Start the server in a daemon thread and return immediately.
 
     Returns the uvicorn ``Server`` so the caller can stop it later via
@@ -216,7 +249,7 @@ def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
     where the cell must return so more components can be inserted.
     """
     app = create_app(bridge, port=port, open_browser=open_browser,
-                     password=password)
+                     password=password, passwords=passwords)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning",
                             **_WS_OPTS)
     server = uvicorn.Server(config)
