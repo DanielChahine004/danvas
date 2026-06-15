@@ -106,6 +106,7 @@ class Bridge:
         self._cursor_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
+        self._any_connected = threading.Event()  # set while ≥1 client is connected
         # One asyncio.Lock per live connection. The websockets legacy protocol
         # forbids concurrent writes (its drain() has no internal lock — two
         # coroutines draining a flow-control-paused socket trip an assertion), so
@@ -324,6 +325,7 @@ class Bridge:
     async def handle_connection(self, ws):
         await ws.accept()
         self._connections.add(ws)
+        self._any_connected.set()
         self._send_locks[ws] = asyncio.Lock()
         self._last_seen[ws] = time.monotonic()
         viewer = self._make_viewer()
@@ -390,6 +392,8 @@ class Bridge:
                 traceback.print_exc(file=sys.__stderr__)
         finally:
             self._connections.discard(ws)
+            if not self._connections:
+                self._any_connected.clear()
             self._send_locks.pop(ws, None)
             self._drop_conflate(ws)
             gone = self._viewers.pop(ws, None)

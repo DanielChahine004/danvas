@@ -307,3 +307,37 @@ def test_request_handler_error_replies_with_error():
     assert resp["reqId"] == "r2"
     assert "result" not in resp
     assert "nope" in resp["error"]
+
+
+def test_wait_for_client_times_out_with_no_connection():
+    canvas, _, _, _ = build_client()
+    assert canvas.wait_for_client(timeout=0.1) is False
+
+
+def test_wait_for_client_returns_true_when_client_connects():
+    canvas, _, _, app = build_client()
+    result = []
+
+    def waiter():
+        result.append(canvas.wait_for_client(timeout=3.0))
+
+    t = threading.Thread(target=waiter, daemon=True)
+    t.start()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            _recv(ws)          # ensure fully connected before joining
+            t.join(timeout=3.0)
+
+    assert result == [True]
+
+
+def test_wait_for_client_clears_after_disconnect():
+    """Event is cleared when the last client leaves so a future call can re-wait."""
+    canvas, _, _, app = build_client()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            _recv(ws)
+        # ws is closed; the finally block in handle_connection discards it
+    # Give the event loop a moment to run the finally block.
+    time.sleep(0.05)
+    assert not canvas._bridge._any_connected.is_set()

@@ -388,6 +388,11 @@ canvas.save("board.json")                    # browser must be open to capture d
 # next run, recreate the panels (same names), then:
 canvas.load("board.json")                    # snaps panels into place + restores drawings
 canvas.load("board.json", formation=False)   # drawings only
+canvas.clear()                               # remove all panels and arrows at once
+
+# Non-blocking save — useful in Jupyter so the cell doesn't stall:
+fut = canvas.save("board.json", blocking=False)
+fut.result()                                 # wait (and raise on error) when ready
 ```
 
 Panels are code, so only their **placement** is saved, never behaviour.

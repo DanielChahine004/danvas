@@ -951,6 +951,14 @@ class Canvas:
             on_removed()
         return component
 
+    def clear(self):
+        """Remove all panels and arrows from the canvas. Works live while serving."""
+        for c in list(self._components):
+            self.remove(c)
+        for a in list(self._arrows):
+            self.disconnect(a)
+        return self
+
     def connect(self, start, end, name=None, text=None, **props):
         """Draw an arrow from panel ``start`` to panel ``end`` and return it.
 
@@ -1024,7 +1032,7 @@ class Canvas:
         return arrow
 
     # -- save / load ----------------------------------------------------------
-    def save(self, path, timeout=5.0):
+    def save(self, path, timeout=5.0, blocking=True):
         """Save the canvas to one JSON file: panel formation + user drawings.
 
         Two things are written together:
@@ -1037,8 +1045,26 @@ class Canvas:
           browser (the source of truth), so an open page is needed for these;
           with no browser open the formation is still saved on its own.
 
-        Reload it with :meth:`load`.
+        With ``blocking=False`` the snapshot request is fired on a background
+        thread and a :class:`~concurrent.futures.Future` is returned immediately.
+        Call ``.result()`` on it to wait and confirm the file was written::
+
+            fut = canvas.save("board.json", blocking=False)
+            # ... do other work in the next cell ...
+            fut.result()    # raises on timeout or I/O error
+
+        Reload with :meth:`load`.
         """
+        if not blocking:
+            import concurrent.futures
+            fut: concurrent.futures.Future = concurrent.futures.Future()
+            threading.Thread(
+                target=self._save_bg, args=(path, timeout, fut), daemon=True
+            ).start()
+            return fut
+        return self._save_sync(path, timeout)
+
+    def _save_sync(self, path, timeout):
         data = {"layout": self._layout()}
         try:
             drawings = self._bridge.request_snapshot(timeout=timeout)
@@ -1049,6 +1075,13 @@ class Canvas:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         return self
+
+    def _save_bg(self, path, timeout, fut):
+        try:
+            self._save_sync(path, timeout)
+            fut.set_result(self)
+        except Exception as exc:
+            fut.set_exception(exc)
 
     def load(self, source, formation=True):
         """Restore a canvas saved by :meth:`save` (a dict or path to JSON).
@@ -1103,6 +1136,11 @@ class Canvas:
         for item in data.get("components", []):
             comp = by_id.get(item.get("id")) or by_name.get(item.get("name"))
             if comp is None:
+                warnings.warn(
+                    f"load: panel {item.get('name')!r} not found on canvas — "
+                    "recreate it before calling load()",
+                    stacklevel=3,
+                )
                 continue
             comp.set_layout(
                 x=item.get("x"),
@@ -1126,9 +1164,7 @@ class Canvas:
         freshly opened page a moment to connect first. Returns ``True`` if a
         client connected.
         """
-        deadline = time.monotonic() + timeout
-        while not self._bridge._connections and time.monotonic() < deadline:
-            time.sleep(0.05)
+        self._bridge._any_connected.wait(timeout=timeout)
         return bool(self._bridge._connections)
 
     def __getattr__(self, name):

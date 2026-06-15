@@ -1,5 +1,8 @@
 """Insert-time conveniences: queue= forwarding and relative placement."""
 
+import json
+import warnings
+
 import pytest
 
 import pycanvas
@@ -79,3 +82,49 @@ def test_matplotlib_figure_released_after_render():
     # itself must still render.
     assert not plt.fignum_exists(num)
     assert _to_data_uri(fig).startswith("data:image/png;base64,")
+
+
+def test_clear_removes_all_panels_and_arrows():
+    canvas = pycanvas.Canvas()
+    a = canvas.label("a", x=0, y=0)
+    b = canvas.label("b", x=100, y=0)
+    canvas.connect(a, b, name="ab")
+    assert len(canvas.components) == 2
+    assert len(canvas.arrows) == 1
+
+    result = canvas.clear()
+
+    assert result is canvas           # fluent return
+    assert canvas.components == []
+    assert canvas.arrows == []
+    assert canvas._named == {}
+
+
+def test_restore_layout_warns_on_missing_panel():
+    canvas = pycanvas.Canvas()
+    canvas.label("present", x=0, y=0)
+    saved = canvas._layout()
+    saved["components"].append({"name": "ghost", "id": "deadbeef",
+                                "x": 50, "y": 50, "w": 200, "h": 100,
+                                "rotation": 0})
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        canvas._restore_layout(saved)
+
+    assert any("ghost" in str(w.message) for w in caught)
+
+
+def test_save_blocking_false_returns_future(tmp_path):
+    canvas = pycanvas.Canvas()
+    canvas.label("hello", value="world")
+    path = tmp_path / "canvas.json"
+
+    # No browser connected: formation-only save still completes.
+    fut = canvas.save(str(path), blocking=False)
+    result = fut.result(timeout=2.0)   # raises on timeout or exception
+
+    assert result is canvas
+    data = json.loads(path.read_text())
+    assert "layout" in data
+    assert "drawings" not in data      # no browser → no drawings captured
