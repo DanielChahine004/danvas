@@ -11,7 +11,13 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 
 # Cookie that carries a viewer's auth session token once they pass the password
@@ -98,6 +104,85 @@ class _FrontendStatic(StaticFiles):
         if path in (".", "", "index.html") or path.endswith(".html"):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
+
+
+class _UploadTooLarge(Exception):
+    """Raised mid-stream when an upload exceeds the panel's ``max_size``."""
+
+
+def _safe_upload_path(dest_root, filename):
+    """Resolve ``filename`` to a path strictly inside ``dest_root``.
+
+    The browser supplies the filename, so it's untrusted: ``basename`` strips any
+    directory parts (``../`` included) and the result is re-checked against the
+    realpath of the root, so an upload can never land outside the destination.
+    Collisions get a ``-1``/``-2`` suffix rather than overwriting.
+    """
+    name = os.path.basename(filename) or "upload.bin"
+    root = os.path.realpath(dest_root)
+    target = os.path.realpath(os.path.join(root, name))
+    if target != root and not target.startswith(root + os.sep):
+        raise ValueError("upload filename escapes the destination directory")
+    if not os.path.exists(target):
+        return target
+    base, ext = os.path.splitext(target)
+    i = 1
+    while os.path.exists(f"{base}-{i}{ext}"):
+        i += 1
+    return f"{base}-{i}{ext}"
+
+
+async def _stream_upload_to_disk(request, target, max_size):
+    """Stream the request body to ``target`` in chunks; return bytes written.
+
+    Enforces ``max_size`` (if set) as the bytes arrive and deletes the partial
+    file before raising :class:`_UploadTooLarge`, so a too-big upload can't fill
+    the disk. Streaming keeps server memory flat regardless of file size.
+    """
+    size = 0
+    try:
+        with open(target, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if max_size and size > max_size:
+                    raise _UploadTooLarge()
+                f.write(chunk)
+    except _UploadTooLarge:
+        if os.path.exists(target):
+            os.remove(target)
+        raise
+    return size
+
+
+async def _read_upload_to_memory(request, max_size):
+    """Read the request body into ``bytes``, enforcing ``max_size`` as it grows."""
+    chunks = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if max_size and size > max_size:
+            raise _UploadTooLarge()
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _attachment_headers(filename):
+    """Build a ``Content-Disposition: attachment`` header for ``filename``.
+
+    Provides both a plain ``filename`` (with quotes/control chars stripped so the
+    header stays well-formed) and an RFC 5987 ``filename*`` UTF-8 form, so
+    non-ascii names survive. Used for the in-memory (``bytes``) download branch;
+    ``FileResponse`` builds the equivalent header itself for on-disk files.
+    """
+    from urllib.parse import quote
+
+    ascii_name = "".join(c for c in filename if c.isprintable() and c not in '"\\') \
+        .encode("ascii", "ignore").decode("ascii") or "download"
+    star = quote(filename, safe="")
+    return {
+        "Content-Disposition":
+            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{star}"
+    }
 
 
 def _login_page(error=False):
@@ -215,6 +300,64 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
             await ws.close(code=1008)
             return
         await bridge.handle_connection(ws, role=_role_of(ws))
+
+    # File downloads minted by the Download panel. The browser only ever sees an
+    # unguessable, short-lived token (see Bridge.register_download); it's resolved
+    # here to host-chosen content, so no viewer-supplied path is ever trusted.
+    # Sits behind the auth gate above, so a password/role-protected canvas
+    # protects its downloads too.
+    @app.get("/__download__/{token}")
+    async def download(token: str):
+        item = bridge.take_download(token)
+        if item is None:
+            return PlainTextResponse("download expired or not found",
+                                     status_code=404)
+        filename, source = item
+        if isinstance(source, (bytes, bytearray)):
+            return Response(content=bytes(source),
+                            media_type="application/octet-stream",
+                            headers=_attachment_headers(filename))
+        # A filesystem path: FileResponse streams it and sets the attachment
+        # header (incl. utf-8 filename) from ``filename`` itself.
+        return FileResponse(source, filename=filename,
+                            media_type="application/octet-stream")
+
+    # File uploads received by an Upload panel. The browser POSTs the raw file
+    # body (name in the query) to its panel's token URL; we stream it (to disk if
+    # the panel set ``dest=``, else into memory) and hand it to Python. Behind the
+    # auth gate above, so only authorised viewers can upload.
+    @app.post("/__upload__/{token}")
+    async def upload(token: str, request: Request, name: str = "", viewer: str = ""):
+        comp = bridge.upload_component(token)
+        if comp is None:
+            return PlainTextResponse("unknown upload target", status_code=404)
+        max_size = getattr(comp, "_max_size", None)
+        # Reject early when the declared length already blows the cap.
+        clen = request.headers.get("content-length")
+        if max_size and clen and clen.isdigit() and int(clen) > max_size:
+            return PlainTextResponse("file too large", status_code=413)
+        filename = os.path.basename(name) or "upload.bin"
+        content_type = request.headers.get("content-type") or \
+            "application/octet-stream"
+        dest = getattr(comp, "_dest", None)
+        try:
+            if dest:
+                target = _safe_upload_path(dest, filename)
+                size = await _stream_upload_to_disk(request, target, max_size)
+                info = {"name": os.path.basename(target), "size": size,
+                        "content_type": content_type, "data": None,
+                        "path": target}
+            else:
+                data = await _read_upload_to_memory(request, max_size)
+                info = {"name": filename, "size": len(data),
+                        "content_type": content_type, "data": data, "path": None}
+        except _UploadTooLarge:
+            return PlainTextResponse("file too large", status_code=413)
+        except Exception as exc:
+            return PlainTextResponse(f"upload failed: {exc}", status_code=400)
+        identity = bridge.resolve_viewer(viewer, _role_of(request))
+        bridge.deliver_upload(comp, info, viewer=identity)
+        return {"ok": True, "name": info["name"], "size": info["size"]}
 
     # Any other WebSocket path would otherwise fall through to the StaticFiles
     # mount, which only handles HTTP and raises AssertionError. Reject cleanly.

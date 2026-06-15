@@ -8,6 +8,7 @@ from .components import (
     Button,
     Chat,
     Custom,
+    Download,
     FileBrowser,
     Histogram,
     Image,
@@ -21,6 +22,8 @@ from .components import (
     Slider,
     Table,
     Toggle,
+    Upload,
+    UploadedFile,
     VideoFeed,
     WebView,
 )
@@ -48,6 +51,7 @@ __all__ = [
     "AudioFeed",
     "Chat",
     "Custom",
+    "Download",
     "FileBrowser",
     "React",
     "Markdown",
@@ -59,6 +63,8 @@ __all__ = [
     "Histogram",
     "Repl",
     "Inspector",
+    "Upload",
+    "UploadedFile",
     "WebView",
     "BaseComponent",
 ]

@@ -108,6 +108,8 @@ best panel (see [Show anything](#show-anything)).
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
+| `Download` | input | a button that sends a host file/`bytes` to the viewer; `source=` (path or bytes) or `@provide`, `filename=` |
+| `Upload` | input | a button / drop-zone that receives a viewer's file into Python; `@on_upload`, `.value`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |
 | `Inspector` | output | live panel/globals state browser |
 
@@ -165,6 +167,28 @@ canvas.components         # list of every panel (canvas.arrows for connectors)
 @panel.on_layout          # fn(comp), after a user drag/resize (geometry synced)
 @chat.on_message          # fn(entry); reply with chat.post(text)
 ```
+
+**Who did it** — *any* of these handlers may declare a trailing `viewer`
+parameter to learn which connected viewer acted; one-arg handlers are unchanged:
+
+```python
+@slider.on_change
+def _(value, viewer):     # {"id","name","color","role"}
+    print(viewer["name"], "→", value)
+
+@panel.on_layout
+def _(comp, viewer): ...           # who moved it
+
+@panel.on("save")
+def _(msg, viewer): ...            # React/Custom inbound message
+
+@panel.on_request("validate")
+def _(req, viewer): ...            # the awaitable path, too
+```
+
+`role` is the server-trusted login level (`None` unless `passwords=` is set);
+`id`/`name`/`color` come from the live roster — fine for attribution, not
+authorization. (Uploads receive the same `viewer`; see *File uploads* above.)
 
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python
@@ -327,6 +351,54 @@ Sites sending `X-Frame-Options: DENY` refuse to load (a browser rule).
 web = canvas.webview("https://en.wikipedia.org/wiki/Robot")
 web.navigate("https://example.com")
 ```
+
+**File downloads** — `Download` is a button that sends a host file (or
+freshly-generated `bytes`) to the viewer's machine. *Host code* picks what each
+click serves — the viewer never names a path — so, unlike `FileBrowser`, there's
+nothing to sandbox. Pass a static `source=` (path or bytes), or register
+`@download.provide` to build the content on every click. The browser only ever
+receives an unguessable, short-lived URL, streamed behind the canvas's auth gate
+(set a `password` for a shared/tunneled canvas and downloads are protected too).
+
+```python
+canvas.download("report", source="out/report.pdf", text="Download report")
+
+dl = canvas.download("export", text="Export CSV")
+@dl.provide
+def _():
+    return ("data.csv", make_csv().encode())   # (filename, bytes); path or bytes also ok
+```
+
+**File uploads** — `Upload` is the mirror image: a click-or-drop zone that
+streams a viewer's file *up* to Python over plain HTTP (no WebSocket size
+limits), behind the same auth gate. By default the bytes arrive in memory
+(`file.data`); pass `dest=` a directory to stream each upload to disk instead
+(`file.path`) — constant memory, right for large files. The browser-supplied
+filename is sandboxed inside `dest` (no `../` escape). Set `max_size` on any
+public/tunneled canvas.
+
+```python
+up = canvas.upload("upload", text="Upload CSV", accept=".csv", max_size=5_000_000)
+@up.on_upload
+def got(file):                       # an UploadedFile: .name .size .data/.path
+    table.update(list(csv.DictReader(io.StringIO(file.data.decode()))))
+
+big = canvas.upload("files", dest="uploads/", multiple=True)   # streamed to disk
+```
+
+**Who uploaded it** — `on_upload` takes an optional `viewer` arg:
+
+```python
+@up.on_upload
+def got(file, viewer):
+    # {"role": "manager", "id": "a1b2c3d4", "name": "Fox", "color": "#ef4444"}
+    file.save(f"uploads/{viewer.get('role') or viewer['name']}/")
+```
+
+`role` is the **server-trusted** login level (`None` unless you set
+`passwords={...}`) — gate permissions on this. `id`/`name`/`color` come from the
+live viewer roster (great for attribution/per-user folders, but client-reported,
+so not for authorization).
 
 **Audio** — `AudioFeed` streams PCM played back-to-back via Web Audio. Capture
 needs `[audio]`; playback needs nothing. Each viewer clicks **Enable audio**
@@ -677,6 +749,8 @@ python examples/matplotlib_panel.py       # slider re-renders a matplotlib figur
 python examples/plotly_panel.py           # interactive Plotly chart
 python examples/robot_control.py          # sliders, toggle, plot, video together
 python examples/repl_inspector.py         # on-canvas REPL + inspectors
+python examples/download_button.py        # download a host file / generated data
+python examples/upload_button.py          # upload a file from the browser to Python
 python examples/chat_room.py              # shared chat with editable names
 python examples/moving_widget.py          # per-viewer cursor-following emoji
 python examples/public_tunnel.py          # share worldwide via HTTPS tunnel

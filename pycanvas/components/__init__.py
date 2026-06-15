@@ -6,6 +6,7 @@ from .video import VideoFeed
 from .audio import AudioFeed
 from .chat import Chat
 from .custom import Custom
+from .download import Download
 from .filebrowser import FileBrowser
 from .react import React
 from .markdown import Markdown
@@ -17,6 +18,7 @@ from .liveplot import LivePlot
 from .histogram import Histogram
 from .repl import Repl
 from .inspector import Inspector
+from .upload import Upload, UploadedFile
 from .webview import WebView
 
 __all__ = [
@@ -28,6 +30,7 @@ __all__ = [
     "AudioFeed",
     "Chat",
     "Custom",
+    "Download",
     "FileBrowser",
     "React",
     "Markdown",
@@ -39,5 +42,7 @@ __all__ = [
     "Histogram",
     "Repl",
     "Inspector",
+    "Upload",
+    "UploadedFile",
     "WebView",
 ]

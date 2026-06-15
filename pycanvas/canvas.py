@@ -17,6 +17,7 @@ from .components import (
     Button,
     Chat,
     Custom,
+    Download,
     FileBrowser,
     Histogram,
     Image,
@@ -30,6 +31,7 @@ from .components import (
     Slider,
     Table,
     Toggle,
+    Upload,
     VideoFeed,
     WebView,
 )
@@ -776,6 +778,36 @@ class Canvas:
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
                           name=name, label=label, **place)
+
+    def download(self, name, source=None, filename=None, text=None, label=None,
+                 **place):
+        """Insert a :class:`~pycanvas.Download` button. See :meth:`insert` for ``place``.
+
+        Clicking it downloads ``source`` — a file path or ``bytes`` — to the
+        viewer's machine. For content generated fresh on each click, omit
+        ``source`` and register a provider with ``@download.provide``.
+        ``filename`` sets the saved name (otherwise a path's basename, or the
+        panel name, is used). The host code chooses what each click serves, so
+        nothing the viewer sends selects a path.
+        """
+        return self._make(Download, name, source=source, filename=filename,
+                          text=text, label=label, **place)
+
+    def upload(self, name="upload", text=None, label=None, dest=None,
+               accept=None, multiple=False, max_size=None, **place):
+        """Insert an :class:`~pycanvas.Upload` panel. See :meth:`insert` for ``place``.
+
+        A click-or-drop zone that receives a viewer's file into Python; wire it
+        with ``@upload.on_upload``. By default the bytes arrive in memory
+        (``file.data``); pass ``dest=`` a directory to stream each upload to disk
+        instead (``file.path``), which keeps memory flat for large files.
+        ``accept`` filters the picker (e.g. ``".csv"``), ``multiple=True`` allows
+        several at once, and ``max_size`` (bytes) rejects oversized uploads — set
+        it on any public/tunneled canvas.
+        """
+        return self._make(Upload, name, text=text, label=label, dest=dest,
+                          accept=accept, multiple=multiple, max_size=max_size,
+                          **place)
 
     def file_browser(self, name="files", root=".", label=None, pattern=None,
                      show_hidden=False, **place):

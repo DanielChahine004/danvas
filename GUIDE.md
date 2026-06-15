@@ -98,7 +98,7 @@ this object. Here's the map of what `canvas` can do, so you know what's coming:
 
 | Category | Methods |
 |---|---|
-| **Add panels** | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `plot`, `live_plot`, `histogram`, `image`, `table`, `markdown`, `chat`, `custom`, `react`, `webview`, `file_browser`, `repl`, `inspector`, `show`, and the generic `insert` |
+| **Add panels** | `slider`, `toggle`, `button`, `download`, `upload`, `label`, `video`, `audio`, `plot`, `live_plot`, `histogram`, `image`, `table`, `markdown`, `chat`, `custom`, `react`, `webview`, `file_browser`, `repl`, `inspector`, `show`, and the generic `insert` |
 | **Auto-layout** | `grid`, `column`, `row` (context managers) |
 | **Connect** | `connect`, `disconnect` |
 | **Remove** | `remove` |
@@ -154,7 +154,7 @@ content first and `name=` as a keyword:
 
 | Kind | First argument | `name` | Factories |
 |---|---|---|---|
-| Input / interactive | `name` (required) | positional, first | `slider`, `toggle`, `button`, `label`, `video`, `audio`, `chat`, `live_plot`, `plot`, `repl`, `inspector`, `file_browser` |
+| Input / interactive | `name` (required) | positional, first | `slider`, `toggle`, `button`, `download`, `upload`, `label`, `video`, `audio`, `chat`, `live_plot`, `plot`, `repl`, `inspector`, `file_browser` |
 | Content renderers | the content | keyword, defaults to the type word | `image(src)`, `table(data)`, `markdown(text)`, `custom(html)`, `react(source)`, `webview(url)`, `show(value)` |
 
 So two named image panels are `canvas.image(fig_a, name="flow")` and
@@ -172,6 +172,8 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 | **Slider** | `canvas.slider(name, min=0, max=100, default=None, step=1)` | `.value` (number) | `@on_change` |
 | **Toggle** | `canvas.toggle(name, options, default=None)` | `.value` (chosen string) | `@on_change` |
 | **Button** | `canvas.button(name, text=None)` | `.value` (click count) | `@on_click`; `update(text)` relabels it live |
+| **Download** | `canvas.download(name, source=None, filename=None, text=None)` | — | a button that sends a host file / `bytes` to the viewer; `source=` (path or bytes) or `@provide` to generate per click |
+| **Upload** | `canvas.upload(name, dest=None, accept=None, multiple=False, max_size=None)` | `.value` (last `UploadedFile`) | `@on_upload`; bytes arrive in `file.data`, or stream to disk with `dest=` (`file.path`) |
 
 #### Outputs — Python drives the display
 
@@ -225,6 +227,8 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 | **React** | `canvas.react(source=…, props=…)` | Your own React component, compiled in the browser, native to the canvas. |
 | **WebView** | `canvas.webview(url)` | Embed any live web page. |
 | **FileBrowser** | `canvas.file_browser(root=".", pattern=None)` | Pick a file from disk (sandboxed to `root`). |
+| **Download** | `canvas.download(name, source=None, filename=None)` | Send a host file / generated `bytes` to the viewer. Host code picks the content, so nothing to sandbox. |
+| **Upload** | `canvas.upload(name, dest=None, accept=None, max_size=None)` | Receive a viewer's file into Python (`@on_upload`). In memory, or streamed to disk with `dest=`. |
 
 #### Interaction between viewers
 

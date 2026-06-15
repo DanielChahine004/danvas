@@ -318,7 +318,9 @@ class React(BaseComponent):
         ``@panel.on_request()`` is the catch-all. Exactly one handler answers (the
         keyed one, else the catch-all), so registering the same key again replaces
         it. A handler that raises rejects the Promise with the error; the return
-        value must be JSON-serialisable.
+        value must be JSON-serialisable. Declare a second parameter
+        (``def _(req, viewer)``) to also receive the requester's identity, as with
+        :meth:`on` / ``on_change``.
 
             @panel.on_request("factorize")
             def _(req): return {"factors": factorize(req["n"])}
@@ -329,12 +331,14 @@ class React(BaseComponent):
             return fn
         return deco
 
-    def _handle_request(self, data):
+    def _handle_request(self, data, viewer=None):
         """Resolve a ``canvas.request`` payload to a reply value (bridge entry).
 
         Returns the matching handler's value; raises if none is registered — the
         bridge turns the return into a ``response`` (resolving the panel's Promise)
-        and an exception into an error ``response`` (rejecting it).
+        and an exception into an error ``response`` (rejecting it). A handler that
+        declares a second parameter (``def fn(req, viewer)``) is given the
+        requester's viewer identity, mirroring ``on_change`` / ``on``.
         """
         event = data.get(self._event_key) if isinstance(data, dict) else None
         handler = self._request_routes.get(event)
@@ -342,6 +346,8 @@ class React(BaseComponent):
             handler = self._request_routes.get(None)
         if handler is None:
             raise LookupError(f"no on_request handler for event {event!r}")
+        if self._accepts_viewer(handler, 1):
+            return handler(data, viewer or {})
         return handler(data)
 
     def _handle_input(self, payload, viewer=None):

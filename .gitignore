@@ -21,9 +21,10 @@ env/
 node_modules/
 pycanvas/frontend/.vite/
 
-# Generated example output (created by running the save/load examples)
+# Generated example output (created by running the save/load + upload examples)
 examples/saved_canvas.json
 examples/saved_layout.json
+examples/uploads/
 
 # Editor / OS / local agent state
 .claude/

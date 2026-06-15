@@ -380,12 +380,13 @@ class BaseComponent:
         self._layout_callbacks.append(fn)
         return fn
 
-    def _apply_remote_layout(self, msg):
+    def _apply_remote_layout(self, msg, viewer=None):
         """Update stored geometry from a user drag/resize in the browser.
 
         Does not broadcast back (the change originated there). ``rotation``
         arrives in radians (tldraw) and is stored as degrees, matching the rest
-        of the Python API.
+        of the Python API. ``on_layout`` handlers fire with the component, plus
+        the mover's ``viewer`` dict when they declare a second parameter.
         """
         x = msg.get("x")
         y = msg.get("y")
@@ -397,17 +398,34 @@ class BaseComponent:
             self._props["h"] = msg["h"]
         if msg.get("rotation") is not None:
             self._rotation = math.degrees(msg["rotation"])
-        for cb in self._layout_callbacks:
-            try:
-                cb(self)
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
 
     # -- input (browser -> Python) -------------------------------------------
     def on_change(self, fn):
         """Decorator: register a callback fired on input from the browser."""
         self._callbacks.append(fn)
         return fn
+
+    @staticmethod
+    def _accepts_viewer(fn, n_call_args):
+        """Whether ``fn`` has room for a trailing ``viewer`` beyond ``n_call_args``.
+
+        True when the callable declares more explicit positional parameters than
+        the fixed args we pass — the signal that a handler opted in to receiving
+        the viewer dict. Unintrospectable callables (some builtins/C funcs) report
+        False, so they're called without it. Shared by the fire-and-forget
+        callback path and the single-answer request path so both detect arity the
+        same way.
+        """
+        try:
+            params = [
+                p for p in inspect.signature(fn).parameters.values()
+                if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                              inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            ]
+            return len(params) > n_call_args
+        except (ValueError, TypeError):
+            return False
 
     def _dispatch_callbacks(self, callbacks, call_args, viewer):
         """Call each callback, appending viewer as a final arg when its signature accepts it.
@@ -419,16 +437,7 @@ class BaseComponent:
         """
         for cb in callbacks:
             try:
-                try:
-                    params = [
-                        p for p in inspect.signature(cb).parameters.values()
-                        if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
-                                      inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                    ]
-                    wants_viewer = len(params) > len(call_args)
-                except (ValueError, TypeError):
-                    wants_viewer = False
-                if wants_viewer:
+                if self._accepts_viewer(cb, len(call_args)):
                     cb(*call_args, viewer or {})
                 else:
                     cb(*call_args)

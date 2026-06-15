@@ -9,6 +9,7 @@ import asyncio
 import json
 import math
 import random
+import secrets
 import sys
 import threading
 import time
@@ -162,6 +163,22 @@ class Bridge:
         self._conflate_pending = {}   # (ws, comp_id, kind) -> (kind, msg|bytes)
         self._conflate_active = set()  # (ws, comp_id, kind) with a live sender
         self._conflate_lock = threading.Lock()
+        # Pending file downloads (the Download panel). Maps an unguessable token
+        # to ``(filename, source, expiry)`` where ``source`` is a filesystem path
+        # or ``bytes``; the ``/__download__/<token>`` HTTP route streams it. Kept
+        # for a TTL window (not single-use, so a HEAD+GET or a retry both work)
+        # then purged so the table can't grow without bound. Guarded by a plain
+        # lock: tokens are minted on the input-dispatch thread and consumed on the
+        # event loop.
+        self._downloads = {}        # token -> (filename, source, expiry monotonic)
+        self._download_lock = threading.Lock()
+        # Upload targets (the Upload panel). Maps a panel's unguessable token to
+        # the component, so the ``/__upload__/<token>`` route can find which panel
+        # an incoming file belongs to and fire its callbacks. Tokens are stable
+        # for the panel's lifetime (the button is reused), unlike one-off download
+        # tokens. Plain dict: writes happen on the loop/insert thread, reads on the
+        # event loop; both are cheap and a stale entry is harmless.
+        self._uploads = {}          # token -> Upload component
         # User input/layout callbacks (``on_change``/``on_layout`` and the
         # component routers) run here, on a single FIFO worker thread, instead of
         # on the asyncio event loop. A slow or blocking callback (a sleep, an HTTP
@@ -243,6 +260,10 @@ class Bridge:
     def remove_component(self, component_id):
         """Forget a component and tell connected clients to drop its panel."""
         self._components.pop(component_id, None)
+        # Drop any upload token pointing at this component so the map can't grow.
+        for tok in [t for t, c in self._uploads.items()
+                    if getattr(c, "id", None) == component_id]:
+            self._uploads.pop(tok, None)
         self.broadcast({"type": "remove", "id": component_id})
 
     def reorder_component(self, component_id, op):
@@ -537,6 +558,88 @@ class Bridge:
         if fn in self._chat_sinks:
             self._chat_sinks.remove(fn)
 
+    # -- file downloads (Download panel <-> /__download__ route) --------------
+    def register_download(self, filename, source, ttl=300):
+        """Stash ``source`` under a fresh token and return it (any-thread safe).
+
+        ``source`` is a filesystem path or ``bytes``; the ``/__download__/<token>``
+        route streams it to the browser as an attachment named ``filename``. The
+        token is unguessable and expires after ``ttl`` seconds, so a leaked URL
+        can't be replayed indefinitely. Expired tokens are purged opportunistically
+        on each register/consume.
+        """
+        token = secrets.token_urlsafe(24)
+        with self._download_lock:
+            self._purge_downloads()
+            self._downloads[token] = (filename, source, time.monotonic() + ttl)
+        return token
+
+    def take_download(self, token):
+        """Resolve a download token to ``(filename, source)`` or ``None``.
+
+        Returns ``None`` if the token is unknown or has expired. Not single-use:
+        the entry stays until its TTL lapses, so a browser that issues a HEAD then
+        GET (or retries) still succeeds.
+        """
+        with self._download_lock:
+            self._purge_downloads()
+            item = self._downloads.get(token)
+        if item is None:
+            return None
+        filename, source, _exp = item
+        return filename, source
+
+    def _purge_downloads(self):
+        """Drop expired download tokens. Call with ``_download_lock`` held."""
+        now = time.monotonic()
+        expired = [t for t, (_, _, exp) in self._downloads.items() if exp <= now]
+        for t in expired:
+            self._downloads.pop(t, None)
+
+    # -- file uploads (Upload panel <-> /__upload__ route) -------------------
+    def register_upload(self, token, component):
+        """Bind an upload ``token`` to the panel that receives its files."""
+        self._uploads[token] = component
+
+    def upload_component(self, token):
+        """Resolve an upload token to its panel, or ``None`` if unknown."""
+        return self._uploads.get(token)
+
+    def deliver_upload(self, component, info, viewer=None):
+        """Fire a panel's upload handler off the event loop (any-thread safe).
+
+        ``info`` is the server-built file dict (``name``/``size``/``content_type``
+        and one of ``data``/``path``); ``viewer`` is the uploader's identity (see
+        :meth:`resolve_viewer`). Runs on the input-dispatch thread, like every
+        other user callback, so a slow handler can't stall rendering.
+        """
+        self._dispatch.submit(
+            lambda: component._receive_upload(info, viewer or {})
+        )
+
+    def resolve_viewer(self, viewer_id, role=None):
+        """Build the uploader identity dict for an upload handler.
+
+        ``role`` is the server-trusted access level from the HTTP auth session —
+        always present (``None`` when no passwords are set) and safe to gate on.
+        ``viewer_id`` is the browser's self-reported roster id; when it matches a
+        *currently connected* viewer, the live ``id``/``name``/``color`` are
+        merged in for attribution. A stale or forged id simply doesn't resolve
+        (you still get ``role``), and because name/colour are read from the server
+        roster — never from the client — the only thing a client can claim is the
+        id of another viewer who is actually online. Don't trust name/id for
+        authorization; use ``role`` for that.
+        """
+        info = {"role": role}
+        if viewer_id:
+            for v in list(self._viewers.values()):
+                if v.get("id") == viewer_id:
+                    info["id"] = v.get("id")
+                    info["name"] = v.get("name")
+                    info["color"] = v.get("color")
+                    break
+        return info
+
     async def _reap_loop(self):
         """Drop connections that have gone silent past the heartbeat deadline.
 
@@ -639,7 +742,7 @@ class Bridge:
             comp = self._components.get(msg.get("id"))
             if comp is not None:
                 self._dispatch.submit(
-                    lambda c=comp, m=msg: self._dispatch_layout(c, m)
+                    lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
@@ -656,7 +759,7 @@ class Bridge:
             if comp is not None:
                 self._dispatch.submit(
                     lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
-                    self._dispatch_request(c, r, d)
+                    self._dispatch_request(c, r, d, ws)
                 )
         elif kind == "snapshot":
             # Reply to a request_snapshot; hand the document to the waiter.
@@ -680,22 +783,25 @@ class Bridge:
                 {"type": "update", "id": comp.id, "payload": state}, exclude=ws
             )
 
-    def _dispatch_request(self, comp, req_id, data):
+    def _dispatch_request(self, comp, req_id, data, ws=None):
         """Answer a panel's ``canvas.request`` (off the loop) and reply by reqId.
 
         Runs the component's request handler on the dispatch thread, then
         broadcasts a ``response`` correlated by ``reqId`` — the requesting tab
         resolves its Promise; other tabs (which don't hold that reqId) ignore it.
-        A panel with no request handler, a handler that raises, or a return value
-        that isn't JSON-serialisable all come back as an ``error`` (rejecting the
-        Promise) rather than hanging the caller.
+        The requester's viewer identity is passed through so an ``on_request``
+        handler that declares a second parameter learns who asked. A panel with no
+        request handler, a handler that raises, or a return value that isn't
+        JSON-serialisable all come back as an ``error`` (rejecting the Promise)
+        rather than hanging the caller.
         """
         handle = getattr(comp, "_handle_request", None)
         if handle is None:
             self._reply(req_id, error="this panel does not accept requests")
             return
+        viewer = self._viewers.get(ws, {})
         try:
-            result = handle(data)
+            result = handle(data, viewer)
             json.dumps(result)  # surface a non-serialisable reply as a clean error
         except Exception as exc:
             traceback.print_exc()
@@ -712,15 +818,16 @@ class Bridge:
             msg["result"] = result
         self.broadcast(msg)
 
-    def _dispatch_layout(self, comp, msg):
+    def _dispatch_layout(self, comp, msg, ws=None):
         """Apply a user move/resize (off the loop) and echo the new geometry.
 
         Echoes to every client (a second browser, or a merge host) as an
         ``update`` -- the server->browser form the frontend applies. The fields
         already carry the wire units the frontend expects (canvas x/y, radian
-        rotation).
+        rotation). The mover's viewer identity is threaded through so an
+        ``on_layout`` handler with a second parameter learns who rearranged it.
         """
-        comp._apply_remote_layout(msg)
+        comp._apply_remote_layout(msg, self._viewers.get(ws, {}))
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
                 if msg.get(k) is not None}
         if geom:
