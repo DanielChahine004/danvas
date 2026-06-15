@@ -492,4 +492,5 @@ canvas.serve(
     port=8000,
     host="0.0.0.0",
     passwords={"admin": "admin", "user": "user"},
+    tunnel=True,
 )
