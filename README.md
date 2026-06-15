@@ -10,6 +10,12 @@ WebSockets (backend). The frontend ships pre-built; you never touch Node or npm.
 ## Install
 
 ```bash
+pip install dans-pycanvas
+```
+
+For local development, clone the repo and install in editable mode instead:
+
+```bash
 pip install -e .
 ```
 
@@ -17,10 +23,10 @@ The base install is lightweight. Heavier features are optional extras:
 
 | Extra | Enables |
 |---|---|
-| `pip install -e ".[video]"` | `VideoFeed` JPEG encoding (OpenCV, ~90 MB) |
-| `pip install -e ".[audio]"` | microphone capture for `AudioFeed` |
-| `pip install -e ".[tunnel]"` | public sharing (`serve(tunnel=True)`) |
-| `pip install -e ".[desktop]"` | native window + `bake()` to a standalone app |
+| `pip install "dans-pycanvas[video]"` | `VideoFeed` JPEG encoding (OpenCV, ~90 MB) |
+| `pip install "dans-pycanvas[audio]"` | microphone capture for `AudioFeed` |
+| `pip install "dans-pycanvas[tunnel]"` | public sharing (`serve(tunnel=True)`) |
+| `pip install "dans-pycanvas[desktop]"` | native window + `bake()` to a standalone app |
 
 `canvas.video(...)` needs `[video]` for default encoding — or stream
 already-JPEG bytes with `VideoFeed(encode=False)`, which needs nothing.

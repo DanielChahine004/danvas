@@ -32,7 +32,7 @@ from .dispatch import panel_for
 try:
     from importlib.metadata import PackageNotFoundError, version as _version
 
-    __version__ = _version("pycanvas")
+    __version__ = _version("dans-pycanvas")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
