@@ -42,6 +42,16 @@
 .pc-card:hover .pc-drag-handle { opacity: 0.5; }
 .pc-drag-handle:hover { opacity: 1; }
 
+/* Mobile: tldraw sets touch-action:none on its canvas layer to own pinch/pan,
+ * which also suppresses the browser's native cursor-positioning for text inputs.
+ * Overriding here gives the browser back control inside panels so tapping to
+ * move the cursor and autocorrect work normally on iOS/Android. */
+.pc-card input,
+.pc-card textarea,
+.pc-card [contenteditable] {
+  touch-action: auto;
+}
+
 .tl-container.tl-theme__dark {
   --pc-bg: #27272b;
   --pc-border: #3a3a40;
