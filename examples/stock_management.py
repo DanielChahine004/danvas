@@ -48,54 +48,51 @@ def push_all():
 
 
 # ── Inventory board (all roles) ──────────────────────────────────────────────
+# CSS is scoped under .pc-sb to avoid collisions with the user panel, which
+# shares some class names (.irow, .ico, etc.) but with different styles.
 
 _BOARD_CSS = """
-.lb{width:100%;border-collapse:collapse;font:13px system-ui,sans-serif;
-    color:var(--pc-text,#e6edf3)}
-.lb th{padding:8px 12px;text-align:left;font-size:11px;font-weight:600;
-    color:#64748b;border-bottom:1px solid var(--pc-border,#30363d);
-    text-transform:uppercase;letter-spacing:.05em}
-.lb td{padding:9px 12px;border-bottom:1px solid #1e293b}
-.lb tr:last-child td{border-bottom:none}
-.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
-.chip{display:inline-block;padding:2px 9px;border-radius:999px;
-      font-size:11px;font-weight:600}
-.in {background:#14532d55;color:#4ade80}
-.low{background:#78350f55;color:#fbbf24}
-.out{background:#7f1d1d55;color:#f87171}
+.pc-sb{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
+       font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-sb .hd{font-size:16px;font-weight:700;margin-bottom:16px;
+           display:flex;align-items:center;gap:8px}
+.pc-sb .irow{display:flex;align-items:center;gap:12px;padding:10px 4px;
+             border-bottom:1px solid var(--pc-border,#30363d);transition:opacity .2s}
+.pc-sb .irow:last-child{border-bottom:none}
+.pc-sb .irow.dim{opacity:0.4}
+.pc-sb .ico{font-size:20px;width:36px;height:36px;border-radius:8px;flex-shrink:0;
+            display:flex;align-items:center;justify-content:center;
+            background:var(--pc-off-bg,#eee)33}
+.pc-sb .iname{flex:1;font-size:13px;font-weight:600}
+.pc-sb .iprice{font-size:13px;font-weight:700;color:var(--pc-muted,#666);
+               font-variant-numeric:tabular-nums;min-width:58px;text-align:right}
+.pc-sb .chip{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.pc-sb .in {background:rgba(20,83,45,.35);color:#4ade80;border:1px solid rgba(74,222,128,.2)}
+.pc-sb .low{background:rgba(120,53,15,.35);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
+.pc-sb .out{background:rgba(127,29,29,.35);color:#f87171;border:1px solid rgba(248,113,113,.2)}
 """
 
 _BOARD_SOURCE = """
 function Component({ props }) {
-  const rows = props.rows || [];
+  const rows  = props.rows || [];
+  const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
   function chip(n) {
     if (n === 0) return <span className="chip out">Out of stock</span>;
     if (n <= 2)  return <span className="chip low">{n} left</span>;
-    return       <span className="chip in">{n} in stock</span>;
+    return             <span className="chip in">{n} in stock</span>;
   }
   return (
-    <div style={{padding:"8px",height:"100%",overflowY:"auto"}}>
+    <div className="pc-sb">
       <style>{`__BOARD_CSS__`}</style>
-      <div style={{fontWeight:700,fontSize:"15px",padding:"4px 4px 12px",
-                   color:"var(--pc-text,#e6edf3)"}}>
-        Inventory
-      </div>
-      <table className="lb">
-        <thead><tr>
-          <th>Item</th>
-          <th style={{textAlign:"right"}}>Unit price</th>
-          <th style={{textAlign:"right"}}>Availability</th>
-        </tr></thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.item}>
-              <td>{r.item}</td>
-              <td className="num">${r.price.toLocaleString()}</td>
-              <td style={{textAlign:"right"}}>{chip(r.stock)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="hd">📦 Inventory</div>
+      {rows.map(r => (
+        <div key={r.item} className={"irow" + (r.stock === 0 ? " dim" : "")}>
+          <div className="ico">{ICONS[r.item] || "📦"}</div>
+          <span className="iname">{r.item}</span>
+          <span className="iprice">${r.price.toLocaleString()}</span>
+          {chip(r.stock)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -105,13 +102,37 @@ function Component({ props }) {
 # ── Admin panel (admin only) ──────────────────────────────────────────────────
 
 _ADMIN_CSS = """
-section{margin-bottom:14px}
-h3{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;
-   letter-spacing:.05em;margin:0 0 8px}
-.log{padding:0;margin:0}
-.log li{font:12px ui-monospace,monospace;color:#94a3b8;padding:3px 0;
-        list-style:none;border-bottom:1px solid #1e293b}
-.log li:last-child{border-bottom:none}
+.pc-sa{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
+       font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-sa .hd{font-size:16px;font-weight:700;margin-bottom:18px}
+.pc-sa .sec{margin-bottom:18px}
+.pc-sa .sec-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+               color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.pc-sa .sec-hd::after{content:"";flex:1;height:1px;background:var(--pc-border,#30363d)}
+.pc-sa .inp{padding:8px 10px;border-radius:8px;font-size:13px;width:100%;box-sizing:border-box;
+            border:1.5px solid var(--pc-border,#30363d);background:var(--pc-input-bg,#1b2230);
+            color:inherit;outline:none;transition:border-color .15s}
+.pc-sa .inp:focus{border-color:#3b82f6}
+.pc-sa .btn{margin-top:10px;width:100%;padding:9px;border-radius:8px;font-size:13px;
+            font-weight:600;cursor:pointer;border:none;background:#2563eb;color:#fff;
+            transition:background .12s}
+.pc-sa .btn:hover{background:#1d4ed8}
+.pc-sa .urow{padding:7px 0;border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-sa .urow:last-child{border-bottom:none}
+.pc-sa .urow-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.pc-sa .uname{font-size:12px;font-weight:600}
+.pc-sa .ubud{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:#4ade80}
+.pc-sa .bbar{height:4px;border-radius:99px;background:var(--pc-off-bg,#333);overflow:hidden}
+.pc-sa .bfill{height:100%;border-radius:99px;
+              background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .5s}
+.pc-sa .litem{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--pc-border,#30363d);
+              font:12px ui-monospace,monospace;color:#94a3b8}
+.pc-sa .litem:last-child{border-bottom:none}
+.pc-sa .ldot{color:#3b82f6;flex-shrink:0}
+.pc-sa .hi{color:var(--pc-text,#e6edf3);font-weight:600}
+.pc-sa .msg{margin-top:8px;padding:6px 10px;border-radius:7px;font-size:12px}
+.pc-sa .ok{background:rgba(20,83,45,.35);color:#4ade80}
+.pc-sa .er{background:rgba(127,29,29,.35);color:#f87171}
 """
 
 _ADMIN_SOURCE = """
@@ -121,72 +142,74 @@ function Component({ canvas, props }) {
   const log   = props.log   || [];
   const [item,  setItem]  = React.useState("");
   const [stock, setStock] = React.useState("");
-  const [msg,   setMsg]   = React.useState("");
-
-  const inp = {
-    padding:"6px 10px", borderRadius:"6px", fontSize:"13px",
-    border:"1px solid var(--pc-border,#30363d)",
-    background:"var(--pc-input-bg,#1b2230)",
-    color:"inherit", width:"100%", boxSizing:"border-box",
-  };
+  const [msg,   setMsg]   = React.useState(null);
+  const START = 2000;
 
   function submit() {
     const n = parseInt(stock, 10);
-    if (!item)           { setMsg("Select an item."); return; }
-    if (isNaN(n) || n < 0) { setMsg("Enter a valid quantity."); return; }
-    canvas.send({ action: "restock", item, stock: n });
-    setMsg("✓ " + item + " set to " + n);
+    if (!item)              { setMsg({t:"Select an item.", ok:false}); return; }
+    if (isNaN(n) || n < 0) { setMsg({t:"Enter a valid quantity.", ok:false}); return; }
+    canvas.send({ action:"restock", item, stock:n });
+    setMsg({t:"✓ " + item + " restocked to " + n, ok:true});
     setItem(""); setStock("");
   }
 
   return (
-    <div style={{padding:"14px",height:"100%",overflowY:"auto",
-                 fontFamily:"system-ui,sans-serif",color:"var(--pc-text,#e6edf3)"}}>
+    <div className="pc-sa">
       <style>{`__ADMIN_CSS__`}</style>
-      <div style={{fontWeight:700,fontSize:"15px",marginBottom:"14px"}}>Admin Controls</div>
+      <div className="hd">⚙️ Admin Controls</div>
 
-      <section>
-        <h3>Restock item</h3>
-        <select value={item} onChange={e=>setItem(e.target.value)} style={inp}>
+      <div className="sec">
+        <div className="sec-hd">Restock item</div>
+        <select value={item} onChange={e=>setItem(e.target.value)} className="inp">
           <option value="">— select item —</option>
           {rows.map(r=>(
-            <option key={r.item} value={r.item}>{r.item} (stock: {r.stock})</option>
+            <option key={r.item} value={r.item}>{r.item}  ({r.stock} in stock)</option>
           ))}
         </select>
         <input type="number" min="0" placeholder="New quantity" value={stock}
           onChange={e=>setStock(e.target.value)}
           onKeyDown={e=>{if(e.key==="Enter") submit();}}
-          style={{...inp, marginTop:8}} />
-        <button onClick={submit}
-          style={{marginTop:8,width:"100%",padding:"7px",borderRadius:"6px",
-                  fontWeight:600,cursor:"pointer",background:"#2563eb",
-                  color:"#fff",border:"none",fontSize:"13px"}}>
-          Set stock
-        </button>
-        {msg && <div style={{marginTop:6,fontSize:"12px",color:"#94a3b8"}}>{msg}</div>}
-      </section>
+          className="inp" style={{marginTop:8}} />
+        <button onClick={submit} className="btn">Set stock</button>
+        {msg && <div className={"msg " + (msg.ok ? "ok" : "er")}>{msg.t}</div>}
+      </div>
 
-      <section>
-        <h3>User budgets</h3>
+      <div className="sec">
+        <div className="sec-hd">User budgets</div>
         {users.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px"}}>No users connected yet.</div>
-          : <ul className="log">
-              {users.map(u=>(
-                <li key={u.name}>{u.name} — <b>${u.budget.toLocaleString()}</b> remaining</li>
-              ))}
-            </ul>}
-      </section>
+          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No users connected yet.</div>
+          : users.map(u => {
+              const pct = Math.max(0, Math.min(100, Math.round(u.budget / START * 100)));
+              return (
+                <div key={u.name} className="urow">
+                  <div className="urow-top">
+                    <span className="uname">{u.name}</span>
+                    <span className="ubud">${u.budget.toLocaleString()}</span>
+                  </div>
+                  <div className="bbar"><div className="bfill" style={{width:pct+"%"}} /></div>
+                </div>
+              );
+            })
+        }
+      </div>
 
-      <section>
-        <h3>Request log</h3>
+      <div className="sec">
+        <div className="sec-hd">Request log</div>
         {log.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px"}}>No requests yet.</div>
-          : <ul className="log">
-              {log.map((r,i)=>(
-                <li key={i}>{r.user} · {r.qty}× {r.item} · <b>${r.cost.toLocaleString()}</b></li>
-              ))}
-            </ul>}
-      </section>
+          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No requests yet.</div>
+          : log.map((r,i) => (
+              <div key={i} className="litem">
+                <span className="ldot">▸</span>
+                <span>
+                  <span className="hi">{r.user}</span>
+                  {" · "}{r.qty}× {r.item}{" · "}
+                  <span className="hi">${r.cost.toLocaleString()}</span>
+                </span>
+              </div>
+            ))
+        }
+      </div>
     </div>
   );
 }
@@ -196,13 +219,67 @@ function Component({ canvas, props }) {
 # ── User panel (user only) ────────────────────────────────────────────────────
 
 _USER_CSS = """
-section{margin-bottom:14px}
-h3{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;
-   letter-spacing:.05em;margin:0 0 8px}
-.log{padding:0;margin:0}
-.log li{font:12px ui-monospace,monospace;color:#94a3b8;padding:3px 0;
-        list-style:none;border-bottom:1px solid #1e293b}
-.log li:last-child{border-bottom:none}
+.pc-su{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
+       font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-su .hd{font-size:16px;font-weight:700;margin-bottom:18px}
+.pc-su .sec{margin-bottom:18px}
+.pc-su .sec-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+               color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.pc-su .sec-hd::after{content:"";flex:1;height:1px;background:var(--pc-border,#30363d)}
+.pc-su .irow{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;
+             cursor:pointer;border:1.5px solid transparent;transition:background .1s,border-color .1s}
+.pc-su .irow:hover{background:rgba(255,255,255,.05)}
+.pc-su .irow.sel{background:rgba(37,99,235,.15);border-color:#3b82f6}
+.pc-su .irow.dim{opacity:0.4;cursor:default;pointer-events:none}
+.pc-su .ico{font-size:18px;width:32px;height:32px;border-radius:7px;flex-shrink:0;
+            display:flex;align-items:center;justify-content:center;
+            background:var(--pc-off-bg,#eee)22}
+.pc-su .iname{flex:1;font-size:13px;font-weight:600}
+.pc-su .iprice{font-size:12px;font-weight:700;color:var(--pc-muted,#666);
+               font-variant-numeric:tabular-nums}
+.pc-su .chip{padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700}
+.pc-su .in {background:rgba(20,83,45,.35);color:#4ade80}
+.pc-su .low{background:rgba(120,53,15,.35);color:#fbbf24}
+.pc-su .out{background:rgba(127,29,29,.35);color:#f87171}
+.pc-su .rcard{background:rgba(37,99,235,.1);border:1.5px solid rgba(59,130,246,.4);
+              border-radius:10px;padding:14px;margin-bottom:14px}
+.pc-su .rcard-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.pc-su .ricon{font-size:24px}
+.pc-su .rname{flex:1;font-size:14px;font-weight:700}
+.pc-su .rprice{font-size:12px;color:var(--pc-muted,#666)}
+.pc-su .qty-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.pc-su .qty-lbl{font-size:12px;color:#64748b;flex:1}
+.pc-su .qty-ctrl{display:flex;align-items:center;gap:6px}
+.pc-su .qbtn{width:28px;height:28px;border-radius:6px;border:1.5px solid var(--pc-border,#30363d);
+             background:transparent;color:inherit;font-size:16px;cursor:pointer;
+             display:flex;align-items:center;justify-content:center;transition:background .1s}
+.pc-su .qbtn:hover{background:rgba(255,255,255,.08)}
+.pc-su .qnum{width:36px;text-align:center;font-size:15px;font-weight:700;
+             font-variant-numeric:tabular-nums}
+.pc-su .cost-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+.pc-su .cost-lbl{font-size:12px;color:#64748b}
+.pc-su .cost-val{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:#60a5fa}
+.pc-su .btn{width:100%;padding:9px;border-radius:8px;font-size:13px;font-weight:600;
+            cursor:pointer;border:none;background:#2563eb;color:#fff;transition:background .12s}
+.pc-su .btn:hover{background:#1d4ed8}
+.pc-su .back{margin-top:8px;text-align:center;font-size:11px;color:#64748b;cursor:pointer}
+.pc-su .back:hover{color:var(--pc-text,#e6edf3)}
+.pc-su .urow{padding:7px 0;border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-su .urow:last-child{border-bottom:none}
+.pc-su .urow-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.pc-su .uname{font-size:12px;font-weight:600}
+.pc-su .ubud{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:#4ade80}
+.pc-su .bbar{height:4px;border-radius:99px;background:var(--pc-off-bg,#333);overflow:hidden}
+.pc-su .bfill{height:100%;border-radius:99px;
+              background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .5s}
+.pc-su .litem{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--pc-border,#30363d);
+              font:12px ui-monospace,monospace;color:#94a3b8}
+.pc-su .litem:last-child{border-bottom:none}
+.pc-su .ldot{color:#3b82f6;flex-shrink:0}
+.pc-su .hi{color:var(--pc-text,#e6edf3);font-weight:600}
+.pc-su .msg{padding:6px 10px;border-radius:7px;font-size:12px;margin-bottom:14px}
+.pc-su .ok  {background:rgba(20,83,45,.35);color:#4ade80}
+.pc-su .warn{background:rgba(120,53,15,.35);color:#fbbf24}
 """
 
 _USER_SOURCE = """
@@ -210,86 +287,135 @@ function Component({ canvas, props }) {
   const rows  = props.rows  || [];
   const users = props.users || [];
   const log   = props.log   || [];
-  const [item, setItem] = React.useState("");
-  const [qty,  setQty]  = React.useState("1");
-  const [msg,  setMsg]  = React.useState("");
+  const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
+  const START = 2000;
 
-  // Register with Python on mount so our budget appears immediately.
-  React.useEffect(() => { canvas.send({ action: "ping" }); }, []);
+  const [sel, setSel] = React.useState(null);
+  const [qty, setQty] = React.useState(1);
+  const [msg, setMsg] = React.useState(null);
 
-  const row  = rows.find(r => r.item === item);
-  const q    = Math.max(1, parseInt(qty) || 1);
-  const cost = row ? row.price * q : 0;
+  // Register with Python on mount so budget appears immediately.
+  React.useEffect(() => { canvas.send({ action:"ping" }); }, []);
 
-  const inp = {
-    padding:"6px 10px", borderRadius:"6px", fontSize:"13px",
-    border:"1px solid var(--pc-border,#30363d)",
-    background:"var(--pc-input-bg,#1b2230)",
-    color:"inherit", width:"100%", boxSizing:"border-box",
-  };
+  // Keep selected item in sync with live stock updates.
+  React.useEffect(() => {
+    if (!sel) return;
+    const fresh = rows.find(r => r.item === sel.item);
+    if (fresh) setSel(fresh);
+  }, [rows]);
+
+  const cost = sel ? sel.price * qty : 0;
+
+  function pick(r) {
+    if (r.stock === 0) return;
+    setSel(r); setQty(1); setMsg(null);
+  }
+
+  function incQty(d) {
+    if (!sel) return;
+    setQty(q => Math.max(1, Math.min(sel.stock, q + d)));
+  }
 
   function request() {
-    if (!item)             { setMsg("Select an item."); return; }
-    if (!row || row.stock < q) { setMsg("Not enough stock."); return; }
-    canvas.send({ action: "request", item, qty: q });
-    setMsg("✓ Requested " + q + "× " + item);
-    setItem(""); setQty("1");
+    if (!sel || qty > sel.stock) return;
+    canvas.send({ action:"request", item:sel.item, qty });
+    setMsg({t:"✓ Requested " + qty + "× " + sel.item, warn:false});
+    setSel(null); setQty(1);
+  }
+
+  function chip(n) {
+    if (n === 0) return <span className="chip out">Out of stock</span>;
+    if (n <= 2)  return <span className="chip low">{n} left</span>;
+    return             <span className="chip in">{n} in stock</span>;
   }
 
   return (
-    <div style={{padding:"14px",height:"100%",overflowY:"auto",
-                 fontFamily:"system-ui,sans-serif",color:"var(--pc-text,#e6edf3)"}}>
+    <div className="pc-su">
       <style>{`__USER_CSS__`}</style>
-      <div style={{fontWeight:700,fontSize:"15px",marginBottom:"14px"}}>Request Items</div>
+      <div className="hd">🛒 Request Items</div>
 
-      <section>
-        <h3>Place a request</h3>
-        <select value={item} onChange={e=>setItem(e.target.value)} style={inp}>
-          <option value="">— select item —</option>
-          {rows.filter(r=>r.stock>0).map(r=>(
-            <option key={r.item} value={r.item}>{r.item} — ${r.price.toLocaleString()}</option>
-          ))}
-        </select>
-        <input type="number" min="1" value={qty}
-          onChange={e=>setQty(e.target.value)} placeholder="Quantity"
-          style={{...inp, marginTop:8}} />
-        {item && (
-          <div style={{marginTop:6,fontSize:"12px",color:"#94a3b8"}}>
-            Total: <b style={{color:"var(--pc-text,#e6edf3)"}}>${cost.toLocaleString()}</b>
-            {row && q > row.stock &&
-              <span style={{color:"#f87171",marginLeft:8}}>only {row.stock} available</span>}
+      {msg && <div className={"msg " + (msg.warn ? "warn" : "ok")}>{msg.t}</div>}
+
+      {sel ? (
+        <div className="rcard">
+          <div className="rcard-top">
+            <span className="ricon">{ICONS[sel.item]||"📦"}</span>
+            <span className="rname">{sel.item}</span>
+            <span className="rprice">${sel.price.toLocaleString()} each</span>
           </div>
-        )}
-        <button onClick={request}
-          style={{marginTop:8,width:"100%",padding:"7px",borderRadius:"6px",
-                  fontWeight:600,cursor:"pointer",background:"#2563eb",
-                  color:"#fff",border:"none",fontSize:"13px"}}>
-          Request
-        </button>
-        {msg && <div style={{marginTop:6,fontSize:"12px",color:"#94a3b8"}}>{msg}</div>}
-      </section>
+          <div className="qty-row">
+            <span className="qty-lbl">Quantity</span>
+            <div className="qty-ctrl">
+              <button className="qbtn" onClick={()=>incQty(-1)}>−</button>
+              <span className="qnum">{qty}</span>
+              <button className="qbtn" onClick={()=>incQty(+1)}>+</button>
+            </div>
+          </div>
+          <div className="cost-row">
+            <span className="cost-lbl">Total cost</span>
+            <span className="cost-val">${cost.toLocaleString()}</span>
+          </div>
+          <button className="btn" onClick={request}>
+            Request {qty > 1 ? qty + "× " : ""}{sel.item}
+          </button>
+          <div className="back" onClick={()=>{setSel(null);setQty(1);}}>
+            ← back to catalogue
+          </div>
+        </div>
+      ) : (
+        <div className="sec">
+          <div className="sec-hd">Catalogue</div>
+          {rows.map(r => (
+            <div key={r.item}
+                 className={"irow" + (r.stock===0?" dim":"")}
+                 onClick={()=>pick(r)}>
+              <div className="ico">{ICONS[r.item]||"📦"}</div>
+              <span className="iname">{r.item}</span>
+              <span className="iprice">${r.price.toLocaleString()}</span>
+              {chip(r.stock)}
+            </div>
+          ))}
+        </div>
+      )}
 
-      <section>
-        <h3>Budgets <span style={{fontWeight:400,color:"#94a3b8"}}>(your name is shown in the canvas cursor)</span></h3>
+      <div className="sec">
+        <div className="sec-hd">Budgets</div>
         {users.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px"}}>Loading…</div>
-          : <ul className="log">
-              {users.map(u=>(
-                <li key={u.name}>{u.name} — <b>${u.budget.toLocaleString()}</b> remaining</li>
-              ))}
-            </ul>}
-      </section>
+          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>Loading…</div>
+          : users.map(u => {
+              const pct = Math.max(0, Math.min(100, Math.round(u.budget / START * 100)));
+              return (
+                <div key={u.name} className="urow">
+                  <div className="urow-top">
+                    <span className="uname">{u.name}</span>
+                    <span className="ubud">${u.budget.toLocaleString()}</span>
+                  </div>
+                  <div className="bbar"><div className="bfill" style={{width:pct+"%"}} /></div>
+                </div>
+              );
+            })
+        }
+        <div style={{marginTop:8,fontSize:"11px",color:"#64748b"}}>
+          Your name is shown on your cursor in the canvas.
+        </div>
+      </div>
 
-      <section>
-        <h3>Recent requests</h3>
+      <div className="sec">
+        <div className="sec-hd">Recent requests</div>
         {log.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px"}}>No requests yet.</div>
-          : <ul className="log">
-              {log.map((r,i)=>(
-                <li key={i}>{r.user} · {r.qty}× {r.item} · <b>${r.cost.toLocaleString()}</b></li>
-              ))}
-            </ul>}
-      </section>
+          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No requests yet.</div>
+          : log.map((r,i) => (
+              <div key={i} className="litem">
+                <span className="ldot">▸</span>
+                <span>
+                  <span className="hi">{r.user}</span>
+                  {" · "}{r.qty}× {r.item}{" · "}
+                  <span className="hi">${r.cost.toLocaleString()}</span>
+                </span>
+              </div>
+            ))
+        }
+      </div>
     </div>
   );
 }
@@ -352,7 +478,7 @@ def on_user(msg, viewer):
     budget = ensure_user(name)
 
     if inv["stock"] < qty or budget < cost:
-        return  # guard: UI pre-checks stock; budget check is server-side only
+        return  # guard: UI pre-checks stock; budget is server-side only
 
     inv["stock"]  -= qty
     budgets[name] -= cost
