@@ -540,14 +540,24 @@ Pass a `view` dict to `serve` (all keys optional):
 canvas.serve(view={"x": 200, "y": 160, "zoom": 1.0, "locked": True, "ui": False})
 ```
 
+Omit `x`/`y`/`zoom` and each viewer's canvas opens framed on the panels they can
+see — fit and centred (zooming out if they overflow, never in past 100%). Set
+any of them to take explicit control.
+
 Change it live with `set_view` (same keys; only those you pass change). Pass
-`client_id` to move just one viewer (ids from `canvas.viewers`):
+`roles` to scope it to a login role (from `serve(passwords=)`), or `client_id`
+to move just one viewer (ids from `canvas.viewers`):
 
 ```python
 canvas.set_view(ui=False)
 canvas.set_view({"zoom": 2.0})
-canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)   # one viewer only
+canvas.set_view(read_only=True, ui=False, roles=["user"])  # by login role
+canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)     # one viewer only
 ```
+
+Per-role view applies on connect too, so e.g. admins keep the toolbar and
+drawing while `"user"` viewers get a chrome-free, read-only canvas. Precedence
+is global < per-role < per-client.
 
 A toolbar button (bottom-left) spawns an ephemeral `Inspector` on demand —
 offered only on a local bind by default (`ui_inspector=True`/`False` to
@@ -633,6 +643,22 @@ a client receives and whether callbacks identify them as `"admin"` or `"viewer"`
 `roles=["admin"]` hides a panel from everyone else; `lock_for=["viewer"]` sends it
 to viewers but with `operable=False` so they can't interact. `password=` still
 works as before (all viewers get `role=None`).
+
+Roles can be created **after** the server starts: the `passwords=` dict is read
+live on every login, so adding a key makes that password valid immediately (no
+restart). Reveal a panel to a role added at runtime with `panel.add_role(name)`
+(and `panel.remove_role(name)` to hide it again) — both update connected viewers
+live, and `panel.roles` reads the current allowlist:
+
+```python
+# An admin creates a team at runtime; its members can log in right away.
+passwords["Red Team"] = "red-pw"     # same dict passed to serve(passwords=...)
+team_panel.add_role("Red Team")      # panel now reaches that role, live
+```
+
+See [`examples/stock_management.py`](examples/stock_management.py) for a full
+JSON-backed app where the admin creates teams (each with its own password and
+budget) on the fly.
 
 **Tunnel** — expose to the whole internet over public HTTPS; keeps the bind on
 `127.0.0.1` and prints a shareable `https://…` URL:

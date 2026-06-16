@@ -737,6 +737,35 @@ check is per-browser-session (a cookie), so each viewer enters it once. A passwo
 controls *who connects*, not whether a Repl may run — that still needs the
 explicit `allow_remote_exec`.
 
+### Roles (different views per login)
+
+Pass `passwords={role: password}` instead of a single `password=` to serve
+different users different panels from one port. The role a visitor logs in with
+is stamped on their session server-side and rides every callback's `viewer`:
+
+```python
+controls = canvas.react(CONTROLS, name="controls", roles=["admin"])  # admin-only
+display  = canvas.react(DISPLAY,  name="display")                    # everyone
+
+@controls.on_message
+def _(msg, viewer):                       # viewer = {id, name, color, role}
+    if viewer["role"] != "admin": return  # authorize server-side, always
+
+canvas.serve(passwords={"admin": "a-pw", "viewer": "v-pw"})
+```
+
+`roles=[...]` restricts which roles see a panel (`[]` = everyone); `lock_for=[...]`
+shows a panel but makes it non-interactive for those roles; `set_view(roles=[...])`
+gives a role its own viewport (see below).
+
+**Roles created at runtime.** The `passwords=` dict is read live on every login,
+so adding a key makes that password valid immediately — no restart. Reveal a
+panel to a freshly added role with `panel.add_role(name)`, hide it with
+`panel.remove_role(name)`, and read the current allowlist via `panel.roles`; both
+mutators also update viewers who are already connected. This is how
+[`examples/stock_management.py`](examples/stock_management.py) lets an admin
+create teams (each with its own password and budget) on the fly.
+
 ### Control the viewport (`view=` and `set_view`)
 
 Make the same canvas a free creative workspace or a fixed kiosk UI. Pass a `view`
@@ -748,6 +777,7 @@ canvas.serve(view={"zoom": 1.5, "ui": False, "locked": True})
 canvas.set_view(ui=False)                      # hide tldraw's toolbars everywhere
 canvas.set_view(zoom=2.0)                      # zoom all viewers to 200%
 canvas.set_view(locked=True)                   # freeze pan/zoom (kiosk)
+canvas.set_view(read_only=True, ui=False, roles=["user"])  # scope to a login role
 canvas.set_view(x=100, y=200, client_id="…")   # move ONE viewer's camera only
 ```
 
@@ -760,8 +790,20 @@ canvas.set_view(x=100, y=200, client_id="…")   # move ONE viewer's camera only
 | `grid` | `True` shows the background grid |
 | `read_only` | `True` puts tldraw in read-only mode (no drawing) |
 
-`set_view` with a `client_id` (from `canvas.viewers`) steers just that one
-viewer; omit it to broadcast to everyone.
+When you **don't** specify `x`/`y`/`zoom`, each viewer's canvas opens framed on
+the panels they can see — fit into view and centred, zooming out if the panels
+overflow the viewport (never in past 100%). This honours role filtering: a
+viewer is only fit to the panels they were actually sent. Set any of
+`x`/`y`/`zoom` to take explicit control instead.
+
+`set_view` with `roles` (a role name or list, matching `serve(passwords=)`)
+scopes the change to viewers logged in under those roles — now and on every
+future connect — so e.g. admins keep the toolbar and free-form drawing while
+`"user"` viewers get a chrome-free, read-only kiosk. A `client_id` (from
+`canvas.viewers`) steers just that one viewer; pass neither to broadcast to
+everyone and set the global default. Precedence on connect is global < per-role
+< per-client, so the most specific scope wins. See
+[`examples/stock_management.py`](examples/stock_management.py).
 
 ### Multiple viewers
 

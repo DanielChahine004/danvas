@@ -1596,7 +1596,7 @@ class Canvas:
         print(f"PyCanvas baked: {out}")
         return out
 
-    def set_view(self, view=None, client_id=None, **opts):
+    def set_view(self, view=None, client_id=None, roles=None, **opts):
         """Change viewport/navigation properties live on connected browsers.
 
         Accepts the same options as ``serve(view=...)`` (initial camera, zoom
@@ -1607,17 +1607,24 @@ class Canvas:
             canvas.set_view({"zoom": 2.0})                 # zoom all viewers to 200%
             canvas.set_view(locked=True)                   # freeze pan/zoom everywhere
             canvas.set_view(x=100, y=200, client_id="...")  # move view for one user
+            canvas.set_view(read_only=True, ui=False, roles=["user"])  # by login role
 
-        If ``client_id`` is omitted, changes broadcast to all viewers (default).
-        If ``client_id`` is provided (a viewer's unique id from the roster), the
-        change affects only that viewer's local view state—other viewers unaffected.
+        The change is scoped by which of ``client_id``/``roles`` you pass:
 
-        Only the keys you pass change; the rest keep their current value.
-        Passing ``x``/``y``/``zoom`` re-centres the camera immediately (subject
-        to any lock); omitting them leaves viewers where they were looking.
-        A viewer who connects later still gets the merged global configuration in
-        their welcome frame (or per-client state if one exists for them).
-        Returns ``self``.
+        * neither — broadcasts to all viewers and becomes the global default that
+          later viewers inherit on connect.
+        * ``roles`` (a role name or list of names, matching ``serve(passwords=)``)
+          — applies to viewers logged in under those roles, now and on every
+          future connect, so e.g. admins keep the toolbar and drawing while
+          ``"user"`` viewers get a chrome-free, read-only canvas.
+        * ``client_id`` (a viewer's unique id from the roster) — affects only
+          that one viewer.
+
+        Precedence on connect is global < per-role < per-client, so a more
+        specific scope wins. Only the keys you pass change; the rest keep their
+        current value. Passing ``x``/``y``/``zoom`` re-centres the camera
+        immediately (subject to any lock); omitting them leaves viewers where
+        they were looking. Returns ``self``.
         """
         merged_in = dict(view or {})
         merged_in.update(opts)
@@ -1625,17 +1632,27 @@ class Canvas:
         if not delta:
             return self
 
-        if client_id is None:
-            # Broadcast to all: update global view state.
-            self._bridge._view = {**(self._bridge._view or {}), **delta}
-            self._bridge.broadcast({"type": "view", "view": delta})
-        else:
-            # Send to one client: update per-client view state.
+        if client_id is not None:
+            # Most specific: one viewer's per-client view state.
             self._bridge._view_per_client[client_id] = {
                 **(self._bridge._view_per_client.get(client_id) or {}),
                 **delta
             }
             self._bridge.send_to_client(client_id, {"type": "view", "view": delta})
+        elif roles is not None:
+            # Per-role: update each role's view state and push to anyone already
+            # connected under that role. Future connects pick it up via _view_for.
+            role_list = [roles] if isinstance(roles, str) else list(roles)
+            for role in role_list:
+                self._bridge._view_per_role[role] = {
+                    **(self._bridge._view_per_role.get(role) or {}),
+                    **delta
+                }
+                self._bridge.send_to_role(role, {"type": "view", "view": delta})
+        else:
+            # Broadcast to all: update global view state.
+            self._bridge._view = {**(self._bridge._view or {}), **delta}
+            self._bridge.broadcast({"type": "view", "view": delta})
         return self
 
     def _start_tunnel(self, port, provider):

@@ -373,10 +373,20 @@ export default function ReactHost({ shape }) {
     // panel and the component never sees the click. The Card header (the label)
     // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
     // wants the opposite — let the pointer fall through to the canvas entirely.
+    //
+    // We also stop touch events here: tldraw's canvas onTouchStart/onTouchEnd
+    // call preventDefault() on every touch (to own pinch/pan), which suppresses
+    // the browser's synthesized `click` for buttons inside the panel — so on a
+    // phone a tap on a panel button does nothing until the shape is selected.
+    // Keeping the touch events from bubbling to tldraw lets the click fire on the
+    // first tap (and lets the panel scroll natively). Pointer events still drive
+    // the component, so this is purely about not letting tldraw kill the tap.
     <div
       ref={hostRef}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
+      onTouchStart={ghost ? undefined : (e) => e.stopPropagation()}
+      onTouchEnd={ghost ? undefined : (e) => e.stopPropagation()}
     >
       {/* When fitting either axis the content sizes to itself (measurable);
           otherwise it's a transparent pass-through (display:contents) so existing

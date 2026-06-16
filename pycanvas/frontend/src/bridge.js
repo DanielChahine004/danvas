@@ -132,8 +132,22 @@ export function setEditor(e) {
 // Run store mutations driven by Python as "remote" changes. The geometry-sync
 // handler below only reacts to "user" changes, so this keeps our own updates
 // (move/resize/register/load) from echoing straight back to Python.
+//
+// tldraw's high-level mutators (createShape/updateShape/deleteShapes/…) all
+// no-op while the instance is read-only. But a read-only view is meant to stop
+// the *viewer* drawing, not the host's Python-driven panels — without this lift,
+// `view={read_only:True}` (or set_view(read_only=True, roles=...)) would silently
+// drop every register/update and the canvas would render empty. So drop the flag
+// for the duration of our own remote batch, then restore it; the toggle is plain
+// instance state (not shape data), so it doesn't echo to Python or to peers.
 function applyRemote(fn) {
-  editor.store.mergeRemoteChanges(fn)
+  const wasReadonly = editor.getInstanceState().isReadonly
+  if (wasReadonly) editor.updateInstanceState({ isReadonly: false })
+  try {
+    editor.store.mergeRemoteChanges(fn)
+  } finally {
+    if (wasReadonly) editor.updateInstanceState({ isReadonly: true })
+  }
 }
 
 // Send any message to Python over the shared socket.
@@ -455,6 +469,7 @@ function handle(msg) {
     sendRaw({ type: 'snapshot', reqId: msg.reqId, data: userContent(msg.panelIds || []) })
   } else if (msg.type === 'load_snapshot') {
     loadSnapshot(msg.data)
+    scheduleInitialFit()
   } else if (msg.type === 'draw') {
     applyDraw(msg.diff)
   } else if (msg.type === 'presence') {
@@ -694,6 +709,10 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
     flowItems.add(shapeId)
     scheduleRelayout()
   }
+  // Frame this (and every other just-registered) panel on first load when no
+  // explicit camera was configured. Debounced, so a burst of registers fits the
+  // whole set once rather than zooming in on the first one.
+  scheduleInitialFit()
 }
 
 // Draw a tldraw arrow bound to two existing panels. The bindings make the
@@ -916,6 +935,62 @@ function applyViewOptions() {
   if (typeof v.read_only === 'boolean') inst.isReadonly = v.read_only
   if (typeof v.grid === 'boolean') inst.isGridMode = v.grid
   if (Object.keys(inst).length) editor.updateInstanceState(inst)
+}
+
+// --- initial auto-fit --------------------------------------------------------
+// When no explicit camera (x/y/zoom) is configured, frame every panel this
+// viewer can see, centred, on first load — so the canvas never opens on empty
+// space (e.g. because tldraw restored a panned camera from this browser's
+// localStorage, or because the panels live far from the origin). Runs once per
+// page load and only over the shapes actually present, which already reflects
+// role filtering: a viewer who isn't sent a panel simply isn't fit to it.
+let initialFitDone = false
+let initialFitTimer = null
+
+// (Re)arm the one-shot fit. Each newly-registered panel calls this; the debounce
+// lets a burst of register messages settle so we fit the whole set at once
+// instead of zooming in on the first panel. A configured camera, or a fit that
+// already ran, cancels it.
+function scheduleInitialFit() {
+  if (initialFitDone || !editor) return
+  const v = viewConfig
+  // An explicit camera wins — respect serve(view={x/y/zoom}) / set_view.
+  if (v && (typeof v.x === 'number' || typeof v.y === 'number' ||
+            typeof v.zoom === 'number')) return
+  clearTimeout(initialFitTimer)
+  initialFitTimer = setTimeout(runInitialFit, 180)
+}
+
+function runInitialFit() {
+  if (initialFitDone || !editor) return
+  const bounds = editor.getCurrentPageBounds() // union of all shapes, or null
+  if (!bounds) return // no panels yet; a later register reschedules
+  initialFitDone = true
+  fitCameraToBounds(bounds)
+}
+
+// Centre the camera on `bounds` and zoom so it fits the viewport with a margin,
+// honouring any configured min/max zoom. Uses the same screen-centre math as
+// applyCameraFrom, and `force` so it lands even under a locked camera.
+function fitCameraToBounds(bounds) {
+  const vsb = editor.getViewportScreenBounds()
+  const pad = 80 // px of breathing room around the panels on every side
+  const fitW = Math.max(1, vsb.w - pad * 2)
+  const fitH = Math.max(1, vsb.h - pad * 2)
+  // Zoom out to fit when the panels overflow the viewport, but never zoom *in*
+  // past 100% — a single small panel should sit centred at its natural size, not
+  // blown up to fill the screen. Configured min/max zoom still bound the result.
+  let z = Math.min(fitW / bounds.w, fitH / bounds.h, 1)
+  const v = viewConfig || {}
+  const minZ = typeof v.min_zoom === 'number' ? v.min_zoom : 0.1
+  const maxZ = typeof v.max_zoom === 'number' ? v.max_zoom : 8
+  z = Math.max(minZ, Math.min(maxZ, z))
+  const cx = bounds.x + bounds.w / 2
+  const cy = bounds.y + bounds.h / 2
+  editor.setCamera(
+    { x: vsb.w / (2 * z) - cx, y: vsb.h / (2 * z) - cy, z },
+    { immediate: true, force: true }
+  )
 }
 
 // Centre the view on a canvas point at a given zoom, taking each of x/y/zoom

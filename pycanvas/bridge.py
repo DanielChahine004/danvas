@@ -155,6 +155,10 @@ class Bridge:
         # Per-client view state: viewer_id -> view_dict. When set, overrides the
         # global _view for that specific client (merged with global defaults).
         self._view_per_client = {}
+        # Per-role view state: role -> view_dict. Applied to a viewer on connect
+        # by their login role. Precedence is global < per-role < per-client, so a
+        # client-specific override still wins. Set via canvas.set_view(roles=...).
+        self._view_per_role = {}
         # Conflated ("latest" queue policy) send state. For components that opt
         # out of FIFO, we keep only the newest pending value per (socket,
         # component, channel) and a flag marking whether a sender is draining it,
@@ -328,13 +332,18 @@ class Bridge:
                 msg[flag.wire] = value
         return msg
 
-    def register_live(self, component):
+    def register_live(self, component, only_roles=None):
         """Push a newly-added component to connected clients who may see it.
 
         Role-aware: clients whose role is not in the component's ``_roles``
         list are skipped. Used for components inserted after the server is
         already running (e.g. from a Jupyter cell). Fresh connections still get
         the full replay via ``handle_connection``; this covers live clients.
+
+        ``only_roles`` (a set/list of role names) further narrows the push to
+        viewers in those roles — used by :meth:`BaseComponent.add_role` so newly
+        allowed roles get the panel without re-registering it to viewers who
+        already had it.
         """
         roles = getattr(component, "_roles", [])
         lock_for = getattr(component, "_lock_for", [])
@@ -345,6 +354,8 @@ class Bridge:
         for ws, viewer in list(self._viewers.items()):
             role = viewer.get("role")
             if roles and role not in roles:
+                continue
+            if only_roles is not None and role not in only_roles:
                 continue
             asyncio.run_coroutine_threadsafe(self._safe_send(ws, reg), self._loop)
             if state:
@@ -373,11 +384,7 @@ class Bridge:
         try:
             # Tell this client who it is, so it can label its own chat messages
             # and prefill the editable name field.
-            view_for_client = self._view_per_client.get(viewer["id"])
-            if view_for_client is not None:
-                view_for_client = {**(self._view or {}), **view_for_client}
-            else:
-                view_for_client = self._view
+            view_for_client = self._view_for(viewer["id"], role)
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
                                   "cursors": self._cursors,
@@ -919,6 +926,35 @@ class Bridge:
                    if v.get("id") == viewer_id), None)
         if ws is not None:
             asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
+
+    def send_to_role(self, role, msg):
+        """Send ``msg`` to every connected client whose login role matches.
+
+        Any-thread safe; a no-op when no one is connected under ``role``. The
+        viewer map is snapshotted before scanning, like :meth:`send_to_client`.
+        """
+        if self._loop is None:
+            return
+        for ws, v in list(self._viewers.items()):
+            if v.get("role") == role:
+                asyncio.run_coroutine_threadsafe(
+                    self._safe_send(ws, msg), self._loop)
+
+    def _view_for(self, viewer_id, role):
+        """Merge the view layers that apply to one viewer, newest layer wins.
+
+        Precedence is global (:attr:`_view`) < per-role < per-client, so a
+        client-specific override beats a role default beats the global view.
+        Returns ``None`` when no layer is set (the welcome frame treats a missing
+        view as "leave tldraw's defaults").
+        """
+        merged, have = {}, False
+        for layer in (self._view, self._view_per_role.get(role),
+                      self._view_per_client.get(viewer_id)):
+            if layer:
+                merged.update(layer)
+                have = True
+        return merged if have else None
 
     @staticmethod
     def _merge_update(existing, new_msg):

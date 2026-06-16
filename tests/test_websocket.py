@@ -36,16 +36,20 @@ def _recv(ws):
 
 def test_register_messages_sent_on_connect():
     canvas, slider, label, app = build_client()
+    # Both panels are native React panels (mounted by ReactHost): each registers
+    # with its state baked into the JSON `data` prop (for first paint), followed
+    # by a state update carrying the live value (so a reconnecting client gets the
+    # current value, not just the baked default). Collect the two registers,
+    # skipping the interleaved updates/presence.
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            msgs = [_recv(ws) for _ in range(2)]
+            regs = {}
+            while len(regs) < 2:
+                m = _recv(ws)
+                if m["type"] == "register":
+                    regs[m["id"]] = m
 
-    types = [(m["type"], m.get("component")) for m in msgs]
-    # Both panels are now native React panels (mounted by ReactHost): their state
-    # rides in the register props as the JSON `data` prop, so each registers with
-    # no separate initial-state update (two msgs total).
-    assert types.count(("register", "React")) == 2
-    regs = {m["id"]: m for m in msgs if m["type"] == "register"}
+    assert all(m.get("component") == "React" for m in regs.values())
     assert "180" in regs[slider.id]["props"]["data"]    # max baked into props
     assert "idle" in regs[label.id]["props"]["data"]    # initial value baked in
 
@@ -151,9 +155,6 @@ def test_snapshot_request_response():
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
-            for _ in range(2):
-                _recv(ws)
-
             # request_snapshot blocks the caller, so run it off-thread and
             # answer the get_snapshot request from this (the client) thread.
             result = {}
@@ -164,8 +165,10 @@ def test_snapshot_request_response():
             )
             t.start()
 
-            req = _recv(ws)
-            assert req["type"] == "get_snapshot" and "reqId" in req
+            # Skip the connect replay (register/update per panel) and wait for the
+            # snapshot request the background thread just broadcast.
+            req = _wait_type(ws, "get_snapshot")
+            assert "reqId" in req
             ws.send_json({"type": "snapshot", "reqId": req["reqId"], "data": fake_doc})
             t.join(timeout=3)
 

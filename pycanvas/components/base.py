@@ -110,6 +110,53 @@ class BaseComponent:
             )
         self._queue = policy
 
+    # -- role-based visibility -----------------------------------------------
+    @property
+    def roles(self):
+        """The viewer roles allowed to see this panel (``[]`` means all roles).
+
+        This is the live form of the ``roles=`` argument on the factory
+        (``canvas.react(..., roles=[...])``). Read-only; use :meth:`add_role` /
+        :meth:`remove_role` to change it so connected viewers update too.
+        """
+        return list(self._roles)
+
+    def add_role(self, *roles):
+        """Allow these viewer roles to see the panel, live.
+
+        Appends to the role allowlist; roles already present are ignored. A
+        viewer currently connected under a newly added role is sent the panel
+        immediately, and later connections get it via the normal replay — so a
+        panel can be revealed to a role created after the server started (e.g. a
+        team whose password the admin just set). Returns ``self``.
+        """
+        added = [r for r in roles if r not in self._roles]
+        self._roles.extend(added)
+        if added and self._bridge is not None:
+            self._bridge.register_live(self, only_roles=set(added))
+        return self
+
+    def remove_role(self, *roles):
+        """Disallow these viewer roles from seeing the panel, live.
+
+        Removes them from the allowlist and tells any viewer currently connected
+        under a removed role to drop the panel. Roles not present are ignored.
+        Note that emptying the allowlist entirely means "visible to all roles",
+        so removing the last role *shows* the panel to everyone rather than
+        hiding it — keep at least one role (or re-add ``roles=``) to stay
+        restricted. Returns ``self``.
+        """
+        removed = [r for r in roles if r in self._roles]
+        for r in removed:
+            self._roles.remove(r)
+        # Only drop it live while the panel is still role-restricted; if the
+        # allowlist is now empty the panel is visible to everyone, so those
+        # viewers should keep it.
+        if removed and self._roles and self._bridge is not None:
+            for r in removed:
+                self._bridge.send_to_role(r, {"type": "remove", "id": self.id})
+        return self
+
     # -- layout (read public state; writes move/resize live) -----------------
     @property
     def x(self):
