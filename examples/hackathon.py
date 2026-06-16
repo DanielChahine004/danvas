@@ -201,14 +201,182 @@ def leaderboard_rows():
     return [{"name": n, "points": t["points"]} for n, t in ranked]
 
 
+def push_team(name):
+    """Send one team only *its* slice — catalogue, budget, and its own orders —
+    addressed to that role with update_for, so no other team's budget or orders
+    are ever sent to it (privacy by construction, not client-side filtering)."""
+    team_panel.update_for(role=name,
+                          team=name,
+                          rows=inv_rows(),
+                          budget=teams[name]["budget"],
+                          orders=[o for o in log if o["team"] == name][:40])
+
+
 def push_all():
+    # Broadcast the shared panels...
     board.update(rows=inv_rows())
     admin_stock.update(rows=inv_rows())
     admin_teams.update(teams=team_rows(True))
     admin_orders.update(log=log[:200])
-    team_panel.update(rows=inv_rows(), teams=team_rows(False), log=log[:40])
     leaderboard.update(rows=leaderboard_rows())
+    # ...then each team's private view, role by role.
+    for name in teams:
+        push_team(name)
 
+
+# ── Request handlers ──────────────────────────────────────────────────────────
+# All the app's behaviour lives here, next to the state it touches. They're
+# registered on the panels down in the wiring section (the panels don't exist
+# yet); every reference below — panels, PASSWORDS, grant_team_view — resolves at
+# call time, i.e. once the canvas is serving.
+
+def on_admin(msg, viewer):
+    # One handler for both admin panels — stock actions come from the stock
+    # panel, team actions from the teams panel; we dispatch on `action`.
+    if viewer.get("role") != "admin":
+        return  # the panels only reach admins, but authorize server-side too
+    action = msg.get("action")
+
+    if action == "item_set":
+        name = (msg.get("item") or "").strip()
+        if not name:
+            return
+        inventory[name] = {"stock": max(0, int(msg.get("stock", 0))),
+                           "price": max(0, int(msg.get("price", 0)))}
+        print(f"[admin] set {name}: ${inventory[name]['price']} / {inventory[name]['stock']} in stock")
+
+    elif action == "item_remove":
+        inventory.pop(msg.get("item", ""), None)
+
+    elif action == "team_add":
+        name = (msg.get("name") or "").strip()
+        pw = (msg.get("password") or "").strip()
+        if not name or not pw or name == "admin":
+            return
+        budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
+        new_team = name not in teams
+        # Upsert: keep the spent-down budget on edit (the form prefills it) and
+        # preserve the team's points across edits.
+        teams[name] = {"password": pw, "budget": budget,
+                       "points": teams.get(name, {}).get("points", 0)}
+        PASSWORDS[name] = pw
+        team_panel.add_role(name)   # team + board panels now admit this role, live
+        board.add_role(name)
+        grant_team_view(name)
+        print(f"[admin] {'created' if new_team else 'updated'} team {name!r} "
+              f"(password {pw!r}, budget ${budget})")
+
+    elif action == "team_remove":
+        name = msg.get("name", "")
+        if name in teams:
+            teams.pop(name)
+            PASSWORDS.pop(name, None)
+            team_panel.remove_role(name)   # drop the panels from that role, live
+            board.remove_role(name)
+            print(f"[admin] removed team {name!r}")
+
+    elif action == "award":
+        name = msg.get("name", "")
+        if name in teams:
+            teams[name]["points"] += int(msg.get("points", 0))
+            print(f"[admin] {name} -> {teams[name]['points']} pts")
+
+    elif action == "order_fulfil":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] == "fulfilled":
+            return
+        if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
+            print(f"[admin] can't fulfil order #{o['id']} "
+                  f"({o['qty']}x {o['item']} for {o['team']}): not enough stock/budget")
+            return
+        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {o['team']}")
+
+    elif action == "order_reject":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] in ("rejected", "retracted"):
+            return
+        set_order_status(o, "rejected")   # refunds budget (and returns stock if fulfilled)
+        print(f"[admin] marked #{o['id']} not fulfilled")
+
+    elif action == "order_edit":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] != "pending":
+            return  # only a pending order's quantity can be edited
+        new_qty = max(1, int(msg.get("qty", o["qty"])))
+        new_cost = o["price"] * new_qty
+        t = teams.get(o["team"])
+        if t is not None:
+            # The order already holds o["cost"]; adjust the reservation to the new
+            # cost, refusing an increase the team can't afford.
+            if t["budget"] + o["cost"] < new_cost:
+                return
+            t["budget"] += o["cost"] - new_cost
+        o["qty"] = new_qty
+        o["cost"] = new_cost
+
+    else:
+        return
+
+    save()
+    push_all()
+
+
+def on_team(msg, viewer):
+    team = viewer.get("role")
+    if team not in teams:
+        return
+    action = msg.get("action")
+
+    if action == "ping":
+        push_all()
+        return
+
+    if action == "file":
+        # File a cart of [{item, qty}, …] as one pending order per line. Budget is
+        # reserved now; prices are snapshotted. Atomic: if the team can't afford
+        # the whole cart, nothing is filed (the UI also pre-checks this).
+        lines = []
+        total = 0
+        for entry in msg.get("cart", []):
+            item = entry.get("item", "")
+            qty = max(1, int(entry.get("qty", 1)))
+            if item not in inventory:
+                continue
+            price = inventory[item]["price"]
+            lines.append((item, qty, price))
+            total += price * qty
+        if not lines or teams[team]["budget"] < total:
+            return
+        for item, qty, price in lines:
+            order = {"id": next_order_id(), "team": team, "item": item,
+                     "qty": qty, "price": price, "cost": price * qty,
+                     "status": "pending"}
+            log.insert(0, order)
+            reserve_budget(order)   # budget goes down on request
+        print(f"[{team}] filed {len(lines)} line(s) for ${total:,} "
+              f"(budget left: ${teams[team]['budget']:,})")
+        save()
+        push_all()
+        return
+
+    if action == "retract":
+        o = find_order(msg.get("id"))
+        # A team can only retract its *own* still-pending order; this refunds the
+        # reserved budget.
+        if o is None or o["team"] != team or o["status"] != "pending":
+            return
+        set_order_status(o, "retracted")
+        print(f"[{team}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
+        save()
+        push_all()
+        return
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PANEL VIEWS — the frontend. Each panel is a React component authored as JSX,
+# with its stylesheet in a sibling CSS string (passed as css=). This is the bulk
+# of the file but none of the app logic; skip to "Canvas layout" for the wiring.
+# ══════════════════════════════════════════════════════════════════════════════
 
 # ── Inventory board (everyone) ────────────────────────────────────────────────
 
@@ -245,7 +413,6 @@ function Component({ props }) {
   }
   return (
     <div className="pc-sb">
-      <style>{`__BOARD_CSS__`}</style>
       <div className="hd">📦 Inventory</div>
       {rows.length === 0
         ? <div className="empty">No items in the catalogue yet.</div>
@@ -260,7 +427,7 @@ function Component({ props }) {
     </div>
   );
 }
-""".replace("__BOARD_CSS__", _BOARD_CSS)
+"""
 
 
 # ── Admin panels (admin only) ─────────────────────────────────────────────────
@@ -327,7 +494,6 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-sa">
-      <style>{`__ADMIN_CSS__`}</style>
       <div className="hd">⚙️ Stock Control</div>
 
       <div className="sec">
@@ -362,7 +528,7 @@ function Component({ canvas, props }) {
     </div>
   );
 }
-""".replace("__ADMIN_CSS__", _ADMIN_CSS)
+"""
 
 
 # Panel 2: team management — create/edit/remove teams (budget) and award points.
@@ -391,7 +557,6 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-sa">
-      <style>{`__ADMIN_CSS__`}</style>
       <div className="hd">👥 Teams</div>
 
       <div className="sec">
@@ -450,7 +615,7 @@ function Component({ canvas, props }) {
     </div>
   );
 }
-""".replace("__ADMIN_CSS__", _ADMIN_CSS)
+"""
 
 
 # ── Team panel (teams only) ───────────────────────────────────────────────────
@@ -546,19 +711,14 @@ _TEAM_CSS = """
 
 _TEAM_SOURCE = """
 function Component({ canvas, props }) {
-  const rows  = props.rows  || [];
-  const teams = props.teams || [];
-  const log   = props.log   || [];
+  // Everything here is *this team's own* slice, delivered by Python's
+  // update_for(role=...) — the panel never receives another team's figures, so
+  // there's nothing to filter and no need to read our own identity.
+  const rows   = props.rows   || [];
+  const myTeam = props.team   || "";
+  const budget = props.budget || 0;     // already net of reserved orders
+  const myLog  = props.orders || [];
   const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
-
-  // Our own viewer identity — `role` is the team we logged in as (server-set).
-  const [me, setMe] = React.useState(null);
-  React.useEffect(() => canvas.chat.identity(setMe), []);
-  const myTeam = me && me.role;
-
-  const mine   = teams.find(t => t.name === myTeam);
-  const budget = mine ? mine.budget : 0;          // already net of reserved orders
-  const myLog  = log.filter(r => r.team === myTeam);
   const priceOf = (item) => { const r = rows.find(x => x.item === item); return r ? r.price : 0; };
 
   const [sel, setSel]   = React.useState(null);
@@ -613,7 +773,6 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-su">
-      <style>{`__TEAM_CSS__`}</style>
       <div className="top">
         <span className="tname">🛒 {myTeam || "…"}</span>
         <span className="tbud">${budget.toLocaleString()} left</span>
@@ -711,7 +870,7 @@ function Component({ canvas, props }) {
     </div>
   );
 }
-""".replace("__TEAM_CSS__", _TEAM_CSS)
+"""
 
 
 # ── Orders panel (admin only) ─────────────────────────────────────────────────
@@ -825,7 +984,6 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-ord">
-      <style>{`__ORDERS_CSS__`}</style>
       <div className="hd">📋 Orders</div>
 
       <div className="bar">
@@ -887,12 +1045,29 @@ function Component({ canvas, props }) {
     </div>
   );
 }
-""".replace("__ORDERS_CSS__", _ORDERS_CSS)
+"""
 
 
 # ── Leaderboard (everyone) ────────────────────────────────────────────────────
 # Teams ranked by points, medals for the top three. Visible to admins, teams and
 # spectators alike. Adapted from examples/leaderboard.py.
+
+_LEADERBOARD_CSS = """
+.pc-lb{padding:14px;height:100%;overflow:auto;box-sizing:border-box;
+       font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-lb .hd{font-size:16px;font-weight:700;margin-bottom:14px}
+.pc-lb table{width:100%;border-collapse:collapse;font-size:14px}
+.pc-lb th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;
+          text-transform:uppercase;letter-spacing:.05em;
+          border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-lb td{padding:11px 12px;border-bottom:1px solid #1e293b}
+.pc-lb tr:last-child td{border-bottom:none}
+.pc-lb .pts{font-variant-numeric:tabular-nums;font-weight:800;text-align:right}
+.pc-lb .rank{width:40px;text-align:center;font-size:18px;font-weight:700}
+.pc-lb .name{font-weight:600}
+.pc-lb .medal td{font-weight:700}
+.pc-lb .empty{color:#64748b;padding:10px 4px;font-size:13px}
+"""
 
 _LEADERBOARD_SOURCE = """
 function Component({ props }) {
@@ -900,26 +1075,8 @@ function Component({ props }) {
   const MEDAL = ["🥇","🥈","🥉"];
   const MEDAL_BG = ["#78350f","#334155","#431407"];  // gold / silver / bronze tints
 
-  const styles = `
-    .pc-lb{padding:14px;height:100%;overflow:auto;box-sizing:border-box;
-           font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
-    .pc-lb .hd{font-size:16px;font-weight:700;margin-bottom:14px}
-    .pc-lb table{width:100%;border-collapse:collapse;font-size:14px}
-    .pc-lb th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;
-              text-transform:uppercase;letter-spacing:.05em;
-              border-bottom:1px solid var(--pc-border,#30363d)}
-    .pc-lb td{padding:11px 12px;border-bottom:1px solid #1e293b}
-    .pc-lb tr:last-child td{border-bottom:none}
-    .pc-lb .pts{font-variant-numeric:tabular-nums;font-weight:800;text-align:right}
-    .pc-lb .rank{width:40px;text-align:center;font-size:18px;font-weight:700}
-    .pc-lb .name{font-weight:600}
-    .pc-lb .medal td{font-weight:700}
-    .pc-lb .empty{color:#64748b;padding:10px 4px;font-size:13px}
-  `;
-
   return (
     <div className="pc-lb">
-      <style>{styles}</style>
       <div className="hd">🏆 Leaderboard</div>
       {rows.length === 0
         ? <div className="empty">No teams yet.</div>
@@ -960,37 +1117,46 @@ function Component({ props }) {
 # The inventory board is for admins and teams, not spectators, so it carries
 # explicit roles (admin + each team) and grows with new teams, like team_panel.
 # "admin" is always present, so the list is never empty.
-board = canvas.react(_BOARD_SOURCE, name="board",
+# Each panel keeps its stylesheet in a plain Python string passed as ``css=`` —
+# the host renders it into a <style>, so there's no inline <style>/`.replace()`.
+
+# The inventory board is for admins and teams, not spectators, so it carries
+# explicit roles (admin + each team) and grows with new teams, like team_panel.
+# "admin" is always present, so the list is never empty.
+board = canvas.react(_BOARD_SOURCE, name="board", css=_BOARD_CSS,
                      x=40, y=40, w=440, h=560,
                      roles=["admin", *teams.keys()],
                      props={"rows": inv_rows()})
 
 # Props are seeded from the loaded JSON so the admin sees the full catalogue,
 # every team (budget + points) and the order log on the very first connect.
-admin_stock = canvas.react(_STOCK_SOURCE, name="stock",
+admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS,
                            x=500, y=40, w=380, h=560,
                            roles=["admin"],
                            props={"rows": inv_rows()})
 
-admin_teams = canvas.react(_TEAMS_SOURCE, name="teams",
+admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
                            x=40, y=620, w=440, h=340,
                            roles=["admin"],
                            props={"teams": team_rows(True)})
 
-admin_orders = canvas.react(_ORDERS_SOURCE, name="orders",
+admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
                             x=500, y=620, w=760, h=340,
                             roles=["admin"],
                             props={"log": log[:200]})
 
 # Team roles are dynamic: seed with the teams already in the JSON, plus the
 # sentinel so the list is never empty. New teams are appended in `team_add`.
-team_panel = canvas.react(_TEAM_SOURCE, name="team",
+# The team panel's per-team data (its name, budget, and orders) is delivered with
+# update_for so no team ever receives another team's figures (see push_all); the
+# seed props just cover the first render before the panel's ping arrives.
+team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS,
                           x=500, y=40, w=380, h=560,
                           roles=[TEAM_SENTINEL, *teams.keys()],
-                          props={"rows": inv_rows(), "teams": team_rows(False), "log": log[:40]})
+                          props={"rows": inv_rows(), "team": "", "budget": 0, "orders": []})
 
 # The leaderboard is for everyone (roles=[] = all roles, incl. spectators).
-leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard",
+leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard", css=_LEADERBOARD_CSS,
                            x=900, y=40, w=360, h=560,
                            props={"rows": leaderboard_rows()})
 
@@ -1013,154 +1179,20 @@ for _name in teams:
     grant_team_view(_name)
 
 
-# ── Python callbacks ──────────────────────────────────────────────────────────
-
-def on_admin(msg, viewer):
-    # One handler for both admin panels — stock actions come from the stock
-    # panel, team actions from the teams panel; we dispatch on `action`.
-    if viewer.get("role") != "admin":
-        return  # the panels only reach admins, but authorize server-side too
-    action = msg.get("action")
-
-    if action == "item_set":
-        name = (msg.get("item") or "").strip()
-        if not name:
-            return
-        inventory[name] = {"stock": max(0, int(msg.get("stock", 0))),
-                           "price": max(0, int(msg.get("price", 0)))}
-        print(f"[admin] set {name}: ${inventory[name]['price']} / {inventory[name]['stock']} in stock")
-
-    elif action == "item_remove":
-        inventory.pop(msg.get("item", ""), None)
-
-    elif action == "team_add":
-        name = (msg.get("name") or "").strip()
-        pw = (msg.get("password") or "").strip()
-        if not name or not pw or name == "admin":
-            return
-        budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
-        new_team = name not in teams
-        # Upsert: keep the spent-down budget on edit (the form prefills it) and
-        # preserve the team's points across edits.
-        teams[name] = {"password": pw, "budget": budget,
-                       "points": teams.get(name, {}).get("points", 0)}
-        PASSWORDS[name] = pw
-        team_panel.add_role(name)   # team + board panels now admit this role, live
-        board.add_role(name)
-        grant_team_view(name)
-        print(f"[admin] {'created' if new_team else 'updated'} team {name!r} "
-              f"(password {pw!r}, budget ${budget})")
-
-    elif action == "team_remove":
-        name = msg.get("name", "")
-        if name in teams:
-            teams.pop(name)
-            PASSWORDS.pop(name, None)
-            team_panel.remove_role(name)   # drop the panels from that role, live
-            board.remove_role(name)
-            print(f"[admin] removed team {name!r}")
-
-    elif action == "award":
-        name = msg.get("name", "")
-        if name in teams:
-            teams[name]["points"] += int(msg.get("points", 0))
-            print(f"[admin] {name} -> {teams[name]['points']} pts")
-
-    elif action == "order_fulfil":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] == "fulfilled":
-            return
-        if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
-            print(f"[admin] can't fulfil order #{o['id']} "
-                  f"({o['qty']}x {o['item']} for {o['team']}): not enough stock/budget")
-            return
-        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {o['team']}")
-
-    elif action == "order_reject":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] in ("rejected", "retracted"):
-            return
-        set_order_status(o, "rejected")   # refunds budget (and returns stock if fulfilled)
-        print(f"[admin] marked #{o['id']} not fulfilled")
-
-    elif action == "order_edit":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] != "pending":
-            return  # only a pending order's quantity can be edited
-        new_qty = max(1, int(msg.get("qty", o["qty"])))
-        new_cost = o["price"] * new_qty
-        t = teams.get(o["team"])
-        if t is not None:
-            # The order already holds o["cost"]; adjust the reservation to the new
-            # cost, refusing an increase the team can't afford.
-            if t["budget"] + o["cost"] < new_cost:
-                return
-            t["budget"] += o["cost"] - new_cost
-        o["qty"] = new_qty
-        o["cost"] = new_cost
-
-    else:
-        return
-
-    save()
-    push_all()
-
-
+# ── Wire the handlers (defined up top) to the panels ──────────────────────────
 admin_stock.on_message(on_admin)
 admin_teams.on_message(on_admin)
 admin_orders.on_message(on_admin)
+team_panel.on_message(on_team)
 
 
-@team_panel.on_message
-def on_team(msg, viewer):
-    team = viewer.get("role")
-    if team not in teams:
-        return
-    action = msg.get("action")
-
-    if action == "ping":
-        push_all()
-        return
-
-    if action == "file":
-        # File a cart of [{item, qty}, …] as one pending order per line. Budget is
-        # reserved now; prices are snapshotted. Atomic: if the team can't afford
-        # the whole cart, nothing is filed (the UI also pre-checks this).
-        lines = []
-        total = 0
-        for entry in msg.get("cart", []):
-            item = entry.get("item", "")
-            qty = max(1, int(entry.get("qty", 1)))
-            if item not in inventory:
-                continue
-            price = inventory[item]["price"]
-            lines.append((item, qty, price))
-            total += price * qty
-        if not lines or teams[team]["budget"] < total:
-            return
-        for item, qty, price in lines:
-            order = {"id": next_order_id(), "team": team, "item": item,
-                     "qty": qty, "price": price, "cost": price * qty,
-                     "status": "pending"}
-            log.insert(0, order)
-            reserve_budget(order)   # budget goes down on request
-        print(f"[{team}] filed {len(lines)} line(s) for ${total:,} "
-              f"(budget left: ${teams[team]['budget']:,})")
-        save()
-        push_all()
-        return
-
-    if action == "retract":
-        o = find_order(msg.get("id"))
-        # A team can only retract its *own* still-pending order; this refunds the
-        # reserved budget.
-        if o is None or o["team"] != team or o["status"] != "pending":
-            return
-        set_order_status(o, "retracted")
-        print(f"[{team}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
-        save()
-        push_all()
-        return
+# Startup lint: catch JSX typos (a missing Component, unbalanced braces) here
+# instead of as a cryptic error in the browser after someone connects.
+for _name, _panel in [("board", board), ("stock", admin_stock),
+                      ("teams", admin_teams), ("orders", admin_orders),
+                      ("team", team_panel), ("leaderboard", leaderboard)]:
+    for _issue in _panel.validate():
+        print(f"[warn] {_name} panel source: {_issue}")
 
 
 canvas.serve(
