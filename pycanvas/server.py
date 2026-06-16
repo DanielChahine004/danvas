@@ -1,6 +1,10 @@
 """FastAPI app: WebSocket endpoint + static serving of the built frontend."""
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 import os
 import secrets
 import socket
@@ -217,6 +221,57 @@ def _cookie_token(request_or_ws):
     return request_or_ws.cookies.get(_AUTH_COOKIE)
 
 
+def _b64(raw):
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _unb64(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def _session_secret():
+    """Key used to sign session cookies.
+
+    Under hot reload the watcher process exports one fixed key to every worker
+    (``_PYCANVAS_RELOAD_SECRET``) so a viewer's cookie keeps validating across
+    restarts — the websocket just reconnects and replays, no re-login on each
+    edit. Without it (a plain run) the key is per-process, so a real restart
+    re-prompts exactly as before.
+    """
+    env = os.environ.get("_PYCANVAS_RELOAD_SECRET")
+    return env.encode("utf-8") if env else secrets.token_bytes(32)
+
+
+def _sign_session(role, secret):
+    """A stateless, tamper-proof session token that encodes ``role``.
+
+    The role travels in the (signed) cookie itself instead of a server-side map,
+    so no shared session store is needed — any process holding ``secret`` can
+    verify it. ``role`` is ``None`` for single-password mode.
+    """
+    payload = _b64(json.dumps({"r": role}).encode("utf-8"))
+    sig = hmac.new(secret, payload.encode("ascii"), hashlib.sha256).digest()
+    return f"{payload}.{_b64(sig)}"
+
+
+def _read_session(token, secret):
+    """Validate a signed session ``token``; return ``(ok, role)``.
+
+    ``role`` is ``None`` both for single-password mode and for any invalid token
+    (callers gate on ``ok`` first).
+    """
+    if not token or "." not in token:
+        return False, None
+    payload, _, sig = token.partition(".")
+    expected = hmac.new(secret, payload.encode("ascii"), hashlib.sha256).digest()
+    try:
+        if not hmac.compare_digest(expected, _unb64(sig)):
+            return False, None
+        return True, json.loads(_unb64(payload)).get("r")
+    except Exception:
+        return False, None
+
+
 def create_app(bridge, port=8000, open_browser=True, password=None,
                passwords=None):
     """Create the FastAPI app.
@@ -252,14 +307,19 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
 
     auth_required = role_map is not None or single_pw is not None
 
-    # Sessions store: token -> role (role is None when single_pw is used).
-    sessions = {}
+    # Sessions are stateless: the role rides in a signed cookie (see
+    # _sign_session), so there's no in-memory token map to lose on a restart —
+    # which is what lets hot reload reconnect a viewer without re-login.
+    secret = _session_secret()
 
     def _authed(scope_obj):
-        return not auth_required or _cookie_token(scope_obj) in sessions
+        if not auth_required:
+            return True
+        ok, _ = _read_session(_cookie_token(scope_obj), secret)
+        return ok
 
     def _role_of(scope_obj):
-        return sessions.get(_cookie_token(scope_obj))
+        return _read_session(_cookie_token(scope_obj), secret)[1]
 
     if auth_required:
         @app.post("/__auth__")
@@ -276,13 +336,11 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
                         break
                 if matched_role is None:
                     return HTMLResponse(_login_page(error=True), status_code=401)
-                token = secrets.token_urlsafe(24)
-                sessions[token] = matched_role
+                token = _sign_session(matched_role, secret)
             else:
                 if not secrets.compare_digest(str(given), str(single_pw)):
                     return HTMLResponse(_login_page(error=True), status_code=401)
-                token = secrets.token_urlsafe(24)
-                sessions[token] = None
+                token = _sign_session(None, secret)
             resp = RedirectResponse(url="/", status_code=303)
             resp.set_cookie(_AUTH_COOKIE, token, httponly=True,
                             samesite="lax", max_age=86400)

@@ -1338,7 +1338,10 @@ class Canvas:
         new tab opens). Only available with ``block=True`` (a script entry
         point); ``block=False`` with ``hot_reload=True`` raises an error, and
         calling it outside a ``python yourscript.py`` run (e.g. a notebook)
-        raises too.
+        raises too. With ``tunnel=True`` the tunnel is opened once by the
+        long-lived watcher process (not the restarting worker), so the public URL
+        stays the same across reloads and the provider isn't re-created on every
+        save — visitors just see a momentary blip during each restart.
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
@@ -1431,7 +1434,13 @@ class Canvas:
                 )
             if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
                 from .hotreload import run_monitor
-                run_monitor(main_file)
+                # The monitor outlives every worker restart, so it — not the
+                # short-lived worker — owns the tunnel: one tunnel is opened here
+                # at the fixed port and stays put across reloads (no per-edit
+                # cloudflared churn, and a stable public URL). Workers serve the
+                # port behind it; see own_tunnel below.
+                run_monitor(main_file, tunnel=tunnel, port=port,
+                            tunnel_provider=tunnel_provider)
                 return self
             if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
                 # Already opened on first launch; a reload should reuse the
@@ -1442,6 +1451,11 @@ class Canvas:
                 # the previous run's panels (their ids change each run) before we
                 # replay this run's — otherwise stale panels linger beside the new.
                 self._bridge._reload = True
+        # Under hot reload the persistent monitor process owns the tunnel (above),
+        # so this worker must not open its own — but it's still publicly reachable
+        # *through* that tunnel, so every public-exposure decision below stays keyed
+        # on `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
+        own_tunnel = tunnel and os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1"
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
@@ -1488,7 +1502,7 @@ class Canvas:
         use_desktop = bool(getattr(sys, "frozen", False)) if desktop is None \
             else bool(desktop)
         if use_desktop:
-            self._serve_desktop(port, host, tunnel, tunnel_provider,
+            self._serve_desktop(port, host, own_tunnel, tunnel_provider,
                                 window_title, window_size, password,
                                 passwords=passwords)
             return self
@@ -1500,11 +1514,11 @@ class Canvas:
             if wait:
                 self._wait_until_ready()
             self._serving = True
-            if tunnel:
+            if own_tunnel:
                 self._start_tunnel(port, tunnel_provider)
             return self
         self._serving = True
-        if tunnel:
+        if own_tunnel:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,

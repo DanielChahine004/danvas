@@ -1,9 +1,12 @@
 """Hackathon control room: a JSON-backed shop + a live points leaderboard.
 
 Teams spend a budget on resources from a catalogue and earn points from judges;
-all state — the catalogue, the teams (password + budget + points), and the order
-log — lives in ``hackathon_data.json`` next to this script. It's loaded at
-startup and rewritten on every change, so a restart resumes where it left off.
+all state lives in three CSV files next to this script — ``hackathon_inventory.csv``
+(the catalogue), ``hackathon_teams.csv`` (password + budget + points), and
+``hackathon_orders.csv`` (the order log) — so it's easy to eyeball or edit in a
+spreadsheet. They're loaded at startup and rewritten on every change, so a restart
+resumes where it left off. On first run the old ``hackathon_data.json`` (if present)
+is read once to seed the CSVs, after which the JSON is ignored.
 
 Roles
 -----
@@ -39,12 +42,18 @@ panel; the leaderboard ranks teams live, medals for the top three, and is visibl
 to everyone — admins, teams, and spectators.
 """
 
+import csv
 import json
 import os
 
 import pycanvas
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "hackathon_data.json")
+_HERE = os.path.dirname(__file__)
+INVENTORY_CSV = os.path.join(_HERE, "hackathon_inventory.csv")
+TEAMS_CSV = os.path.join(_HERE, "hackathon_teams.csv")
+ORDERS_CSV = os.path.join(_HERE, "hackathon_orders.csv")
+ANNOUNCEMENT_MD = os.path.join(_HERE, "hackathon_announcement.md")  # admin notice board
+LEGACY_JSON = os.path.join(_HERE, "hackathon_data.json")  # one-time bootstrap only
 ADMIN_PASSWORD = "admin"
 VIEWER_PASSWORD = "view"     # spectator: read-only catalogue + leaderboard
 DEFAULT_BUDGET = 2000
@@ -58,29 +67,176 @@ canvas = pycanvas.Canvas()
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
+# State lives in three CSV tables (inventory / teams / orders) so it can be read
+# or edited in a spreadsheet. A team's identity is its *id* (the ``id`` column);
+# the name is just a display field, so renaming a team never disturbs logins or
+# order history (which reference the id). In memory: item->{stock,price},
+# id->{name,password,budget,points}, and [orders] whose ``team`` is a team id.
+# Columns are the canonical schema — extra columns are ignored, and a missing/
+# empty file just loads as empty.
 
-DATA_VERSION = 2   # bumped when the saved-state model changes (see migration)
+INVENTORY_COLS = ("item", "stock", "price")
+TEAMS_COLS = ("id", "name", "password", "budget", "points")
+ORDERS_COLS = ("id", "team", "item", "qty", "price", "cost", "status")
+
+
+def _read_csv(path):
+    """Rows of a CSV as dicts, or None if the file doesn't exist."""
+    if not os.path.exists(path):
+        return None
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_csv(path, header, rows):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+def _bootstrap_from_json():
+    """Seed CSV-shaped rows from the old single-file JSON on first run.
+
+    Returns ``(inventory_rows, team_rows, order_rows)`` — the same dict-per-row
+    shape a CSV would, so load() normalises both sources the same way. Empty lists
+    if there's nothing to migrate. Carries the v1→v2 budget fix: v1 reserved a
+    team's budget only at fulfilment, v2 reserves it at request, so back pending
+    orders out once here. Runs at most once: the next save writes CSVs and the
+    JSON is never read again.
+    """
+    if not os.path.exists(LEGACY_JSON):
+        return [], [], []
+    with open(LEGACY_JSON, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    inv, tms, lg = data.get("inventory", {}), data.get("teams", {}), data.get("log", [])
+    if data.get("version", 1) < 2:
+        for o in lg:
+            if o.get("status") == "pending":
+                t = tms.get(o.get("team"))
+                if t is not None:
+                    t["budget"] = t.get("budget", 0) - o.get("cost", 0)
+    inv_rows = [{"item": k, "stock": v["stock"], "price": v["price"]}
+                for k, v in inv.items()]
+    # No id in the old JSON (teams were keyed by name); load() assigns one, and
+    # orders still referencing a name are remapped to that id there.
+    team_rows = [{"name": k, "password": v.get("password", ""),
+                  "budget": v.get("budget", 0), "points": v.get("points", 0)}
+                 for k, v in tms.items()]
+    order_rows = [dict(o) for o in lg]
+    return inv_rows, team_rows, order_rows
+
+
+def _norm_teams(rows):
+    """Build the id-keyed teams dict from raw rows, assigning a stable id to any
+    row that lacks one (the pre-id schema, or a hand-added row). Returns
+    ``(teams, name2id)``; the name→id map migrates orders that still reference a
+    team by name (see load()) and is meaningless once orders hold ids."""
+    teams, used, pending = {}, set(), []
+    for r in rows or []:
+        name = (str(r.get("name") or "")).strip()
+        if not name:
+            continue
+        rec = {"name": name, "password": str(r.get("password") or ""),
+               "budget": int(r.get("budget") or 0),
+               "points": int(r.get("points") or 0)}
+        tid = (str(r.get("id") or "")).strip()
+        if tid and tid not in teams:
+            teams[tid] = rec
+            used.add(tid)
+        else:
+            pending.append(rec)   # missing or duplicate id -> assign one below
+    seq = 0
+    for rec in pending:
+        seq += 1
+        while f"t{seq}" in used:
+            seq += 1
+        used.add(f"t{seq}")
+        teams[f"t{seq}"] = rec
+    name2id = {rec["name"]: tid for tid, rec in teams.items()}
+    return teams, name2id
 
 
 def load():
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return (data["inventory"], data["teams"], data.get("log", []),
-            data.get("version", 1))
+    inv_rows = _read_csv(INVENTORY_CSV)
+    team_rows_ = _read_csv(TEAMS_CSV)
+    order_rows = _read_csv(ORDERS_CSV)
+    if inv_rows is None and team_rows_ is None and order_rows is None:
+        inv_rows, team_rows_, order_rows = _bootstrap_from_json()
+    inventory = {r["item"]: {"stock": int(r["stock"]), "price": int(r["price"])}
+                 for r in (inv_rows or []) if r.get("item")}
+    teams, name2id = _norm_teams(team_rows_)
+    log = [{"id": int(r["id"]), "team": str(r["team"]), "item": r["item"],
+            "qty": int(r["qty"]), "price": int(r["price"]), "cost": int(r["cost"]),
+            "status": r["status"]}
+           for r in (order_rows or []) if r.get("id")]
+    # One-time migration: orders that reference a team by name (the pre-id schema)
+    # get rewritten to its id. A no-op once orders already hold ids.
+    for o in log:
+        if o["team"] not in teams and o["team"] in name2id:
+            o["team"] = name2id[o["team"]]
+    return inventory, teams, log
 
 
 def save():
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump({"version": DATA_VERSION, "inventory": inventory,
-                   "teams": teams, "log": log}, f, indent=2)
+    _write_csv(INVENTORY_CSV, INVENTORY_COLS,
+               ([k, v["stock"], v["price"]] for k, v in inventory.items()))
+    _write_csv(TEAMS_CSV, TEAMS_COLS,
+               ([tid, t["name"], t["password"], t["budget"], t["points"]]
+                for tid, t in teams.items()))
+    _write_csv(ORDERS_CSV, ORDERS_COLS,
+               ([o["id"], o["team"], o["item"], o["qty"], o["price"], o["cost"], o["status"]]
+                for o in log))
 
 
-inventory, teams, log, _data_version = load()   # item->{stock,price}, team->{password,budget,points}, [orders]
+DEFAULT_ANNOUNCEMENT = (
+    "# 📣 Welcome to the hackathon!\n\n"
+    "Admins can edit this board live. Markdown works: **bold**, *italics*,\n"
+    "`code`, [links](https://example.com), lists and headings.\n\n"
+    "- Pinned info and rules go here\n"
+    "- Updates appear instantly for every team\n"
+)
 
-# Every team carries a points total for the leaderboard; backfill it for teams
-# saved before points existed (idempotent, so it runs safely on every load).
-for _t in teams.values():
-    _t.setdefault("points", 0)
+
+def load_announcement():
+    """The announcement board's Markdown, from its own .md file (human-editable
+    in any text editor). Falls back to a friendly default on first run."""
+    if os.path.exists(ANNOUNCEMENT_MD):
+        with open(ANNOUNCEMENT_MD, "r", encoding="utf-8") as f:
+            return f.read()
+    return DEFAULT_ANNOUNCEMENT
+
+
+def save_announcement(text):
+    with open(ANNOUNCEMENT_MD, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+inventory, teams, log = load()
+announcement = load_announcement()
+
+
+def _max_team_seq():
+    """Highest n among ids shaped ``t{n}``, so runtime ids continue the sequence
+    without colliding with ones already assigned on load."""
+    return max((int(tid[1:]) for tid in teams
+                if tid[:1] == "t" and tid[1:].isdigit()), default=0)
+
+
+_team_seq = _max_team_seq()
+
+
+def next_team_id():
+    global _team_seq
+    _team_seq += 1
+    return f"t{_team_seq}"
+
+
+def team_name(tid):
+    """Display name for a team id (falls back to the id, e.g. for an order that
+    references a since-deleted team)."""
+    t = teams.get(tid)
+    return t["name"] if t else tid
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
@@ -109,17 +265,6 @@ def normalize_log():
 
 
 normalize_log()
-
-# Migrate v1 saves (budget was deducted only at fulfilment) to v2 (budget is
-# reserved at request): pending orders didn't count against budget before, so
-# reserve them once now. Fulfilled orders were already deducted, so they're left
-# alone. Stamped DATA_VERSION on the next save, making this run exactly once.
-if _data_version < 2:
-    for o in log:
-        if o["status"] == "pending":
-            t = teams.get(o["team"])
-            if t is not None:
-                t["budget"] -= o["cost"]
 
 _order_seq = max((o["id"] for o in log), default=0)
 
@@ -186,9 +331,10 @@ def inv_rows():
 
 def team_rows(with_passwords):
     # Admins get the passwords (they set them); teams never see another team's.
+    # ``id`` rides along so the admin panel can edit/remove/award by stable id.
     out = []
-    for name, t in teams.items():
-        row = {"name": name, "budget": t["budget"], "points": t["points"]}
+    for tid, t in teams.items():
+        row = {"id": tid, "name": t["name"], "budget": t["budget"], "points": t["points"]}
         if with_passwords:
             row["password"] = t["password"]
         out.append(row)
@@ -196,20 +342,36 @@ def team_rows(with_passwords):
 
 
 def leaderboard_rows():
-    """Teams ranked by points, highest first — what the leaderboard renders."""
+    """Teams ranked by points, highest first, with *standard competition ranking*
+    — tied teams share a rank and the next rank skips accordingly (1, 2, 2, 4).
+    The ``rank`` rides along so the leaderboard can give ties the same medal."""
     ranked = sorted(teams.items(), key=lambda kv: kv[1]["points"], reverse=True)
-    return [{"name": n, "points": t["points"]} for n, t in ranked]
+    rows = []
+    rank = 0
+    last_points = None
+    for i, (tid, t) in enumerate(ranked):
+        if t["points"] != last_points:
+            rank = i + 1            # first team at this score sets the shared rank
+            last_points = t["points"]
+        rows.append({"id": tid, "name": t["name"], "points": t["points"], "rank": rank})
+    return rows
 
 
-def push_team(name):
+def admin_order_rows():
+    """The order log with each row's team id resolved to its display name, for the
+    admin Orders table (orders store the id; admins read names)."""
+    return [{**o, "team": team_name(o["team"])} for o in log[:200]]
+
+
+def push_team(tid):
     """Send one team only *its* slice — catalogue, budget, and its own orders —
-    addressed to that role with update_for, so no other team's budget or orders
+    addressed to its id-role with update_for, so no other team's budget or orders
     are ever sent to it (privacy by construction, not client-side filtering)."""
-    team_panel.update_for(role=name,
-                          team=name,
+    team_panel.update_for(role=tid,
+                          team=teams[tid]["name"],
                           rows=inv_rows(),
-                          budget=teams[name]["budget"],
-                          orders=[o for o in log if o["team"] == name][:40])
+                          budget=teams[tid]["budget"],
+                          orders=[o for o in log if o["team"] == tid][:40])
 
 
 def push_all():
@@ -217,11 +379,11 @@ def push_all():
     board.update(rows=inv_rows())
     admin_stock.update(rows=inv_rows())
     admin_teams.update(teams=team_rows(True))
-    admin_orders.update(log=log[:200])
+    admin_orders.update(log=admin_order_rows())
     leaderboard.update(rows=leaderboard_rows())
     # ...then each team's private view, role by role.
-    for name in teams:
-        push_team(name)
+    for tid in teams:
+        push_team(tid)
 
 
 # ── Request handlers ──────────────────────────────────────────────────────────
@@ -230,6 +392,44 @@ def push_all():
 # yet); every reference below — panels, PASSWORDS, grant_team_view — resolves at
 # call time, i.e. once the canvas is serving.
 
+def reload_data():
+    """Re-read the three CSVs from disk so manual edits apply without a restart.
+
+    State is replaced *in place* (clear + refill) so every existing reference —
+    handlers and panels alike — keeps pointing at the live objects. Auth and the
+    team/board panel roles are reconciled for teams that appeared or vanished in
+    the CSV, mirroring what team_add/team_remove do for in-app edits.
+    """
+    global _order_seq, _team_seq, announcement
+    new_inv, new_teams, new_log = load()
+    old_ids = set(teams)
+    inventory.clear(); inventory.update(new_inv)
+    teams.clear(); teams.update(new_teams)
+    log.clear(); log.extend(new_log)
+    # Pick up an externally-edited announcement file too, and re-broadcast it.
+    announcement = load_announcement()
+    announce_display.update(announcement)
+    announce_editor.update(text=announcement)
+    normalize_log()                                   # backfill ids/cost on hand-edited rows
+    _order_seq = max((o["id"] for o in log), default=0)
+    _team_seq = _max_team_seq()
+    # Reconcile panel roles for teams added/removed via the CSV. A team renamed in
+    # the CSV keeps its id, so it isn't in either diff — no role churn, and its
+    # connected members keep their session and panels.
+    new_ids = set(teams)
+    for tid in new_ids - old_ids:
+        team_panel.add_role(tid)
+        board.add_role(tid)
+        grant_team_view(tid)
+    for tid in old_ids - new_ids:
+        team_panel.remove_role(tid)
+        board.remove_role(tid)
+    # Rebuild the auth map in place so edited/removed passwords take effect too.
+    PASSWORDS.clear()
+    PASSWORDS.update({"admin": ADMIN_PASSWORD, "viewer": VIEWER_PASSWORD,
+                      **{tid: t["password"] for tid, t in teams.items()}})
+
+
 def on_admin(msg, viewer):
     # One handler for both admin panels — stock actions come from the stock
     # panel, team actions from the teams panel; we dispatch on `action`.
@@ -237,7 +437,27 @@ def on_admin(msg, viewer):
         return  # the panels only reach admins, but authorize server-side too
     action = msg.get("action")
 
-    if action == "item_set":
+    if action == "announce_set":
+        # The announcement is its own bit of state (a Markdown file), unrelated to
+        # the CSV catalogue/teams/orders, so it saves + broadcasts on its own and
+        # skips the shared save()/push_all() at the end.
+        global announcement
+        announcement = msg.get("text", "")
+        save_announcement(announcement)
+        announce_display.update(announcement)       # everyone sees the rendered board
+        announce_editor.update(text=announcement)   # persist for admins who connect later
+        print(f"[admin] announcement updated ({len(announcement)} chars)")
+        return
+
+    if action == "reload":
+        # Pull manual edits to the CSVs back into memory. Falls through to the
+        # save() + push_all() below, which re-broadcasts the freshly loaded state
+        # (and normalises the files on disk).
+        reload_data()
+        print(f"[admin] reloaded from CSV: {len(inventory)} items, "
+              f"{len(teams)} teams, {len(log)} orders")
+
+    elif action == "item_set":
         name = (msg.get("item") or "").strip()
         if not name:
             return
@@ -249,37 +469,45 @@ def on_admin(msg, viewer):
         inventory.pop(msg.get("item", ""), None)
 
     elif action == "team_add":
+        tid = (msg.get("id") or "").strip()
         name = (msg.get("name") or "").strip()
         pw = (msg.get("password") or "").strip()
         if not name or not pw or name == "admin":
             return
         budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
-        new_team = name not in teams
-        # Upsert: keep the spent-down budget on edit (the form prefills it) and
-        # preserve the team's points across edits.
-        teams[name] = {"password": pw, "budget": budget,
-                       "points": teams.get(name, {}).get("points", 0)}
-        PASSWORDS[name] = pw
-        team_panel.add_role(name)   # team + board panels now admit this role, live
-        board.add_role(name)
-        grant_team_view(name)
-        print(f"[admin] {'created' if new_team else 'updated'} team {name!r} "
-              f"(password {pw!r}, budget ${budget})")
+        if tid and tid in teams:
+            # Edit an existing team — including a *rename*. The id (and so the role
+            # and order history) is unchanged, so connected members keep their
+            # session and panels; the new name just propagates via push_all.
+            t = teams[tid]
+            t["name"], t["password"], t["budget"] = name, pw, budget
+            PASSWORDS[tid] = pw
+            print(f"[admin] updated team {tid} -> {name!r} (budget ${budget})")
+        else:
+            tid = next_team_id()
+            teams[tid] = {"name": name, "password": pw, "budget": budget, "points": 0}
+            PASSWORDS[tid] = pw
+            team_panel.add_role(tid)   # team + board panels now admit this role, live
+            board.add_role(tid)
+            grant_team_view(tid)
+            print(f"[admin] created team {name!r} as {tid} "
+                  f"(password {pw!r}, budget ${budget})")
 
     elif action == "team_remove":
-        name = msg.get("name", "")
-        if name in teams:
-            teams.pop(name)
-            PASSWORDS.pop(name, None)
-            team_panel.remove_role(name)   # drop the panels from that role, live
-            board.remove_role(name)
-            print(f"[admin] removed team {name!r}")
+        tid = msg.get("id", "")
+        if tid in teams:
+            name = teams[tid]["name"]
+            teams.pop(tid)
+            PASSWORDS.pop(tid, None)
+            team_panel.remove_role(tid)   # drop the panels from that role, live
+            board.remove_role(tid)
+            print(f"[admin] removed team {name!r} ({tid})")
 
     elif action == "award":
-        name = msg.get("name", "")
-        if name in teams:
-            teams[name]["points"] += int(msg.get("points", 0))
-            print(f"[admin] {name} -> {teams[name]['points']} pts")
+        tid = msg.get("id", "")
+        if tid in teams:
+            teams[tid]["points"] += int(msg.get("points", 0))
+            print(f"[admin] {teams[tid]['name']} -> {teams[tid]['points']} pts")
 
     elif action == "order_fulfil":
         o = find_order(msg.get("id"))
@@ -287,9 +515,9 @@ def on_admin(msg, viewer):
             return
         if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
             print(f"[admin] can't fulfil order #{o['id']} "
-                  f"({o['qty']}x {o['item']} for {o['team']}): not enough stock/budget")
+                  f"({o['qty']}x {o['item']} for {team_name(o['team'])}): not enough stock/budget")
             return
-        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {o['team']}")
+        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {team_name(o['team'])}")
 
     elif action == "order_reject":
         o = find_order(msg.get("id"))
@@ -322,9 +550,10 @@ def on_admin(msg, viewer):
 
 
 def on_team(msg, viewer):
-    team = viewer.get("role")
+    team = viewer.get("role")   # the team's stable id (orders reference it)
     if team not in teams:
         return
+    name = teams[team]["name"]
     action = msg.get("action")
 
     if action == "ping":
@@ -337,6 +566,7 @@ def on_team(msg, viewer):
         # the whole cart, nothing is filed (the UI also pre-checks this).
         lines = []
         total = 0
+        want = {}   # item -> total qty requested across the cart
         for entry in msg.get("cart", []):
             item = entry.get("item", "")
             qty = max(1, int(entry.get("qty", 1)))
@@ -345,7 +575,13 @@ def on_team(msg, viewer):
             price = inventory[item]["price"]
             lines.append((item, qty, price))
             total += price * qty
+            want[item] = want.get(item, 0) + qty
+        # Atomic: file nothing unless the team can afford the whole cart *and*
+        # no item is requested beyond its current stock (the UI pre-checks both).
         if not lines or teams[team]["budget"] < total:
+            return
+        if any(qty > inventory[item]["stock"] for item, qty in want.items()):
+            print(f"[{name}] request rejected: over stock")
             return
         for item, qty, price in lines:
             order = {"id": next_order_id(), "team": team, "item": item,
@@ -353,7 +589,7 @@ def on_team(msg, viewer):
                      "status": "pending"}
             log.insert(0, order)
             reserve_budget(order)   # budget goes down on request
-        print(f"[{team}] filed {len(lines)} line(s) for ${total:,} "
+        print(f"[{name}] filed {len(lines)} line(s) for ${total:,} "
               f"(budget left: ${teams[team]['budget']:,})")
         save()
         push_all()
@@ -366,7 +602,7 @@ def on_team(msg, viewer):
         if o is None or o["team"] != team or o["status"] != "pending":
             return
         set_order_status(o, "retracted")
-        print(f"[{team}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
+        print(f"[{name}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
         save()
         push_all()
         return
@@ -438,6 +674,11 @@ _ADMIN_CSS = """
 .pc-sa{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
 .pc-sa .hd{font-size:16px;font-weight:700;margin-bottom:16px}
+.pc-sa .hd.hd-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pc-sa .reload{padding:5px 10px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;
+               border:1.5px solid var(--pc-border,#30363d);background:transparent;color:#94a3b8;
+               transition:border-color .12s,color .12s}
+.pc-sa .reload:hover{border-color:#3b82f6;color:var(--pc-text,#e6edf3)}
 .pc-sa .sec{margin-bottom:20px}
 .pc-sa .sec-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
                color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -457,6 +698,9 @@ _ADMIN_CSS = """
             border-bottom:1px solid var(--pc-border,#30363d);cursor:pointer}
 .pc-sa .row:last-child{border-bottom:none}
 .pc-sa .row:hover{background:rgba(255,255,255,.04)}
+.pc-sa .row.editing{background:rgba(59,130,246,.12);box-shadow:inset 2px 0 0 #3b82f6}
+.pc-sa .back{flex:1 1 100%;margin-top:4px;text-align:center;font-size:11px;color:#64748b;cursor:pointer}
+.pc-sa .back:hover{color:var(--pc-text,#e6edf3)}
 .pc-sa .nm{flex:1;font-size:13px;font-weight:600}
 .pc-sa .meta{font-size:12px;color:#94a3b8;font-variant-numeric:tabular-nums}
 .pc-sa .pw{font:12px ui-monospace,monospace;color:#fbbf24;
@@ -494,7 +738,11 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-sa">
-      <div className="hd">⚙️ Stock Control</div>
+      <div className="hd hd-row">
+        <span>⚙️ Stock Control</span>
+        <button className="reload" title="Reload inventory, teams & orders from the CSV files on disk"
+          onClick={()=>canvas.send({ action:"reload" })}>↻ Reload CSV</button>
+      </div>
 
       <div className="sec">
         <div className="sec-hd">Add / update item</div>
@@ -536,22 +784,24 @@ _TEAMS_SOURCE = """
 function Component({ canvas, props }) {
   const teams = props.teams || [];
 
-  const [tm, setTm] = React.useState({ name:"", password:"", budget:"2000" });
-  const [aw, setAw] = React.useState({ team:"", points:"" });
+  // tm.id distinguishes editing an existing team (id set — incl. renaming it)
+  // from creating a new one (id ""). The id is the team's stable identity.
+  const [tm, setTm] = React.useState({ id:"", name:"", password:"", budget:"2000" });
+  const [aw, setAw] = React.useState({ team:"", points:"" });  // aw.team is a team id
 
   function submitTeam() {
     const name = tm.name.trim();
     const password = tm.password.trim();
     const budget = parseInt(tm.budget, 10);
     if (!name || !password || isNaN(budget)) return;
-    canvas.send({ action:"team_add", name, password, budget });
-    setTm({ name:"", password:"", budget:"2000" });
+    canvas.send({ action:"team_add", id:tm.id, name, password, budget });
+    setTm({ id:"", name:"", password:"", budget:"2000" });
   }
   function award(delta) {
     const team = aw.team;
     const pts = delta != null ? delta : parseInt(aw.points, 10);
     if (!team || isNaN(pts) || pts === 0) return;
-    canvas.send({ action:"award", name:team, points:pts });
+    canvas.send({ action:"award", id:team, points:pts });
     if (delta == null) setAw({ ...aw, points:"" });
   }
 
@@ -560,7 +810,7 @@ function Component({ canvas, props }) {
       <div className="hd">👥 Teams</div>
 
       <div className="sec">
-        <div className="sec-hd">Add / update team</div>
+        <div className="sec-hd">{tm.id ? "Edit team — rename / set password & budget" : "Add team"}</div>
         <div className="frm">
           <input className="inp grow" placeholder="Team name" value={tm.name}
             onChange={e=>setTm({...tm, name:e.target.value})} />
@@ -569,7 +819,11 @@ function Component({ canvas, props }) {
           <input className="inp num" type="number" min="0" placeholder="Budget" value={tm.budget}
             onChange={e=>setTm({...tm, budget:e.target.value})}
             onKeyDown={e=>{ if(e.key==="Enter") submitTeam(); }} />
-          <button className="btn" onClick={submitTeam}>Save team</button>
+          <button className="btn" onClick={submitTeam}>{tm.id ? "Save changes" : "Add team"}</button>
+          {tm.id &&
+            <div className="back" onClick={()=>setTm({ id:"", name:"", password:"", budget:"2000" })}>
+              + add a new team instead
+            </div>}
         </div>
       </div>
 
@@ -579,7 +833,7 @@ function Component({ canvas, props }) {
           <select className="inp grow" value={aw.team}
             onChange={e=>setAw({...aw, team:e.target.value})}>
             <option value="">— select team —</option>
-            {teams.map(t => <option key={t.name} value={t.name}>{t.name} ({t.points} pts)</option>)}
+            {teams.map(t => <option key={t.id} value={t.id}>{t.name} ({t.points} pts)</option>)}
           </select>
           <input className="inp grow" type="number" placeholder="± points" value={aw.points}
             onChange={e=>setAw({...aw, points:e.target.value})}
@@ -600,15 +854,15 @@ function Component({ canvas, props }) {
         {teams.length === 0
           ? <div className="empty">No teams yet — add one above.</div>
           : teams.map(t => (
-              <div key={t.name} className="row"
+              <div key={t.id} className={"row" + (t.id === tm.id ? " editing" : "")}
                    title="Click to edit"
-                   onClick={()=>setTm({ name:t.name, password:t.password, budget:String(t.budget) })}>
+                   onClick={()=>setTm({ id:t.id, name:t.name, password:t.password, budget:String(t.budget) })}>
                 <span className="nm">{t.name}</span>
                 <span className="pw">{t.password}</span>
                 <span className="bud">${t.budget.toLocaleString()}</span>
                 <span className="pts">{t.points} pts</span>
                 <button className="x" title="Remove team"
-                  onClick={e=>{ e.stopPropagation(); canvas.send({ action:"team_remove", name:t.name }); }}>×</button>
+                  onClick={e=>{ e.stopPropagation(); canvas.send({ action:"team_remove", id:t.id }); }}>×</button>
               </div>
             ))}
       </div>
@@ -720,6 +974,7 @@ function Component({ canvas, props }) {
   const myLog  = props.orders || [];
   const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
   const priceOf = (item) => { const r = rows.find(x => x.item === item); return r ? r.price : 0; };
+  const stockOf = (item) => { const r = rows.find(x => x.item === item); return r ? r.stock : 0; };
 
   const [sel, setSel]   = React.useState(null);
   const [qty, setQty]   = React.useState(1);
@@ -737,9 +992,11 @@ function Component({ canvas, props }) {
   }, [rows]);
 
   const cartLines = cart.map(c => ({ item:c.item, qty:c.qty,
-                                     cost: priceOf(c.item) * c.qty }));
+                                     cost: priceOf(c.item) * c.qty,
+                                     stock: stockOf(c.item) }));
   const cartTotal = cartLines.reduce((s, l) => s + l.cost, 0);
   const afterFiling = budget - cartTotal;          // what we'd have left once filed
+  const overStock = cartLines.some(l => l.qty > l.stock);   // any line beyond stock
 
   function pick(r) { if (r.stock > 0) { setSel(r); setQty(1); setMsg(null); } }
   function incQty(d) { if (sel) setQty(q => Math.max(1, Math.min(sel.stock, q + d))); }
@@ -747,18 +1004,18 @@ function Component({ canvas, props }) {
     if (!sel) return;
     setCart(c => {
       const i = c.findIndex(x => x.item === sel.item);
-      if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + qty }; return n; }
+      if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: Math.min(sel.stock, n[i].qty + qty) }; return n; }
       return [...c, { item: sel.item, qty }];
     });
     setMsg("Added " + qty + "× " + sel.item + " to cart");
     setSel(null); setQty(1);
   }
   function setLineQty(item, q) {
-    setCart(c => c.map(x => x.item === item ? { ...x, qty: Math.max(1, q) } : x));
+    setCart(c => c.map(x => x.item === item ? { ...x, qty: Math.max(1, Math.min(stockOf(item), q)) } : x));
   }
   function removeLine(item) { setCart(c => c.filter(x => x.item !== item)); }
   function fileRequest() {
-    if (!cart.length || afterFiling < 0) return;
+    if (!cart.length || afterFiling < 0 || overStock) return;
     canvas.send({ action:"file", cart: cart.map(c => ({ item: c.item, qty: c.qty })) });
     setMsg("✓ Filed " + cart.length + " line(s) for $" + cartTotal.toLocaleString());
     setCart([]);
@@ -840,8 +1097,10 @@ function Component({ canvas, props }) {
               <span>After filing</span><span>${afterFiling.toLocaleString()}</span>
             </div>
           </div>
-          <button className="btn" onClick={fileRequest} disabled={afterFiling < 0}>
-            {afterFiling < 0 ? "Over budget" : "File request — $" + cartTotal.toLocaleString()}
+          <button className="btn" onClick={fileRequest} disabled={afterFiling < 0 || overStock}>
+            {overStock ? "Not enough stock"
+              : afterFiling < 0 ? "Over budget"
+              : "File request — $" + cartTotal.toLocaleString()}
           </button>
         </div>
       )}
@@ -1049,23 +1308,49 @@ function Component({ canvas, props }) {
 
 
 # ── Leaderboard (everyone) ────────────────────────────────────────────────────
-# Teams ranked by points, medals for the top three. Visible to admins, teams and
-# spectators alike. Adapted from examples/leaderboard.py.
+# Teams ranked by points: a three-tier podium for the top three, then a runners-up
+# table for the rest. Visible to admins, teams and spectators alike.
 
 _LEADERBOARD_CSS = """
 .pc-lb{padding:14px;height:100%;overflow:auto;box-sizing:border-box;
        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
-.pc-lb .hd{font-size:16px;font-weight:700;margin-bottom:14px}
+.pc-lb .hd{font-size:16px;font-weight:700;margin-bottom:10px}
+
+/* ── Podium (top 3) ── */
+.pc-lb .podium{display:flex;align-items:flex-end;justify-content:center;gap:8px;
+               margin:8px 0 18px;min-height:150px}
+.pc-lb .col{flex:1 1 0;max-width:120px;display:flex;flex-direction:column;align-items:center;
+            animation:lb-rise 1.1s cubic-bezier(.2,.8,.2,1) both}  /* delay set inline, per place */
+@keyframes lb-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.pc-lb .crown{font-size:22px;line-height:1;margin-bottom:1px;
+              filter:drop-shadow(0 0 7px rgba(251,191,36,.85))}
+.pc-lb .ava{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;
+            justify-content:center;font-size:26px;margin-bottom:6px;border:2px solid #475569;
+            background:radial-gradient(circle at 50% 35%,rgba(255,255,255,.14),rgba(255,255,255,.02))}
+.pc-lb .ava.g1{border-color:#fbbf24;box-shadow:0 0 16px rgba(251,191,36,.6)}
+.pc-lb .ava.g2{border-color:#cbd5e1;box-shadow:0 0 11px rgba(203,213,225,.45)}
+.pc-lb .ava.g3{border-color:#f59e0b;box-shadow:0 0 11px rgba(245,158,11,.4)}
+.pc-lb .pname{font-size:12px;font-weight:700;max-width:100%;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis;text-align:center;line-height:1.2}
+.pc-lb .ppts{font-size:12px;font-weight:800;color:#fbbf24;
+             font-variant-numeric:tabular-nums;margin:1px 0 8px}
+.pc-lb .ped{width:100%;border-radius:9px 9px 0 0;display:flex;align-items:flex-start;
+            justify-content:center;padding-top:7px;font-size:22px;font-weight:900;
+            color:rgba(255,255,255,.92);text-shadow:0 1px 2px rgba(0,0,0,.4);
+            box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 -1px 0 rgba(0,0,0,.25)}
+.pc-lb .ped.r1{height:96px;background:linear-gradient(180deg,#fbbf24,#b45309)}
+.pc-lb .ped.r2{height:68px;background:linear-gradient(180deg,#e2e8f0,#64748b)}
+.pc-lb .ped.r3{height:48px;background:linear-gradient(180deg,#f59e0b,#7c2d12)}
+
+/* ── Runners-up (rank 4+) ── */
+.pc-lb .rest-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+                color:#64748b;margin:0 2px 4px}
 .pc-lb table{width:100%;border-collapse:collapse;font-size:14px}
-.pc-lb th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;
-          text-transform:uppercase;letter-spacing:.05em;
-          border-bottom:1px solid var(--pc-border,#30363d)}
-.pc-lb td{padding:11px 12px;border-bottom:1px solid #1e293b}
+.pc-lb td{padding:9px 12px;border-bottom:1px solid #1e293b}
 .pc-lb tr:last-child td{border-bottom:none}
 .pc-lb .pts{font-variant-numeric:tabular-nums;font-weight:800;text-align:right}
-.pc-lb .rank{width:40px;text-align:center;font-size:18px;font-weight:700}
+.pc-lb .rank{width:40px;text-align:center;font-size:15px;font-weight:700;color:#94a3b8}
 .pc-lb .name{font-weight:600}
-.pc-lb .medal td{font-weight:700}
 .pc-lb .empty{color:#64748b;padding:10px 4px;font-size:13px}
 """
 
@@ -1073,32 +1358,169 @@ _LEADERBOARD_SOURCE = """
 function Component({ props }) {
   const rows = props.rows || [];
   const MEDAL = ["🥇","🥈","🥉"];
-  const MEDAL_BG = ["#78350f","#334155","#431407"];  // gold / silver / bronze tints
+  // Python sends a `rank` per row (standard competition ranking), so ties share
+  // a place — and thus a medal, colour and plinth height. The podium is every
+  // team placing 1st–3rd (a tie can mean two golds, or no silver, etc.).
+  const podium = rows.filter(r => r.rank <= 3);
+  const rest   = rows.filter(r => r.rank >= 4);
+  // Lay out the places silver | gold | bronze so the winners sit in the middle;
+  // a place left empty by a tie simply contributes no column.
+  const atPlace = p => podium.filter(r => r.rank === p);
+  const order = [...atPlace(2), ...atPlace(1), ...atPlace(3)];
+  // Reveal builds up to the winner: 3rd rises first, then 2nd, then 1st last.
+  // Keyed by place, so tied teams (same rank) rise together.
+  const DELAY = { 1: 2, 2: 1, 3: 0.5 };
 
   return (
     <div className="pc-lb">
       <div className="hd">🏆 Leaderboard</div>
-      {rows.length === 0
-        ? <div className="empty">No teams yet.</div>
-        : <table>
-            <thead>
-              <tr><th className="rank">#</th><th>Team</th>
-                  <th style={{textAlign:"right"}}>Points</th></tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const medal = i < 3;
-                return (
-                  <tr key={r.name} className={medal ? "medal" : ""}
-                      style={medal ? { background: MEDAL_BG[i] + "55" } : {}}>
-                    <td className="rank">{medal ? MEDAL[i] : i + 1}</td>
-                    <td className="name">{r.name}</td>
-                    <td className="pts">{r.points.toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>}
+
+      {rows.length === 0 && <div className="empty">No teams yet.</div>}
+
+      {podium.length > 0 &&
+        <div className="podium">
+          {order.map(r => (
+            <div key={r.id} className="col" style={{ animationDelay: DELAY[r.rank] + "s" }}>
+              {r.rank === 1 && <div className="crown">👑</div>}
+              <div className={"ava g" + r.rank}>{MEDAL[r.rank - 1]}</div>
+              <div className="pname" title={r.name}>{r.name}</div>
+              <div className="ppts">{r.points.toLocaleString()} pts</div>
+              <div className={"ped r" + r.rank}>{r.rank}</div>
+            </div>
+          ))}
+        </div>}
+
+      {rest.length > 0 &&
+        <div className="rest">
+          <div className="rest-hd">Runners-up</div>
+          <table><tbody>
+            {rest.map(r => (
+              <tr key={r.id}>
+                <td className="rank">{r.rank}</td>
+                <td className="name">{r.name}</td>
+                <td className="pts">{r.points.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>}
+    </div>
+  );
+}
+"""
+
+
+# ── Announcements editor (admin only) ─────────────────────────────────────────
+# The rendered board everyone sees is a built-in Markdown panel (canvas.markdown,
+# Python-rendered). This admin-only panel edits its source: a textarea with a live
+# client-side preview and a Publish button that broadcasts + persists. The preview
+# is a tiny Markdown subset just for instant feedback; the published board uses
+# Python's renderer (richer). Raw string so the regex backslashes survive.
+
+_ANNOUNCE_CSS = """
+.pc-ann{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:14px;
+        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-ann .hd{font-size:16px;font-weight:700;margin-bottom:10px;
+            display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pc-ann .st{font-size:11px;font-weight:700;color:#4ade80}
+.pc-ann .st.dirty{color:#fbbf24}
+.pc-ann .ta{width:100%;min-height:90px;flex:0 0 auto;resize:vertical;box-sizing:border-box;
+            padding:9px 11px;border-radius:8px;border:1.5px solid var(--pc-border,#30363d);
+            background:var(--pc-input-bg,#1b2230);color:inherit;outline:none;
+            font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-ann .ta:focus{border-color:#3b82f6}
+.pc-ann .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+.pc-ann .btn{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;
+             border:none;background:#2563eb;color:#fff;transition:background .12s}
+.pc-ann .btn:not(:disabled):hover{background:#1d4ed8}
+.pc-ann .btn:disabled{opacity:.45;cursor:not-allowed}
+.pc-ann .btn.ghost{background:transparent;border:1.5px solid var(--pc-border,#30363d);color:#94a3b8}
+.pc-ann .btn.ghost:not(:disabled):hover{border-color:#3b82f6;color:var(--pc-text,#e6edf3)}
+.pc-ann .hint{font-size:11px;color:#64748b;margin-left:auto;text-align:right}
+.pc-ann .prev-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+                 color:#64748b;margin:4px 2px 6px}
+.pc-ann .prev{flex:1;overflow:auto;border:1px solid var(--pc-border,#30363d);border-radius:8px;
+              padding:10px 12px;font-size:13px;line-height:1.5;background:rgba(255,255,255,.02)}
+.pc-ann .prev h1,.pc-ann .prev h2,.pc-ann .prev h3{margin:.4em 0 .3em;line-height:1.25}
+.pc-ann .prev h1{font-size:1.5em}.pc-ann .prev h2{font-size:1.3em}.pc-ann .prev h3{font-size:1.1em}
+.pc-ann .prev p{margin:.4em 0}.pc-ann .prev ul,.pc-ann .prev ol{margin:.4em 0;padding-left:1.4em}
+.pc-ann .prev a{color:#60a5fa}
+.pc-ann .prev code{background:rgba(255,255,255,.08);border-radius:4px;padding:1px 4px;
+                   font:12px ui-monospace,monospace}
+.pc-ann .prev pre{background:rgba(255,255,255,.06);border-radius:6px;padding:8px;overflow:auto}
+.pc-ann .prev pre code{background:none;padding:0}
+.pc-ann .prev blockquote{margin:.4em 0;padding:2px 10px;border-left:3px solid #3b82f6;color:#94a3b8}
+.pc-ann .prev hr{border:none;border-top:1px solid var(--pc-border,#30363d);margin:.6em 0}
+"""
+
+_ANNOUNCE_SOURCE = r"""
+// Compact Markdown -> HTML for the *preview* only (instant, client-side). The
+// published board is rendered by Python's richer converter. (Regexes here avoid
+// char classes with brackets/backticks so the startup lint's brace-scan stays
+// happy; lazy groups do the same job.)
+function annEsc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function annInline(s){
+  return annEsc(s)
+    .replace(/`(.+?)`/g,"<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g,"<em>$1</em>")
+    .replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function annFence(l){ return l.trim().slice(0,3) === "" + "``" + "`"; }
+function annIsBlock(l){
+  return /^(#{1,3})\s+/.test(l) || /^\s*([-*]|\d+\.)\s+/.test(l)
+      || /^\s*>/.test(l) || annFence(l) || /^\s*(---|\*\*\*)\s*$/.test(l);
+}
+function annMd(src){
+  const lines=(src||"").split("\n"); const out=[]; let i=0;
+  while(i<lines.length){
+    const ln=lines[i];
+    if(annFence(ln)){ i++; const code=[];
+      while(i<lines.length && !annFence(lines[i])){ code.push(annEsc(lines[i])); i++; }
+      i++; out.push("<pre><code>"+code.join("\n")+"</code></pre>"); continue; }
+    const h=ln.match(/^(#{1,3})\s+(.*)/);
+    if(h){ const l=h[1].length; out.push("<h"+l+">"+annInline(h[2])+"</h"+l+">"); i++; continue; }
+    if(/^\s*(---|\*\*\*)\s*$/.test(ln)){ out.push("<hr>"); i++; continue; }
+    if(/^\s*>\s?/.test(ln)){ const q=[];
+      while(i<lines.length && /^\s*>\s?/.test(lines[i])){ q.push(annInline(lines[i].replace(/^\s*>\s?/,""))); i++; }
+      out.push("<blockquote>"+q.join("<br>")+"</blockquote>"); continue; }
+    if(/^\s*([-*]|\d+\.)\s+/.test(ln)){ const ordered=/^\s*\d+\.\s+/.test(ln); const items=[];
+      while(i<lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])){
+        items.push("<li>"+annInline(lines[i].replace(/^\s*([-*]|\d+\.)\s+/,""))+"</li>"); i++; }
+      out.push((ordered?"<ol>":"<ul>")+items.join("")+(ordered?"</ol>":"</ul>")); continue; }
+    if(!ln.trim()){ i++; continue; }
+    const para=[];
+    while(i<lines.length && lines[i].trim() && !annIsBlock(lines[i])){ para.push(annInline(lines[i])); i++; }
+    out.push("<p>"+para.join("<br>")+"</p>");
+  }
+  return out.join("");
+}
+
+function Component({ canvas, props }) {
+  const published = props.text || "";
+  const [draft, setDraft] = React.useState(published);
+  // Re-sync when the published text changes server-side (reload, another admin).
+  React.useEffect(() => { setDraft(published); }, [published]);
+  const dirty = draft !== published;
+
+  function publish() { canvas.send({ action: "announce_set", text: draft }); }
+
+  return (
+    <div className="pc-ann">
+      <div className="hd">
+        <span>📣 Edit announcement</span>
+        <span className={"st" + (dirty ? " dirty" : "")}>{dirty ? "● unpublished" : "✓ published"}</span>
+      </div>
+      <textarea className="ta" value={draft} spellCheck={false}
+        placeholder="Write in Markdown…  # heading, **bold**, - list, [link](url)"
+        onChange={e=>setDraft(e.target.value)}
+        onKeyDown={e=>{ if((e.ctrlKey||e.metaKey) && e.key==="Enter") publish(); }} />
+      <div className="row">
+        <button className="btn" onClick={publish} disabled={!dirty}>Publish</button>
+        <button className="btn ghost" onClick={()=>setDraft(published)} disabled={!dirty}>Revert</button>
+        <span className="hint">Ctrl+Enter to publish</span>
+      </div>
+      <div className="prev-hd">Live preview</div>
+      <div className="prev" dangerouslySetInnerHTML={{ __html: annMd(draft) }} />
     </div>
   );
 }
@@ -1143,7 +1565,7 @@ admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
 admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
                             x=500, y=620, w=760, h=340,
                             roles=["admin"],
-                            props={"log": log[:200]})
+                            props={"log": admin_order_rows()})
 
 # Team roles are dynamic: seed with the teams already in the JSON, plus the
 # sentinel so the list is never empty. New teams are appended in `team_add`.
@@ -1160,29 +1582,42 @@ leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard", css=_LEADERB
                            x=900, y=40, w=360, h=560,
                            props={"rows": leaderboard_rows()})
 
+# Announcements. The rendered board is a built-in Markdown panel visible to
+# everyone (no roles); the admin-only editor below it publishes new Markdown
+# (broadcast + saved to hackathon_announcement.md). New rightmost column.
+announce_display = canvas.markdown(announcement, name="announce",
+                                   label="📣 Announcements",
+                                   x=1280, y=40, w=360, h=300)
+
+announce_editor = canvas.react(_ANNOUNCE_SOURCE, name="announce_edit", css=_ANNOUNCE_CSS,
+                               x=1280, y=360, w=360, h=320,
+                               roles=["admin"],
+                               props={"text": announcement})
+
 
 # ── Auth map (mutated live as the admin creates teams) ────────────────────────
 # Passed by reference to serve(); the login check iterates it on every attempt,
 # so adding a key here makes that password valid immediately — no restart.
 PASSWORDS = {"admin": ADMIN_PASSWORD, "viewer": VIEWER_PASSWORD,
-             **{name: t["password"] for name, t in teams.items()}}
+             **{tid: t["password"] for tid, t in teams.items()}}
 
 
-def grant_team_view(name):
+def grant_team_view(role):
     """Give a role the read-only, chrome-free kiosk view (admins keep the full
     surface). Applies on that role's next connect."""
-    canvas.set_view(read_only=True, ui=False, roles=[name])
+    canvas.set_view(read_only=True, ui=False, roles=[role])
 
 
 grant_team_view("viewer")          # spectators: read-only, leaderboard only
-for _name in teams:
-    grant_team_view(_name)
+for _tid in teams:
+    grant_team_view(_tid)
 
 
 # ── Wire the handlers (defined up top) to the panels ──────────────────────────
 admin_stock.on_message(on_admin)
 admin_teams.on_message(on_admin)
 admin_orders.on_message(on_admin)
+announce_editor.on_message(on_admin)
 team_panel.on_message(on_team)
 
 
@@ -1190,7 +1625,8 @@ team_panel.on_message(on_team)
 # instead of as a cryptic error in the browser after someone connects.
 for _name, _panel in [("board", board), ("stock", admin_stock),
                       ("teams", admin_teams), ("orders", admin_orders),
-                      ("team", team_panel), ("leaderboard", leaderboard)]:
+                      ("team", team_panel), ("leaderboard", leaderboard),
+                      ("announce_edit", announce_editor)]:
     for _issue in _panel.validate():
         print(f"[warn] {_name} panel source: {_issue}")
 
@@ -1199,5 +1635,6 @@ canvas.serve(
     port=8000,
     host="0.0.0.0",
     passwords=PASSWORDS,
-    tunnel=True,
+    tunnel=True,   # local only for now; re-enable (or use a named CF tunnel) to share
+    hot_reload=True
 )
