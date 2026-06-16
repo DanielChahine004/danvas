@@ -53,9 +53,10 @@ import re
 
 from ..bridge import BINARY_REACT
 from .base import BaseComponent
+from ._routing import _EventRouter
 
 
-class React(BaseComponent):
+class React(_EventRouter, BaseComponent):
     component = "React"
 
     default_w = 380
@@ -106,10 +107,9 @@ class React(BaseComponent):
         # the one-shot ``push``).
         self._role_data = {}
         self._client_data = {}
-        # Inbound ``canvas.send`` payloads are routed by ``payload[event_key]``;
-        # the ``None`` slot holds catch-all handlers (``on_message`` / ``on()``).
-        self._event_key = event_key
-        self._routes = {None: list(self._callbacks)}
+        # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
+        # with Custom via _EventRouter; this seeds the table (+ on_change catch-alls).
+        self._init_routing(event_key)
         # Request/response handlers for ``canvas.request(data)`` (see on_request):
         # event value -> the single handler whose *return value* is the reply.
         # Unlike ``_routes`` exactly one handler answers, so it's not a list.
@@ -148,6 +148,9 @@ class React(BaseComponent):
 
     def register_props_for(self, role=None, client_id=None):
         return self._compose_props(self._data_for(role, client_id))
+
+    def _has_viewer_overlays(self):
+        return bool(self._role_data or self._client_data) or super()._has_viewer_overlays()
 
     def _set_auto_h(self):
         """Enable content-fit height live (``comp.h = "auto"``).
@@ -502,23 +505,8 @@ class React(BaseComponent):
         return []
 
     # -- input routing (panel -> Python) -------------------------------------
-    def on(self, event=None):
-        """Decorator: handle inbound ``canvas.send`` messages.
-
-        ``@panel.on("tick")`` fires only for messages whose ``event`` field (see
-        ``event_key``) equals ``"tick"``; ``@panel.on()`` is a catch-all. The
-        handler gets the full payload dict.
-        """
-        def deco(fn):
-            self._routes.setdefault(event, []).append(fn)
-            return fn
-        return deco
-
-    def on_message(self, fn):
-        """Decorator: handle *every* inbound message (a catch-all ``on()``)."""
-        self._routes.setdefault(None, []).append(fn)
-        return fn
-
+    # on() / on_message() / _handle_input() come from _EventRouter (shared with
+    # Custom). React adds request/response routing below.
     def on_request(self, event=None):
         """Decorator: *answer* a panel's ``await canvas.request(data)`` call.
 
@@ -561,12 +549,3 @@ class React(BaseComponent):
         if self._accepts_viewer(handler, 1):
             return handler(data, viewer or {})
         return handler(data)
-
-    def _handle_input(self, payload, viewer=None):
-        with self._lock:
-            self._value = payload
-        event = payload.get(self._event_key) if isinstance(payload, dict) else None
-        handlers = list(self._routes.get(event, []))
-        if event is not None:
-            handlers += self._routes.get(None, [])
-        self._dispatch_callbacks(handlers, (payload,), viewer)

@@ -482,6 +482,12 @@ class BaseComponent:
             if name in fields:
                 setattr(self, LAYOUT_FLAGS[name].attr, bool(fields[name]))
 
+    def _has_viewer_overlays(self):
+        """True when this panel has any per-role/per-client override, so its
+        register frame must be built per viewer rather than shared once (see
+        ``Bridge.register_live``). Subclasses with prop overlays extend this."""
+        return bool(self._role_layout or self._client_layout)
+
     def _layout_overlay_for(self, role=None, client_id=None):
         """The per-viewer layout override (role then client merged), or ``{}``.
         Used by the bridge to replay a viewer's own placement/size on connect."""

@@ -374,15 +374,19 @@ class Bridge:
         state = component.state_payload()
         if self._loop is None:
             return
+        # Build the register frame once when the panel has no per-viewer overlays
+        # (the common case) — only re-derive per viewer when there's a role/client
+        # override to merge, so a fan-out to N viewers isn't N identical builds.
+        shared_reg = (None if component._has_viewer_overlays()
+                      else self.register_message(component))
         for ws, viewer in list(self._viewers.items()):
             role = viewer.get("role")
             if roles and role not in roles:
                 continue
             if only_roles is not None and role not in only_roles:
                 continue
-            # Built per viewer so any per-role/per-client prop overlay is merged.
-            reg = self.register_message(component, role=role,
-                                        client_id=viewer.get("id"))
+            reg = shared_reg if shared_reg is not None else self.register_message(
+                component, role=role, client_id=viewer.get("id"))
             asyncio.run_coroutine_threadsafe(self._safe_send(ws, reg), self._loop)
             if state:
                 asyncio.run_coroutine_threadsafe(
@@ -541,9 +545,6 @@ class Bridge:
         viewers = list(self._viewers.values())
         self.broadcast({"type": "presence", "count": len(viewers),
                         "viewers": viewers})
-
-    # Backwards-compatible alias (older call sites / the merge host).
-    _broadcast_presence = _broadcast_roster
 
     # -- chat / identity (browser <-> browser, relayed through the server) ----
     def _rename_viewer(self, ws, name):
@@ -916,6 +917,21 @@ class Bridge:
             await ws.send_bytes(data)
 
     # -- outbound (thread-safe) ----------------------------------------------
+    def _emit(self, targets, msg):
+        """Schedule ``msg`` to each websocket in ``targets`` — the shared tail of
+        :meth:`broadcast` / :meth:`send_to_role` / :meth:`send_to_client`.
+
+        A no-op before the loop exists (replay carries the state on connect); each
+        send is wrapped in :meth:`_safe_send` so a dead socket is dropped rather
+        than raising. ``targets`` is materialised by the caller (a snapshot of the
+        connection/viewer map) so a concurrent connect/disconnect can't mutate it
+        mid-iteration.
+        """
+        if self._loop is None:
+            return
+        for ws in targets:
+            asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
+
     def broadcast(self, msg, exclude=None):
         """Send ``msg`` to every connected client. Safe to call from any thread.
 
@@ -925,10 +941,7 @@ class Bridge:
         if self._loop is None:
             return  # not serving yet; connection replay will carry the state
         self._tap_frame("out", msg)
-        for ws in list(self._connections):
-            if ws is exclude:
-                continue
-            asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
+        self._emit([ws for ws in list(self._connections) if ws is not exclude], msg)
 
     async def _safe_send(self, ws, msg):
         try:
@@ -969,12 +982,9 @@ class Bridge:
         concurrent connect/disconnect on the loop thread can't trip a
         "dict changed size" error -- mirrors :meth:`broadcast`.
         """
-        if self._loop is None:
-            return
         ws = next((s for s, v in list(self._viewers.items())
                    if v.get("id") == viewer_id), None)
-        if ws is not None:
-            asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
+        self._emit((ws,) if ws is not None else (), msg)
 
     def send_to_role(self, role, msg):
         """Send ``msg`` to every connected client whose login role matches.
@@ -982,12 +992,8 @@ class Bridge:
         Any-thread safe; a no-op when no one is connected under ``role``. The
         viewer map is snapshotted before scanning, like :meth:`send_to_client`.
         """
-        if self._loop is None:
-            return
-        for ws, v in list(self._viewers.items()):
-            if v.get("role") == role:
-                asyncio.run_coroutine_threadsafe(
-                    self._safe_send(ws, msg), self._loop)
+        self._emit([ws for ws, v in list(self._viewers.items())
+                    if v.get("role") == role], msg)
 
     def _view_for(self, viewer_id, role):
         """Merge the view layers that apply to one viewer, newest layer wins.

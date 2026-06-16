@@ -22,10 +22,11 @@ import json
 import traceback
 
 from .base import BaseComponent
+from ._routing import _EventRouter
 from ..bridge import BINARY_CUSTOM
 
 
-class Custom(BaseComponent):
+class Custom(_EventRouter, BaseComponent):
     component = "Custom"
     default_w = 380
     default_h = 320
@@ -64,12 +65,10 @@ class Custom(BaseComponent):
         self._html = html or ""
         self._css = css or ""
         self._js = js or ""
-        # Inbound ``canvas.send`` payloads are routed by ``payload[event_key]``.
-        # Override the key if your HTML tags messages with a different field.
-        self._event_key = event_key
-        # event value -> [handlers]; the ``None`` slot holds catch-all handlers
-        # (``on_message`` and ``on()`` with no event) that see every message.
-        self._routes = {None: list(self._callbacks)}
+        # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
+        # with React via _EventRouter; override event_key if your HTML tags
+        # messages with a different field.
+        self._init_routing(event_key)
 
     def _wrap(self, html):
         """Prepend the ``canvas`` helper, tagged with this component's id.
@@ -317,30 +316,5 @@ class Custom(BaseComponent):
         self._send_binary(BINARY_CUSTOM, bytes(data))
 
     # -- input routing (browser -> Python) -----------------------------------
-    def on(self, event=None):
-        """Decorator: handle inbound ``canvas.send`` messages.
-
-        ``@panel.on("rotate")`` fires only for messages whose ``event`` field (see
-        ``event_key``) equals ``"rotate"``; ``@panel.on()`` with no event is a
-        catch-all that sees every message. The handler is called with the full
-        payload dict. This is the built-in dispatcher, so a widget no longer needs
-        to subclass and reimplement its own routing.
-        """
-        def deco(fn):
-            self._routes.setdefault(event, []).append(fn)
-            return fn
-        return deco
-
-    def on_message(self, fn):
-        """Decorator: handle *every* inbound message (a catch-all ``on()``)."""
-        self._routes.setdefault(None, []).append(fn)
-        return fn
-
-    def _handle_input(self, payload, viewer=None):
-        with self._lock:
-            self._value = payload
-        event = payload.get(self._event_key) if isinstance(payload, dict) else None
-        handlers = list(self._routes.get(event, []))
-        if event is not None:
-            handlers += self._routes.get(None, [])
-        self._dispatch_callbacks(handlers, (payload,), viewer)
+    # on() / on_message() / _handle_input() come from _EventRouter, shared with
+    # React (so a Custom widget needn't subclass to reimplement its own routing).
