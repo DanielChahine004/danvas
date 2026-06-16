@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 import warnings
+from collections import namedtuple
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
@@ -25,6 +26,15 @@ from .components import Inspector  # spawned directly by the toolbar UI toggle
 from .kernel import Kernel
 from ._layout import _FlowLayout, _LayoutMixin  # noqa: F401  (_FlowLayout re-exported)
 from ._factories import _FactoryMixin
+
+
+# serve() helper return types (see Canvas._resolve_exposure /
+# _maybe_handoff_reload). ``_Exposure`` is the viewer-reach decision; the gating
+# truth-table lives in a pure function so it can be unit-tested. ``_ReloadHandoff``
+# tells serve() whether to return early (the call spawned the file-watch monitor)
+# and whether to override open_browser (a reload restart reuses the existing tab).
+_Exposure = namedtuple("_Exposure", "public_bind ui_inspector cursors")
+_ReloadHandoff = namedtuple("_ReloadHandoff", "should_return open_browser")
 
 
 class Place(TypedDict, total=False):
@@ -1084,75 +1094,33 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
         ("viewer connected / disconnected") are always printed, debug or not.
         """
-        if os.environ.get("_PYCANVAS_RELOAD_CHECK") == "1":
-            # Hot-reload pre-flight (see hotreload.run_monitor): the monitor
-            # runs the edited script in this mode to confirm it imports and runs
-            # before tearing down the live worker. Reaching serve() means the
-            # module body executed without error -- which is all the check needs
-            # -- so exit cleanly *without* binding a port or starting threads, so
-            # the check never collides with the worker that's still serving.
-            sys.exit(0)
-        if hot_reload:
-            if not block:
-                raise ValueError(
-                    "hot_reload=True requires block=True (not block=False). "
-                    "Hot reloading restarts the entire process, which is "
-                    "incompatible with background mode."
-                )
-            main_file = getattr(sys.modules.get("__main__"), "__file__", None)
-            if main_file is None:
-                raise RuntimeError(
-                    "hot_reload=True requires running as a script "
-                    "(`python yourscript.py`), not from an interactive "
-                    "session."
-                )
-            if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
-                from .hotreload import run_monitor
-                # The monitor outlives every worker restart, so it — not the
-                # short-lived worker — owns the tunnel: one tunnel is opened here
-                # at the fixed port and stays put across reloads (no per-edit
-                # cloudflared churn, and a stable public URL). Workers serve the
-                # port behind it; see own_tunnel below.
-                run_monitor(main_file, tunnel=tunnel, port=port,
-                            tunnel_provider=tunnel_provider)
-                return self
-            if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
-                # Already opened on first launch; a reload should reuse the
-                # existing tab (the frontend reconnects its websocket
-                # automatically) instead of popping another one.
-                open_browser = False
-                # Tell the reconnecting browser this is a fresh run so it drops
-                # the previous run's panels (their ids change each run) before we
-                # replay this run's — otherwise stale panels linger beside the new.
-                self._bridge._reload = True
-        # Under hot reload the persistent monitor process owns the tunnel (above),
-        # so this worker must not open its own — but it's still publicly reachable
-        # *through* that tunnel, so every public-exposure decision below stays keyed
-        # on `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
+        # Hot-reload / reload pre-flight handoff. May exit (the import
+        # pre-flight), hand off to the file-watch monitor (return early), or
+        # force open_browser off when a reload restart should reuse the tab.
+        handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
+                                             tunnel_provider)
+        if handoff.should_return:
+            return self
+        if handoff.open_browser is not None:
+            open_browser = handoff.open_browser
+        # Under hot reload the persistent monitor process owns the tunnel, so this
+        # worker must not open its own — but it's still publicly reachable
+        # *through* that tunnel, so every public-exposure decision stays keyed on
+        # `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
         own_tunnel = tunnel and os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1"
         # A tunnel publishes the loopback bind to the entire internet, so the
         # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
         # as if binding publicly.
         self._check_remote_exec("0.0.0.0" if tunnel else host, allow_remote_exec)
-        # Remember the bind's reach so a Repl inserted live (serve(block=False))
-        # gets the same gate; a password doesn't lift it (auth'd users still get
-        # RCE), so allow_remote_exec stays the explicit opt-in.
-        self._public_bind = tunnel or host not in ("127.0.0.1", "localhost")
+        # Resolve how far this serve reaches and the telemetry defaults (the UI
+        # Inspector + cursor reporting). Remembered on self so a Repl inserted
+        # live (serve(block=False)) gets the same gate; a password doesn't lift it
+        # (auth'd users still get RCE), so allow_remote_exec stays the opt-in.
+        exposure = self._resolve_exposure(host, tunnel, ui_inspector, cursors)
+        self._public_bind = exposure.public_bind
         self._allow_remote_exec = allow_remote_exec
-        # The UI Inspector exposes state to every viewer; default it on only for
-        # a private, non-tunneled bind. An explicit ui_inspector overrides that.
-        local = host in ("127.0.0.1", "localhost")
-        self._bridge._ui_inspector = (
-            bool(ui_inspector) if ui_inspector is not None
-            else (local and not tunnel)
-        )
-        # Cursor reporting is viewer telemetry (the host can read every viewer's
-        # pointer via canvas.viewers), so gate it like the Inspector: default on
-        # only for a private, non-tunneled bind; an explicit cursors= overrides.
-        self._bridge._cursors = (
-            bool(cursors) if cursors is not None
-            else (local and not tunnel)
-        )
+        self._bridge._ui_inspector = exposure.ui_inspector
+        self._bridge._cursors = exposure.cursors
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
         # — Windows consoles often run cp1252, which can't print "▼"/"▲".
@@ -1181,16 +1149,103 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                                 passwords=passwords)
             return self
         if not block:
-            self._server = server.run_background(
-                self._bridge, port=port, open_browser=open_browser, host=host,
-                password=password, passwords=passwords,
-            )
-            if wait:
-                self._wait_until_ready()
-            self._serving = True
-            if own_tunnel:
-                self._start_tunnel(port, tunnel_provider)
+            self._serve_background(port, open_browser, host, password,
+                                   passwords, own_tunnel, tunnel_provider, wait)
             return self
+        self._serve_blocking(port, open_browser, host, password, passwords,
+                             own_tunnel, tunnel_provider)
+
+    def _resolve_exposure(self, host, tunnel, ui_inspector, cursors):
+        """Resolve how far this serve() reaches, plus the telemetry defaults.
+
+        A pure function of the bind arguments (no side effects), so the gating
+        truth-table is unit-testable in isolation. ``public_bind`` is whether
+        browsers off this machine can reach the canvas (a tunnel, or a
+        non-loopback host). The UI Inspector and cursor reporting both expose
+        viewer state/telemetry to the host, so each defaults on *only* for a
+        private, non-tunneled bind unless the caller forces it with an explicit
+        ``ui_inspector=`` / ``cursors=``.
+        """
+        local = host in ("127.0.0.1", "localhost")
+        default_private = local and not tunnel
+        return _Exposure(
+            public_bind=tunnel or not local,
+            ui_inspector=bool(ui_inspector) if ui_inspector is not None
+            else default_private,
+            cursors=bool(cursors) if cursors is not None else default_private,
+        )
+
+    def _maybe_handoff_reload(self, hot_reload, block, port, tunnel,
+                              tunnel_provider):
+        """Handle the hot-reload pre-flight and monitor handoff for serve().
+
+        Returns ``_ReloadHandoff(should_return, open_browser)``: when
+        ``should_return`` is True serve() should return immediately (this call
+        spawned the file-watching monitor, which owns the real serving). The
+        ``open_browser`` field is ``False`` on a reload *restart* (reuse the
+        existing tab) and ``None`` otherwise (leave serve()'s argument untouched).
+        May call ``sys.exit`` for the reload import pre-flight, and validates that
+        ``hot_reload`` is only used from a blocking script entry point.
+        """
+        if os.environ.get("_PYCANVAS_RELOAD_CHECK") == "1":
+            # Hot-reload pre-flight (see hotreload.run_monitor): the monitor runs
+            # the edited script in this mode to confirm it imports and runs before
+            # tearing down the live worker. Reaching serve() means the module body
+            # executed without error -- exit cleanly *without* binding a port or
+            # starting threads, so the check never collides with the live worker.
+            sys.exit(0)
+        if not hot_reload:
+            return _ReloadHandoff(False, None)
+        if not block:
+            raise ValueError(
+                "hot_reload=True requires block=True (not block=False). "
+                "Hot reloading restarts the entire process, which is "
+                "incompatible with background mode."
+            )
+        main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+        if main_file is None:
+            raise RuntimeError(
+                "hot_reload=True requires running as a script "
+                "(`python yourscript.py`), not from an interactive session."
+            )
+        if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
+            from .hotreload import run_monitor
+            # The monitor outlives every worker restart, so it — not the
+            # short-lived worker — owns the tunnel: one tunnel is opened at the
+            # fixed port and stays put across reloads (no per-edit cloudflared
+            # churn, and a stable public URL). Workers serve the port behind it.
+            run_monitor(main_file, tunnel=tunnel, port=port,
+                        tunnel_provider=tunnel_provider)
+            return _ReloadHandoff(True, None)
+        if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
+            # Already opened on first launch; a reload reuses the existing tab
+            # (the frontend reconnects its websocket) instead of popping another.
+            # Tell the reconnecting browser this is a fresh run so it drops the
+            # previous run's panels (ids change each run) before this run's replay.
+            self._bridge._reload = True
+            return _ReloadHandoff(False, False)
+        return _ReloadHandoff(False, None)
+
+    def _serve_background(self, port, open_browser, host, password, passwords,
+                          own_tunnel, tunnel_provider, wait):
+        """Start the server in a daemon thread and return (serve(block=False)).
+
+        ``wait`` blocks briefly until the event loop is ready so the first
+        post-serve insert is guaranteed to broadcast.
+        """
+        self._server = server.run_background(
+            self._bridge, port=port, open_browser=open_browser, host=host,
+            password=password, passwords=passwords,
+        )
+        if wait:
+            self._wait_until_ready()
+        self._serving = True
+        if own_tunnel:
+            self._start_tunnel(port, tunnel_provider)
+
+    def _serve_blocking(self, port, open_browser, host, password, passwords,
+                        own_tunnel, tunnel_provider):
+        """Run the server on this thread until shutdown (serve(block=True))."""
         self._serving = True
         if own_tunnel:
             self._start_tunnel(port, tunnel_provider)
