@@ -370,9 +370,33 @@ let heartbeatTimer = null
 // starts at null and adopts whatever run it first joins.
 let lastRunId = null
 
+// Per-tab viewer identity. Stored in sessionStorage (per-tab, not shared like
+// localStorage — two tabs stay two viewers) and re-sent on every reconnect, so a
+// background tab whose socket keeps flapping keeps one stable identity/name
+// instead of churning a fresh animal name each time. Survives page reloads within
+// the tab; a brand-new tab starts fresh.
+const VIEWER_KEY = 'pc_viewer'
+function loadStoredIdentity() {
+  try { return JSON.parse(sessionStorage.getItem(VIEWER_KEY) || 'null') } catch { return null }
+}
+function persistIdentity(v) {
+  try {
+    if (v && v.id) {
+      sessionStorage.setItem(VIEWER_KEY, JSON.stringify({ id: v.id, name: v.name, color: v.color }))
+    }
+  } catch { /* private mode / disabled storage — fall back to per-connection ids */ }
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const url = `${proto}://${location.host}/ws`
+  let url = `${proto}://${location.host}/ws`
+  const me = loadStoredIdentity()
+  if (me && me.id) {
+    const q = new URLSearchParams({ vid: me.id })
+    if (me.name) q.set('vname', me.name)
+    if (me.color) q.set('vcolor', me.color)
+    url += `?${q.toString()}`
+  }
   ws = new WebSocket(url)
   // High-rate media (video) arrives as binary frames; take them as ArrayBuffers
   // so payloads go straight into a Blob with no base64/text decode.
@@ -1028,6 +1052,7 @@ const chatListeners = new Set()
 
 function setIdentity(v) {
   myViewer = v
+  persistIdentity(v)   // remember across this tab's reconnects/reloads
   for (const cb of identityListeners) cb(v)
 }
 

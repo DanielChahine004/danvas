@@ -404,7 +404,13 @@ class Bridge:
         self._any_connected.set()
         self._send_locks[ws] = asyncio.Lock()
         self._last_seen[ws] = time.monotonic()
-        viewer = self._make_viewer(role=role)
+        # A reconnecting browser re-sends its identity (id/name/color) as query
+        # params so a flapping tab keeps one viewer instead of churning new ones.
+        # ``role`` still comes from the trusted session, never the client.
+        qp = getattr(ws, "query_params", {})
+        requested = {"id": qp.get("vid"), "name": qp.get("vname"),
+                     "color": qp.get("vcolor")}
+        viewer = self._make_viewer(role=role, requested=requested)
         self._viewers[ws] = viewer
         self._broadcast_roster()  # tell everyone a viewer joined
         try:
@@ -491,8 +497,24 @@ class Bridge:
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
-    def _make_viewer(self, role=None):
-        """Mint a fresh viewer identity (id + friendly editable name + color + role)."""
+    def _make_viewer(self, role=None, requested=None):
+        """Mint a viewer identity (id + friendly editable name + color + role).
+
+        ``requested`` carries a browser-supplied id/name/color from a reconnect
+        (see handle_connection): when its id looks valid it's reused so a tab that
+        flaps keeps a single, stable identity instead of being renamed each time.
+        These three fields are client-reported either way (only ``role`` is
+        trusted), so honouring them changes no trust boundary.
+        """
+        rid = (requested or {}).get("id")
+        if rid and rid.isalnum() and len(rid) <= 32:
+            rname = ((requested or {}).get("name") or "").strip()[:40]
+            rcolor = (requested or {}).get("color") or ""
+            color = (rcolor if len(rcolor) == 7 and rcolor[0] == "#"
+                     and all(c in "0123456789abcdefABCDEF" for c in rcolor[1:])
+                     else random.choice(_VIEWER_COLORS))
+            return {"id": rid, "name": rname or random.choice(_VIEWER_ANIMALS),
+                    "color": color, "cursor": None, "role": role}
         existing = {v["name"] for v in self._viewers.values()}
         animal = random.choice(_VIEWER_ANIMALS)
         name = animal
