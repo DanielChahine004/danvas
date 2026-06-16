@@ -289,6 +289,21 @@ def _(msg, viewer): ...            # React/Custom inbound message
 def _(req, viewer): ...            # the awaitable path, too
 ```
 
+**Action routing + field validation.** `@panel.on("name")` dispatches by the
+payload's routing field, so a panel with several actions reads as one named
+handler each instead of one big `if msg["action"] == …` ladder (set the field
+with `event_key=`, e.g. `react(..., event_key="action")`, to match your JSX
+`canvas.send({action:'…'})`). Pass `fields={name: type}` to coerce values off the
+wire before the handler runs — and give validation a home: a value that can't
+coerce drops that message (handler not called) and logs why, instead of crashing
+the handler on a bad string.
+
+```python
+@stock.on("item_set", fields={"stock": int, "price": int})
+def _(msg):                        # msg["stock"]/["price"] are ints here
+    inventory[msg["item"]] = {"stock": msg["stock"], "price": msg["price"]}
+```
+
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
 cursors):
