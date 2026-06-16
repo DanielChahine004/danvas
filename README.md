@@ -304,6 +304,9 @@ def _(msg):                        # msg["stock"]/["price"] are ints here
     inventory[msg["item"]] = {"stock": msg["stock"], "price": msg["price"]}
 ```
 
+`examples/action_routing.py` is a minimal demo; `examples/hackathon.py` uses the
+pattern at scale (one handler per admin/team action across several panels).
+
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
 cursors):

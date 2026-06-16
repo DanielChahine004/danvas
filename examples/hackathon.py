@@ -431,182 +431,223 @@ def reload_data():
                       **{tid: t["password"] for tid, t in teams.items()}})
 
 
-def on_admin(msg, viewer):
-    # One handler for both admin panels — stock actions come from the stock
-    # panel, team actions from the teams panel; we dispatch on `action`.
-    if viewer.get("role") != "admin":
-        return  # the panels only reach admins, but authorize server-side too
-    action = msg.get("action")
-
-    if action == "announce_set":
-        # The announcement is its own bit of state (a Markdown file), unrelated to
-        # the CSV catalogue/teams/orders, so it saves + broadcasts on its own and
-        # skips the shared save()/push_all() at the end.
-        global announcement
-        announcement = msg.get("text", "")
-        save_announcement(announcement)
-        announce_display.update(announcement)       # everyone sees the rendered board
-        announce_editor.update(text=announcement)   # persist for admins who connect later
-        print(f"[admin] announcement updated ({len(announcement)} chars)")
-        return
-
-    if action == "reload":
-        # Pull manual edits to the CSVs back into memory. Falls through to the
-        # save() + push_all() below, which re-broadcasts the freshly loaded state
-        # (and normalises the files on disk).
-        reload_data()
-        print(f"[admin] reloaded from CSV: {len(inventory)} items, "
-              f"{len(teams)} teams, {len(log)} orders")
-
-    elif action == "item_set":
-        name = (msg.get("item") or "").strip()
-        if not name:
-            return
-        inventory[name] = {"stock": max(0, int(msg.get("stock", 0))),
-                           "price": max(0, int(msg.get("price", 0)))}
-        print(f"[admin] set {name}: ${inventory[name]['price']} / {inventory[name]['stock']} in stock")
-
-    elif action == "item_remove":
-        inventory.pop(msg.get("item", ""), None)
-
-    elif action == "team_add":
-        tid = (msg.get("id") or "").strip()
-        name = (msg.get("name") or "").strip()
-        pw = (msg.get("password") or "").strip()
-        if not name or not pw or name == "admin":
-            return
-        budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
-        if tid and tid in teams:
-            # Edit an existing team — including a *rename*. The id (and so the role
-            # and order history) is unchanged, so connected members keep their
-            # session and panels; the new name just propagates via push_all.
-            t = teams[tid]
-            t["name"], t["password"], t["budget"] = name, pw, budget
-            PASSWORDS[tid] = pw
-            print(f"[admin] updated team {tid} -> {name!r} (budget ${budget})")
-        else:
-            tid = next_team_id()
-            teams[tid] = {"name": name, "password": pw, "budget": budget, "points": 0}
-            PASSWORDS[tid] = pw
-            team_panel.add_role(tid)   # team + board panels now admit this role, live
-            board.add_role(tid)
-            grant_team_view(tid)
-            print(f"[admin] created team {name!r} as {tid} "
-                  f"(password {pw!r}, budget ${budget})")
-
-    elif action == "team_remove":
-        tid = msg.get("id", "")
-        if tid in teams:
-            name = teams[tid]["name"]
-            teams.pop(tid)
-            PASSWORDS.pop(tid, None)
-            team_panel.remove_role(tid)   # drop the panels from that role, live
-            board.remove_role(tid)
-            print(f"[admin] removed team {name!r} ({tid})")
-
-    elif action == "award":
-        tid = msg.get("id", "")
-        if tid in teams:
-            teams[tid]["points"] += int(msg.get("points", 0))
-            print(f"[admin] {teams[tid]['name']} -> {teams[tid]['points']} pts")
-
-    elif action == "order_fulfil":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] == "fulfilled":
-            return
-        if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
-            print(f"[admin] can't fulfil order #{o['id']} "
-                  f"({o['qty']}x {o['item']} for {team_name(o['team'])}): not enough stock/budget")
-            return
-        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {team_name(o['team'])}")
-
-    elif action == "order_reject":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] in ("rejected", "retracted"):
-            return
-        set_order_status(o, "rejected")   # refunds budget (and returns stock if fulfilled)
-        print(f"[admin] marked #{o['id']} not fulfilled")
-
-    elif action == "order_edit":
-        o = find_order(msg.get("id"))
-        if o is None or o["status"] != "pending":
-            return  # only a pending order's quantity can be edited
-        new_qty = max(1, int(msg.get("qty", o["qty"])))
-        new_cost = o["price"] * new_qty
-        t = teams.get(o["team"])
-        if t is not None:
-            # The order already holds o["cost"]; adjust the reservation to the new
-            # cost, refusing an increase the team can't afford.
-            if t["budget"] + o["cost"] < new_cost:
-                return
-            t["budget"] += o["cost"] - new_cost
-        o["qty"] = new_qty
-        o["cost"] = new_cost
-
-    else:
-        return
-
+def commit():
+    """Persist the CSVs and re-broadcast every panel — the shared tail of every
+    catalogue/team/order mutation. (The announcement is separate state and
+    broadcasts on its own; see admin_announce_set.)"""
     save()
     push_all()
 
 
-def on_team(msg, viewer):
-    team = viewer.get("role")   # the team's stable id (orders reference it)
+# Each browser action is one named handler, wired to its panel in the wiring
+# section with @panel.on("action", fields=…) — no central if/elif. The admin
+# panels are roles=["admin"], so only admins reach them; the per-handler role
+# check is defence-in-depth (authorize server-side too). Numeric inputs declare
+# ``fields=`` at the wiring so they arrive coerced, and a malformed value drops
+# that message instead of crashing the handler.
+
+# -- admin: stock control (the Stock panel) -----------------------------------
+def admin_reload(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    reload_data()   # pull manual edits to the CSVs back into memory
+    print(f"[admin] reloaded from CSV: {len(inventory)} items, "
+          f"{len(teams)} teams, {len(log)} orders")
+    commit()
+
+
+def admin_item_set(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    name = (msg.get("item") or "").strip()
+    if not name:
+        return
+    inventory[name] = {"stock": max(0, msg.get("stock", 0)),
+                       "price": max(0, msg.get("price", 0))}
+    print(f"[admin] set {name}: ${inventory[name]['price']} / {inventory[name]['stock']} in stock")
+    commit()
+
+
+def admin_item_remove(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    inventory.pop(msg.get("item", ""), None)
+    commit()
+
+
+# -- admin: teams + points (the Teams panel) ----------------------------------
+def admin_team_add(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    tid = (msg.get("id") or "").strip()
+    name = (msg.get("name") or "").strip()
+    pw = (msg.get("password") or "").strip()
+    if not name or not pw or name == "admin":
+        return
+    budget = max(0, msg.get("budget", DEFAULT_BUDGET))
+    if tid and tid in teams:
+        # Edit an existing team — including a *rename*. The id (and so the role
+        # and order history) is unchanged, so connected members keep their
+        # session and panels; the new name just propagates via push_all.
+        t = teams[tid]
+        t["name"], t["password"], t["budget"] = name, pw, budget
+        PASSWORDS[tid] = pw
+        print(f"[admin] updated team {tid} -> {name!r} (budget ${budget})")
+    else:
+        tid = next_team_id()
+        teams[tid] = {"name": name, "password": pw, "budget": budget, "points": 0}
+        PASSWORDS[tid] = pw
+        team_panel.add_role(tid)   # team + board panels now admit this role, live
+        board.add_role(tid)
+        grant_team_view(tid)
+        print(f"[admin] created team {name!r} as {tid} "
+              f"(password {pw!r}, budget ${budget})")
+    commit()
+
+
+def admin_team_remove(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    tid = msg.get("id", "")
+    if tid in teams:
+        name = teams[tid]["name"]
+        teams.pop(tid)
+        PASSWORDS.pop(tid, None)
+        team_panel.remove_role(tid)   # drop the panels from that role, live
+        board.remove_role(tid)
+        print(f"[admin] removed team {name!r} ({tid})")
+    commit()
+
+
+def admin_award(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    tid = msg.get("id", "")
+    if tid in teams:
+        teams[tid]["points"] += msg.get("points", 0)
+        print(f"[admin] {teams[tid]['name']} -> {teams[tid]['points']} pts")
+    commit()
+
+
+# -- admin: order workflow (the Orders table) ---------------------------------
+def admin_order_fulfil(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    o = find_order(msg.get("id"))
+    if o is None or o["status"] == "fulfilled":
+        return
+    if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
+        print(f"[admin] can't fulfil order #{o['id']} "
+              f"({o['qty']}x {o['item']} for {team_name(o['team'])}): not enough stock/budget")
+        return
+    print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {team_name(o['team'])}")
+    commit()
+
+
+def admin_order_reject(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    o = find_order(msg.get("id"))
+    if o is None or o["status"] in ("rejected", "retracted"):
+        return
+    set_order_status(o, "rejected")   # refunds budget (and returns stock if fulfilled)
+    print(f"[admin] marked #{o['id']} not fulfilled")
+    commit()
+
+
+def admin_order_edit(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    o = find_order(msg.get("id"))
+    if o is None or o["status"] != "pending":
+        return  # only a pending order's quantity can be edited
+    new_qty = max(1, msg.get("qty", o["qty"]))
+    new_cost = o["price"] * new_qty
+    t = teams.get(o["team"])
+    if t is not None:
+        # The order already holds o["cost"]; adjust the reservation to the new
+        # cost, refusing an increase the team can't afford.
+        if t["budget"] + o["cost"] < new_cost:
+            return
+        t["budget"] += o["cost"] - new_cost
+    o["qty"] = new_qty
+    o["cost"] = new_cost
+    commit()
+
+
+# -- admin: announcement board (its own Markdown state, no shared commit) ------
+def admin_announce_set(msg, viewer):
+    if viewer.get("role") != "admin":
+        return
+    global announcement
+    announcement = msg.get("text", "")
+    save_announcement(announcement)
+    announce_display.update(announcement)       # everyone sees the rendered board
+    announce_editor.update(text=announcement)   # persist for admins who connect later
+    print(f"[admin] announcement updated ({len(announcement)} chars)")
+    # The announcement is unrelated to the CSV catalogue/teams/orders, so it
+    # broadcasts on its own above and skips the shared commit().
+
+
+# -- a team's own actions (the team catalogue/cart panel) ---------------------
+# ``viewer["role"]`` is the team's stable id (orders reference it), server-trusted.
+def team_ping(msg, viewer):
+    # Sent on mount so the team's budget/orders appear immediately.
+    if viewer.get("role") in teams:
+        push_all()
+
+
+def team_file(msg, viewer):
+    team = viewer.get("role")
     if team not in teams:
         return
     name = teams[team]["name"]
-    action = msg.get("action")
-
-    if action == "ping":
-        push_all()
+    # File a cart of [{item, qty}, …] as one pending order per line. Budget is
+    # reserved now; prices are snapshotted. Atomic: if the team can't afford the
+    # whole cart, nothing is filed (the UI also pre-checks this).
+    lines = []
+    total = 0
+    want = {}   # item -> total qty requested across the cart
+    for entry in msg.get("cart", []):
+        item = entry.get("item", "")
+        qty = max(1, int(entry.get("qty", 1)))
+        if item not in inventory:
+            continue
+        price = inventory[item]["price"]
+        lines.append((item, qty, price))
+        total += price * qty
+        want[item] = want.get(item, 0) + qty
+    # Atomic: file nothing unless the team can afford the whole cart *and* no item
+    # is requested beyond its current stock (the UI pre-checks both).
+    if not lines or teams[team]["budget"] < total:
         return
-
-    if action == "file":
-        # File a cart of [{item, qty}, …] as one pending order per line. Budget is
-        # reserved now; prices are snapshotted. Atomic: if the team can't afford
-        # the whole cart, nothing is filed (the UI also pre-checks this).
-        lines = []
-        total = 0
-        want = {}   # item -> total qty requested across the cart
-        for entry in msg.get("cart", []):
-            item = entry.get("item", "")
-            qty = max(1, int(entry.get("qty", 1)))
-            if item not in inventory:
-                continue
-            price = inventory[item]["price"]
-            lines.append((item, qty, price))
-            total += price * qty
-            want[item] = want.get(item, 0) + qty
-        # Atomic: file nothing unless the team can afford the whole cart *and*
-        # no item is requested beyond its current stock (the UI pre-checks both).
-        if not lines or teams[team]["budget"] < total:
-            return
-        if any(qty > inventory[item]["stock"] for item, qty in want.items()):
-            print(f"[{name}] request rejected: over stock")
-            return
-        for item, qty, price in lines:
-            order = {"id": next_order_id(), "team": team, "item": item,
-                     "qty": qty, "price": price, "cost": price * qty,
-                     "status": "pending"}
-            log.insert(0, order)
-            reserve_budget(order)   # budget goes down on request
-        print(f"[{name}] filed {len(lines)} line(s) for ${total:,} "
-              f"(budget left: ${teams[team]['budget']:,})")
-        save()
-        push_all()
+    if any(qty > inventory[item]["stock"] for item, qty in want.items()):
+        print(f"[{name}] request rejected: over stock")
         return
+    for item, qty, price in lines:
+        order = {"id": next_order_id(), "team": team, "item": item,
+                 "qty": qty, "price": price, "cost": price * qty,
+                 "status": "pending"}
+        log.insert(0, order)
+        reserve_budget(order)   # budget goes down on request
+    print(f"[{name}] filed {len(lines)} line(s) for ${total:,} "
+          f"(budget left: ${teams[team]['budget']:,})")
+    commit()
 
-    if action == "retract":
-        o = find_order(msg.get("id"))
-        # A team can only retract its *own* still-pending order; this refunds the
-        # reserved budget.
-        if o is None or o["team"] != team or o["status"] != "pending":
-            return
-        set_order_status(o, "retracted")
-        print(f"[{name}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
-        save()
-        push_all()
+
+def team_retract(msg, viewer):
+    team = viewer.get("role")
+    if team not in teams:
         return
+    name = teams[team]["name"]
+    o = find_order(msg.get("id"))
+    # A team can only retract its *own* still-pending order; this refunds the
+    # reserved budget.
+    if o is None or o["team"] != team or o["status"] != "pending":
+        return
+    set_order_status(o, "retracted")
+    print(f"[{name}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
+    commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1567,7 +1608,7 @@ board = canvas.react(_BOARD_SOURCE, name="board", css=_BOARD_CSS,
 
 # Props are seeded from the loaded JSON so the admin sees the full catalogue,
 # every team (budget + points) and the order log on the very first connect.
-admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS,
+admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS, event_key="action",
                            right_of=board, gap=GAP, w=380, h=560,
                            roles=["admin"],
                            props={"rows": inv_rows()})
@@ -1578,7 +1619,7 @@ admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS,
 # update(roles=...) so no team ever receives another team's figures (see
 # push_all); the seed props just cover the first render before that arrives.
 # Same anchor as admin_stock — admins see stock there, teams see this.
-team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS,
+team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS, event_key="action",
                           right_of=board, gap=GAP, w=380, h=560,
                           roles=[TEAM_SENTINEL, *teams.keys()],
                           props={"rows": inv_rows(), "team": "", "budget": 0, "orders": []})
@@ -1596,17 +1637,17 @@ announce_display = canvas.markdown(announcement, name="announce",
                                    right_of=leaderboard, gap=GAP, w=560, h=560, frame=False, grabbable=False)
 
 # Bottom row (admin only): Teams under the board, Orders under the stock panel.
-admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
+admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS, event_key="action",
                            below=board, gap=GAP, w=440, h=700,
                            roles=["admin"],
                            props={"teams": team_rows(True)})
 
-admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
+admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS, event_key="action",
                             below=admin_stock, gap=GAP, w=760, h=560,
                             roles=["admin"],
                             props={"log": admin_order_rows()})
 
-announce_editor = canvas.react(_ANNOUNCE_SOURCE, name="announce_edit", css=_ANNOUNCE_CSS,
+announce_editor = canvas.react(_ANNOUNCE_SOURCE, name="announce_edit", css=_ANNOUNCE_CSS, event_key="action",
                                below=announce_display, gap=GAP, w=560, h=560,
                                roles=["admin"],
                                props={"text": announcement})
@@ -1630,12 +1671,27 @@ for _tid in teams:
     grant_team_view(_tid)
 
 
-# ── Wire the handlers (defined up top) to the panels ──────────────────────────
-admin_stock.on_message(on_admin)
-admin_teams.on_message(on_admin)
-admin_orders.on_message(on_admin)
-announce_editor.on_message(on_admin)
-team_panel.on_message(on_team)
+# ── Wire each action to its handler (defined up top) ──────────────────────────
+# @panel.on("action") routes on msg["action"] (the panels carry event_key="action"),
+# so each browser action lands on its own named handler — no central if/elif.
+# `fields=` coerces numeric inputs off the wire (and drops a malformed message).
+admin_stock.on("reload")(admin_reload)
+admin_stock.on("item_set", fields={"stock": int, "price": int})(admin_item_set)
+admin_stock.on("item_remove")(admin_item_remove)
+
+admin_teams.on("team_add", fields={"budget": int})(admin_team_add)
+admin_teams.on("team_remove")(admin_team_remove)
+admin_teams.on("award", fields={"points": int})(admin_award)
+
+admin_orders.on("order_fulfil")(admin_order_fulfil)
+admin_orders.on("order_reject")(admin_order_reject)
+admin_orders.on("order_edit", fields={"qty": int})(admin_order_edit)
+
+announce_editor.on("announce_set")(admin_announce_set)
+
+team_panel.on("ping")(team_ping)
+team_panel.on("file")(team_file)
+team_panel.on("retract")(team_retract)
 
 
 # Startup lint: catch JSX typos (a missing Component, unbalanced braces) here
