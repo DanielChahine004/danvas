@@ -45,13 +45,21 @@ def test_flag_wire_keys_match_protocol():
 
 
 # -- JS side agrees with the canonical module --------------------------------
-def test_bridge_js_binary_codes_match_protocol():
+def test_bridge_js_imports_binary_codes_from_generated():
+    # bridge.js no longer hardcodes the codes — it imports them from the
+    # generated module (whose values are guaranteed by the staleness test +
+    # the Python-side check). Assert the import is present and that nothing
+    # re-declares them as literals (which would silently shadow the import).
     src = _read(_BRIDGE_JS)
-    found = {m.group(1): int(m.group(2))
-             for m in re.finditer(r"const BIN_(\w+)\s*=\s*(\d+)", src)}
-    for name, code in _protocol.BINARY_FRAME_CODES.items():
-        assert found.get(name) == code, (
-            f"bridge.js BIN_{name} ({found.get(name)}) != protocol {code}")
+    m = re.search(r"import\s*\{([^}]*)\}\s*from\s*'\./protocol\.generated\.js'",
+                  src)
+    assert m, "bridge.js must import the BIN_* codes from ./protocol.generated.js"
+    imported = {name.strip() for name in m.group(1).split(",")}
+    for name in _protocol.BINARY_FRAME_CODES:
+        assert f"BIN_{name}" in imported, (
+            f"bridge.js does not import BIN_{name} from the generated module")
+    assert not re.search(r"const BIN_\w+\s*=\s*\d+", src), (
+        "bridge.js still hardcodes a BIN_* code — it should import them")
 
 
 def test_bridge_js_uses_the_flag_wire_keys():

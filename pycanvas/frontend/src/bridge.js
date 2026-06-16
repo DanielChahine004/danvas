@@ -1,5 +1,6 @@
 import { createShapeId, createBindingId } from 'tldraw'
 import { COMPONENT_TO_SHAPE } from './canvas'
+import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT } from './protocol.generated.js'
 
 // Single shared WebSocket connection. All components are multiplexed over it,
 // keyed by component id. State lives in Python + tldraw shape props only.
@@ -443,11 +444,9 @@ function connect() {
   }
 }
 
-// Binary-frame type codes (must match the server's bridge.py).
-const BIN_VIDEO = 1
-const BIN_AUDIO = 2
-const BIN_CUSTOM = 3
-const BIN_REACT = 4
+// Binary-frame type codes (BIN_VIDEO/AUDIO/CUSTOM/REACT) are imported at the top
+// from ./protocol.generated.js, which is rendered from the server's canonical
+// pycanvas/_protocol.py — so the two sides can't drift.
 const frameDecoder = new TextDecoder()
 
 // Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its

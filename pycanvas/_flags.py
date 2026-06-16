@@ -20,24 +20,30 @@ message.
 
 from collections import namedtuple
 
+from ._protocol import FLAG_WIRE_KEYS
+
 Flag = namedtuple("Flag", "wire attr default doc")
 
 
 # Python name -> Flag(wire key, backing attribute, default, property docstring).
 # Insertion order is the canonical order used wherever the flags are iterated.
+# The ``wire`` keys come from the canonical pycanvas/_protocol.py (the same
+# definition the frontend's protocol.generated.js is rendered from) so the
+# browser-facing names can't drift; this module owns the backing attr / default /
+# docstring.
 LAYOUT_FLAGS = {
     "locked": Flag(
-        "locked", "_locked", False,
+        FLAG_WIRE_KEYS["locked"], "_locked", False,
         "Whether the panel is fully locked (no move/resize/interaction)."),
     "draggable": Flag(
-        "movable", "_draggable", True,
+        FLAG_WIRE_KEYS["draggable"], "_draggable", True,
         "Whether the user can drag the panel. Control interaction is "
         "unaffected."),
     "resizable": Flag(
-        "resizable", "_resizable", True,
+        FLAG_WIRE_KEYS["resizable"], "_resizable", True,
         "Whether the user can resize the panel. Interaction is unaffected."),
     "operable": Flag(
-        "interactive", "_operable", True,
+        FLAG_WIRE_KEYS["operable"], "_operable", True,
         "Whether the user can operate the panel's controls from the UI.\n\n"
         "        Set to ``False`` to make the controls inert to the user while "
         "the panel\n        stays unlocked, so Python ``update()`` calls still "
@@ -45,7 +51,7 @@ LAYOUT_FLAGS = {
         "value the user mustn't drag). The\n        panel can still be "
         "moved/selected; use ``locked`` to freeze everything.\n        "),
     "grabbable": Flag(
-        "selectable", "_grabbable", True,
+        FLAG_WIRE_KEYS["grabbable"], "_grabbable", True,
         "Whether the user can grab/select this panel at all.\n\n"
         "        Content-heavy panels (Custom, React, WebView, plots…) normally "
         "need a\n        first click to select the panel before their content "
@@ -57,7 +63,7 @@ LAYOUT_FLAGS = {
         "can't move or resize it; do that from Python (or flip\n        "
         "``grabbable`` back on).\n        "),
     "frame": Flag(
-        "frame", "_frame", True,
+        FLAG_WIRE_KEYS["frame"], "_frame", True,
         "Whether the panel draws its rectangular card chrome.\n\n"
         "        Set to ``False`` to strip the card entirely — background, "
         "border,\n        shadow, padding, label header, and the "

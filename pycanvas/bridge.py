@@ -20,6 +20,7 @@ from collections import deque
 from fastapi import WebSocketDisconnect
 
 from ._flags import LAYOUT_FLAGS
+from ._protocol import BINARY_FRAME_CODES
 from .kernel import Kernel
 
 
@@ -60,16 +61,18 @@ _VIEWER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6",
 _HEARTBEAT_TIMEOUT = 30.0
 _REAP_INTERVAL = 10.0
 
-# Binary-frame type codes (must match the frontend's bridge.js). High-rate media
-# rides a binary WebSocket frame instead of base64-in-JSON: a 2-byte header
-# (``[type][id-length]``) plus the id, then the raw payload, so the browser feeds
-# bytes straight into a Blob/ArrayBuffer with no base64 decode or JSON parse.
-# Control messages (register/update/layout/chat/...) stay JSON: they're low-rate
-# and self-describing, so binary would cost readability for no real throughput.
-BINARY_VIDEO = 1   # payload: JPEG-encoded frame bytes
-BINARY_AUDIO = 2   # payload: little-endian int16 PCM samples (interleaved)
-BINARY_CUSTOM = 3  # payload: opaque user bytes -> Custom.push_binary -> canvas.onPush
-BINARY_REACT = 4   # payload: opaque user bytes -> React.push_binary -> canvas.onFrame
+# Binary-frame type codes. High-rate media rides a binary WebSocket frame instead
+# of base64-in-JSON: a 2-byte header (``[type][id-length]``) plus the id, then the
+# raw payload, so the browser feeds bytes straight into a Blob/ArrayBuffer with no
+# base64 decode or JSON parse. Control messages (register/update/layout/chat/...)
+# stay JSON: they're low-rate and self-describing, so binary would cost
+# readability for no real throughput. The codes are sourced from the canonical
+# pycanvas/_protocol.py (the same definition the frontend's protocol.generated.js
+# is rendered from), so the two sides can't drift.
+BINARY_VIDEO = BINARY_FRAME_CODES["VIDEO"]   # JPEG-encoded frame bytes
+BINARY_AUDIO = BINARY_FRAME_CODES["AUDIO"]   # little-endian int16 PCM (interleaved)
+BINARY_CUSTOM = BINARY_FRAME_CODES["CUSTOM"]  # opaque -> Custom.push_binary -> canvas.onPush
+BINARY_REACT = BINARY_FRAME_CODES["REACT"]   # opaque -> React.push_binary -> canvas.onFrame
 
 
 def encode_binary_frame(type_code, comp_id, payload):
