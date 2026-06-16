@@ -133,6 +133,34 @@ canvas.components         # list of every panel (canvas.arrows for connectors)
 `canvas.clear()` removes everything at once; `canvas.save` / `canvas.load`
 persist placement (see [Saving & loading](#saving--loading)).
 
+### Shared React components & styles
+
+When you build custom UI with `react(...)` (step 2), repeating the same widget —
+a status pill, a stat card, a table — in every panel's source gets old fast.
+`canvas.define()` registers a JSX component **once** and makes it available *by
+name* in every React panel; `canvas.style()` adds **one** global stylesheet
+shared by all of them (vs a panel's own `css=`, which is scoped to that panel):
+
+```python
+canvas.define("StatusPill", """
+  function StatusPill({ kind, children }) {
+    return <span className={"pill " + kind}>{children}</span>
+  }
+""")
+canvas.style(".pill{padding:2px 10px;border-radius:999px} .pill.ok{color:#4ade80}")
+
+# now ANY react() panel can use it, with no re-declaration:
+canvas.react("function Component(){ return <StatusPill kind='ok'>In stock</StatusPill> }")
+```
+
+`define(name, source=…)` (or `path=` a `.jsx` file) — `name` must be a valid
+identifier and match the component the source declares. `style(css)` accumulates
+(each call adds rules) and injects into the page `<head>`, so scope selectors
+with your own class prefix. Both replay to every browser on connect and apply
+live while serving — a `define()` mid-session recompiles the open panels. They're
+for native `react()` panels; sandboxed `custom()` iframes are isolated and don't
+receive them. See `examples/shared_components.py`.
+
 # 2. Components
 
 `canvas.<factory>(...)` builds a panel **and** places it, returning the handle.

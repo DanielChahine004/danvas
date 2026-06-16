@@ -632,10 +632,6 @@ _BOARD_CSS = """
 .pc-sb .iname{flex:1;font-size:13px;font-weight:600}
 .pc-sb .iprice{font-size:13px;font-weight:700;color:var(--pc-muted,#666);
                font-variant-numeric:tabular-nums;min-width:58px;text-align:right}
-.pc-sb .chip{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
-.pc-sb .in {background:rgba(20,83,45,.35);color:#4ade80;border:1px solid rgba(74,222,128,.2)}
-.pc-sb .low{background:rgba(120,53,15,.35);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
-.pc-sb .out{background:rgba(127,29,29,.35);color:#f87171;border:1px solid rgba(248,113,113,.2)}
 .pc-sb .empty{color:#64748b;font-size:13px;padding:12px 4px}
 """
 
@@ -643,11 +639,6 @@ _BOARD_SOURCE = """
 function Component({ props }) {
   const rows  = props.rows || [];
   const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
-  function chip(n) {
-    if (n === 0) return <span className="chip out">Out of stock</span>;
-    if (n <= 2)  return <span className="chip low">{n} left</span>;
-    return             <span className="chip in">{n} in stock</span>;
-  }
   return (
     <div className="pc-sb">
       <div className="hd">📦 Inventory</div>
@@ -658,7 +649,7 @@ function Component({ props }) {
               <div className="ico">{ICONS[r.item] || "📦"}</div>
               <span className="iname">{r.item}</span>
               <span className="iprice">${r.price.toLocaleString()}</span>
-              {chip(r.stock)}
+              <StockChip n={r.stock} />
             </div>
           ))}
     </div>
@@ -895,10 +886,6 @@ _TEAM_CSS = """
 .pc-su .iname{flex:1;font-size:13px;font-weight:600}
 .pc-su .iprice{font-size:12px;font-weight:700;color:var(--pc-muted,#666);
                font-variant-numeric:tabular-nums}
-.pc-su .chip{padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700}
-.pc-su .in {background:rgba(20,83,45,.35);color:#4ade80}
-.pc-su .low{background:rgba(120,53,15,.35);color:#fbbf24}
-.pc-su .out{background:rgba(127,29,29,.35);color:#f87171}
 .pc-su .rcard{background:rgba(37,99,235,.1);border:1.5px solid rgba(59,130,246,.4);
               border-radius:10px;padding:14px;margin-bottom:14px}
 .pc-su .rcard-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
@@ -933,10 +920,6 @@ _TEAM_CSS = """
 .pc-su .hi{color:var(--pc-text,#e6edf3);font-weight:600}
 .pc-su .ostat{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
               padding:2px 6px;border-radius:999px;flex-shrink:0}
-.pc-su .s-pend{background:rgba(59,130,246,.2);color:#60a5fa}
-.pc-su .s-ok{background:rgba(20,83,45,.35);color:#4ade80}
-.pc-su .s-no{background:rgba(127,29,29,.35);color:#f87171}
-.pc-su .s-ret{background:rgba(100,116,139,.25);color:#94a3b8}
 .pc-su .msg{padding:6px 10px;border-radius:7px;font-size:12px;margin-bottom:14px;
             background:rgba(20,83,45,.35);color:#4ade80}
 .pc-su .empty{color:#64748b;font-size:12px;padding:4px 0}
@@ -1023,12 +1006,6 @@ function Component({ canvas, props }) {
   }
   function retract(id) { canvas.send({ action:"retract", id }); }
 
-  function chip(n) {
-    if (n === 0) return <span className="chip out">Out of stock</span>;
-    if (n <= 2)  return <span className="chip low">{n} left</span>;
-    return             <span className="chip in">{n} in stock</span>;
-  }
-
   return (
     <div className="pc-su">
       <div className="top">
@@ -1070,7 +1047,7 @@ function Component({ canvas, props }) {
                   <div className="ico">{ICONS[r.item]||"📦"}</div>
                   <span className="iname">{r.item}</span>
                   <span className="iprice">${r.price.toLocaleString()}</span>
-                  {chip(r.stock)}
+                  <StockChip n={r.stock} />
                 </div>
               ))}
         </div>
@@ -1111,9 +1088,9 @@ function Component({ canvas, props }) {
         {myLog.length === 0
           ? <div className="empty">No orders yet.</div>
           : myLog.map(r => {
-              const st = ({pending:["awaiting","s-pend"], fulfilled:["fulfilled","s-ok"],
-                           rejected:["declined","s-no"], retracted:["retracted","s-ret"]})[r.status]
-                         || ["awaiting","s-pend"];
+              const st = ({pending:["awaiting","st-pend"], fulfilled:["fulfilled","st-ok"],
+                           rejected:["declined","st-no"], retracted:["retracted","st-ret"]})[r.status]
+                         || ["awaiting","st-pend"];
               return (
                 <div key={r.id} className="litem">
                   <span className="ldot">▸</span>
@@ -1166,10 +1143,6 @@ _ORDERS_CSS = """
 .pc-ord td.rt{text-align:right;font-variant-numeric:tabular-nums}
 .pc-ord .badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
                padding:2px 7px;border-radius:999px}
-.pc-ord .b-pend{background:rgba(59,130,246,.2);color:#60a5fa}
-.pc-ord .b-ok{background:rgba(20,83,45,.35);color:#4ade80}
-.pc-ord .b-no{background:rgba(127,29,29,.35);color:#f87171}
-.pc-ord .b-ret{background:rgba(100,116,139,.25);color:#94a3b8}
 .pc-ord td.acts{text-align:right;white-space:nowrap}
 .pc-ord .act{width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;margin-left:4px;
              font-size:13px;line-height:1;background:rgba(255,255,255,.06);color:inherit}
@@ -1182,8 +1155,8 @@ _ORDERS_CSS = """
 """
 
 _ORDERS_SOURCE = """
-const STATUS = { pending:["pending","b-pend"], fulfilled:["fulfilled","b-ok"],
-                 rejected:["not fulfilled","b-no"], retracted:["retracted","b-ret"] };
+const STATUS = { pending:["pending","st-pend"], fulfilled:["fulfilled","st-ok"],
+                 rejected:["not fulfilled","st-no"], retracted:["retracted","st-ret"] };
 const COLS = [
   { key:"id",     label:"#",      num:true,  get:o=>o.id },
   { key:"team",   label:"Team",   num:false, get:o=>o.team },
@@ -1552,6 +1525,37 @@ function Component({ canvas, props }) {
 # they overlap by design rather than fighting for the slot.
 GAP = 20
 
+# ── Shared UI kit (canvas.define / canvas.style) ──────────────────────────────
+# A couple of elements recur across panels: the stock-level chip (inventory board
+# + each team's catalogue) and the order-status colours (a team's order list +
+# the admin Orders table). Define the chip once and put the shared colours in one
+# stylesheet here, instead of re-declaring the JSX helper and re-pasting the CSS
+# into every panel — panels just render <StockChip n={…}/> and use the .st-* /
+# .chip colours. Registered before the panels (replayed to each browser on
+# connect, ahead of the panels that use them).
+canvas.define("StockChip", """
+function StockChip({ n }) {
+  if (n === 0) return <span className="chip out">Out of stock</span>;
+  if (n <= 2)  return <span className="chip low">{n} left</span>;
+  return             <span className="chip in">{n} in stock</span>;
+}
+""")
+
+canvas.style("""
+/* stock-level chip — shared by the inventory board and each team's catalogue */
+.chip{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.chip.in {background:rgba(20,83,45,.35);color:#4ade80;border:1px solid rgba(74,222,128,.2)}
+.chip.low{background:rgba(120,53,15,.35);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
+.chip.out{background:rgba(127,29,29,.35);color:#f87171;border:1px solid rgba(248,113,113,.2)}
+/* order-status colours — shared by a team's order list and the admin Orders
+   table; each panel keeps its own pill base (.ostat / .badge). */
+.st-pend{background:rgba(59,130,246,.2);color:#60a5fa}
+.st-ok{background:rgba(20,83,45,.35);color:#4ade80}
+.st-no{background:rgba(127,29,29,.35);color:#f87171}
+.st-ret{background:rgba(100,116,139,.25);color:#94a3b8}
+""")
+
+
 # Top row, left -> right:  board | stock·team | leaderboard | announcements
 # The inventory board is for admins and teams, not spectators, so it carries
 # explicit roles (admin + each team) and grows with new teams, like team_panel.
@@ -1582,14 +1586,14 @@ team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS,
 # The leaderboard is for everyone (roles=[] = all roles, incl. spectators).
 leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard", css=_LEADERBOARD_CSS,
                            right_of=admin_stock, gap=GAP, w=360, h=560,
-                           props={"rows": leaderboard_rows()})
+                           props={"rows": leaderboard_rows()}, frame=False, grabbable=False)
 
 # Announcements. The rendered board is a built-in Markdown panel visible to
 # everyone (no roles); the admin-only editor below it publishes new Markdown
 # (broadcast + saved to hackathon_announcement.md). Rightmost column.
 announce_display = canvas.markdown(announcement, name="announce",
                                    label="📣 Announcements",
-                                   right_of=leaderboard, gap=GAP, w=560, h=560)
+                                   right_of=leaderboard, gap=GAP, w=560, h=560, frame=False, grabbable=False)
 
 # Bottom row (admin only): Teams under the board, Orders under the stock panel.
 admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
@@ -1598,7 +1602,7 @@ admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
                            props={"teams": team_rows(True)})
 
 admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
-                            below=admin_stock, gap=GAP, w=760, h=340,
+                            below=admin_stock, gap=GAP, w=760, h=560,
                             roles=["admin"],
                             props={"log": admin_order_rows()})
 
