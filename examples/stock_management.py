@@ -1,55 +1,194 @@
-"""Stock management system with role-based access.
+"""Stock management with a JSON-backed catalogue and admin-managed teams.
 
-Admin (password "admin"):  restocks items, monitors all user budgets and requests.
-User  (password "user"):   browses live inventory, requests items from their budget.
+All state — the catalogue, the teams (name + password + budget) and the order
+log — lives in ``stock_data.json`` next to this script. It's loaded at startup
+and rewritten on every change, so a restart resumes exactly where it left off.
 
-Both roles see the inventory board in real time. The action panel on the right
-is role-specific — admin and user panels sit at the same position so each role
-sees the full canvas without gaps.
+Roles
+-----
+* **admin** (password ``admin``): sees three panels — *Stock Control* (add /
+  change / remove items and prices/stock), *Teams* (create teams, set their
+  passwords and budgets, watch each team's balance), and *Orders*, a sortable,
+  filterable table of every request with fulfil / reject / edit-quantity actions.
+* **a team** (each team has its own password, set by the admin): browses the
+  live catalogue and requests items against that team's shared budget.
+
+A viewer's *role* is the team they logged in as — it's assigned server-side from
+the password and can't be spoofed — so every order is attributed to the right
+team and the budget is shared by everyone on it. Teams are created at runtime:
+the admin's new password is added to the live auth map (no restart) and the team
+panel starts accepting that role.
+
+Order workflow
+--------------
+A team adds items to a *cart* and files it, which sees how much budget it would
+have left first. Filing **reserves the budget** (it goes down immediately) and
+creates one pending order per line. The team can **retract** any still-pending
+order to get the money back. In the Orders table the admin can fulfil (✓), mark
+not-fulfilled (×), or edit a pending order's quantity (✎). **Stock** is taken
+only on fulfilment and returned if that's undone; **budget** is held while an
+order is pending or fulfilled and refunded the moment it's retracted or rejected.
 """
+
+import json
+import os
 
 import pycanvas
 
+DATA_PATH = os.path.join(os.path.dirname(__file__), "stock_data.json")
+ADMIN_PASSWORD = "admin"
+DEFAULT_BUDGET = 2000
+
+# A role string no password ever maps to. It keeps the team panel's role list
+# non-empty: an empty `roles=[]` means "visible to everyone" (incl. admin), so
+# even after the admin deletes every team the panel stays hidden from non-teams.
+TEAM_SENTINEL = "__team__"
+
 canvas = pycanvas.Canvas()
 
-STARTING_BUDGET = 2000
 
-inventory = {
-    "Laptop":   {"stock": 5,  "price": 1200},
-    "Monitor":  {"stock": 8,  "price":  350},
-    "Keyboard": {"stock": 15, "price":   80},
-    "Mouse":    {"stock": 20, "price":   45},
-    "Headset":  {"stock": 10, "price":  150},
-}
+# ── Persistence ───────────────────────────────────────────────────────────────
 
-budgets = {}   # viewer name → remaining budget
-req_log = []   # newest-first: {user, item, qty, cost}
+DATA_VERSION = 2   # bumped when the saved-state model changes (see migration)
 
 
-def ensure_user(name):
-    if name not in budgets:
-        budgets[name] = STARTING_BUDGET
-    return budgets[name]
+def load():
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return (data["inventory"], data["teams"], data.get("log", []),
+            data.get("version", 1))
 
+
+def save():
+    with open(DATA_PATH, "w", encoding="utf-8") as f:
+        json.dump({"version": DATA_VERSION, "inventory": inventory,
+                   "teams": teams, "log": log}, f, indent=2)
+
+
+inventory, teams, log, _data_version = load()   # item->{stock,price}, team->{password,budget}, [orders]
+
+
+# ── Orders ────────────────────────────────────────────────────────────────────
+# An order is a log row with a status. A team's *budget* is reserved the moment
+# it requests (held while the order is "pending" or "fulfilled") and refunded if
+# the order is "retracted" (by the team) or "rejected" (by the admin). *Stock*
+# moves later: it's taken only when the admin marks an order "fulfilled" and put
+# back if that's undone. `set_order_status` reconciles both holds on any change.
+
+_BUDGET_STATES = ("pending", "fulfilled")   # order is holding the team's money
+_STOCK_STATES = ("fulfilled",)              # order is holding the stock
+
+
+def normalize_log():
+    """Backfill id/price/status/cost on rows from older saves."""
+    seq = max((o["id"] for o in log if isinstance(o.get("id"), int)), default=0)
+    for o in log:
+        if not isinstance(o.get("id"), int):
+            seq += 1
+            o["id"] = seq
+        qty = max(1, int(o.get("qty", 1)))
+        o.setdefault("price", int(o.get("cost", 0) / qty) if o.get("cost") else 0)
+        o.setdefault("status", "fulfilled")
+        o["qty"] = qty
+        o["cost"] = o["price"] * qty
+
+
+normalize_log()
+
+# Migrate v1 saves (budget was deducted only at fulfilment) to v2 (budget is
+# reserved at request): pending orders didn't count against budget before, so
+# reserve them once now. Fulfilled orders were already deducted, so they're left
+# alone. Stamped DATA_VERSION on the next save, making this run exactly once.
+if _data_version < 2:
+    for o in log:
+        if o["status"] == "pending":
+            t = teams.get(o["team"])
+            if t is not None:
+                t["budget"] -= o["cost"]
+
+_order_seq = max((o["id"] for o in log), default=0)
+
+
+def next_order_id():
+    global _order_seq
+    _order_seq += 1
+    return _order_seq
+
+
+def find_order(oid):
+    return next((o for o in log if o["id"] == oid), None)
+
+
+def reserve_budget(o):
+    t = teams.get(o["team"])
+    if t is not None:
+        t["budget"] -= o["cost"]
+
+
+def refund_budget(o):
+    t = teams.get(o["team"])
+    if t is not None:
+        t["budget"] += o["cost"]
+
+
+def set_order_status(o, new):
+    """Move an order to ``new`` status, reconciling the budget + stock it holds.
+
+    Acquiring a hold (budget or stock) is pre-checked, so the transition is
+    atomic: it returns False and changes nothing if the team can't afford the
+    re-reservation or there isn't enough stock to fulfil.
+    """
+    old = o["status"]
+    if old == new:
+        return True
+    gain_budget = old not in _BUDGET_STATES and new in _BUDGET_STATES
+    gain_stock = old not in _STOCK_STATES and new in _STOCK_STATES
+    t = teams.get(o["team"])
+    inv = inventory.get(o["item"])
+    if gain_budget and (t is None or t["budget"] < o["cost"]):
+        return False
+    if gain_stock and (inv is None or inv["stock"] < o["qty"]):
+        return False
+    # Release first, then acquire (both pre-checked above).
+    if old in _BUDGET_STATES and new not in _BUDGET_STATES:
+        refund_budget(o)
+    if old in _STOCK_STATES and new not in _STOCK_STATES and inv is not None:
+        inv["stock"] += o["qty"]
+    if gain_budget:
+        reserve_budget(o)
+    if gain_stock:
+        inv["stock"] = max(0, inv["stock"] - o["qty"])
+    o["status"] = new
+    return True
+
+
+# ── Wire shapes for the panels ────────────────────────────────────────────────
 
 def inv_rows():
     return [{"item": k, "stock": v["stock"], "price": v["price"]}
             for k, v in inventory.items()]
 
 
-def user_rows():
-    return [{"name": n, "budget": b} for n, b in budgets.items()]
+def team_rows(with_passwords):
+    # Admins get the passwords (they set them); teams never see another team's.
+    out = []
+    for name, t in teams.items():
+        row = {"name": name, "budget": t["budget"]}
+        if with_passwords:
+            row["password"] = t["password"]
+        out.append(row)
+    return out
 
 
 def push_all():
-    stock_board.update(rows=inv_rows())
-    admin_panel.update(rows=inv_rows(), users=user_rows(), log=req_log[:20])
-    user_panel.update(rows=inv_rows(), users=user_rows(), log=req_log[:10])
+    board.update(rows=inv_rows())
+    admin_stock.update(rows=inv_rows())
+    admin_teams.update(teams=team_rows(True))
+    admin_orders.update(log=log[:200])
+    team_panel.update(rows=inv_rows(), teams=team_rows(False), log=log[:40])
 
 
-# ── Inventory board (all roles) ──────────────────────────────────────────────
-# CSS is scoped under .pc-sb to avoid collisions with the user panel, which
-# shares some class names (.irow, .ico, etc.) but with different styles.
+# ── Inventory board (everyone) ────────────────────────────────────────────────
 
 _BOARD_CSS = """
 .pc-sb{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
@@ -70,6 +209,7 @@ _BOARD_CSS = """
 .pc-sb .in {background:rgba(20,83,45,.35);color:#4ade80;border:1px solid rgba(74,222,128,.2)}
 .pc-sb .low{background:rgba(120,53,15,.35);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
 .pc-sb .out{background:rgba(127,29,29,.35);color:#f87171;border:1px solid rgba(248,113,113,.2)}
+.pc-sb .empty{color:#64748b;font-size:13px;padding:12px 4px}
 """
 
 _BOARD_SOURCE = """
@@ -85,130 +225,110 @@ function Component({ props }) {
     <div className="pc-sb">
       <style>{`__BOARD_CSS__`}</style>
       <div className="hd">📦 Inventory</div>
-      {rows.map(r => (
-        <div key={r.item} className={"irow" + (r.stock === 0 ? " dim" : "")}>
-          <div className="ico">{ICONS[r.item] || "📦"}</div>
-          <span className="iname">{r.item}</span>
-          <span className="iprice">${r.price.toLocaleString()}</span>
-          {chip(r.stock)}
-        </div>
-      ))}
+      {rows.length === 0
+        ? <div className="empty">No items in the catalogue yet.</div>
+        : rows.map(r => (
+            <div key={r.item} className={"irow" + (r.stock === 0 ? " dim" : "")}>
+              <div className="ico">{ICONS[r.item] || "📦"}</div>
+              <span className="iname">{r.item}</span>
+              <span className="iprice">${r.price.toLocaleString()}</span>
+              {chip(r.stock)}
+            </div>
+          ))}
     </div>
   );
 }
 """.replace("__BOARD_CSS__", _BOARD_CSS)
 
 
-# ── Admin panel (admin only) ──────────────────────────────────────────────────
+# ── Admin panels (admin only) ─────────────────────────────────────────────────
+# Shared CSS for both admin panels (stock control + teams). Scoped under .pc-sa,
+# so duplicating the <style> in each panel is harmless.
 
 _ADMIN_CSS = """
 .pc-sa{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
-.pc-sa .hd{font-size:16px;font-weight:700;margin-bottom:18px}
-.pc-sa .sec{margin-bottom:18px}
+.pc-sa .hd{font-size:16px;font-weight:700;margin-bottom:16px}
+.pc-sa .sec{margin-bottom:20px}
 .pc-sa .sec-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
                color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .pc-sa .sec-hd::after{content:"";flex:1;height:1px;background:var(--pc-border,#30363d)}
-.pc-sa .inp{padding:8px 10px;border-radius:8px;font-size:13px;width:100%;box-sizing:border-box;
+.pc-sa .frm{display:flex;flex-wrap:wrap;gap:6px}
+.pc-sa .inp{padding:7px 9px;border-radius:7px;font-size:13px;box-sizing:border-box;
             border:1.5px solid var(--pc-border,#30363d);background:var(--pc-input-bg,#1b2230);
-            color:inherit;outline:none;transition:border-color .15s}
+            color:inherit;outline:none;transition:border-color .15s;min-width:0}
 .pc-sa .inp:focus{border-color:#3b82f6}
-.pc-sa .btn{margin-top:10px;width:100%;padding:9px;border-radius:8px;font-size:13px;
+.pc-sa .grow{flex:1 1 100%}
+.pc-sa .num{flex:1 1 0;min-width:70px}
+.pc-sa .btn{flex:1 1 100%;margin-top:2px;padding:8px;border-radius:7px;font-size:13px;
             font-weight:600;cursor:pointer;border:none;background:#2563eb;color:#fff;
             transition:background .12s}
 .pc-sa .btn:hover{background:#1d4ed8}
-.pc-sa .urow{padding:7px 0;border-bottom:1px solid var(--pc-border,#30363d)}
-.pc-sa .urow:last-child{border-bottom:none}
-.pc-sa .urow-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.pc-sa .uname{font-size:12px;font-weight:600}
-.pc-sa .ubud{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:#4ade80}
-.pc-sa .bbar{height:4px;border-radius:99px;background:var(--pc-off-bg,#333);overflow:hidden}
-.pc-sa .bfill{height:100%;border-radius:99px;
-              background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .5s}
-.pc-sa .litem{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--pc-border,#30363d);
-              font:12px ui-monospace,monospace;color:#94a3b8}
-.pc-sa .litem:last-child{border-bottom:none}
-.pc-sa .ldot{color:#3b82f6;flex-shrink:0}
+.pc-sa .row{display:flex;align-items:center;gap:10px;padding:7px 0;
+            border-bottom:1px solid var(--pc-border,#30363d);cursor:pointer}
+.pc-sa .row:last-child{border-bottom:none}
+.pc-sa .row:hover{background:rgba(255,255,255,.04)}
+.pc-sa .nm{flex:1;font-size:13px;font-weight:600}
+.pc-sa .meta{font-size:12px;color:#94a3b8;font-variant-numeric:tabular-nums}
+.pc-sa .pw{font:12px ui-monospace,monospace;color:#fbbf24;
+           background:rgba(120,53,15,.25);padding:1px 6px;border-radius:5px}
+.pc-sa .bud{font-size:12px;font-weight:700;color:#4ade80;font-variant-numeric:tabular-nums}
+.pc-sa .x{width:22px;height:22px;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;
+          background:rgba(127,29,29,.3);color:#f87171;font-size:14px;line-height:1}
+.pc-sa .x:hover{background:rgba(127,29,29,.6)}
 .pc-sa .hi{color:var(--pc-text,#e6edf3);font-weight:600}
-.pc-sa .msg{margin-top:8px;padding:6px 10px;border-radius:7px;font-size:12px}
-.pc-sa .ok{background:rgba(20,83,45,.35);color:#4ade80}
-.pc-sa .er{background:rgba(127,29,29,.35);color:#f87171}
+.pc-sa .empty{color:#64748b;font-size:12px;padding:6px 0}
 """
 
-_ADMIN_SOURCE = """
+# Panel 1: stock control — add / change / remove items, prices and stock.
+_STOCK_SOURCE = """
 function Component({ canvas, props }) {
-  const rows  = props.rows  || [];
-  const users = props.users || [];
-  const log   = props.log   || [];
-  const [item,  setItem]  = React.useState("");
-  const [stock, setStock] = React.useState("");
-  const [msg,   setMsg]   = React.useState(null);
-  const START = 2000;
+  const rows = props.rows || [];
 
-  function submit() {
-    const n = parseInt(stock, 10);
-    if (!item)              { setMsg({t:"Select an item.", ok:false}); return; }
-    if (isNaN(n) || n < 0) { setMsg({t:"Enter a valid quantity.", ok:false}); return; }
-    canvas.send({ action:"restock", item, stock:n });
-    setMsg({t:"✓ " + item + " restocked to " + n, ok:true});
-    setItem(""); setStock("");
+  const [it, setIt] = React.useState({ item:"", price:"", stock:"" });
+
+  function submitItem() {
+    const name = it.item.trim();
+    const price = parseInt(it.price, 10);
+    const stock = parseInt(it.stock, 10);
+    if (!name || isNaN(price) || isNaN(stock)) return;
+    canvas.send({ action:"item_set", item:name, price, stock });
+    setIt({ item:"", price:"", stock:"" });
   }
 
   return (
     <div className="pc-sa">
       <style>{`__ADMIN_CSS__`}</style>
-      <div className="hd">⚙️ Admin Controls</div>
+      <div className="hd">⚙️ Stock Control</div>
 
       <div className="sec">
-        <div className="sec-hd">Restock item</div>
-        <select value={item} onChange={e=>setItem(e.target.value)} className="inp">
-          <option value="">— select item —</option>
-          {rows.map(r=>(
-            <option key={r.item} value={r.item}>{r.item}  ({r.stock} in stock)</option>
-          ))}
-        </select>
-        <input type="number" min="0" placeholder="New quantity" value={stock}
-          onChange={e=>setStock(e.target.value)}
-          onKeyDown={e=>{if(e.key==="Enter") submit();}}
-          className="inp" style={{marginTop:8}} />
-        <button onClick={submit} className="btn">Set stock</button>
-        {msg && <div className={"msg " + (msg.ok ? "ok" : "er")}>{msg.t}</div>}
+        <div className="sec-hd">Add / update item</div>
+        <div className="frm">
+          <input className="inp grow" placeholder="Item name" value={it.item}
+            onChange={e=>setIt({...it, item:e.target.value})} />
+          <input className="inp num" type="number" min="0" placeholder="Price" value={it.price}
+            onChange={e=>setIt({...it, price:e.target.value})} />
+          <input className="inp num" type="number" min="0" placeholder="Stock" value={it.stock}
+            onChange={e=>setIt({...it, stock:e.target.value})}
+            onKeyDown={e=>{ if(e.key==="Enter") submitItem(); }} />
+          <button className="btn" onClick={submitItem}>Save item</button>
+        </div>
       </div>
 
       <div className="sec">
-        <div className="sec-hd">User budgets</div>
-        {users.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No users connected yet.</div>
-          : users.map(u => {
-              const pct = Math.max(0, Math.min(100, Math.round(u.budget / START * 100)));
-              return (
-                <div key={u.name} className="urow">
-                  <div className="urow-top">
-                    <span className="uname">{u.name}</span>
-                    <span className="ubud">${u.budget.toLocaleString()}</span>
-                  </div>
-                  <div className="bbar"><div className="bfill" style={{width:pct+"%"}} /></div>
-                </div>
-              );
-            })
-        }
-      </div>
-
-      <div className="sec">
-        <div className="sec-hd">Request log</div>
-        {log.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No requests yet.</div>
-          : log.map((r,i) => (
-              <div key={i} className="litem">
-                <span className="ldot">▸</span>
-                <span>
-                  <span className="hi">{r.user}</span>
-                  {" · "}{r.qty}× {r.item}{" · "}
-                  <span className="hi">${r.cost.toLocaleString()}</span>
-                </span>
+        <div className="sec-hd">Catalogue ({rows.length})</div>
+        {rows.length === 0
+          ? <div className="empty">No items yet.</div>
+          : rows.map(r => (
+              <div key={r.item} className="row"
+                   title="Click to edit"
+                   onClick={()=>setIt({ item:r.item, price:String(r.price), stock:String(r.stock) })}>
+                <span className="nm">{r.item}</span>
+                <span className="meta">${r.price.toLocaleString()} · {r.stock} in stock</span>
+                <button className="x" title="Remove item"
+                  onClick={e=>{ e.stopPropagation(); canvas.send({ action:"item_remove", item:r.item }); }}>×</button>
               </div>
-            ))
-        }
+            ))}
       </div>
     </div>
   );
@@ -216,12 +336,71 @@ function Component({ canvas, props }) {
 """.replace("__ADMIN_CSS__", _ADMIN_CSS)
 
 
-# ── User panel (user only) ────────────────────────────────────────────────────
+# Panel 2: team management (create / edit / remove teams, with budgets).
+_TEAMS_SOURCE = """
+function Component({ canvas, props }) {
+  const teams = props.teams || [];
 
-_USER_CSS = """
+  const [tm, setTm] = React.useState({ name:"", password:"", budget:"2000" });
+
+  function submitTeam() {
+    const name = tm.name.trim();
+    const password = tm.password.trim();
+    const budget = parseInt(tm.budget, 10);
+    if (!name || !password || isNaN(budget)) return;
+    canvas.send({ action:"team_add", name, password, budget });
+    setTm({ name:"", password:"", budget:"2000" });
+  }
+
+  return (
+    <div className="pc-sa">
+      <style>{`__ADMIN_CSS__`}</style>
+      <div className="hd">👥 Teams</div>
+
+      <div className="sec">
+        <div className="sec-hd">Add / update team</div>
+        <div className="frm">
+          <input className="inp grow" placeholder="Team name" value={tm.name}
+            onChange={e=>setTm({...tm, name:e.target.value})} />
+          <input className="inp num" placeholder="Password" value={tm.password}
+            onChange={e=>setTm({...tm, password:e.target.value})} />
+          <input className="inp num" type="number" min="0" placeholder="Budget" value={tm.budget}
+            onChange={e=>setTm({...tm, budget:e.target.value})}
+            onKeyDown={e=>{ if(e.key==="Enter") submitTeam(); }} />
+          <button className="btn" onClick={submitTeam}>Save team</button>
+        </div>
+      </div>
+
+      <div className="sec">
+        <div className="sec-hd">Teams ({teams.length})</div>
+        {teams.length === 0
+          ? <div className="empty">No teams yet — add one above.</div>
+          : teams.map(t => (
+              <div key={t.name} className="row"
+                   title="Click to edit"
+                   onClick={()=>setTm({ name:t.name, password:t.password, budget:String(t.budget) })}>
+                <span className="nm">{t.name}</span>
+                <span className="pw">{t.password}</span>
+                <span className="bud">${t.budget.toLocaleString()}</span>
+                <button className="x" title="Remove team"
+                  onClick={e=>{ e.stopPropagation(); canvas.send({ action:"team_remove", name:t.name }); }}>×</button>
+              </div>
+            ))}
+      </div>
+    </div>
+  );
+}
+""".replace("__ADMIN_CSS__", _ADMIN_CSS)
+
+
+# ── Team panel (teams only) ───────────────────────────────────────────────────
+
+_TEAM_CSS = """
 .pc-su{padding:16px;height:100%;overflow-y:auto;box-sizing:border-box;
        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
-.pc-su .hd{font-size:16px;font-weight:700;margin-bottom:18px}
+.pc-su .top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+.pc-su .tname{font-size:16px;font-weight:700}
+.pc-su .tbud{font-size:13px;font-weight:800;color:#4ade80;font-variant-numeric:tabular-nums}
 .pc-su .sec{margin-bottom:18px}
 .pc-su .sec-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
                color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -229,7 +408,6 @@ _USER_CSS = """
 .pc-su .irow{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;
              cursor:pointer;border:1.5px solid transparent;transition:background .1s,border-color .1s}
 .pc-su .irow:hover{background:rgba(255,255,255,.05)}
-.pc-su .irow.sel{background:rgba(37,99,235,.15);border-color:#3b82f6}
 .pc-su .irow.dim{opacity:0.4;cursor:default;pointer-events:none}
 .pc-su .ico{font-size:18px;width:32px;height:32px;border-radius:7px;flex-shrink:0;
             display:flex;align-items:center;justify-content:center;
@@ -252,76 +430,120 @@ _USER_CSS = """
 .pc-su .qty-ctrl{display:flex;align-items:center;gap:6px}
 .pc-su .qbtn{width:28px;height:28px;border-radius:6px;border:1.5px solid var(--pc-border,#30363d);
              background:transparent;color:inherit;font-size:16px;cursor:pointer;
-             display:flex;align-items:center;justify-content:center;transition:background .1s}
+             display:flex;align-items:center;justify-content:center}
 .pc-su .qbtn:hover{background:rgba(255,255,255,.08)}
 .pc-su .qnum{width:36px;text-align:center;font-size:15px;font-weight:700;
              font-variant-numeric:tabular-nums}
 .pc-su .cost-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
 .pc-su .cost-lbl{font-size:12px;color:#64748b}
 .pc-su .cost-val{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:#60a5fa}
+.pc-su .cost-val.over{color:#f87171}
 .pc-su .btn{width:100%;padding:9px;border-radius:8px;font-size:13px;font-weight:600;
             cursor:pointer;border:none;background:#2563eb;color:#fff;transition:background .12s}
-.pc-su .btn:hover{background:#1d4ed8}
+.pc-su .btn:disabled{opacity:.45;cursor:not-allowed}
+.pc-su .btn:not(:disabled):hover{background:#1d4ed8}
 .pc-su .back{margin-top:8px;text-align:center;font-size:11px;color:#64748b;cursor:pointer}
 .pc-su .back:hover{color:var(--pc-text,#e6edf3)}
-.pc-su .urow{padding:7px 0;border-bottom:1px solid var(--pc-border,#30363d)}
-.pc-su .urow:last-child{border-bottom:none}
-.pc-su .urow-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.pc-su .uname{font-size:12px;font-weight:600}
-.pc-su .ubud{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:#4ade80}
-.pc-su .bbar{height:4px;border-radius:99px;background:var(--pc-off-bg,#333);overflow:hidden}
-.pc-su .bfill{height:100%;border-radius:99px;
-              background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .5s}
-.pc-su .litem{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--pc-border,#30363d);
+.pc-su .litem{display:flex;align-items:center;gap:8px;padding:5px 0;
+              border-bottom:1px solid var(--pc-border,#30363d);
               font:12px ui-monospace,monospace;color:#94a3b8}
 .pc-su .litem:last-child{border-bottom:none}
 .pc-su .ldot{color:#3b82f6;flex-shrink:0}
+.pc-su .ltext{flex:1;min-width:0}
 .pc-su .hi{color:var(--pc-text,#e6edf3);font-weight:600}
-.pc-su .msg{padding:6px 10px;border-radius:7px;font-size:12px;margin-bottom:14px}
-.pc-su .ok  {background:rgba(20,83,45,.35);color:#4ade80}
-.pc-su .warn{background:rgba(120,53,15,.35);color:#fbbf24}
+.pc-su .ostat{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+              padding:2px 6px;border-radius:999px;flex-shrink:0}
+.pc-su .s-pend{background:rgba(59,130,246,.2);color:#60a5fa}
+.pc-su .s-ok{background:rgba(20,83,45,.35);color:#4ade80}
+.pc-su .s-no{background:rgba(127,29,29,.35);color:#f87171}
+.pc-su .s-ret{background:rgba(100,116,139,.25);color:#94a3b8}
+.pc-su .msg{padding:6px 10px;border-radius:7px;font-size:12px;margin-bottom:14px;
+            background:rgba(20,83,45,.35);color:#4ade80}
+.pc-su .empty{color:#64748b;font-size:12px;padding:4px 0}
+.pc-su .retract{width:22px;height:22px;border-radius:5px;border:none;cursor:pointer;flex-shrink:0;
+                background:rgba(255,255,255,.06);color:#94a3b8;font-size:12px;line-height:1}
+.pc-su .retract:hover{background:rgba(251,191,36,.25);color:#fbbf24}
+.pc-su .cart{margin-bottom:18px;border:1.5px solid rgba(59,130,246,.4);border-radius:10px;
+             background:rgba(37,99,235,.08);padding:12px}
+.pc-su .cline{display:flex;align-items:center;gap:8px;padding:6px 0;
+              border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-su .cline:last-of-type{border-bottom:none}
+.pc-su .cname{flex:1;font-size:13px;font-weight:600;min-width:0;white-space:nowrap;
+              overflow:hidden;text-overflow:ellipsis}
+.pc-su .qty-ctrl.sm .qbtn{width:22px;height:22px;font-size:14px}
+.pc-su .qty-ctrl.sm .qnum{width:24px;font-size:13px}
+.pc-su .ccost{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;
+              min-width:56px;text-align:right}
+.pc-su .cx{width:20px;height:20px;border-radius:5px;border:none;cursor:pointer;flex-shrink:0;
+           background:rgba(127,29,29,.3);color:#f87171;font-size:13px;line-height:1}
+.pc-su .cx:hover{background:rgba(127,29,29,.6)}
+.pc-su .ctot{margin:10px 0;font-size:12px}
+.pc-su .ctot-row{display:flex;justify-content:space-between;padding:3px 0;color:#94a3b8}
+.pc-su .ctot-row.big{font-size:14px;font-weight:800;color:#4ade80;margin-top:4px;
+                     padding-top:8px;border-top:1px solid var(--pc-border,#30363d)}
+.pc-su .ctot-row.big.over{color:#f87171}
 """
 
-_USER_SOURCE = """
+_TEAM_SOURCE = """
 function Component({ canvas, props }) {
   const rows  = props.rows  || [];
-  const users = props.users || [];
+  const teams = props.teams || [];
   const log   = props.log   || [];
   const ICONS = {Laptop:"💻",Monitor:"🖥️",Keyboard:"⌨️",Mouse:"🖱️",Headset:"🎧"};
-  const START = 2000;
 
-  const [sel, setSel] = React.useState(null);
-  const [qty, setQty] = React.useState(1);
-  const [msg, setMsg] = React.useState(null);
+  // Our own viewer identity — `role` is the team we logged in as (server-set).
+  const [me, setMe] = React.useState(null);
+  React.useEffect(() => canvas.chat.identity(setMe), []);
+  const myTeam = me && me.role;
 
-  // Register with Python on mount so budget appears immediately.
+  const mine   = teams.find(t => t.name === myTeam);
+  const budget = mine ? mine.budget : 0;          // already net of reserved orders
+  const myLog  = log.filter(r => r.team === myTeam);
+  const priceOf = (item) => { const r = rows.find(x => x.item === item); return r ? r.price : 0; };
+
+  const [sel, setSel]   = React.useState(null);
+  const [qty, setQty]   = React.useState(1);
+  const [cart, setCart] = React.useState([]);     // [{item, qty}] — staged, not yet filed
+  const [msg, setMsg]   = React.useState(null);
+
+  // Register with Python on mount so our budget/log appear immediately.
   React.useEffect(() => { canvas.send({ action:"ping" }); }, []);
 
-  // Keep selected item in sync with live stock updates.
+  // Keep the selected item in sync with live stock updates; drop cart lines whose
+  // item left the catalogue.
   React.useEffect(() => {
-    if (!sel) return;
-    const fresh = rows.find(r => r.item === sel.item);
-    if (fresh) setSel(fresh);
+    if (sel) { const fresh = rows.find(r => r.item === sel.item); setSel(fresh || null); }
+    setCart(c => c.filter(line => rows.some(r => r.item === line.item)));
   }, [rows]);
 
-  const cost = sel ? sel.price * qty : 0;
+  const cartLines = cart.map(c => ({ item:c.item, qty:c.qty,
+                                     cost: priceOf(c.item) * c.qty }));
+  const cartTotal = cartLines.reduce((s, l) => s + l.cost, 0);
+  const afterFiling = budget - cartTotal;          // what we'd have left once filed
 
-  function pick(r) {
-    if (r.stock === 0) return;
-    setSel(r); setQty(1); setMsg(null);
-  }
-
-  function incQty(d) {
+  function pick(r) { if (r.stock > 0) { setSel(r); setQty(1); setMsg(null); } }
+  function incQty(d) { if (sel) setQty(q => Math.max(1, Math.min(sel.stock, q + d))); }
+  function addToCart() {
     if (!sel) return;
-    setQty(q => Math.max(1, Math.min(sel.stock, q + d)));
-  }
-
-  function request() {
-    if (!sel || qty > sel.stock) return;
-    canvas.send({ action:"request", item:sel.item, qty });
-    setMsg({t:"✓ Requested " + qty + "× " + sel.item, warn:false});
+    setCart(c => {
+      const i = c.findIndex(x => x.item === sel.item);
+      if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + qty }; return n; }
+      return [...c, { item: sel.item, qty }];
+    });
+    setMsg("Added " + qty + "× " + sel.item + " to cart");
     setSel(null); setQty(1);
   }
+  function setLineQty(item, q) {
+    setCart(c => c.map(x => x.item === item ? { ...x, qty: Math.max(1, q) } : x));
+  }
+  function removeLine(item) { setCart(c => c.filter(x => x.item !== item)); }
+  function fileRequest() {
+    if (!cart.length || afterFiling < 0) return;
+    canvas.send({ action:"file", cart: cart.map(c => ({ item: c.item, qty: c.qty })) });
+    setMsg("✓ Filed " + cart.length + " line(s) for $" + cartTotal.toLocaleString());
+    setCart([]);
+  }
+  function retract(id) { canvas.send({ action:"retract", id }); }
 
   function chip(n) {
     if (n === 0) return <span className="chip out">Out of stock</span>;
@@ -331,10 +553,13 @@ function Component({ canvas, props }) {
 
   return (
     <div className="pc-su">
-      <style>{`__USER_CSS__`}</style>
-      <div className="hd">🛒 Request Items</div>
+      <style>{`__TEAM_CSS__`}</style>
+      <div className="top">
+        <span className="tname">🛒 {myTeam || "…"}</span>
+        <span className="tbud">${budget.toLocaleString()} left</span>
+      </div>
 
-      {msg && <div className={"msg " + (msg.warn ? "warn" : "ok")}>{msg.t}</div>}
+      {msg && <div className="msg">{msg}</div>}
 
       {sel ? (
         <div className="rcard">
@@ -352,145 +577,453 @@ function Component({ canvas, props }) {
             </div>
           </div>
           <div className="cost-row">
-            <span className="cost-lbl">Total cost</span>
-            <span className="cost-val">${cost.toLocaleString()}</span>
+            <span className="cost-lbl">Line cost</span>
+            <span className="cost-val">${(sel.price * qty).toLocaleString()}</span>
           </div>
-          <button className="btn" onClick={request}>
-            Request {qty > 1 ? qty + "× " : ""}{sel.item}
-          </button>
-          <div className="back" onClick={()=>{setSel(null);setQty(1);}}>
-            ← back to catalogue
-          </div>
+          <button className="btn" onClick={addToCart}>Add to cart</button>
+          <div className="back" onClick={()=>{ setSel(null); setQty(1); }}>← back to catalogue</div>
         </div>
       ) : (
         <div className="sec">
           <div className="sec-hd">Catalogue</div>
-          {rows.map(r => (
-            <div key={r.item}
-                 className={"irow" + (r.stock===0?" dim":"")}
-                 onClick={()=>pick(r)}>
-              <div className="ico">{ICONS[r.item]||"📦"}</div>
-              <span className="iname">{r.item}</span>
-              <span className="iprice">${r.price.toLocaleString()}</span>
-              {chip(r.stock)}
+          {rows.length === 0
+            ? <div className="empty">Nothing in stock right now.</div>
+            : rows.map(r => (
+                <div key={r.item} className={"irow" + (r.stock===0?" dim":"")} onClick={()=>pick(r)}>
+                  <div className="ico">{ICONS[r.item]||"📦"}</div>
+                  <span className="iname">{r.item}</span>
+                  <span className="iprice">${r.price.toLocaleString()}</span>
+                  {chip(r.stock)}
+                </div>
+              ))}
+        </div>
+      )}
+
+      {cart.length > 0 && (
+        <div className="cart">
+          <div className="sec-hd">Cart ({cart.length})</div>
+          {cartLines.map(l => (
+            <div key={l.item} className="cline">
+              <span className="cname">{ICONS[l.item]||"📦"} {l.item}</span>
+              <div className="qty-ctrl sm">
+                <button className="qbtn" onClick={()=>setLineQty(l.item, l.qty - 1)}>−</button>
+                <span className="qnum">{l.qty}</span>
+                <button className="qbtn" onClick={()=>setLineQty(l.item, l.qty + 1)}>+</button>
+              </div>
+              <span className="ccost">${l.cost.toLocaleString()}</span>
+              <button className="cx" title="Remove" onClick={()=>removeLine(l.item)}>×</button>
             </div>
           ))}
+          <div className="ctot">
+            <div className="ctot-row"><span>Cart total</span><span>${cartTotal.toLocaleString()}</span></div>
+            <div className="ctot-row"><span>Budget now</span><span>${budget.toLocaleString()}</span></div>
+            <div className={"ctot-row big" + (afterFiling < 0 ? " over" : "")}>
+              <span>After filing</span><span>${afterFiling.toLocaleString()}</span>
+            </div>
+          </div>
+          <button className="btn" onClick={fileRequest} disabled={afterFiling < 0}>
+            {afterFiling < 0 ? "Over budget" : "File request — $" + cartTotal.toLocaleString()}
+          </button>
         </div>
       )}
 
       <div className="sec">
-        <div className="sec-hd">Budgets</div>
-        {users.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>Loading…</div>
-          : users.map(u => {
-              const pct = Math.max(0, Math.min(100, Math.round(u.budget / START * 100)));
+        <div className="sec-hd">Your orders</div>
+        {myLog.length === 0
+          ? <div className="empty">No orders yet.</div>
+          : myLog.map(r => {
+              const st = ({pending:["awaiting","s-pend"], fulfilled:["fulfilled","s-ok"],
+                           rejected:["declined","s-no"], retracted:["retracted","s-ret"]})[r.status]
+                         || ["awaiting","s-pend"];
               return (
-                <div key={u.name} className="urow">
-                  <div className="urow-top">
-                    <span className="uname">{u.name}</span>
-                    <span className="ubud">${u.budget.toLocaleString()}</span>
-                  </div>
-                  <div className="bbar"><div className="bfill" style={{width:pct+"%"}} /></div>
+                <div key={r.id} className="litem">
+                  <span className="ldot">▸</span>
+                  <span className="ltext">{r.qty}× {r.item}{" · "}
+                    <span className="hi">${(r.price * r.qty).toLocaleString()}</span></span>
+                  <span className={"ostat " + st[1]}>{st[0]}</span>
+                  {r.status === "pending" &&
+                    <button className="retract" title="Retract — refunds your budget"
+                      onClick={()=>retract(r.id)}>↩</button>}
                 </div>
               );
-            })
-        }
-        <div style={{marginTop:8,fontSize:"11px",color:"#64748b"}}>
-          Your name is shown on your cursor in the canvas.
-        </div>
-      </div>
-
-      <div className="sec">
-        <div className="sec-hd">Recent requests</div>
-        {log.length === 0
-          ? <div style={{color:"#64748b",fontSize:"12px",padding:"4px 0"}}>No requests yet.</div>
-          : log.map((r,i) => (
-              <div key={i} className="litem">
-                <span className="ldot">▸</span>
-                <span>
-                  <span className="hi">{r.user}</span>
-                  {" · "}{r.qty}× {r.item}{" · "}
-                  <span className="hi">${r.cost.toLocaleString()}</span>
-                </span>
-              </div>
-            ))
-        }
+            })}
       </div>
     </div>
   );
 }
-""".replace("__USER_CSS__", _USER_CSS)
+""".replace("__TEAM_CSS__", _TEAM_CSS)
+
+
+# ── Orders panel (admin only) ─────────────────────────────────────────────────
+# The order log as a sortable, filterable table: click a header to sort, type to
+# filter by team/item, and use the status chips to narrow to pending/fulfilled/
+# not-fulfilled. The Actions column keeps the fulfil (✓) / not-fulfilled (×) /
+# edit-quantity (✎) controls.
+
+_ORDERS_CSS = """
+.pc-ord{display:flex;flex-direction:column;height:100%;box-sizing:border-box;
+        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3);padding:14px}
+.pc-ord .hd{font-size:16px;font-weight:700;margin-bottom:12px}
+.pc-ord .bar{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.pc-ord .filter{flex:1;min-width:140px;padding:7px 10px;border-radius:7px;font-size:13px;
+                box-sizing:border-box;border:1.5px solid var(--pc-border,#30363d);
+                background:var(--pc-input-bg,#1b2230);color:inherit;outline:none}
+.pc-ord .filter:focus{border-color:#3b82f6}
+.pc-ord .chip{padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;
+              border:1.5px solid var(--pc-border,#30363d);background:transparent;color:#94a3b8}
+.pc-ord .chip:hover{border-color:#3b82f6;color:var(--pc-text,#e6edf3)}
+.pc-ord .chip.on{background:#2563eb;border-color:#2563eb;color:#fff}
+.pc-ord .scroll{flex:1;overflow:auto;border:1px solid var(--pc-border,#30363d);border-radius:8px}
+.pc-ord table{border-collapse:collapse;width:100%;font-size:13px}
+.pc-ord th,.pc-ord td{padding:8px 10px;text-align:left;white-space:nowrap;
+                      border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-ord thead th{position:sticky;top:0;background:var(--pc-input-bg,#1b2230);z-index:1;
+                 font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+                 color:#94a3b8;cursor:pointer;user-select:none}
+.pc-ord thead th.acth{cursor:default;text-align:right}
+.pc-ord thead th:hover{color:var(--pc-text,#e6edf3)}
+.pc-ord .arr{color:#3b82f6}
+.pc-ord tbody tr:hover td{background:rgba(255,255,255,.03)}
+.pc-ord td.rt{text-align:right;font-variant-numeric:tabular-nums}
+.pc-ord .badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+               padding:2px 7px;border-radius:999px}
+.pc-ord .b-pend{background:rgba(59,130,246,.2);color:#60a5fa}
+.pc-ord .b-ok{background:rgba(20,83,45,.35);color:#4ade80}
+.pc-ord .b-no{background:rgba(127,29,29,.35);color:#f87171}
+.pc-ord .b-ret{background:rgba(100,116,139,.25);color:#94a3b8}
+.pc-ord td.acts{text-align:right;white-space:nowrap}
+.pc-ord .act{width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;margin-left:4px;
+             font-size:13px;line-height:1;background:rgba(255,255,255,.06);color:inherit}
+.pc-ord .act.ok:hover{background:rgba(20,83,45,.5);color:#4ade80}
+.pc-ord .act.no:hover{background:rgba(127,29,29,.5);color:#f87171}
+.pc-ord .act.ed:hover{background:rgba(59,130,246,.4);color:#fff}
+.pc-ord .qedit{width:52px;padding:2px 5px;border-radius:5px;font:13px ui-monospace,monospace;
+               border:1.5px solid #3b82f6;background:var(--pc-input-bg,#1b2230);color:inherit;outline:none}
+.pc-ord .empty{color:#64748b;text-align:center;padding:24px}
+"""
+
+_ORDERS_SOURCE = """
+const STATUS = { pending:["pending","b-pend"], fulfilled:["fulfilled","b-ok"],
+                 rejected:["not fulfilled","b-no"], retracted:["retracted","b-ret"] };
+const COLS = [
+  { key:"id",     label:"#",      num:true,  get:o=>o.id },
+  { key:"team",   label:"Team",   num:false, get:o=>o.team },
+  { key:"item",   label:"Item",   num:false, get:o=>o.item },
+  { key:"qty",    label:"Qty",    num:true,  get:o=>o.qty },
+  { key:"cost",   label:"Cost",   num:true,  get:o=>o.price * o.qty },
+  { key:"status", label:"Status", num:false, get:o=>o.status },
+];
+const FILTERS = [["all","All"],["pending","Pending"],["fulfilled","Fulfilled"],["rejected","Not fulfilled"]];
+
+function Component({ canvas, props }) {
+  const log = props.log || [];
+
+  const [q, setQ] = React.useState("");
+  const [status, setStatus] = React.useState("all");
+  const [sortKey, setSortKey] = React.useState("id");
+  const [sortDir, setSortDir] = React.useState(-1);  // newest first by default
+  const [editId, setEditId] = React.useState(null);
+  const [editQ, setEditQ] = React.useState("");
+
+  const counts = React.useMemo(() => {
+    const c = { all: log.length, pending:0, fulfilled:0, rejected:0 };
+    for (const o of log) c[o.status] = (c[o.status] || 0) + 1;
+    return c;
+  }, [log]);
+
+  const view = React.useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    let rows = log.filter(o => {
+      if (status !== "all" && o.status !== status) return false;
+      if (ql && (o.team + " " + o.item).toLowerCase().indexOf(ql) < 0) return false;
+      return true;
+    });
+    const col = COLS.find(c => c.key === sortKey);
+    if (col) {
+      rows = rows.slice().sort((a, b) => {
+        let va = col.get(a), vb = col.get(b);
+        if (col.num) { va = +va; vb = +vb; }
+        else { va = ("" + va).toLowerCase(); vb = ("" + vb).toLowerCase(); }
+        if (va < vb) return -sortDir;
+        if (va > vb) return sortDir;
+        return 0;
+      });
+    }
+    return rows;
+  }, [log, q, status, sortKey, sortDir]);
+
+  function clickHeader(key) {
+    if (sortKey !== key) { setSortKey(key); setSortDir(1); }
+    else setSortDir(d => -d);
+  }
+  function startEdit(o) { setEditId(o.id); setEditQ(String(o.qty)); }
+  function saveEdit(o) {
+    const n = parseInt(editQ, 10);
+    if (!isNaN(n) && n > 0 && n !== o.qty) canvas.send({ action:"order_edit", id:o.id, qty:n });
+    setEditId(null);
+  }
+
+  return (
+    <div className="pc-ord">
+      <style>{`__ORDERS_CSS__`}</style>
+      <div className="hd">📋 Orders</div>
+
+      <div className="bar">
+        <input className="filter" placeholder="Filter by team or item…" value={q}
+          onChange={e=>setQ(e.target.value)} />
+        {FILTERS.map(([key, label]) => (
+          <button key={key} className={"chip" + (status===key ? " on" : "")}
+            onClick={()=>setStatus(key)}>{label} ({counts[key] || 0})</button>
+        ))}
+      </div>
+
+      <div className="scroll">
+        <table>
+          <thead>
+            <tr>
+              {COLS.map(c => (
+                <th key={c.key} onClick={()=>clickHeader(c.key)}>
+                  {c.label}<span className="arr">{sortKey===c.key ? (sortDir===1 ? " ▲" : " ▼") : ""}</span>
+                </th>
+              ))}
+              <th className="acth">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.length === 0
+              ? <tr><td className="empty" colSpan={COLS.length + 1}>No orders match.</td></tr>
+              : view.map(o => {
+                  const [label, cls] = STATUS[o.status] || STATUS.pending;
+                  return (
+                    <tr key={o.id}>
+                      <td className="rt">{o.id}</td>
+                      <td>{o.team}</td>
+                      <td>{o.item}</td>
+                      <td className="rt">
+                        {editId === o.id
+                          ? <input className="qedit" type="number" min="1" value={editQ} autoFocus
+                              onChange={e=>setEditQ(e.target.value)} onBlur={()=>saveEdit(o)}
+                              onKeyDown={e=>{ if(e.key==="Enter") saveEdit(o); if(e.key==="Escape") setEditId(null); }} />
+                          : o.qty}
+                      </td>
+                      <td className="rt">${(o.price * o.qty).toLocaleString()}</td>
+                      <td><span className={"badge " + cls}>{label}</span></td>
+                      <td className="acts">
+                        {o.status === "pending" &&
+                          <button className="act ed" title="Edit quantity" onClick={()=>startEdit(o)}>✎</button>}
+                        {(o.status === "pending" || o.status === "rejected") &&
+                          <button className="act ok" title="Fulfil — deducts stock"
+                            onClick={()=>canvas.send({ action:"order_fulfil", id:o.id })}>✓</button>}
+                        {(o.status === "pending" || o.status === "fulfilled") &&
+                          <button className="act no" title="Mark not fulfilled — refunds budget"
+                            onClick={()=>canvas.send({ action:"order_reject", id:o.id })}>×</button>}
+                      </td>
+                    </tr>
+                  );
+                })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+""".replace("__ORDERS_CSS__", _ORDERS_CSS)
 
 
 # ── Canvas layout ─────────────────────────────────────────────────────────────
 
-stock_board = canvas.react(_BOARD_SOURCE, name="board",
-                            x=40,  y=40, w=440, h=480,
-                            props={"rows": inv_rows()})
+board = canvas.react(_BOARD_SOURCE, name="board",
+                     x=40, y=40, w=440, h=560,
+                     props={"rows": inv_rows()})
 
-admin_panel = canvas.react(_ADMIN_SOURCE, name="admin",
-                            x=500, y=40, w=310, h=480,
+# Admin sees three panels across the top — stock control, team management, and
+# (below, full-width) the orders table. Props are seeded from the loaded JSON so
+# the admin sees the full catalogue, every team and its budget, and the order log
+# on the very first connect — no interaction needed to populate them.
+admin_stock = canvas.react(_STOCK_SOURCE, name="stock",
+                           x=500, y=40, w=360, h=560,
+                           roles=["admin"],
+                           props={"rows": inv_rows()})
+
+admin_teams = canvas.react(_TEAMS_SOURCE, name="teams",
+                           x=880, y=40, w=360, h=560,
+                           roles=["admin"],
+                           props={"teams": team_rows(True)})
+
+admin_orders = canvas.react(_ORDERS_SOURCE, name="orders",
+                            x=40, y=620, w=1200, h=340,
                             roles=["admin"],
-                            props={"rows": inv_rows(), "users": [], "log": []})
+                            props={"log": log[:200]})
 
-user_panel  = canvas.react(_USER_SOURCE,  name="user",
-                            x=500, y=40, w=310, h=480,
-                            roles=["user"],
-                            props={"rows": inv_rows(), "users": [], "log": []})
+# Team roles are dynamic: seed with the teams already in the JSON, plus the
+# sentinel so the list is never empty. New teams are appended in `team_add`.
+team_panel = canvas.react(_TEAM_SOURCE, name="team",
+                          x=500, y=40, w=380, h=560,
+                          roles=[TEAM_SENTINEL, *teams.keys()],
+                          props={"rows": inv_rows(), "teams": team_rows(False), "log": log[:40]})
+
+
+# ── Auth map (mutated live as the admin creates teams) ────────────────────────
+# Passed by reference to serve(); the login check iterates it on every attempt,
+# so adding a key here makes that password valid immediately — no restart.
+PASSWORDS = {"admin": ADMIN_PASSWORD,
+             **{name: t["password"] for name, t in teams.items()}}
+
+
+def grant_team_view(name):
+    """Give a team role the read-only, chrome-free kiosk view (admins keep the
+    full surface). Applies on the team's next connect and to any member already
+    on (none can be, since the password is brand new when this first runs)."""
+    canvas.set_view(read_only=True, ui=False, roles=[name])
+
+
+for _name in teams:
+    grant_team_view(_name)
 
 
 # ── Python callbacks ──────────────────────────────────────────────────────────
 
-@admin_panel.on_message
 def on_admin(msg, viewer):
-    if msg.get("action") != "restock":
+    # One handler for both admin panels — stock actions come from the stock
+    # panel, team actions from the teams panel; we dispatch on `action`.
+    if viewer.get("role") != "admin":
+        return  # the panels only reach admins, but authorize server-side too
+    action = msg.get("action")
+
+    if action == "item_set":
+        name = (msg.get("item") or "").strip()
+        if not name:
+            return
+        inventory[name] = {"stock": max(0, int(msg.get("stock", 0))),
+                           "price": max(0, int(msg.get("price", 0)))}
+        print(f"[admin] set {name}: ${inventory[name]['price']} / {inventory[name]['stock']} in stock")
+
+    elif action == "item_remove":
+        inventory.pop(msg.get("item", ""), None)
+
+    elif action == "team_add":
+        name = (msg.get("name") or "").strip()
+        pw = (msg.get("password") or "").strip()
+        if not name or not pw or name == "admin":
+            return
+        budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
+        new_team = name not in teams
+        # Upsert: keep the spent-down budget on edit unless the admin changed it.
+        teams[name] = {"password": pw, "budget": budget}
+        PASSWORDS[name] = pw
+        team_panel.add_role(name)   # team panel now admits this role, live
+        grant_team_view(name)
+        print(f"[admin] {'created' if new_team else 'updated'} team {name!r} "
+              f"(password {pw!r}, budget ${budget})")
+
+    elif action == "team_remove":
+        name = msg.get("name", "")
+        if name in teams:
+            teams.pop(name)
+            PASSWORDS.pop(name, None)
+            team_panel.remove_role(name)   # drop the panel from that role, live
+            print(f"[admin] removed team {name!r}")
+
+    elif action == "order_fulfil":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] == "fulfilled":
+            return
+        if not set_order_status(o, "fulfilled"):   # takes stock (budget already held)
+            print(f"[admin] can't fulfil order #{o['id']} "
+                  f"({o['qty']}x {o['item']} for {o['team']}): not enough stock/budget")
+            return
+        print(f"[admin] fulfilled #{o['id']}: {o['qty']}x {o['item']} -> {o['team']}")
+
+    elif action == "order_reject":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] in ("rejected", "retracted"):
+            return
+        set_order_status(o, "rejected")   # refunds budget (and returns stock if fulfilled)
+        print(f"[admin] marked #{o['id']} not fulfilled")
+
+    elif action == "order_edit":
+        o = find_order(msg.get("id"))
+        if o is None or o["status"] != "pending":
+            return  # only a pending order's quantity can be edited
+        new_qty = max(1, int(msg.get("qty", o["qty"])))
+        new_cost = o["price"] * new_qty
+        t = teams.get(o["team"])
+        if t is not None:
+            # The order already holds o["cost"]; adjust the reservation to the new
+            # cost, refusing an increase the team can't afford.
+            if t["budget"] + o["cost"] < new_cost:
+                return
+            t["budget"] += o["cost"] - new_cost
+        o["qty"] = new_qty
+        o["cost"] = new_cost
+
+    else:
         return
-    item = msg.get("item", "")
-    if item not in inventory:
-        return
-    new_stock = max(0, int(msg.get("stock", 0)))
-    inventory[item]["stock"] = new_stock
-    print(f"[admin] {viewer['name']} restocked {item} → {new_stock}")
+
+    save()
     push_all()
 
 
-@user_panel.on_message
-def on_user(msg, viewer):
-    name   = viewer["name"]
+admin_stock.on_message(on_admin)
+admin_teams.on_message(on_admin)
+admin_orders.on_message(on_admin)
+
+
+@team_panel.on_message
+def on_team(msg, viewer):
+    team = viewer.get("role")
+    if team not in teams:
+        return
     action = msg.get("action")
 
     if action == "ping":
-        ensure_user(name)
         push_all()
         return
 
-    if action != "request":
+    if action == "file":
+        # File a cart of [{item, qty}, …] as one pending order per line. Budget is
+        # reserved now; prices are snapshotted. Atomic: if the team can't afford
+        # the whole cart, nothing is filed (the UI also pre-checks this).
+        lines = []
+        total = 0
+        for entry in msg.get("cart", []):
+            item = entry.get("item", "")
+            qty = max(1, int(entry.get("qty", 1)))
+            if item not in inventory:
+                continue
+            price = inventory[item]["price"]
+            lines.append((item, qty, price))
+            total += price * qty
+        if not lines or teams[team]["budget"] < total:
+            return
+        for item, qty, price in lines:
+            order = {"id": next_order_id(), "team": team, "item": item,
+                     "qty": qty, "price": price, "cost": price * qty,
+                     "status": "pending"}
+            log.insert(0, order)
+            reserve_budget(order)   # budget goes down on request
+        print(f"[{team}] filed {len(lines)} line(s) for ${total:,} "
+              f"(budget left: ${teams[team]['budget']:,})")
+        save()
+        push_all()
         return
 
-    item = msg.get("item", "")
-    qty  = max(1, int(msg.get("qty", 1)))
-
-    if item not in inventory:
+    if action == "retract":
+        o = find_order(msg.get("id"))
+        # A team can only retract its *own* still-pending order; this refunds the
+        # reserved budget.
+        if o is None or o["team"] != team or o["status"] != "pending":
+            return
+        set_order_status(o, "retracted")
+        print(f"[{team}] retracted order #{o['id']} (budget back: ${teams[team]['budget']:,})")
+        save()
+        push_all()
         return
-
-    inv    = inventory[item]
-    cost   = inv["price"] * qty
-    budget = ensure_user(name)
-
-    if inv["stock"] < qty or budget < cost:
-        return  # guard: UI pre-checks stock; budget is server-side only
-
-    inv["stock"]  -= qty
-    budgets[name] -= cost
-    req_log.insert(0, {"user": name, "item": item, "qty": qty, "cost": cost})
-
-    print(f"[user] {name} → {qty}× {item} for ${cost:,}  (budget left: ${budgets[name]:,})")
-    push_all()
 
 
 canvas.serve(
     port=8000,
     host="0.0.0.0",
-    passwords={"admin": "admin", "user": "user"},
+    passwords=PASSWORDS,
     tunnel=True,
 )
