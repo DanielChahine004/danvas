@@ -22,15 +22,16 @@
       "price": 150
     }
   },
-  "teams": {
-    "Red Team": {
-      "password": "red",
-      "budget": 2000
-    },
-    "Blue Team": {
-      "password": "blue",
-      "budget": 2000
+  "teams": {},
+  "log": [
+    {
+      "id": 1,
+      "team": "Blue Team",
+      "item": "Headset",
+      "qty": 10,
+      "price": 150,
+      "cost": 1500,
+      "status": "rejected"
     }
-  },
-  "log": []
+  ]
 }

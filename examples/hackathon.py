@@ -1,33 +1,42 @@
-"""Stock management with a JSON-backed catalogue and admin-managed teams.
+"""Hackathon control room: a JSON-backed shop + a live points leaderboard.
 
-All state — the catalogue, the teams (name + password + budget) and the order
-log — lives in ``stock_data.json`` next to this script. It's loaded at startup
-and rewritten on every change, so a restart resumes exactly where it left off.
+Teams spend a budget on resources from a catalogue and earn points from judges;
+all state — the catalogue, the teams (password + budget + points), and the order
+log — lives in ``hackathon_data.json`` next to this script. It's loaded at
+startup and rewritten on every change, so a restart resumes where it left off.
 
 Roles
 -----
-* **admin** (password ``admin``): sees three panels — *Stock Control* (add /
-  change / remove items and prices/stock), *Teams* (create teams, set their
-  passwords and budgets, watch each team's balance), and *Orders*, a sortable,
-  filterable table of every request with fulfil / reject / edit-quantity actions.
+* **admin / judge** (password ``admin``): manages the catalogue (*Stock
+  Control*), creates teams and awards points (*Teams*), works the *Orders* table
+  (sortable/filterable, with fulfil / reject / edit-quantity actions), and sees
+  the leaderboard.
 * **a team** (each team has its own password, set by the admin): browses the
-  live catalogue and requests items against that team's shared budget.
+  catalogue, files orders against its shared budget, and watches the leaderboard.
+* **a spectator** (password ``view``): a read-only big-screen view — just the
+  catalogue and the leaderboard, nothing to click.
 
-A viewer's *role* is the team they logged in as — it's assigned server-side from
-the password and can't be spoofed — so every order is attributed to the right
-team and the budget is shared by everyone on it. Teams are created at runtime:
+A viewer's *role* is the team they logged in as — assigned server-side from the
+password, so it can't be spoofed — so every order is attributed to the right team
+and the budget/points are shared by everyone on it. Teams are created at runtime:
 the admin's new password is added to the live auth map (no restart) and the team
 panel starts accepting that role.
 
 Order workflow
 --------------
-A team adds items to a *cart* and files it, which sees how much budget it would
-have left first. Filing **reserves the budget** (it goes down immediately) and
-creates one pending order per line. The team can **retract** any still-pending
-order to get the money back. In the Orders table the admin can fulfil (✓), mark
+A team adds items to a *cart* and files it, seeing how much budget it would have
+left first. Filing **reserves the budget** (it goes down immediately) and creates
+one pending order per line. The team can **retract** any still-pending order to
+get the money back. In the Orders table the admin can fulfil (✓), mark
 not-fulfilled (×), or edit a pending order's quantity (✎). **Stock** is taken
 only on fulfilment and returned if that's undone; **budget** is held while an
 order is pending or fulfilled and refunded the moment it's retracted or rejected.
+
+Leaderboard
+-----------
+Every team has a points total. The admin awards (or docks) points from the Teams
+panel; the leaderboard ranks teams live, medals for the top three, and is visible
+to everyone — admins, teams, and spectators.
 """
 
 import json
@@ -35,8 +44,9 @@ import os
 
 import pycanvas
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "stock_data.json")
+DATA_PATH = os.path.join(os.path.dirname(__file__), "hackathon_data.json")
 ADMIN_PASSWORD = "admin"
+VIEWER_PASSWORD = "view"     # spectator: read-only catalogue + leaderboard
 DEFAULT_BUDGET = 2000
 
 # A role string no password ever maps to. It keeps the team panel's role list
@@ -65,7 +75,12 @@ def save():
                    "teams": teams, "log": log}, f, indent=2)
 
 
-inventory, teams, log, _data_version = load()   # item->{stock,price}, team->{password,budget}, [orders]
+inventory, teams, log, _data_version = load()   # item->{stock,price}, team->{password,budget,points}, [orders]
+
+# Every team carries a points total for the leaderboard; backfill it for teams
+# saved before points existed (idempotent, so it runs safely on every load).
+for _t in teams.values():
+    _t.setdefault("points", 0)
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
@@ -173,11 +188,17 @@ def team_rows(with_passwords):
     # Admins get the passwords (they set them); teams never see another team's.
     out = []
     for name, t in teams.items():
-        row = {"name": name, "budget": t["budget"]}
+        row = {"name": name, "budget": t["budget"], "points": t["points"]}
         if with_passwords:
             row["password"] = t["password"]
         out.append(row)
     return out
+
+
+def leaderboard_rows():
+    """Teams ranked by points, highest first — what the leaderboard renders."""
+    ranked = sorted(teams.items(), key=lambda kv: kv[1]["points"], reverse=True)
+    return [{"name": n, "points": t["points"]} for n, t in ranked]
 
 
 def push_all():
@@ -186,6 +207,7 @@ def push_all():
     admin_teams.update(teams=team_rows(True))
     admin_orders.update(log=log[:200])
     team_panel.update(rows=inv_rows(), teams=team_rows(False), log=log[:40])
+    leaderboard.update(rows=leaderboard_rows())
 
 
 # ── Inventory board (everyone) ────────────────────────────────────────────────
@@ -273,9 +295,16 @@ _ADMIN_CSS = """
 .pc-sa .pw{font:12px ui-monospace,monospace;color:#fbbf24;
            background:rgba(120,53,15,.25);padding:1px 6px;border-radius:5px}
 .pc-sa .bud{font-size:12px;font-weight:700;color:#4ade80;font-variant-numeric:tabular-nums}
+.pc-sa .pts{font-size:12px;font-weight:800;color:#fbbf24;font-variant-numeric:tabular-nums;
+            min-width:50px;text-align:right}
 .pc-sa .x{width:22px;height:22px;border-radius:6px;border:none;cursor:pointer;flex-shrink:0;
           background:rgba(127,29,29,.3);color:#f87171;font-size:14px;line-height:1}
 .pc-sa .x:hover{background:rgba(127,29,29,.6)}
+.pc-sa .quick{display:flex;gap:6px;margin-top:8px}
+.pc-sa .qpt{flex:1;padding:6px;border-radius:6px;border:1.5px solid var(--pc-border,#30363d);
+            background:transparent;color:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.pc-sa .qpt:not(:disabled):hover{border-color:#3b82f6;background:rgba(59,130,246,.15)}
+.pc-sa .qpt:disabled{opacity:.4;cursor:not-allowed}
 .pc-sa .hi{color:var(--pc-text,#e6edf3);font-weight:600}
 .pc-sa .empty{color:#64748b;font-size:12px;padding:6px 0}
 """
@@ -336,12 +365,13 @@ function Component({ canvas, props }) {
 """.replace("__ADMIN_CSS__", _ADMIN_CSS)
 
 
-# Panel 2: team management (create / edit / remove teams, with budgets).
+# Panel 2: team management — create/edit/remove teams (budget) and award points.
 _TEAMS_SOURCE = """
 function Component({ canvas, props }) {
   const teams = props.teams || [];
 
   const [tm, setTm] = React.useState({ name:"", password:"", budget:"2000" });
+  const [aw, setAw] = React.useState({ team:"", points:"" });
 
   function submitTeam() {
     const name = tm.name.trim();
@@ -350,6 +380,13 @@ function Component({ canvas, props }) {
     if (!name || !password || isNaN(budget)) return;
     canvas.send({ action:"team_add", name, password, budget });
     setTm({ name:"", password:"", budget:"2000" });
+  }
+  function award(delta) {
+    const team = aw.team;
+    const pts = delta != null ? delta : parseInt(aw.points, 10);
+    if (!team || isNaN(pts) || pts === 0) return;
+    canvas.send({ action:"award", name:team, points:pts });
+    if (delta == null) setAw({ ...aw, points:"" });
   }
 
   return (
@@ -372,6 +409,28 @@ function Component({ canvas, props }) {
       </div>
 
       <div className="sec">
+        <div className="sec-hd">Award points</div>
+        <div className="frm">
+          <select className="inp grow" value={aw.team}
+            onChange={e=>setAw({...aw, team:e.target.value})}>
+            <option value="">— select team —</option>
+            {teams.map(t => <option key={t.name} value={t.name}>{t.name} ({t.points} pts)</option>)}
+          </select>
+          <input className="inp grow" type="number" placeholder="± points" value={aw.points}
+            onChange={e=>setAw({...aw, points:e.target.value})}
+            onKeyDown={e=>{ if(e.key==="Enter") award(); }} />
+          <button className="btn" onClick={()=>award()}>Award points</button>
+        </div>
+        <div className="quick">
+          {[1, 5, 10, -5].map(d => (
+            <button key={d} className="qpt" disabled={!aw.team} onClick={()=>award(d)}>
+              {d > 0 ? "+" + d : d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="sec">
         <div className="sec-hd">Teams ({teams.length})</div>
         {teams.length === 0
           ? <div className="empty">No teams yet — add one above.</div>
@@ -382,6 +441,7 @@ function Component({ canvas, props }) {
                 <span className="nm">{t.name}</span>
                 <span className="pw">{t.password}</span>
                 <span className="bud">${t.budget.toLocaleString()}</span>
+                <span className="pts">{t.points} pts</span>
                 <button className="x" title="Remove team"
                   onClick={e=>{ e.stopPropagation(); canvas.send({ action:"team_remove", name:t.name }); }}>×</button>
               </div>
@@ -830,28 +890,95 @@ function Component({ canvas, props }) {
 """.replace("__ORDERS_CSS__", _ORDERS_CSS)
 
 
+# ── Leaderboard (everyone) ────────────────────────────────────────────────────
+# Teams ranked by points, medals for the top three. Visible to admins, teams and
+# spectators alike. Adapted from examples/leaderboard.py.
+
+_LEADERBOARD_SOURCE = """
+function Component({ props }) {
+  const rows = props.rows || [];
+  const MEDAL = ["🥇","🥈","🥉"];
+  const MEDAL_BG = ["#78350f","#334155","#431407"];  // gold / silver / bronze tints
+
+  const styles = `
+    .pc-lb{padding:14px;height:100%;overflow:auto;box-sizing:border-box;
+           font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+    .pc-lb .hd{font-size:16px;font-weight:700;margin-bottom:14px}
+    .pc-lb table{width:100%;border-collapse:collapse;font-size:14px}
+    .pc-lb th{padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;
+              text-transform:uppercase;letter-spacing:.05em;
+              border-bottom:1px solid var(--pc-border,#30363d)}
+    .pc-lb td{padding:11px 12px;border-bottom:1px solid #1e293b}
+    .pc-lb tr:last-child td{border-bottom:none}
+    .pc-lb .pts{font-variant-numeric:tabular-nums;font-weight:800;text-align:right}
+    .pc-lb .rank{width:40px;text-align:center;font-size:18px;font-weight:700}
+    .pc-lb .name{font-weight:600}
+    .pc-lb .medal td{font-weight:700}
+    .pc-lb .empty{color:#64748b;padding:10px 4px;font-size:13px}
+  `;
+
+  return (
+    <div className="pc-lb">
+      <style>{styles}</style>
+      <div className="hd">🏆 Leaderboard</div>
+      {rows.length === 0
+        ? <div className="empty">No teams yet.</div>
+        : <table>
+            <thead>
+              <tr><th className="rank">#</th><th>Team</th>
+                  <th style={{textAlign:"right"}}>Points</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const medal = i < 3;
+                return (
+                  <tr key={r.name} className={medal ? "medal" : ""}
+                      style={medal ? { background: MEDAL_BG[i] + "55" } : {}}>
+                    <td className="rank">{medal ? MEDAL[i] : i + 1}</td>
+                    <td className="name">{r.name}</td>
+                    <td className="pts">{r.points.toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>}
+    </div>
+  );
+}
+"""
+
+
 # ── Canvas layout ─────────────────────────────────────────────────────────────
 
+# Layout, by role:
+#   admin      board + Stock + Leaderboard (top), Teams + Orders (bottom)
+#   a team     board + their ordering panel + Leaderboard (top row)
+#   spectator  the Leaderboard only (the board is admin+team only, below)
+# Panels keep one position for all viewers, so the board and the team/stock
+# panels share x=500 — only one of them reaches any given viewer.
+
+# The inventory board is for admins and teams, not spectators, so it carries
+# explicit roles (admin + each team) and grows with new teams, like team_panel.
+# "admin" is always present, so the list is never empty.
 board = canvas.react(_BOARD_SOURCE, name="board",
                      x=40, y=40, w=440, h=560,
+                     roles=["admin", *teams.keys()],
                      props={"rows": inv_rows()})
 
-# Admin sees three panels across the top — stock control, team management, and
-# (below, full-width) the orders table. Props are seeded from the loaded JSON so
-# the admin sees the full catalogue, every team and its budget, and the order log
-# on the very first connect — no interaction needed to populate them.
+# Props are seeded from the loaded JSON so the admin sees the full catalogue,
+# every team (budget + points) and the order log on the very first connect.
 admin_stock = canvas.react(_STOCK_SOURCE, name="stock",
-                           x=500, y=40, w=360, h=560,
+                           x=500, y=40, w=380, h=560,
                            roles=["admin"],
                            props={"rows": inv_rows()})
 
 admin_teams = canvas.react(_TEAMS_SOURCE, name="teams",
-                           x=880, y=40, w=360, h=560,
+                           x=40, y=620, w=440, h=340,
                            roles=["admin"],
                            props={"teams": team_rows(True)})
 
 admin_orders = canvas.react(_ORDERS_SOURCE, name="orders",
-                            x=40, y=620, w=1200, h=340,
+                            x=500, y=620, w=760, h=340,
                             roles=["admin"],
                             props={"log": log[:200]})
 
@@ -862,21 +989,26 @@ team_panel = canvas.react(_TEAM_SOURCE, name="team",
                           roles=[TEAM_SENTINEL, *teams.keys()],
                           props={"rows": inv_rows(), "teams": team_rows(False), "log": log[:40]})
 
+# The leaderboard is for everyone (roles=[] = all roles, incl. spectators).
+leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard",
+                           x=900, y=40, w=360, h=560,
+                           props={"rows": leaderboard_rows()})
+
 
 # ── Auth map (mutated live as the admin creates teams) ────────────────────────
 # Passed by reference to serve(); the login check iterates it on every attempt,
 # so adding a key here makes that password valid immediately — no restart.
-PASSWORDS = {"admin": ADMIN_PASSWORD,
+PASSWORDS = {"admin": ADMIN_PASSWORD, "viewer": VIEWER_PASSWORD,
              **{name: t["password"] for name, t in teams.items()}}
 
 
 def grant_team_view(name):
-    """Give a team role the read-only, chrome-free kiosk view (admins keep the
-    full surface). Applies on the team's next connect and to any member already
-    on (none can be, since the password is brand new when this first runs)."""
+    """Give a role the read-only, chrome-free kiosk view (admins keep the full
+    surface). Applies on that role's next connect."""
     canvas.set_view(read_only=True, ui=False, roles=[name])
 
 
+grant_team_view("viewer")          # spectators: read-only, leaderboard only
 for _name in teams:
     grant_team_view(_name)
 
@@ -908,10 +1040,13 @@ def on_admin(msg, viewer):
             return
         budget = max(0, int(msg.get("budget", DEFAULT_BUDGET)))
         new_team = name not in teams
-        # Upsert: keep the spent-down budget on edit unless the admin changed it.
-        teams[name] = {"password": pw, "budget": budget}
+        # Upsert: keep the spent-down budget on edit (the form prefills it) and
+        # preserve the team's points across edits.
+        teams[name] = {"password": pw, "budget": budget,
+                       "points": teams.get(name, {}).get("points", 0)}
         PASSWORDS[name] = pw
-        team_panel.add_role(name)   # team panel now admits this role, live
+        team_panel.add_role(name)   # team + board panels now admit this role, live
+        board.add_role(name)
         grant_team_view(name)
         print(f"[admin] {'created' if new_team else 'updated'} team {name!r} "
               f"(password {pw!r}, budget ${budget})")
@@ -921,8 +1056,15 @@ def on_admin(msg, viewer):
         if name in teams:
             teams.pop(name)
             PASSWORDS.pop(name, None)
-            team_panel.remove_role(name)   # drop the panel from that role, live
+            team_panel.remove_role(name)   # drop the panels from that role, live
+            board.remove_role(name)
             print(f"[admin] removed team {name!r}")
+
+    elif action == "award":
+        name = msg.get("name", "")
+        if name in teams:
+            teams[name]["points"] += int(msg.get("points", 0))
+            print(f"[admin] {name} -> {teams[name]['points']} pts")
 
     elif action == "order_fulfil":
         o = find_order(msg.get("id"))
