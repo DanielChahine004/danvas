@@ -323,7 +323,7 @@ function enableSmartScroll(editor) {
     // Normalize deltaY to pixels (Firefox line mode: ~40px per line).
     const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
     const cam = editor.getCamera()
-    const factor = Math.exp(-dy * 0.005)
+    const factor = Math.exp(-dy * 0.002)
     const newZ = Math.max(0.1, Math.min(8, cam.z * factor))
     // Keep the page point under the cursor fixed: derive new cam.x/y so that
     // (clientX / newZ - clientX / cam.z + cam.x) maps the same page point.
