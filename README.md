@@ -258,9 +258,21 @@ def _(msg, viewer): ...            # React/Custom inbound message
 def _(req, viewer): ...            # the awaitable path, too
 ```
 
-`role` is the server-trusted login level (`None` unless `passwords=` is set);
-`id`/`name`/`color` come from the live roster — fine for attribution, not
-authorization. (Uploads receive the same `viewer`; see *File uploads* below.)
+<a id="the-viewer-dict"></a>
+The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
+cursors):
+
+| key | what | trust |
+|---|---|---|
+| `id` | stable per-connection roster id (use with `client_id=`) | client-side — attribution only |
+| `name` | viewer's editable display name | client-side |
+| `color` | roster color | client-side |
+| `role` | login level from `serve(passwords=)`, else `None` | **server-trusted — authorize on this** |
+| `cursor` | `{"x", "y"}` in canvas coords, or `None` (only with `serve(cursors=True)`) | client-side |
+
+Gate permissions on `role` only; `id`/`name`/`color`/`cursor` are reported by the
+browser, so they're great for attribution and per-viewer targeting but not for
+authorization.
 
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python
@@ -435,10 +447,9 @@ def got(file, viewer):
     file.save(f"uploads/{viewer.get('role') or viewer['name']}/")
 ```
 
-`role` is the **server-trusted** login level (`None` unless you set
-`passwords={...}`) — gate permissions on this. `id`/`name`/`color` come from the
-live viewer roster (great for attribution/per-user folders, but client-reported,
-so not for authorization).
+It's the same [`viewer` dict](#the-viewer-dict) as everywhere else: gate
+permissions on the server-trusted `role`; `id`/`name`/`color` are client-reported
+(great for attribution/per-user folders, not for authorization).
 
 **Audio** — `AudioFeed` streams PCM played back-to-back via Web Audio. Capture
 needs `[audio]`; playback needs nothing. Each viewer clicks **Enable audio**
@@ -467,6 +478,9 @@ tip = canvas.viewers[0]["cursor"]    # {"x", "y"} in canvas coords, or None
 @canvas.on_cursor
 def _(viewer): ...                   # streaming form, fires on each move
 ```
+
+With cursors on, every entry in `canvas.viewers` (and each callback `viewer`)
+carries the extra `cursor` key — see [the `viewer` dict](#the-viewer-dict).
 
 **Streaming performance** — `queue` policy decides what happens when updates
 outpace a slow viewer:
