@@ -66,6 +66,7 @@ class React(BaseComponent):
                  event_key="event", queue="fifo"):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
+        self._path = path   # remembered so watch() can reload it
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 source = f.read()
@@ -75,11 +76,16 @@ class React(BaseComponent):
         if source is not None and jsx is not None:
             raise ValueError("pass either source= (a full Component) or jsx= "
                              "(markup to be wrapped), not both")
+        # CSS handling: with jsx= the styles are composed into the wrapper; with
+        # source= they ride as a `css` prop that ReactHost renders into a <style>
+        # ahead of the component — so a full component can keep its styles in a
+        # separate Python string instead of an inline <style>/`.replace()` hack.
+        # Scope rules are the author's own selectors, exactly as an inline tag.
+        self._css = ""
         if jsx is not None:
             source = self.compose(jsx, css or "")
         elif css:
-            raise ValueError("css= only applies to jsx=; a full source= "
-                             "component should carry its own <style>")
+            self._css = css
         self._source = source or ""
         # Optional third-party libraries to make available to the component as
         # the ``libs`` global. Each name is loaded as ESM from a CDN in the
@@ -113,6 +119,7 @@ class React(BaseComponent):
         props = dict(self._props)  # label, w, h
         props["source"] = self._source
         props["data"] = json.dumps(self._data)
+        props["css"] = self._css
         props["autoH"] = self._auto_h
         props["autoW"] = self._auto_w
         props["libs"] = json.dumps(self._libs)
@@ -255,6 +262,33 @@ class React(BaseComponent):
         self._data.update(props)
         self._send_update({"data": json.dumps(self._data)})
 
+    def update_for(self, *, role=None, client_id=None, **props):
+        """Send props to specific viewers only — the per-recipient twin of
+        :meth:`update`.
+
+        Pushes the panel's current props merged with ``props`` to just the
+        viewers matching ``role`` (a name or list, as in ``serve(passwords=)``)
+        and/or ``client_id`` (an id from ``canvas.viewers``). Lets you show each
+        viewer their own slice — a per-team budget, a personalised greeting —
+        without the component filtering a global blob client-side::
+
+            for v in canvas.viewers:
+                panel.update_for(client_id=v["id"], balance=balances[v["role"]])
+
+        Unlike :meth:`update`, it does **not** change the panel's shared props, so
+        it's a live push: a viewer who reconnects sees the shared props again
+        (re-send from an on-connect/identity hook, or fold the per-viewer value
+        into your data model and broadcast). With neither ``role`` nor
+        ``client_id`` it's a no-op — use :meth:`update` to reach everyone.
+        Returns ``self``.
+        """
+        if role is None and client_id is None:
+            return self
+        merged = {**self._data, **props}
+        self._send_update_to({"data": json.dumps(merged)},
+                             role=role, client_id=client_id)
+        return self
+
     def push(self, data):
         """Stream ``data`` to the component without a re-mount.
 
@@ -288,6 +322,143 @@ class React(BaseComponent):
         """Replace the component's JSX source and recompile it, live."""
         self._source = source
         self._send_update({"source": source})
+
+    def set_css(self, css):
+        """Replace the panel's ``css=`` stylesheet, live (source= panels only)."""
+        self._css = css or ""
+        self._send_update({"css": self._css})
+
+    def watch(self, path=None, css_path=None, interval=0.5):
+        """Dev convenience: live-reload the panel's source (and optionally CSS)
+        from disk whenever the file changes — edit the ``.jsx``, save, and the
+        panel recompiles with no server restart.
+
+        ``path`` defaults to the file the panel was built from (``path=`` on the
+        constructor); pass ``css_path`` to also hot-reload a ``css=`` stylesheet.
+        A daemon thread polls the files' modification time every ``interval``
+        seconds and calls :meth:`set_source` / :meth:`set_css` on change. Returns
+        a ``stop()`` callable. Meant for development — poll-based and best paired
+        with ``serve(block=True)`` so the process stays alive::
+
+            panel = canvas.react(path="panel.jsx")
+            panel.watch()
+            canvas.serve()
+
+        Raises if no source file is known (build the panel with ``path=`` or pass
+        one here).
+        """
+        import os
+        import threading
+
+        src_path = path or self._path
+        if src_path is None and css_path is None:
+            raise ValueError(
+                "watch() needs a file: build the panel with path= or pass "
+                "path=/css_path= here")
+
+        targets = [(p, apply) for p, apply in
+                   ((src_path, self.set_source), (css_path, self.set_css)) if p]
+        # Snapshot the on-disk state now (synchronously), so a change made right
+        # after watch() returns is detected — and the current contents, already
+        # loaded, aren't re-pushed on the first poll.
+        seen = {}
+        for p, _ in targets:
+            try:
+                seen[p] = os.path.getmtime(p)
+            except OSError:
+                seen[p] = None
+        stop = threading.Event()
+
+        def loop():
+            while not stop.is_set():
+                for p, apply in targets:
+                    try:
+                        mtime = os.path.getmtime(p)
+                    except OSError:
+                        continue
+                    if seen.get(p) == mtime:
+                        continue
+                    seen[p] = mtime
+                    try:
+                        with open(p, "r", encoding="utf-8") as f:
+                            apply(f.read())
+                    except OSError:
+                        pass
+                stop.wait(interval)
+
+        threading.Thread(target=loop, daemon=True).start()
+        return stop.set
+
+    def validate(self):
+        """Check the source for the common mistakes that otherwise only surface
+        as a cryptic browser error, *before* you serve the canvas.
+
+        Returns a list of human-readable problems (empty when it looks OK):
+
+        * an empty source, or one that never declares ``Component``
+          (``function Component(...)`` / ``const Component = …``);
+        * unbalanced ``()`` / ``[]`` / ``{}`` — the usual fallout of a bad edit.
+
+        Contents of strings and ``//`` / ``/* */`` comments are skipped, so braces
+        inside text or a CSS template literal don't trip it. It's a fast
+        structural check, **not** a full compile: source that passes here can
+        still fail in the browser (a bad hook call, an undefined variable), and
+        valid-but-unusual syntax could be flagged — so treat it as a lint, e.g.
+        ``assert not panel.validate()`` in a test. Returns ``[]`` for a panel
+        built from ``jsx=`` whose wrapper this class generated.
+        """
+        src = self._source or ""
+        if not src.strip():
+            return ["empty source"]
+        problems = []
+        if not re.search(r"\b(function\s+Component\b|Component\s*=)", src):
+            problems.append("no `Component` defined — the source must declare "
+                            "`function Component(...)` (or `const Component = …`)")
+        problems += self._delimiter_problems(src)
+        return problems
+
+    @staticmethod
+    def _delimiter_problems(src):
+        """Balanced-delimiter scan that skips JS strings and comments, so braces
+        in text/CSS don't cause false positives. Heuristic (a template literal's
+        ``${…}`` is treated as opaque), but catches the common unbalanced edit."""
+        close_to_open = {")": "(", "]": "[", "}": "{"}
+        stack = []
+        i, n = 0, len(src)
+        mode = None  # None | "'" | '"' | '`' | '//' | '/*'
+        while i < n:
+            c = src[i]
+            nxt = src[i + 1] if i + 1 < n else ""
+            if mode in ("'", '"', "`"):
+                if c == "\\":
+                    i += 2; continue
+                if c == mode:
+                    mode = None
+                i += 1; continue
+            if mode == "//":
+                if c == "\n":
+                    mode = None
+                i += 1; continue
+            if mode == "/*":
+                if c == "*" and nxt == "/":
+                    mode = None; i += 2; continue
+                i += 1; continue
+            if c == "/" and nxt == "/":
+                mode = "//"; i += 2; continue
+            if c == "/" and nxt == "*":
+                mode = "/*"; i += 2; continue
+            if c in ("'", '"', "`"):
+                mode = c; i += 1; continue
+            if c in "([{":
+                stack.append(c); i += 1; continue
+            if c in ")]}":
+                if not stack or stack[-1] != close_to_open[c]:
+                    return [f"unbalanced '{c}'"]
+                stack.pop(); i += 1; continue
+            i += 1
+        if stack:
+            return [f"unclosed '{stack[-1]}'"]
+        return []
 
     # -- input routing (panel -> Python) -------------------------------------
     def on(self, event=None):

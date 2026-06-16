@@ -101,7 +101,7 @@ best panel (see [Show anything](#show-anything)).
 | `LivePlot` | output | streaming telemetry; `.push({trace: y}, x=)`, `.clear()`, `smoothing=` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
 | `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)` |
-| `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)`, `.push(data)` |
+| `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)`/`.update_for(role=…)`, `.push(data)`, `css=` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=` |
 | `Table` | output | DataFrame/Series/records/dict → sortable, filterable; `.update(data)` |
@@ -167,6 +167,12 @@ canvas.components         # list of every panel (canvas.arrows for connectors)
 @panel.on_layout          # fn(comp), after a user drag/resize (geometry synced)
 @chat.on_message          # fn(entry); reply with chat.post(text)
 ```
+
+These are plain registration methods, so `@panel.on_change` and
+`panel.on_change(fn)` are the *same thing* — decorate for the usual one-handler
+case, or call it directly to reuse one handler across panels
+(`for p in panels: p.on_message(handle)`) or to register a function defined
+before the panel exists.
 
 **Who did it** — *any* of these handlers may declare a trailing `viewer`
 parameter to learn which connected viewer acted; one-arg handlers are unchanged:
@@ -340,6 +346,26 @@ bridge handle:
 - `React.from_uiverse(raw)` rewrites a `styled-components` snippet into plain
   React + CSS the in-browser pipeline accepts.
 - `h="auto"`/`w="auto"` shrink the panel to its content.
+
+Authoring conveniences (Python side):
+
+- **`css=` works with `source=` too** — keep a full component's styles in a
+  separate string instead of an inline `<style>`; it's rendered ahead of the
+  component (scoped by your own selectors). `panel.set_css(...)` updates it live.
+- **`panel.update_for(role=…, client_id=…, **props)`** — the per-recipient twin
+  of `update()`: push props to just the matching viewers (a login role from
+  `serve(passwords=)`, or an id from `canvas.viewers`) so each viewer sees only
+  their own slice — a per-team budget, a personalised greeting — without the
+  component filtering a global blob. (See `examples/hackathon.py`.)
+- **`panel.validate()`** — a fast structural lint that catches a missing
+  `Component` or unbalanced `()/[]/{}` before they become a cryptic browser
+  error. Returns a list of problems (empty = OK); handy as `assert not
+  panel.validate()` in a test, or as a startup check.
+- **`panel.watch(path=…, css_path=…)`** — dev hot-reload: edit the `.jsx`/`.css`
+  on disk, save, and the panel recompiles live (no restart). Build it with
+  `path=` and call `panel.watch()` before `serve()`; returns a `stop()`.
+- `react(...)` spells out placement/visibility (`x/y/w/h`, `roles`, `lock_for`,
+  the lock/chrome flags) as explicit keyword args, so they autocomplete.
 
 ## Specific panels
 

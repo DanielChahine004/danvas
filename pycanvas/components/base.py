@@ -279,6 +279,23 @@ class BaseComponent:
         else:
             self._bridge.broadcast(msg)
 
+    def _send_update_to(self, payload, role=None, client_id=None):
+        """Send an update to specific viewers only, leaving broadcast state alone.
+
+        Routes by login ``role`` (a name or list, matching ``serve(passwords=)``)
+        and/or ``client_id`` (an id from ``canvas.viewers``). Backs the
+        per-recipient writes (e.g. :meth:`React.update_for`); a no-op before the
+        server is running, like the other sends.
+        """
+        if self._bridge is None:
+            return
+        msg = {"type": "update", "id": self.id, "payload": payload}
+        if client_id is not None:
+            self._bridge.send_to_client(client_id, msg)
+        if role is not None:
+            for r in ([role] if isinstance(role, str) else role):
+                self._bridge.send_to_role(r, msg)
+
     def _send_binary(self, type_code, payload):
         """Push raw bytes to the browser as a binary frame, keyed by this id.
 

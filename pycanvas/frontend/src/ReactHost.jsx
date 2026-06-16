@@ -406,6 +406,11 @@ export default function ReactHost({ shape }) {
             : { display: 'contents' }
         }
       >
+        {/* Optional stylesheet from Python's `css=` (source= panels): rendered
+            ahead of the component so a full component can keep its styles in a
+            separate string instead of an inline <style>. Scoped by the author's
+            own selectors, exactly like an inline tag. */}
+        {shape.props.css ? <style>{shape.props.css}</style> : null}
         <Boundary resetKey={Comp}>
           <Comp canvas={canvas} value={streamed} props={userProps} />
         </Boundary>
