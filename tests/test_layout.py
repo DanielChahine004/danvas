@@ -82,6 +82,35 @@ def test_layout_stack_unwinds_after_block():
     assert loose.x is None and loose.y is None
 
 
+def test_role_scoped_column_writes_overlay_not_base():
+    canvas = pycanvas.Canvas()
+    with canvas.column(roles="admin", gap=10, origin=(100, 100)):
+        a = canvas.label("a", w=200, h=50)
+        b = canvas.label("b", w=200, h=50)
+    reg = canvas._bridge.register_message
+    # admins replay the column positions...
+    ra, rb = reg(a, role="admin"), reg(b, role="admin")
+    assert (ra["x"], ra["y"]) == (100, 100)
+    assert (rb["x"], rb["y"]) == (100, 160)        # stacked: 50 + gap
+    # ...but the shared base is left unset, so other roles auto-cascade.
+    base = reg(a, role="other")
+    assert "x" not in base and "y" not in base
+    assert a.x is None and a.y is None             # no Python-side base position
+
+
+def test_role_scoped_row_is_isolated_per_role():
+    canvas = pycanvas.Canvas()
+    with canvas.row(roles="viewer", gap=10, origin=(0, 0)):
+        p = canvas.label("p", w=80, h=40)
+        q = canvas.label("q", w=80, h=40)
+    reg = canvas._bridge.register_message
+    rp, rq = reg(p, role="viewer"), reg(q, role="viewer")
+    assert (rp["x"], rp["y"]) == (0, 0)
+    assert (rq["x"], rq["y"]) == (90, 0)           # beside: 80 + gap
+    # A different role sees no position from this viewer-scoped row.
+    assert "x" not in reg(p, role="admin")
+
+
 def test_auto_height_panel_keeps_fitting_in_a_grid():
     canvas = pycanvas.Canvas()
     with canvas.grid(cols=2, slot=(300, 200), gap=10, origin=(0, 0)):

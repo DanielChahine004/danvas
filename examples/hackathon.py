@@ -1543,6 +1543,16 @@ function Component({ canvas, props }) {
 # Each panel keeps its stylesheet in a plain Python string passed as ``css=`` —
 # the host renders it into a <style>, so there's no inline <style>/`.replace()`.
 
+# Placement is anchor-based: only the board carries absolute x/y, and every other
+# panel hangs off a neighbour with a uniform GAP — so there are no scattered magic
+# coordinates and the row/column reflows if a panel's size changes. (Panels still
+# carry w/h: these dashboard cards have intended sizes, and right_of needs the
+# anchor's width.) Note admin_stock and team_panel anchor to the *same* spot
+# (right_of=board): only one ever reaches a given viewer — admins vs teams — so
+# they overlap by design rather than fighting for the slot.
+GAP = 20
+
+# Top row, left -> right:  board | stock·team | leaderboard | announcements
 # The inventory board is for admins and teams, not spectators, so it carries
 # explicit roles (admin + each team) and grows with new teams, like team_panel.
 # "admin" is always present, so the list is never empty.
@@ -1554,44 +1564,46 @@ board = canvas.react(_BOARD_SOURCE, name="board", css=_BOARD_CSS,
 # Props are seeded from the loaded JSON so the admin sees the full catalogue,
 # every team (budget + points) and the order log on the very first connect.
 admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS,
-                           x=500, y=40, w=380, h=560,
+                           right_of=board, gap=GAP, w=380, h=560,
                            roles=["admin"],
                            props={"rows": inv_rows()})
-
-admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
-                           x=40, y=620, w=440, h=700,
-                           roles=["admin"],
-                           props={"teams": team_rows(True)})
-
-admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
-                            x=500, y=620, w=760, h=340,
-                            roles=["admin"],
-                            props={"log": admin_order_rows()})
 
 # Team roles are dynamic: seed with the teams already in the JSON, plus the
 # sentinel so the list is never empty. New teams are appended in `team_add`.
 # The team panel's per-team data (its name, budget, and orders) is delivered with
 # update(roles=...) so no team ever receives another team's figures (see
 # push_all); the seed props just cover the first render before that arrives.
+# Same anchor as admin_stock — admins see stock there, teams see this.
 team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS,
-                          x=500, y=40, w=380, h=560,
+                          right_of=board, gap=GAP, w=380, h=560,
                           roles=[TEAM_SENTINEL, *teams.keys()],
                           props={"rows": inv_rows(), "team": "", "budget": 0, "orders": []})
 
 # The leaderboard is for everyone (roles=[] = all roles, incl. spectators).
 leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard", css=_LEADERBOARD_CSS,
-                           x=900, y=40, w=360, h=560,
+                           right_of=admin_stock, gap=GAP, w=360, h=560,
                            props={"rows": leaderboard_rows()})
 
 # Announcements. The rendered board is a built-in Markdown panel visible to
 # everyone (no roles); the admin-only editor below it publishes new Markdown
-# (broadcast + saved to hackathon_announcement.md). New rightmost column.
+# (broadcast + saved to hackathon_announcement.md). Rightmost column.
 announce_display = canvas.markdown(announcement, name="announce",
                                    label="📣 Announcements",
-                                   x=1280, y=40, w=560, h=560)
+                                   right_of=leaderboard, gap=GAP, w=560, h=560)
+
+# Bottom row (admin only): Teams under the board, Orders under the stock panel.
+admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
+                           below=board, gap=GAP, w=440, h=700,
+                           roles=["admin"],
+                           props={"teams": team_rows(True)})
+
+admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
+                            below=admin_stock, gap=GAP, w=760, h=340,
+                            roles=["admin"],
+                            props={"log": admin_order_rows()})
 
 announce_editor = canvas.react(_ANNOUNCE_SOURCE, name="announce_edit", css=_ANNOUNCE_CSS,
-                               x=1280, y=620, w=560, h=560,
+                               below=announce_display, gap=GAP, w=560, h=560,
                                roles=["admin"],
                                props={"text": announcement})
 

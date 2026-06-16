@@ -100,7 +100,7 @@ class _FlowLayout:
     """
 
     def __init__(self, canvas, kind, *, cols=1, slot=(None, None), gap=16,
-                 origin=(40, 40)):
+                 origin=(40, 40), roles=None, client_id=None):
         self._canvas = canvas
         self._kind = kind                 # "grid" | "column" | "row"
         self._cols = cols
@@ -109,6 +109,12 @@ class _FlowLayout:
         self._ox, self._oy = origin
         self._i = 0
         self._cursor = list(origin)        # running (x, y) for column/row flow
+        # When set, the layout this container computes is written as a per-viewer
+        # *overlay* (via set_layout) for these roles / this client, not the shared
+        # base — so one role can have its own arrangement (precedence shared <
+        # role < client). None = lay out the shared base, as usual.
+        self._roles = roles
+        self._client_id = client_id
 
     def __enter__(self):
         self._canvas._layout_stack.append(self)
@@ -590,18 +596,26 @@ class Canvas:
         # Auto-layout: inside a `with canvas.grid(...)`/`column`/`row` block, a
         # panel given neither an explicit position nor a relative anchor takes the
         # next slot (and the layout's default slot size, unless w/h were given).
+        scoped_layout = None
         if self._layout_stack and x is None and y is None:
-            x, y, w, h = self._layout_stack[-1]._place(component, w, h, auto_h)
+            flow = self._layout_stack[-1]
+            fx, fy, fw, fh = flow._place(component, w, h, auto_h)
             # A grid slot / row common-height just imposed a concrete height on a
             # panel that was only *default* auto-height (e.g. a Label): honor that
             # height instead of fitting, so the grid stays uniform.
-            if default_auto and h is not None:
+            if default_auto and fh is not None:
                 component._auto_h = False
             # Likewise a slot width pins a default auto-width panel, keeping grid
             # columns uniform (autopanel passes an explicit slot_w, so its tidy
             # columns are preserved; show() outside a layout keeps fitting).
-            if default_auto_w and w is not None:
+            if default_auto_w and fw is not None:
                 component._auto_w = False
+            if flow._roles is None and flow._client_id is None:
+                x, y, w, h = fx, fy, fw, fh   # shared base (the usual case)
+            else:
+                # Scoped container: this placement is that audience's overlay, not
+                # the shared base — applied via set_layout once the panel is bound.
+                scoped_layout = (fx, fy, fw, fh, flow._roles, flow._client_id)
         if name is None:
             name = component.name
         if name is None:
@@ -698,6 +712,14 @@ class Canvas:
         on_attached = getattr(component, "_on_attached", None)
         if callable(on_attached):
             on_attached()
+        # A role/client-scoped container stores its computed slot as that
+        # audience's layout overlay (replayed to them on connect), leaving the
+        # shared base unset. Done before register_live so a live insert replays
+        # the overlay merged into the register frame.
+        if scoped_layout is not None:
+            fx, fy, fw, fh, sroles, scid = scoped_layout
+            component.set_layout(x=fx, y=fy, w=fw, h=fh,
+                                 roles=sroles, client_id=scid)
         if self._serving:
             self._bridge.register_live(component)
         return component
@@ -942,7 +964,8 @@ class Canvas:
         """
         return self._make(Histogram, name=name, **kw)
 
-    def grid(self, cols=2, slot=(520, 360), gap=24, origin=(40, 40)):
+    def grid(self, cols=2, slot=(520, 360), gap=24, origin=(40, 40),
+             roles=None, client_id=None):
         """Auto-arrange panels added inside a ``with`` block into a grid.
 
         Inside the block, any panel inserted without an explicit ``x``/``y`` (or a
@@ -961,11 +984,20 @@ class Canvas:
         blocks freely to build columns of charts beside columns of media. For a
         strip of mixed-height controls, prefer :meth:`column` / :meth:`row`,
         which keep each panel's natural size instead of a uniform cell.
+
+        Pass ``roles=`` and/or ``client_id=`` to lay the block out for just those
+        viewers — each panel's slot is written as that audience's *overlay* (via
+        :meth:`~pycanvas.React.set_layout`) instead of the shared base, so one
+        role can have its own arrangement. Best for a role's *exclusive* panels;
+        a panel shared across roles is created once (in one block), so give the
+        other roles their layout with a separate scoped block over fresh panels
+        or `set_layout(roles=…)` directly.
         """
         return _FlowLayout(self, "grid", cols=cols, slot=slot, gap=gap,
-                           origin=origin)
+                           origin=origin, roles=roles, client_id=client_id)
 
-    def column(self, width=None, gap=16, origin=(40, 40), w=None):
+    def column(self, width=None, gap=16, origin=(40, 40), w=None,
+               roles=None, client_id=None):
         """Auto-stack panels added inside a ``with`` block into one column.
 
         Each panel keeps its **natural height** (a slider stays slider-tall, a
@@ -973,29 +1005,32 @@ class Canvas:
         height. ``width`` sets a common width (``None`` keeps each panel's own);
         ``gap`` is the vertical spacing, ``origin`` the top-left corner. An
         explicit position or relative anchor still wins for that panel. ``w`` is
-        accepted as an alias for ``width``.
+        accepted as an alias for ``width``. ``roles=`` / ``client_id=`` scope the
+        arrangement to those viewers (see :meth:`grid`).
         """
         if w is not None:
             if width is not None:
                 raise TypeError("pass either width= or w=, not both")
             width = w
         return _FlowLayout(self, "column", slot=(width, None), gap=gap,
-                           origin=origin)
+                           origin=origin, roles=roles, client_id=client_id)
 
-    def row(self, height=None, gap=16, origin=(40, 40), h=None):
+    def row(self, height=None, gap=16, origin=(40, 40), h=None,
+            roles=None, client_id=None):
         """Auto-arrange panels added inside a ``with`` block into one row.
 
         The horizontal counterpart of :meth:`column`: panels flow left to right,
         each keeping its **natural width**. ``height`` sets a common height
         (``None`` keeps each panel's own); ``gap`` is the horizontal spacing.
-        ``h`` is accepted as an alias for ``height``.
+        ``h`` is accepted as an alias for ``height``. ``roles=`` / ``client_id=``
+        scope the arrangement to those viewers (see :meth:`grid`).
         """
         if h is not None:
             if height is not None:
                 raise TypeError("pass either height= or h=, not both")
             height = h
         return _FlowLayout(self, "row", slot=(None, height), gap=gap,
-                           origin=origin)
+                           origin=origin, roles=roles, client_id=client_id)
 
     def repl(self, name="repl", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Repl`. See :meth:`insert` for ``place``.

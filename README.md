@@ -529,6 +529,20 @@ with canvas.column(width=320, gap=12):    # stacks; each keeps its natural heigh
 `row(height=…)` is the horizontal twin of `column`. An explicit position or
 relative anchor still wins per panel.
 
+Pass `roles=` (or `client_id=`) to a container and the whole block is laid out
+for just those viewers — each slot is written as that audience's layout *overlay*
+(via `set_layout(roles=…)`) instead of the shared base, so one role can have its
+own arrangement (precedence `shared < role < client`). Ideal for a role's
+*exclusive* panels; a panel shared across roles is created once, so give the other
+roles their layout with a second scoped block (over their own panels) or
+`set_layout(roles=…)` directly.
+
+```python
+with canvas.column(roles="admin", gap=12, origin=(40, 40)):   # admins: a stack
+    canvas.react(STOCK, roles=["admin"])
+    canvas.react(ORDERS, roles=["admin"])
+```
+
 **Auto-height** — `h="auto"` fits a panel's height to its rendered content
 (Custom-/React-based panels: `markdown`, `custom`, `table`, `image`, `label`,
 controls). Also a live property:
