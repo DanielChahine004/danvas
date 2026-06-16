@@ -162,6 +162,14 @@ class Bridge:
         # by their login role. Precedence is global < per-role < per-client, so a
         # client-specific override still wins. Set via canvas.set_view(roles=...).
         self._view_per_role = {}
+        # Shared React assets (canvas.define / canvas.style): JSX component sources
+        # made available by name in every React panel's compile scope, and a single
+        # global stylesheet injected once into the page <head>. Replayed to each
+        # browser on connect (before panels register, so a panel mounts with them
+        # present) and broadcast live when changed. ``_shared_components`` is
+        # name -> JSX source; ``_shared_styles`` is the concatenated global CSS.
+        self._shared_components = {}
+        self._shared_styles = ""
         # Conflated ("latest" queue policy) send state. For components that opt
         # out of FIFO, we keep only the newest pending value per (socket,
         # component, channel) and a flag marking whether a sender is draining it,
@@ -430,6 +438,11 @@ class Bridge:
                                   "view": view_for_client,
                                   "runId": self._run_id,
                                   "reload": self._reload})
+            # Replay the shared React assets (canvas.define / canvas.style) before
+            # any panel registers, so a React panel mounts with its shared
+            # components and the global stylesheet already in place.
+            if self._shared_components or self._shared_styles:
+                await self._send(ws, self.shared_message())
             # Replay recent chat so a fresh viewer sees the conversation so far.
             for entry in self._chat_history:
                 await self._send(ws, entry)
@@ -1185,6 +1198,17 @@ class Bridge:
             return waiter["data"]
         finally:
             self._snapshot_waiters.pop(req_id, None)
+
+    # -- shared React assets (canvas.define / canvas.style) -------------------
+    def shared_message(self):
+        """The ``shared`` frame: every defined component source + the global CSS."""
+        return {"type": "shared",
+                "components": dict(self._shared_components),
+                "styles": self._shared_styles}
+
+    def broadcast_shared(self):
+        """Push the current shared components/styles to every connected browser."""
+        self.broadcast(self.shared_message())
 
     def load_snapshot(self, data):
         """Push saved user drawings to connected browsers (merged onto the page).

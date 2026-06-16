@@ -11,5 +11,5 @@ export const BIN_REACT = 4
 
 export const FLAG_WIRE_KEYS = Object.freeze({"locked": "locked", "draggable": "movable", "resizable": "resizable", "operable": "interactive", "grabbable": "selectable", "frame": "frame"})
 
-export const MESSAGE_TYPES_OUT = Object.freeze(["register", "arrow", "update", "order", "remove", "get_snapshot", "load_snapshot", "draw", "presence", "cursor", "cursor_gone", "view", "welcome", "chat", "response", "complete_result"])
+export const MESSAGE_TYPES_OUT = Object.freeze(["register", "arrow", "update", "order", "remove", "get_snapshot", "load_snapshot", "draw", "presence", "cursor", "cursor_gone", "view", "welcome", "chat", "response", "complete_result", "shared"])
 export const MESSAGE_TYPES_IN = Object.freeze(["heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout", "draw", "request", "snapshot"])

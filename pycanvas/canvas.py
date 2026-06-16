@@ -721,6 +721,59 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             self.disconnect(a)
         return self
 
+    def define(self, name, source=None, path=None):
+        """Register a shared React component usable by name in every ``react()`` panel.
+
+        Pass JSX ``source`` (or a file ``path=``) that declares a component named
+        ``name`` — e.g. ``define("StatusPill", "function StatusPill({kind, children}) "
+        "{ return <span className={'pill '+kind}>{children}</span> }")``. It is
+        delivered to the browser once and made available in every React panel's
+        scope, so any panel can render ``<StatusPill kind="ok">In stock</StatusPill>``
+        without re-declaring it. This is how you kill the per-panel duplication of a
+        shared table/button/badge: define it once here, use it everywhere.
+
+        ``name`` must be a valid identifier (it's the component's name in JSX). Call
+        this *before* creating the panels that use it; defining (or redefining) a
+        component while serving recompiles the live panels with the new source.
+        Pair with :meth:`style` for the component's shared CSS. Returns ``self``.
+        """
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError(
+                f"define() name must be a valid identifier (the JSX component "
+                f"name), got {name!r}")
+        if path is not None:
+            with open(path, "r", encoding="utf-8") as f:
+                source = f.read()
+        if not source or not source.strip():
+            raise ValueError("define() needs source= (JSX) or path= to a .jsx file")
+        self._bridge._shared_components[name] = source
+        if self._serving:
+            self._bridge.broadcast_shared()
+        return self
+
+    def style(self, css):
+        """Add a global stylesheet shared by every native (React) panel.
+
+        The ``css`` is injected once into the page ``<head>`` — unlike a panel's
+        own ``css=`` (rendered inside that one panel), this is shared by all of
+        them, so the styles for components registered with :meth:`define` live in
+        one place instead of being copied into every panel. Selectors are
+        page-global, so scope them with your own class prefix (e.g. ``.pc-pill``)
+        exactly as you would a panel's ``css=``.
+
+        Calls accumulate (each adds rules, like multiple ``<style>`` tags), so call
+        it once per stylesheet. Sandboxed ``Custom`` iframes are isolated and don't
+        receive these styles. Applies live while serving. Returns ``self``.
+        """
+        css = css or ""
+        if self._bridge._shared_styles:
+            self._bridge._shared_styles += "\n" + css
+        else:
+            self._bridge._shared_styles = css
+        if self._serving:
+            self._bridge.broadcast_shared()
+        return self
+
     def connect(self, start, end, name=None, text=None, **props):
         """Draw an arrow from panel ``start`` to panel ``end`` and return it.
 

@@ -28,6 +28,7 @@ import React from 'react'
 import { useEditor } from 'tldraw'
 import { sendInput, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
+import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
 
 // Compile a source string into a *factory* — `(React, libs) => Component` —
 // memoised by source so a re-render (or many panels sharing one source) runs the
@@ -187,6 +188,11 @@ export default function ReactHost({ shape }) {
   // Latest value streamed via push() (Custom's `post` live channel, reused).
   const [streamed, setStreamed] = React.useState(undefined)
 
+  // Shared components registered from Python (canvas.define). Re-render when the
+  // shared set changes so a live define() re-prepends and recompiles the panel.
+  const [sharedV, setSharedV] = React.useState(getSharedVersion())
+  React.useEffect(() => subscribeShared(setSharedV), [])
+
   // Imperative push subscribers (canvas.onFrame). A component that paints a
   // high-rate stream itself — to a <canvas>/<img>, with zero-copy binary —
   // registers here instead of reading the `value` prop, so each frame skips a
@@ -324,11 +330,24 @@ export default function ReactHost({ shape }) {
     // libsReady: re-measure once libraries load and the content reflows.
   }, [autoH, autoW, id, shape.props.source, shape.props.data, libsReady])
 
+  // Prepend the shared component sources (canvas.define) so they're defined in
+  // the same scope as the panel's Component and usable by bare name — e.g.
+  // `<StatusPill/>`. Recomputed when the shared set changes (sharedV). compile()
+  // is memoised by the full source string, so each distinct panel still compiles
+  // once and a shared change makes a fresh entry.
+  const sharedSrc = React.useMemo(
+    () => Object.values(getSharedComponents()).join('\n\n'),
+    [sharedV]
+  )
+  const fullSource = sharedSrc
+    ? `${sharedSrc}\n\n${shape.props.source || ''}`
+    : shape.props.source || ''
+
   // Compile (memoised by source), then bind the factory with React + the loaded
   // libs. Binding runs the user's module-level code and can throw (or omit
   // `Component`), so it's guarded; it re-binds when libs arrive. All hooks above
   // run unconditionally — only the render result branches below.
-  const compiled = compile(shape.props.source || '')
+  const compiled = compile(fullSource)
   const bound = React.useMemo(() => {
     if (compiled.error) return { error: compiled.error }
     try {

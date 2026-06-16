@@ -449,6 +449,42 @@ function connect() {
 // pycanvas/_protocol.py — so the two sides can't drift.
 const frameDecoder = new TextDecoder()
 
+// --- shared React assets (Python canvas.define / canvas.style) ---------------
+// Component sources made available by name in every React panel's compile scope,
+// plus a single global stylesheet injected once into <head>. Delivered by the
+// server in a `shared` frame on connect (before panels register) and again when
+// changed live. ReactHost reads getSharedComponents() and re-compiles when
+// sharedVersion bumps, so a define() while serving updates the live panels.
+let sharedComponents = {}   // name -> JSX source
+let sharedVersion = 0
+const sharedListeners = new Set()
+
+export function getSharedComponents() {
+  return sharedComponents
+}
+export function getSharedVersion() {
+  return sharedVersion
+}
+export function subscribeShared(cb) {
+  sharedListeners.add(cb)
+  return () => sharedListeners.delete(cb)
+}
+
+function applyShared(msg) {
+  sharedComponents = msg.components || {}
+  // One global <style> shared by every panel (vs a panel's own css=, which is
+  // rendered inside that one panel). Replace its text so re-sends don't stack.
+  let el = document.getElementById('pc-shared-styles')
+  if (!el) {
+    el = document.createElement('style')
+    el.id = 'pc-shared-styles'
+    document.head.appendChild(el)
+  }
+  el.textContent = msg.styles || ''
+  sharedVersion += 1
+  for (const cb of sharedListeners) cb(sharedVersion)
+}
+
 // Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its
 // raw payload (an ArrayBuffer) to the matching component's live handler, the
 // same channel LivePlot/Custom use. Dropped if the panel isn't mounted. Video
@@ -522,6 +558,8 @@ function handle(msg) {
     setUiInspectorEnabled(!!msg.uiInspector)
     setCursorsEnabled(!!msg.cursors)
     setViewConfig(msg.view || null)
+  } else if (msg.type === 'shared') {
+    applyShared(msg)              // canvas.define / canvas.style assets
   } else if (msg.type === 'chat') {
     pushChat(msg)
   } else if (msg.type === 'complete_result') {
