@@ -1,5 +1,7 @@
 """Canvas: the public entry point. Holds components and serves the app."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -7,6 +9,13 @@ import threading
 import time
 import uuid
 import warnings
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    # `Unpack[Place]` types every factory's **place kwargs (PEP 692) for editor
+    # autocomplete. Annotations are lazy strings (the __future__ import above), so
+    # this import never runs at import time — no runtime dependency added.
+    from typing_extensions import Unpack
 
 from . import server
 from ._flags import LAYOUT_FLAGS
@@ -46,6 +55,34 @@ from .kernel import Kernel
 _INSERT_KEYS = ("x", "y", "w", "h", "width", "height", "rotation", "queue",
                 "below", "above", "right_of", "left_of", "gap",
                 "roles", "lock_for", *LAYOUT_FLAGS)
+
+
+class Place(TypedDict, total=False):
+    """Placement, visibility, and backpressure options that every factory accepts
+    via ``**place`` (the same set :meth:`Canvas.insert` documents). Typed only so
+    editors autocomplete the keyword arguments — kept in step with ``_INSERT_KEYS``.
+    """
+    x: float
+    y: float
+    w: int | str          # pixels, or "auto" to fit content
+    h: int | str
+    width: int | str      # aliases for w / h
+    height: int | str
+    rotation: float        # degrees clockwise
+    queue: str            # "fifo" | "latest"
+    below: object         # a component or its name (same for the three below)
+    above: object
+    right_of: object
+    left_of: object
+    gap: int
+    roles: list[str]      # login roles allowed to see the panel ([] = all)
+    lock_for: list[str]   # roles that get it non-interactive (operable=False)
+    locked: bool
+    draggable: bool
+    resizable: bool
+    operable: bool
+    grabbable: bool
+    frame: bool
 
 
 class _FlowLayout:
@@ -731,7 +768,7 @@ class Canvas:
         return self.insert(cls(*args, **kw), **place)
 
     def slider(self, name, min=0, max=100, default=None, step=1,
-               on_release=False, label=None, **place):
+               on_release=False, label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Slider`. See :meth:`insert` for ``place``.
 
         ``step`` sets the granularity and the int-vs-float behaviour (a
@@ -742,34 +779,34 @@ class Canvas:
         return self._make(Slider, name, min=min, max=max, default=default,
                           step=step, on_release=on_release, label=label, **place)
 
-    def toggle(self, name, options, default=None, label=None, **place):
+    def toggle(self, name, options, default=None, label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Toggle`. See :meth:`insert` for ``place``."""
         return self._make(Toggle, name, options, default=default, label=label,
                           **place)
 
-    def button(self, name, text=None, label=None, **place):
+    def button(self, name, text=None, label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Button`. See :meth:`insert` for ``place``."""
         return self._make(Button, name, text=text, label=label, **place)
 
-    def label(self, name, value="", label=None, **place):
+    def label(self, name, value="", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Label`. See :meth:`insert` for ``place``."""
         return self._make(Label, name, value=value, label=label, **place)
 
-    def video(self, name, quality=70, label=None, **place):
+    def video(self, name, quality=70, label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.VideoFeed`. See :meth:`insert` for ``place``."""
         return self._make(VideoFeed, name, quality=quality, label=label, **place)
 
-    def audio(self, name, sample_rate=16000, channels=1, label=None, **place):
+    def audio(self, name, sample_rate=16000, channels=1, label=None, **place: Unpack[Place]):
         """Insert an :class:`~pycanvas.AudioFeed`. See :meth:`insert` for ``place``."""
         return self._make(AudioFeed, name, sample_rate=sample_rate,
                           channels=channels, label=label, **place)
 
-    def chat(self, name="chat", label=None, **place):
+    def chat(self, name="chat", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Chat` panel. See :meth:`insert` for ``place``."""
         return self._make(Chat, name=name, label=label, **place)
 
     def custom(self, html=None, path=None, css=None, js=None, name="custom",
-               label=None, **place):
+               label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Custom`. See :meth:`insert` for ``place``.
 
         ``html``/``css``/``js`` may be given as separate strings (e.g. pasted
@@ -780,7 +817,7 @@ class Canvas:
                           name=name, label=label, **place)
 
     def download(self, name, source=None, filename=None, text=None, label=None,
-                 **place):
+                 **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Download` button. See :meth:`insert` for ``place``.
 
         Clicking it downloads ``source`` — a file path or ``bytes`` — to the
@@ -794,7 +831,7 @@ class Canvas:
                           text=text, label=label, **place)
 
     def upload(self, name="upload", text=None, label=None, dest=None,
-               accept=None, multiple=False, max_size=None, **place):
+               accept=None, multiple=False, max_size=None, **place: Unpack[Place]):
         """Insert an :class:`~pycanvas.Upload` panel. See :meth:`insert` for ``place``.
 
         A click-or-drop zone that receives a viewer's file into Python; wire it
@@ -810,7 +847,7 @@ class Canvas:
                           **place)
 
     def file_browser(self, name="files", root=".", label=None, pattern=None,
-                     show_hidden=False, **place):
+                     show_hidden=False, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.FileBrowser`. See :meth:`insert` for ``place``.
 
         Navigation is confined to ``root``. ``pattern`` (an fnmatch glob like
@@ -821,41 +858,45 @@ class Canvas:
                           pattern=pattern, show_hidden=show_hidden, **place)
 
     def react(self, source=None, path=None, jsx=None, css=None, name="react",
-              label=None, props=None, scope=None, **place):
-        """Insert a :class:`~pycanvas.React` panel. See :meth:`insert` for ``place``.
+              label=None, props=None, scope=None, **place: Unpack[Place]):
+        """Insert a :class:`~pycanvas.React` panel — the workhorse for custom UI.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
-        file with ``path=``); alternatively pass just ``jsx`` markup plus
-        optional ``css`` and the Component wrapper is added under the hood. Use
+        file with ``path=``); alternatively pass just ``jsx`` markup plus optional
+        ``css`` and the Component wrapper is added under the hood. ``css`` also
+        works with ``source=`` (it rides as a ``<style>`` the host renders), so a
+        full component can keep its styles in a separate string. Use
         :meth:`React.from_uiverse` to convert a uiverse.io styled-components
-        snippet into ``source``. ``props`` is the initial props dict. ``scope``
-        is a list of third-party library names (e.g. ``["d3"]``) loaded as ESM
-        in the browser and exposed to the component as the ``libs`` global. Size
-        it with ``w``/``h`` in ``place``.
+        snippet. ``props`` is the initial props dict; ``scope`` is third-party
+        library names (e.g. ``["d3"]``) loaded as ESM and exposed as ``libs``.
+
+        Placement, visibility (``roles`` / ``lock_for``), the lock/chrome flags,
+        and ``queue`` all flow through ``**place`` — see :meth:`insert` (and the
+        :class:`Place` keys your editor now autocompletes).
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
                           name=name, label=label, props=props, scope=scope,
                           **place)
 
-    def markdown(self, text="", name="markdown", label=None, **place):
+    def markdown(self, text="", name="markdown", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Markdown` panel. See :meth:`insert` for ``place``."""
         return self._make(Markdown, text=text, name=name, label=label, **place)
 
-    def image(self, src, name="image", label=None, fit="contain", **place):
+    def image(self, src, name="image", label=None, fit="contain", **place: Unpack[Place]):
         """Insert an :class:`~pycanvas.Image` panel. See :meth:`insert` for ``place``.
 
         ``src`` is a path, URL, image bytes, Matplotlib/PIL figure, or array.
         """
         return self._make(Image, src, name=name, label=label, fit=fit, **place)
 
-    def table(self, data, name="table", label=None, **place):
+    def table(self, data, name="table", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Table` panel. See :meth:`insert` for ``place``.
 
         ``data`` is a pandas DataFrame/Series, a list of dicts/rows, or a dict.
         """
         return self._make(Table, data, name=name, label=label, **place)
 
-    def show(self, value, name=None, label=None, **place):
+    def show(self, value, name=None, label=None, **place: Unpack[Place]):
         """Auto-render any value as the best-fitting panel and insert it.
 
         Picks the component the way a notebook decides how to render an output
@@ -874,11 +915,11 @@ class Canvas:
         # re-showing under the same name replaces in place on its own.
         return self.insert(comp, **place)
 
-    def webview(self, url, name="web", label=None, **place):
+    def webview(self, url, name="web", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.WebView`. See :meth:`insert` for ``place``."""
         return self._make(WebView, url, name=name, label=label, **place)
 
-    def plot(self, name="plot", label=None, **place):
+    def plot(self, name="plot", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Plot`. See :meth:`insert` for ``place``."""
         return self._make(Plot, name=name, label=label, **place)
 
@@ -956,7 +997,7 @@ class Canvas:
         return _FlowLayout(self, "row", slot=(None, height), gap=gap,
                            origin=origin)
 
-    def repl(self, name="repl", label=None, **place):
+    def repl(self, name="repl", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Repl`. See :meth:`insert` for ``place``.
 
         Call :meth:`enable_repl` first to bind the namespace cells run against.
@@ -964,7 +1005,7 @@ class Canvas:
         return self._make(Repl, name=name, label=label, **place)
 
     def inspector(self, name="inspector", refresh=None, source="components",
-                  namespace=None, label=None, **place):
+                  namespace=None, label=None, **place: Unpack[Place]):
         """Insert an :class:`~pycanvas.Inspector`. See :meth:`insert` for ``place``."""
         return self._make(Inspector, name=name, refresh=refresh, source=source,
                           namespace=namespace, label=label, **place)
