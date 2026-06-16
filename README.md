@@ -109,10 +109,13 @@ canvas.serve(port=8000)   # opens the browser, blocks
 The loop is always: build panels → register callbacks → `serve()`. Python owns
 all state; the browser renders it and reports user actions.
 
-Your `@on_change` / `@on_layout` / `@panel.on(...)` handlers run on a background
-worker thread, so a blocking handler (`time.sleep`, an HTTP call, a slow
-compute) won't freeze the canvas or stall other viewers. Handlers for one panel
-run **in order**.
+Your `@on_change` / `@on_layout` / `@panel.on(...)` handlers run on a single
+ordered worker thread, separate from the event loop — so a blocking handler
+(`time.sleep`, an HTTP call, a slow compute) never freezes rendering or live
+`update()` broadcasts, and handlers run **in order**. That one thread is shared
+across panels, though, so a genuinely slow handler delays other panels' handlers
+and the echo of other users' actions until it returns. For slow work, launch it
+on your own `threading.Thread` so the worker thread stays free.
 
 # 1. The canvas
 
@@ -896,10 +899,12 @@ role/client **overlays**, merged at replay (`register_props_for`, the layout
 overlay) and pushed live to matching viewers via `send_to_role` / `send_to_client`.
 
 **Threading.** An asyncio event loop owns the socket; your `@on_change` /
-`@on_message` / `@on_layout` handlers run on a separate **worker thread** (ordered
-per panel), so a slow handler never stalls the canvas, and outbound sends are
-marshalled back onto the loop. High-rate media (`VideoFeed`/`AudioFeed`,
-`push_binary`) skips JSON entirely on a binary frame.
+`@on_message` / `@on_layout` handlers run on a single ordered **worker thread**,
+so a slow handler never freezes rendering or live `update()` broadcasts (and
+outbound sends are marshalled back onto the loop). That worker is shared across
+panels, so a slow handler does delay other panels' handlers until it returns —
+offload genuinely slow work to your own thread. High-rate media
+(`VideoFeed`/`AudioFeed`, `push_binary`) skips JSON entirely on a binary frame.
 
 **Auth & sharing.** Roles come from the password used at login, carried in a
 signed session cookie (no server-side session store), so a viewer stays logged in

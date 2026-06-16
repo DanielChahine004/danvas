@@ -891,7 +891,22 @@ class Bridge:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom})
 
     async def _send(self, ws, msg):
-        """Send one frame, serialized against any other send to this socket."""
+        """Serialize and send one frame to a single socket.
+
+        For a fan-out to many sockets go through :meth:`_emit`, which encodes the
+        frame *once* and hands the same text to every recipient via
+        :meth:`_send_text`; broadcasting a dict through here would re-encode it
+        per socket.
+        """
+        await self._send_text(ws, json.dumps(msg))
+
+    async def _send_text(self, ws, text):
+        """Send an already-serialized JSON frame, serialized against any other
+        send to this socket.
+
+        The shared tail of :meth:`_send` and the broadcast fan-out, so a frame
+        delivered to N sockets is JSON-encoded once rather than N times.
+        """
         if ws not in self._connections:
             return  # connection already torn down
         # Lazily create the per-connection lock so any code path that registers a
@@ -902,7 +917,7 @@ class Bridge:
         if lock is None:
             lock = self._send_locks.setdefault(ws, asyncio.Lock())
         async with lock:
-            await ws.send_text(json.dumps(msg))
+            await ws.send_text(text)
 
     async def _send_bytes(self, ws, data):
         """Send one binary frame, serialized against any other send (text or
@@ -921,16 +936,20 @@ class Bridge:
         """Schedule ``msg`` to each websocket in ``targets`` — the shared tail of
         :meth:`broadcast` / :meth:`send_to_role` / :meth:`send_to_client`.
 
-        A no-op before the loop exists (replay carries the state on connect); each
-        send is wrapped in :meth:`_safe_send` so a dead socket is dropped rather
-        than raising. ``targets`` is materialised by the caller (a snapshot of the
-        connection/viewer map) so a concurrent connect/disconnect can't mutate it
-        mid-iteration.
+        The frame is JSON-encoded *once* here and the same text handed to every
+        recipient, so a broadcast to N viewers pays a single ``json.dumps`` rather
+        than one per socket. A no-op before the loop exists (replay carries the
+        state on connect); each send is wrapped in :meth:`_safe_send_text` so a
+        dead socket is dropped rather than raising. ``targets`` is materialised by
+        the caller (a snapshot of the connection/viewer map) so a concurrent
+        connect/disconnect can't mutate it mid-iteration.
         """
         if self._loop is None:
             return
+        text = json.dumps(msg)
         for ws in targets:
-            asyncio.run_coroutine_threadsafe(self._safe_send(ws, msg), self._loop)
+            asyncio.run_coroutine_threadsafe(
+                self._safe_send_text(ws, text), self._loop)
 
     def broadcast(self, msg, exclude=None):
         """Send ``msg`` to every connected client. Safe to call from any thread.
@@ -946,6 +965,14 @@ class Bridge:
     async def _safe_send(self, ws, msg):
         try:
             await self._send(ws, msg)
+        except Exception:
+            self._connections.discard(ws)
+            self._send_locks.pop(ws, None)
+
+    async def _safe_send_text(self, ws, text):
+        """:meth:`_safe_send` for an already-serialized frame (broadcast fan-out)."""
+        try:
+            await self._send_text(ws, text)
         except Exception:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
