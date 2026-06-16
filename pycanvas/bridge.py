@@ -306,13 +306,18 @@ class Bridge:
         self._loop = loop
         loop.create_task(self._reap_loop())
 
-    def register_message(self, component):
-        """Build the ``register`` message for a component, including placement."""
+    def register_message(self, component, role=None, client_id=None):
+        """Build the ``register`` message for a component, including placement.
+
+        ``role``/``client_id`` identify the connecting viewer so a component with
+        per-viewer prop overlays (see :meth:`React.update` ``roles=``) replays the
+        slice that viewer should see; omit them for the shared props.
+        """
         msg = {
             "type": "register",
             "id": component.id,
             "component": component.component,
-            "props": component.register_props(),
+            "props": component.register_props_for(role, client_id),
         }
         pos = getattr(component, "_position", None)
         if pos is not None:
@@ -330,6 +335,25 @@ class Bridge:
             value = getattr(component, flag.attr, flag.default)
             if value != flag.default:
                 msg[flag.wire] = value
+        # Per-viewer layout overlay (set_layout(roles=) / a drag written to the
+        # viewer's own layer): merge it on top of the base geometry. x/y/rotation
+        # and the lock flags are top-level register fields; w/h are shape props.
+        overlay = (component._layout_overlay_for(role, client_id)
+                   if hasattr(component, "_layout_overlay_for") else {})
+        if overlay:
+            if "x" in overlay:
+                msg["x"] = overlay["x"]
+            if "y" in overlay:
+                msg["y"] = overlay["y"]
+            if "rotation" in overlay:
+                msg["rotation"] = math.radians(overlay["rotation"])
+            if "w" in overlay:
+                msg["props"]["w"] = overlay["w"]
+            if "h" in overlay:
+                msg["props"]["h"] = overlay["h"]
+            for name, flag in LAYOUT_FLAGS.items():
+                if name in overlay:
+                    msg[flag.wire] = bool(overlay[name])
         return msg
 
     def register_live(self, component, only_roles=None):
@@ -347,7 +371,6 @@ class Bridge:
         """
         roles = getattr(component, "_roles", [])
         lock_for = getattr(component, "_lock_for", [])
-        reg = self.register_message(component)
         state = component.state_payload()
         if self._loop is None:
             return
@@ -357,6 +380,9 @@ class Bridge:
                 continue
             if only_roles is not None and role not in only_roles:
                 continue
+            # Built per viewer so any per-role/per-client prop overlay is merged.
+            reg = self.register_message(component, role=role,
+                                        client_id=viewer.get("id"))
             asyncio.run_coroutine_threadsafe(self._safe_send(ws, reg), self._loop)
             if state:
                 asyncio.run_coroutine_threadsafe(
@@ -399,7 +425,8 @@ class Bridge:
                 roles = getattr(comp, "_roles", [])
                 if roles and role not in roles:
                     continue  # this panel is not visible to this role
-                await self._send(ws, self.register_message(comp))
+                await self._send(ws, self.register_message(
+                    comp, role=role, client_id=viewer["id"]))
                 state = comp.state_payload()
                 if state:
                     await self._send(

@@ -80,6 +80,13 @@ class BaseComponent:
         # keys, and the property docstrings generated at the bottom of this file.
         for _flag in LAYOUT_FLAGS.values():
             setattr(self, _flag.attr, _flag.default)
+        # Per-viewer layout overlays (the layout twin of React's prop overlays):
+        # role / client id -> {x, y, w, h, rotation, <flag name>}. Merged onto the
+        # base geometry for that viewer (precedence shared < role < client), so
+        # ``set_layout(roles=...)`` and a user's drag-to-their-own-layer persist
+        # and replay on reconnect.
+        self._role_layout = {}
+        self._client_layout = {}
 
     # -- wiring (called by Canvas.insert) ------------------------------------
     def _bind(self, component_id, bridge):
@@ -261,6 +268,16 @@ class BaseComponent:
         """Props sent in the ``register`` message to build the shape."""
         return dict(self._props)
 
+    def register_props_for(self, role=None, client_id=None):
+        """Register props for one connecting viewer.
+
+        The base ignores ``role``/``client_id`` and returns the shared props;
+        components with per-viewer prop overlays (e.g. :meth:`React.update` with
+        ``roles=``) override this so a reconnecting viewer replays the slice it
+        should see (precedence shared < role < client, mirroring ``set_view``).
+        """
+        return self.register_props()
+
     def state_payload(self):
         """Current state pushed right after register (None = nothing)."""
         return None
@@ -386,53 +403,95 @@ class BaseComponent:
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
                    locked=None, draggable=None, resizable=None, operable=None,
-                   grabbable=None, frame=None):
+                   grabbable=None, frame=None, *, roles=None, client_id=None):
         """Update position, size, rotation and/or lock state in one live message.
 
-        Any argument left as ``None`` is unchanged. Stored state is updated so a
-        reconnecting client replays the new layout. ``x``/``y`` travel as the
-        panel's canvas position, ``rotation`` (degrees) as its angle. ``locked``
-        is a full lock (also blocks interaction *and* programmatic updates);
+        Any argument left as ``None`` is unchanged. ``x``/``y`` are the canvas
+        position, ``rotation`` (degrees) the angle, ``w``/``h`` the size.
+        ``locked`` is a full lock (blocks interaction *and* programmatic updates);
         ``draggable``/``resizable``/``operable``/``grabbable`` are
         interaction-preserving locks carried in the shape's tldraw ``meta``
         (``operable=False`` makes controls inert to the user while value updates
-        keep rendering). ``w``/``h`` are shape props.
+        keep rendering); ``frame`` toggles the card chrome.
+
+        Scope it to specific viewers with ``roles=`` and/or ``client_id=`` (just
+        like :meth:`React.update`): the change is stored as a per-viewer layout
+        *overlay* on the shared geometry (precedence shared < role < client) and
+        pushed to just those viewers — it persists and replays on reconnect, so a
+        role can have its own placement/size. Omit both to set the shared layout
+        for everyone. A user dragging/resizing a panel writes back to whichever
+        layer their layout currently comes from (their client/role overlay if any,
+        else the shared base), so hand-arranged layouts stick. Returns ``self``.
         """
+        fields = {}
+        for key, val in (("x", x), ("y", y), ("w", w), ("h", h),
+                         ("rotation", rotation), ("locked", locked),
+                         ("draggable", draggable), ("resizable", resizable),
+                         ("operable", operable), ("grabbable", grabbable),
+                         ("frame", frame)):
+            if val is not None:
+                fields[key] = val
+        if not fields:
+            return self
+        payload = self._layout_payload(fields)
+        if roles is None and client_id is None:
+            self._store_base_layout(fields)
+            if payload:
+                self._send_update(payload)
+            return self
+        if roles is not None:
+            for r in ([roles] if isinstance(roles, str) else roles):
+                self._role_layout.setdefault(r, {}).update(fields)
+                self._send_update_to(payload, role=r)
+        if client_id is not None:
+            self._client_layout.setdefault(client_id, {}).update(fields)
+            self._send_update_to(payload, client_id=client_id)
+        return self
+
+    def _layout_payload(self, fields):
+        """Normalised layout ``fields`` -> the wire ``update`` payload (rotation
+        to radians for tldraw, flag names to their wire keys)."""
         payload = {}
-        if x is not None:
-            payload["x"] = x
-        if y is not None:
-            payload["y"] = y
-        if x is not None or y is not None:
+        for key in ("x", "y", "w", "h"):
+            if key in fields:
+                payload[key] = fields[key]
+        if "rotation" in fields:
+            payload["rotation"] = math.radians(fields["rotation"])
+        for name in LAYOUT_FLAGS:
+            if name in fields:
+                payload[LAYOUT_FLAGS[name].wire] = bool(fields[name])
+        return payload
+
+    def _store_base_layout(self, fields):
+        """Write normalised layout ``fields`` into the shared base state, so they
+        replay for every viewer (the position fill-in matches the old inline
+        behaviour: a lone x or y keeps the other coordinate)."""
+        if "x" in fields or "y" in fields:
             prev_x, prev_y = self._position or (None, None)
-            new_x = x if x is not None else prev_x
-            new_y = y if y is not None else prev_y
+            new_x = fields.get("x", prev_x)
+            new_y = fields.get("y", prev_y)
             if new_x is not None and new_y is not None:
                 self._position = (new_x, new_y)
-        if w is not None:
-            self._props["w"] = w
-            payload["w"] = w
-        if h is not None:
-            self._props["h"] = h
-            payload["h"] = h
-        if rotation is not None:
-            self._rotation = rotation
-            payload["rotation"] = math.radians(rotation)  # tldraw uses radians
-        # The boolean lock/chrome flags are uniform: store the attribute and put
-        # the wire key on the payload. Driven by LAYOUT_FLAGS so a new flag needs
-        # only a table entry plus its keyword above.
-        flag_values = {
-            "locked": locked, "draggable": draggable, "resizable": resizable,
-            "operable": operable, "grabbable": grabbable, "frame": frame,
-        }
-        for name, value in flag_values.items():
-            if value is None:
-                continue
-            flag = LAYOUT_FLAGS[name]
-            setattr(self, flag.attr, bool(value))
-            payload[flag.wire] = bool(value)
-        if payload:
-            self._send_update(payload)
+        if "w" in fields:
+            self._props["w"] = fields["w"]
+        if "h" in fields:
+            self._props["h"] = fields["h"]
+        if "rotation" in fields:
+            self._rotation = fields["rotation"]
+        for name in LAYOUT_FLAGS:
+            if name in fields:
+                setattr(self, LAYOUT_FLAGS[name].attr, bool(fields[name]))
+
+    def _layout_overlay_for(self, role=None, client_id=None):
+        """The per-viewer layout override (role then client merged), or ``{}``.
+        Used by the bridge to replay a viewer's own placement/size on connect."""
+        overlay = {}
+        if role is not None:
+            for r in ([role] if isinstance(role, str) else role):
+                overlay.update(self._role_layout.get(r, {}))
+        if client_id is not None:
+            overlay.update(self._client_layout.get(client_id, {}))
+        return overlay
 
     # -- layout read-back (browser -> Python) --------------------------------
     def on_layout(self, fn):
@@ -447,21 +506,35 @@ class BaseComponent:
     def _apply_remote_layout(self, msg, viewer=None):
         """Update stored geometry from a user drag/resize in the browser.
 
-        Does not broadcast back (the change originated there). ``rotation``
-        arrives in radians (tldraw) and is stored as degrees, matching the rest
-        of the Python API. ``on_layout`` handlers fire with the component, plus
-        the mover's ``viewer`` dict when they declare a second parameter.
+        Writes back to the layer this viewer's layout currently comes from — their
+        per-client overlay, else their per-role overlay, else the shared base — so
+        a hand-arranged layout sticks, and in a role-based canvas a drag rearranges
+        only the dragger's role rather than everyone's. Does not broadcast (the
+        change already happened in that browser). ``rotation`` arrives in radians
+        (tldraw) and is stored as degrees, matching the rest of the Python API.
+        ``on_layout`` handlers fire with the component, plus the mover's ``viewer``
+        when they declare a second parameter.
         """
+        fields = {}
         x = msg.get("x")
         y = msg.get("y")
         if x is not None and y is not None:
-            self._position = (x, y)
+            fields["x"], fields["y"] = x, y
         if msg.get("w") is not None:
-            self._props["w"] = msg["w"]
+            fields["w"] = msg["w"]
         if msg.get("h") is not None:
-            self._props["h"] = msg["h"]
+            fields["h"] = msg["h"]
         if msg.get("rotation") is not None:
-            self._rotation = math.degrees(msg["rotation"])
+            fields["rotation"] = math.degrees(msg["rotation"])
+        viewer = viewer or {}
+        role = viewer.get("role")
+        cid = viewer.get("id")
+        if cid is not None and cid in self._client_layout:
+            self._client_layout[cid].update(fields)
+        elif role is not None and role in self._role_layout:
+            self._role_layout[role].update(fields)
+        else:
+            self._store_base_layout(fields)
         self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
 
     # -- input (browser -> Python) -------------------------------------------

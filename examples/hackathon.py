@@ -365,13 +365,14 @@ def admin_order_rows():
 
 def push_team(tid):
     """Send one team only *its* slice — catalogue, budget, and its own orders —
-    addressed to its id-role with update_for, so no other team's budget or orders
-    are ever sent to it (privacy by construction, not client-side filtering)."""
-    team_panel.update_for(role=tid,
-                          team=teams[tid]["name"],
-                          rows=inv_rows(),
-                          budget=teams[tid]["budget"],
-                          orders=[o for o in log if o["team"] == tid][:40])
+    addressed to its id-role with update(roles=...), so no other team's budget or
+    orders are ever sent to it (privacy by construction, not client-side
+    filtering). The role-scoped props persist, so they replay on reconnect."""
+    team_panel.update(roles=tid,
+                      team=teams[tid]["name"],
+                      rows=inv_rows(),
+                      budget=teams[tid]["budget"],
+                      orders=[o for o in log if o["team"] == tid][:40])
 
 
 def push_all():
@@ -966,7 +967,7 @@ _TEAM_CSS = """
 _TEAM_SOURCE = """
 function Component({ canvas, props }) {
   // Everything here is *this team's own* slice, delivered by Python's
-  // update_for(role=...) — the panel never receives another team's figures, so
+  // update(roles=...) — the panel never receives another team's figures, so
   // there's nothing to filter and no need to read our own identity.
   const rows   = props.rows   || [];
   const myTeam = props.team   || "";
@@ -1558,7 +1559,7 @@ admin_stock = canvas.react(_STOCK_SOURCE, name="stock", css=_ADMIN_CSS,
                            props={"rows": inv_rows()})
 
 admin_teams = canvas.react(_TEAMS_SOURCE, name="teams", css=_ADMIN_CSS,
-                           x=40, y=620, w=440, h=340,
+                           x=40, y=620, w=440, h=700,
                            roles=["admin"],
                            props={"teams": team_rows(True)})
 
@@ -1570,8 +1571,8 @@ admin_orders = canvas.react(_ORDERS_SOURCE, name="orders", css=_ORDERS_CSS,
 # Team roles are dynamic: seed with the teams already in the JSON, plus the
 # sentinel so the list is never empty. New teams are appended in `team_add`.
 # The team panel's per-team data (its name, budget, and orders) is delivered with
-# update_for so no team ever receives another team's figures (see push_all); the
-# seed props just cover the first render before the panel's ping arrives.
+# update(roles=...) so no team ever receives another team's figures (see
+# push_all); the seed props just cover the first render before that arrives.
 team_panel = canvas.react(_TEAM_SOURCE, name="team", css=_TEAM_CSS,
                           x=500, y=40, w=380, h=560,
                           roles=[TEAM_SENTINEL, *teams.keys()],
@@ -1587,10 +1588,10 @@ leaderboard = canvas.react(_LEADERBOARD_SOURCE, name="leaderboard", css=_LEADERB
 # (broadcast + saved to hackathon_announcement.md). New rightmost column.
 announce_display = canvas.markdown(announcement, name="announce",
                                    label="📣 Announcements",
-                                   x=1280, y=40, w=360, h=300)
+                                   x=1280, y=40, w=560, h=560)
 
 announce_editor = canvas.react(_ANNOUNCE_SOURCE, name="announce_edit", css=_ANNOUNCE_CSS,
-                               x=1280, y=360, w=360, h=320,
+                               x=1280, y=620, w=560, h=560,
                                roles=["admin"],
                                props={"text": announcement})
 
@@ -1635,6 +1636,7 @@ canvas.serve(
     port=8000,
     host="0.0.0.0",
     passwords=PASSWORDS,
-    tunnel=True,   # local only for now; re-enable (or use a named CF tunnel) to share
+    tunnel=True,
+    ui_inspector=False,
     hot_reload=True
 )

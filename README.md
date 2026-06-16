@@ -7,6 +7,65 @@ user input back in real time over one WebSocket.
 Built on [tldraw](https://tldraw.dev) + React + Vite (frontend) and FastAPI +
 WebSockets (backend). The frontend ships pre-built; you never touch Node or npm.
 
+## Mental model
+
+The lifecycle is always the same handful of steps:
+
+```python
+import pycanvas
+
+canvas = pycanvas.Canvas()                        # 1. make a canvas
+speed  = canvas.slider("speed", min=0, max=100)   # 2. make components (panels)
+status = canvas.label("status", "idle")
+
+@speed.on_change                                  #    read user input back …
+def _(v): status.update(f"speed {v}")             #    … and push state out
+
+speed.set_layout(x=40, y=40, w=320)               # 3. place/size it (optional —
+                                                  #    factory x=/y=/w=/h= work too)
+canvas.set_view(zoom=1.0, ui=True)                # 4. set the camera/chrome (optional)
+canvas.serve(port=8000)                           # 5. serve — opens the browser, blocks
+```
+
+**Python owns all state; the browser renders it and reports user actions.** The
+loop is always: make panels → register callbacks → `serve()`.
+
+This README follows those five steps — [1. The canvas](#1-the-canvas),
+[2. Components](#2-components), [3. Layout](#3-layout),
+[4. Views & navigation](#4-views--navigation),
+[5. Serving & sharing](#5-serving--sharing) — then
+[Beyond the five steps](#beyond-the-five-steps) for the rest.
+
+### Roles: one rule for everything per-viewer
+
+Pass `serve(passwords={role: pw})` and each viewer logs in as a **role**. Every
+viewer then renders the same canvas, but you can layer **per-viewer overrides** on
+top of the shared definition. There's exactly one rule:
+
+> **Precedence is `shared < role < client`.** Omit the scope and you set the
+> shared value (everyone); pass `roles=` and/or `client_id=` and you override it
+> for just those viewers.
+
+The same `roles=` / `client_id=` scoping works across four axes:
+
+| Axis | shared (everyone) | scoped to viewers |
+|---|---|---|
+| **Exists?** (visibility) | `canvas.react(..., roles=[])` = all | `roles=["admin"]` on the factory; `add_role`/`remove_role` live |
+| **Content** (props/state) | `panel.update(**props)` | `panel.update(roles=…, client_id=…, **props)` |
+| **Layout** (x/y/w/h, rotation, locks) | factory `x/y/w/h`, or `panel.set_layout(...)` | `panel.set_layout(roles=…, client_id=…, ...)` |
+| **View** (camera, chrome, `read_only`, `ui`) | `canvas.set_view(...)` | `canvas.set_view(roles=…, client_id=…, ...)` |
+
+Scoped overrides **persist and replay on reconnect**, so each viewer keeps their
+own slice — a per-team budget, an admin-only toolbar, a kiosk layout. When a user
+drags or resizes a panel, the change writes back to whichever layer their layout
+came from (their own overlay if any, else the shared base), so hand-arranged
+layouts stick. `lock_for=[roles]` is shorthand for "visible but not interactive
+for these roles."
+
+Roles can even be created **after** `serve()` (the `passwords=` dict is read live
+on every login). Full walkthrough — passwords, `lock_for`, runtime roles — in
+[Serving & sharing](#5-serving--sharing).
+
 ## Install
 
 ```bash
@@ -55,7 +114,23 @@ worker thread, so a blocking handler (`time.sleep`, an HTTP call, a slow
 compute) won't freeze the canvas or stall other viewers. Handlers for one panel
 run **in order**.
 
-## Creating panels
+# 1. The canvas
+
+`pycanvas.Canvas()` is the document everything hangs off. You build panels with
+its factories (step 2) and reach or manage them through it:
+
+```python
+canvas.remove(panel)
+canvas.connect(a, b, text="x2", color="blue")   # arrow that follows both panels
+canvas.disconnect(arrow)                         # or by name
+canvas.servo_1            # reach any panel by name (canvas["servo_1"] also works)
+canvas.components         # list of every panel (canvas.arrows for connectors)
+```
+
+`canvas.clear()` removes everything at once; `canvas.save` / `canvas.load`
+persist placement (see [Saving & loading](#saving--loading)).
+
+# 2. Components
 
 `canvas.<factory>(...)` builds a panel **and** places it, returning the handle.
 
@@ -87,7 +162,7 @@ canvas.insert(s, x=80, y=80)
 Or skip choosing a component: `canvas.show(value)` auto-renders any value as the
 best panel (see [Show anything](#show-anything)).
 
-## Components
+## The component catalogue
 
 | Component | Direction | API |
 |---|---|---|
@@ -101,7 +176,7 @@ best panel (see [Show anything](#show-anything)).
 | `LivePlot` | output | streaming telemetry; `.push({trace: y}, x=)`, `.clear()`, `smoothing=` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
 | `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)` |
-| `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)`/`.update_for(role=…)`, `.push(data)`, `css=` |
+| `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=` |
 | `Table` | output | DataFrame/Series/records/dict → sortable, filterable; `.update(data)` |
@@ -113,7 +188,7 @@ best panel (see [Show anything](#show-anything)).
 | `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |
 | `Inspector` | output | live panel/globals state browser |
 
-### The three data verbs
+## The three data verbs
 
 | Verb | Means | Replayed on reconnect? | Panels |
 |---|---|:--:|---|
@@ -139,6 +214,7 @@ Every panel:
 panel.update(...)                 # push new state (signature varies per component)
 panel.move(x, y); panel.resize(w, h); panel.rotate(deg)
 panel.set_layout(x=, y=, w=, h=, rotation=, locked=, ...)   # any combo, one message
+panel.set_layout(x=, y=, roles=["admin"])         # scope to roles/client_id (per-viewer layout)
 panel.to_front(); panel.to_back(); panel.forward(); panel.backward()   # z-order
 panel.x, panel.y, panel.w, panel.h, panel.rotation   # read/write live
 panel.value                       # current value (sliders, toggles, button count)
@@ -147,16 +223,6 @@ panel.queue = "latest"            # backpressure policy (below)
 
 `to_front`/`to_back` persist across reload; `forward`/`backward` are a live
 nudge only.
-
-Canvas-level:
-
-```python
-canvas.remove(panel)
-canvas.connect(a, b, text="x2", color="blue")   # arrow that follows both panels
-canvas.disconnect(arrow)                         # or by name
-canvas.servo_1            # reach any panel by name (canvas["servo_1"] also works)
-canvas.components         # list of every panel (canvas.arrows for connectors)
-```
 
 ## Receiving input
 
@@ -194,128 +260,41 @@ def _(req, viewer): ...            # the awaitable path, too
 
 `role` is the server-trusted login level (`None` unless `passwords=` is set);
 `id`/`name`/`color` come from the live roster — fine for attribution, not
-authorization. (Uploads receive the same `viewer`; see *File uploads* above.)
+authorization. (Uploads receive the same `viewer`; see *File uploads* below.)
 
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python
 replies via `panel.push(data)`, received in JS by `canvas.onPush(cb)`.
 
-## Layout
+## Show anything
 
-`x`/`y` are canvas coords, `w`/`h` pixels (aliases `width`/`height`), `rotation`
-degrees clockwise. Omit `x`/`y` → panels auto-arrange (left-to-right,
-top-to-bottom, packed by size). Omit `w`/`h` → component default.
-
-**Relative placement** — anchor to a placed panel; `gap` defaults to 16:
+`canvas.show(value)` inspects the value and inserts the best panel — like a
+notebook deciding how to render an `Out[...]`, but works in plain scripts:
 
 ```python
-controls = canvas.slider("t", min=0, max=1, step=0.01, below=plot)
-legend   = canvas.markdown("…", right_of=plot, gap=24)
-button   = canvas.button("go", below=controls, right_of=plot)   # two anchors = both axes
+canvas.show(df)                    # DataFrame → interactive Table
+canvas.show(fig)                   # Matplotlib / Plotly → Image / Plot
+canvas.show({"status": "ok"})      # dict / list → pretty JSON
+canvas.show("use **bold**")        # Markdown syntax → rendered text
+canvas.show("report.csv")          # existing file → Table; "photo.png" → Image
+canvas.show("https://site.com/x.png")  # image URL → Image; web URL → link
+canvas.show(model)                 # _repr_html_/_repr_png_ → its rich view
 ```
 
-`below`/`above` align left edges; `right_of`/`left_of` align tops. An explicit
-`x`/`y` overrides the derived coordinate. The anchor must already have a
-position.
+Dispatch is conservative (single `*italic*` isn't Markdown; a path must be a
+real file). No `name` → fresh panel each call; `name=` replaces in place.
+`pycanvas.panel_for(value)` builds without inserting. Matplotlib figures are
+released from pyplot after rendering — no manual `plt.close()`.
 
-**Auto-layout containers** — open a `with` block; panels inside without an
-explicit position drop into the next slot:
+## Create your own components
 
-```python
-with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
-    canvas.live_plot("loss")
-    canvas.live_plot("accuracy")      # next column
-    canvas.image(fig)                 # wraps to next row
+Beyond the built-ins, two factories ship custom UI straight from Python:
+**`react`** mounts your JSX as a real React subtree (the native, theme-aware
+path — reach for this first), and **`custom`** drops arbitrary HTML/CSS/JS into a
+sandboxed iframe. Both are bidirectional: `canvas.send(...)` posts up to Python,
+`push`/`update` send down.
 
-with canvas.column(width=320, gap=12):    # stacks; each keeps its natural height
-    canvas.label("status", "ready")
-    canvas.button("start")
-    canvas.slider("lr", min=0, max=1, step=0.01)
-```
-
-`row(height=…)` is the horizontal twin of `column`. An explicit position or
-relative anchor still wins per panel.
-
-**Auto-height** — `h="auto"` fits a panel's height to its rendered content
-(Custom-/React-based panels: `markdown`, `custom`, `table`, `image`, `label`,
-controls). Also a live property:
-
-```python
-notes = canvas.markdown("# Heading\n\nas tall as this text", h="auto")
-notes.h = 240          # assigning a number turns auto off
-```
-
-Layout reflects both what Python set **and** the user's drags/resizes/rotations
-(reported back, so `x`/`y`/`w`/`h`/`rotation` stay in sync). A panel's `x`/`y`
-are `None` until first placed.
-
-## Locking & interactivity
-
-Five independent controls; set on `insert`/a factory, or flip live as a
-property. Mix freely.
-
-| Control | Move? | Resize? | Controls operable? | `update()` renders? |
-|---|---|---|---|---|
-| *(default)* | yes | yes | yes | yes |
-| `draggable=False` | **no** | yes | yes | yes |
-| `resizable=False` | yes | **no** | yes | yes |
-| `operable=False` | yes | yes | **no** | yes |
-| `grabbable=False` | **no** (Python only) | **no** | yes, **immediately** | yes |
-| `locked=True` | **no** | **no** | **no** | **no** (frozen) |
-
-```python
-servo.draggable = False     # can't drag; slider still works
-servo.operable = False      # user can't operate it; your update()s still move the thumb
-servo.locked = True         # full freeze, including programmatic updates
-servo.pin();  servo.unpin() # draggable=False + resizable=False
-servo.lock(); servo.unlock()
-```
-
-Key distinction: `operable=False` blocks the *user* while your code keeps
-driving the control; `locked=True` freezes everything including your `update()`s.
-
-`grabbable=False` (content-heavy panels) drops the click-to-select cover so the
-widget is hover/click-live immediately, and makes the panel unselectable —
-move/resize from Python only.
-
-`frame=False` strips card chrome (background, border, shadow, padding, label,
-hover outline) so content sits directly on the canvas. Pair with
-`grabbable=False` for a free-floating widget; add `operable=False` for a
-click-through decorative overlay.
-
-## Custom HTML panels
-
-`Custom` renders any HTML/CSS/JS (or a file via `path=`) in a sandboxed iframe
-with a symmetric channel injected as `canvas`: `canvas.send(data)` posts to
-Python, `canvas.onPush(fn)` receives streamed data.
-
-```python
-panel = canvas.custom(html='''
-  <button onclick="canvas.send({event: 'go'})">go</button>
-  <script>canvas.onPush((msg) => document.body.append(msg))</script>
-''')
-
-@panel.on("go")            # routes {event: 'go'}; @panel.on_message is a catch-all
-def handle(msg):
-    panel.push("clicked")  # → canvas.onPush in the iframe
-```
-
-- `html`/`css`/`js` may be separate strings (handy for pasted
-  [uiverse.io](https://uiverse.io) snippets); composed under the hood.
-- `panel.update(html)` swaps the whole document (reloads the iframe);
-  `panel.push(data)` streams without reloading (keeps focus/scroll/listeners).
-- `panel.push_binary(bytes)` streams raw bytes on a binary frame (no JSON/base64,
-  same fast path as video); `canvas.onPush` receives an `ArrayBuffer`. Honours
-  `queue=`.
-- `event_key=` changes the routing field (default `event`).
-- Anything that renders to HTML works: matplotlib (`savefig` → base64 `<img>`),
-  Plotly (`fig.to_html(include_plotlyjs='cdn')`, stays interactive).
-
-Subclass `Custom` only to package HTML behind a typed constructor or to override
-`state_payload()` — called for every connecting client so the iframe is seeded
-with current state on load (no ready-handshake needed).
-
-## React panels
+### React panels
 
 `React` ships JSX *source* from Python, compiled in the browser and mounted as a
 real React subtree (no npm build, no postMessage hop, inherits the canvas theme,
@@ -352,11 +331,14 @@ Authoring conveniences (Python side):
 - **`css=` works with `source=` too** — keep a full component's styles in a
   separate string instead of an inline `<style>`; it's rendered ahead of the
   component (scoped by your own selectors). `panel.set_css(...)` updates it live.
-- **`panel.update_for(role=…, client_id=…, **props)`** — the per-recipient twin
-  of `update()`: push props to just the matching viewers (a login role from
-  `serve(passwords=)`, or an id from `canvas.viewers`) so each viewer sees only
-  their own slice — a per-team budget, a personalised greeting — without the
-  component filtering a global blob. (See `examples/hackathon.py`.)
+- **`panel.update(roles=…, client_id=…, **props)`** — scope an update to specific
+  viewers: a login role (from `serve(passwords=)`) and/or an id (from
+  `canvas.viewers`). The props are stored as a per-viewer *overlay* on the shared
+  state (precedence shared < role < client) and — unlike `push` — **persist and
+  replay on reconnect**, so each viewer sees only their own slice (a per-team
+  budget, a personalised greeting) with no client-side filtering of a global blob.
+  Omit both to update the shared state for everyone. (`update_for(role=…)` is a
+  deprecated alias. See `examples/hackathon.py`.)
 - **`panel.validate()`** — a fast structural lint that catches a missing
   `Component` or unbalanced `()/[]/{}` before they become a cryptic browser
   error. Returns a list of problems (empty = OK); handy as `assert not
@@ -366,6 +348,38 @@ Authoring conveniences (Python side):
   `path=` and call `panel.watch()` before `serve()`; returns a `stop()`.
 - `react(...)` spells out placement/visibility (`x/y/w/h`, `roles`, `lock_for`,
   the lock/chrome flags) as explicit keyword args, so they autocomplete.
+
+### Custom HTML panels
+
+`Custom` renders any HTML/CSS/JS (or a file via `path=`) in a sandboxed iframe
+with a symmetric channel injected as `canvas`: `canvas.send(data)` posts to
+Python, `canvas.onPush(fn)` receives streamed data.
+
+```python
+panel = canvas.custom(html='''
+  <button onclick="canvas.send({event: 'go'})">go</button>
+  <script>canvas.onPush((msg) => document.body.append(msg))</script>
+''')
+
+@panel.on("go")            # routes {event: 'go'}; @panel.on_message is a catch-all
+def handle(msg):
+    panel.push("clicked")  # → canvas.onPush in the iframe
+```
+
+- `html`/`css`/`js` may be separate strings (handy for pasted
+  [uiverse.io](https://uiverse.io) snippets); composed under the hood.
+- `panel.update(html)` swaps the whole document (reloads the iframe);
+  `panel.push(data)` streams without reloading (keeps focus/scroll/listeners).
+- `panel.push_binary(bytes)` streams raw bytes on a binary frame (no JSON/base64,
+  same fast path as video); `canvas.onPush` receives an `ArrayBuffer`. Honours
+  `queue=`.
+- `event_key=` changes the routing field (default `event`).
+- Anything that renders to HTML works: matplotlib (`savefig` → base64 `<img>`),
+  Plotly (`fig.to_html(include_plotlyjs='cdn')`, stays interactive).
+
+Subclass `Custom` only to package HTML behind a typed constructor or to override
+`state_payload()` — called for every connecting client so the iframe is seeded
+with current state on load (no ready-handshake needed).
 
 ## Specific panels
 
@@ -465,91 +479,96 @@ outpace a slow viewer:
 plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" later
 ```
 
-## Show anything
+# 3. Layout
 
-`canvas.show(value)` inspects the value and inserts the best panel — like a
-notebook deciding how to render an `Out[...]`, but works in plain scripts:
+`x`/`y` are canvas coords, `w`/`h` pixels (aliases `width`/`height`), `rotation`
+degrees clockwise. Omit `x`/`y` → panels auto-arrange (left-to-right,
+top-to-bottom, packed by size). Omit `w`/`h` → component default.
 
-```python
-canvas.show(df)                    # DataFrame → interactive Table
-canvas.show(fig)                   # Matplotlib / Plotly → Image / Plot
-canvas.show({"status": "ok"})      # dict / list → pretty JSON
-canvas.show("use **bold**")        # Markdown syntax → rendered text
-canvas.show("report.csv")          # existing file → Table; "photo.png" → Image
-canvas.show("https://site.com/x.png")  # image URL → Image; web URL → link
-canvas.show(model)                 # _repr_html_/_repr_png_ → its rich view
-```
-
-Dispatch is conservative (single `*italic*` isn't Markdown; a path must be a
-real file). No `name` → fresh panel each call; `name=` replaces in place.
-`pycanvas.panel_for(value)` builds without inserting. Matplotlib figures are
-released from pyplot after rendering — no manual `plt.close()`.
-
-## Saving & loading
+**Relative placement** — anchor to a placed panel; `gap` defaults to 16:
 
 ```python
-canvas.save("board.json")                    # browser must be open to capture drawings
-# next run, recreate the panels (same names), then:
-canvas.load("board.json")                    # snaps panels into place + restores drawings
-canvas.load("board.json", formation=False)   # drawings only
-canvas.clear()                               # remove all panels and arrows at once
-
-# Non-blocking save — useful in Jupyter so the cell doesn't stall:
-fut = canvas.save("board.json", blocking=False)
-fut.result()                                 # wait (and raise on error) when ready
+controls = canvas.slider("t", min=0, max=1, step=0.01, below=plot)
+legend   = canvas.markdown("…", right_of=plot, gap=24)
+button   = canvas.button("go", below=controls, right_of=plot)   # two anchors = both axes
 ```
 
-Panels are code, so only their **placement** is saved, never behaviour.
+`below`/`above` align left edges; `right_of`/`left_of` align tops. An explicit
+`x`/`y` overrides the derived coordinate. The anchor must already have a
+position.
 
-## Background workers
-
-Register producer loops (camera, sensor, telemetry) with `@canvas.background` —
-`serve()` runs each on a daemon thread in the serving process only.
+**Auto-layout containers** — open a `with` block; panels inside without an
+explicit position drop into the next slot:
 
 ```python
-feed = canvas.video("webcam")
+with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
+    canvas.live_plot("loss")
+    canvas.live_plot("accuracy")      # next column
+    canvas.image(fig)                 # wraps to next row
 
-@canvas.background
-def stream():
-    cap = cv2.VideoCapture(0)
-    while True:
-        ok, frame = cap.read()
-        if ok: feed.update(frame)
-
-canvas.serve(hot_reload=True)
+with canvas.column(width=320, gap=12):    # stacks; each keeps its natural height
+    canvas.label("status", "ready")
+    canvas.button("start")
+    canvas.slider("lr", min=0, max=1, step=0.01)
 ```
 
-**Required, not just tidy, with `hot_reload=True`:** a hand-started thread at
-module scope runs in *both* the file-watching monitor and the worker, so it
-would double-grab a single-owner resource (camera, serial port). `background`
-defers the thread to the worker only.
+`row(height=…)` is the horizontal twin of `column`. An explicit position or
+relative anchor still wins per panel.
 
-## Tracking an ML training run
-
-The panels above *are* the dashboard — no logging framework. Make each once,
-keep the handle, push from your loop:
+**Auto-height** — `h="auto"` fits a panel's height to its rendered content
+(Custom-/React-based panels: `markdown`, `custom`, `table`, `image`, `label`,
+controls). Also a live property:
 
 ```python
-loss    = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6)
-weights = canvas.histogram("weights", bins=40)
-canvas.table({"lr": 3e-4, "batch": 64})       # flat dict → key/value table
-
-@canvas.background
-def train():
-    for step in range(steps):
-        loss.push({"train": train_loss, "val": val_loss}, x=step)
-        if step % 50 == 0:
-            weights.add(model.fc1.weight, step=step)
-            canvas.show(make_grid(batch), name="samples")
-
-canvas.serve()
+notes = canvas.markdown("# Heading\n\nas tall as this text", h="auto")
+notes.h = 240          # assigning a number turns auto off
 ```
 
-Being bidirectional, the same loop can read controls TensorBoard can't offer (a
-pause button, a live LR slider). `live_plot`/`histogram` need `plotly`. See
-[`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py).
+Layout reflects both what Python set **and** the user's drags/resizes/rotations
+(reported back, so `x`/`y`/`w`/`h`/`rotation` stay in sync). A panel's `x`/`y`
+are `None` until first placed.
 
-## Viewport & navigation
+**Per-role layout** — scope placement/size to viewers with
+`set_layout(roles=…, client_id=…)` (precedence shared < role < client, the same
+overlay model as content and view). A role can have its own arrangement, and a
+user's drag writes back to whichever layer their layout came from — see the
+[Roles](#roles-one-rule-for-everything-per-viewer) overview.
+
+## Locking & interactivity
+
+Five independent controls; set on `insert`/a factory, or flip live as a
+property. Mix freely.
+
+| Control | Move? | Resize? | Controls operable? | `update()` renders? |
+|---|---|---|---|---|
+| *(default)* | yes | yes | yes | yes |
+| `draggable=False` | **no** | yes | yes | yes |
+| `resizable=False` | yes | **no** | yes | yes |
+| `operable=False` | yes | yes | **no** | yes |
+| `grabbable=False` | **no** (Python only) | **no** | yes, **immediately** | yes |
+| `locked=True` | **no** | **no** | **no** | **no** (frozen) |
+
+```python
+servo.draggable = False     # can't drag; slider still works
+servo.operable = False      # user can't operate it; your update()s still move the thumb
+servo.locked = True         # full freeze, including programmatic updates
+servo.pin();  servo.unpin() # draggable=False + resizable=False
+servo.lock(); servo.unlock()
+```
+
+Key distinction: `operable=False` blocks the *user* while your code keeps
+driving the control; `locked=True` freezes everything including your `update()`s.
+
+`grabbable=False` (content-heavy panels) drops the click-to-select cover so the
+widget is hover/click-live immediately, and makes the panel unselectable —
+move/resize from Python only.
+
+`frame=False` strips card chrome (background, border, shadow, padding, label,
+hover outline) so content sits directly on the canvas. Pair with
+`grabbable=False` for a free-floating widget; add `operable=False` for a
+click-through decorative overlay.
+
+# 4. Views & navigation
 
 Pass a `view` dict to `serve` (all keys optional):
 
@@ -589,36 +608,10 @@ A toolbar button (bottom-left) spawns an ephemeral `Inspector` on demand —
 offered only on a local bind by default (`ui_inspector=True`/`False` to
 override), since it can surface state to everyone.
 
-## Hot reloading
+# 5. Serving & sharing
 
-```python
-canvas.serve(port=8000, hot_reload=True)   # run as `python your_script.py`
-```
-
-Restarts the process when you save a `.py` in the script's folder; the browser
-tab reconnects on its own. A broken save is pre-flighted and skipped — the last
-working version keeps serving. Needs `block=True` and a real script entry point.
-
-## Notebooks
-
-`serve(block=False)` returns immediately so later cells edit the open canvas:
-
-```python
-canvas = pycanvas.Canvas().serve(port=8000, block=False)
-servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
-canvas.remove(servo)
-canvas.stop()
-```
-
-`canvas.capture_cells(cols=2)` (alias `pycanvas.autopanel(canvas)`) mirrors
-every expression cell's output to its own auto-arranged panel (rendered via
-`show()`); re-running a cell swaps its panel in place, keeping any geometry you
-dragged. Override one cell with a `# pycanvas: x=40 y=80 w=600 locked=true`
-directive line (or `# pycanvas: skip`); pass `auto=False` to flip to an
-allowlist. Stop with `stop_capturing_cells()`.
-
-In a plain script, a daemon background server dies with the process — call
-`canvas.wait()` to park the main thread.
+`canvas.serve(port=8000)` opens the browser and blocks. The rest of this section
+covers exposing that server to other people and machines.
 
 ## Sharing
 
@@ -701,6 +694,60 @@ the server stops. Quick-tunnel URLs are random and ephemeral.
 > exposure (LAN bind, tunnel, merge) is refused unless you pass
 > `allow_remote_exec=True` — even behind a password.
 
+## Hot reloading
+
+```python
+canvas.serve(port=8000, hot_reload=True)   # run as `python your_script.py`
+```
+
+Restarts the process when you save a `.py` in the script's folder; the browser
+tab reconnects on its own. A broken save is pre-flighted and skipped — the last
+working version keeps serving. Needs `block=True` and a real script entry point.
+
+## Background workers
+
+Register producer loops (camera, sensor, telemetry) with `@canvas.background` —
+`serve()` runs each on a daemon thread in the serving process only.
+
+```python
+feed = canvas.video("webcam")
+
+@canvas.background
+def stream():
+    cap = cv2.VideoCapture(0)
+    while True:
+        ok, frame = cap.read()
+        if ok: feed.update(frame)
+
+canvas.serve(hot_reload=True)
+```
+
+**Required, not just tidy, with `hot_reload=True`:** a hand-started thread at
+module scope runs in *both* the file-watching monitor and the worker, so it
+would double-grab a single-owner resource (camera, serial port). `background`
+defers the thread to the worker only.
+
+## Notebooks
+
+`serve(block=False)` returns immediately so later cells edit the open canvas:
+
+```python
+canvas = pycanvas.Canvas().serve(port=8000, block=False)
+servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
+canvas.remove(servo)
+canvas.stop()
+```
+
+`canvas.capture_cells(cols=2)` (alias `pycanvas.autopanel(canvas)`) mirrors
+every expression cell's output to its own auto-arranged panel (rendered via
+`show()`); re-running a cell swaps its panel in place, keeping any geometry you
+dragged. Override one cell with a `# pycanvas: x=40 y=80 w=600 locked=true`
+directive line (or `# pycanvas: skip`); pass `auto=False` to flip to an
+allowlist. Stop with `stop_capturing_cells()`.
+
+In a plain script, a daemon background server dies with the process — call
+`canvas.wait()` to park the main thread.
+
 ## Merging canvases
 
 A `Canvas` is single-process, but a *merge host* connects to several running
@@ -721,6 +768,49 @@ Merge(["https://a.trycloudflare.com", ":8002"]).serve(port=8080, tunnel=True)
 Sources overlay by default (`region_width` spreads them side-by-side). A source
 going offline drops its panels until it reconnects. Sources may be tunneled
 URLs; the merged view can be tunneled too. Free-form drawings aren't composited.
+
+# Beyond the five steps
+
+## Saving & loading
+
+```python
+canvas.save("board.json")                    # browser must be open to capture drawings
+# next run, recreate the panels (same names), then:
+canvas.load("board.json")                    # snaps panels into place + restores drawings
+canvas.load("board.json", formation=False)   # drawings only
+canvas.clear()                               # remove all panels and arrows at once
+
+# Non-blocking save — useful in Jupyter so the cell doesn't stall:
+fut = canvas.save("board.json", blocking=False)
+fut.result()                                 # wait (and raise on error) when ready
+```
+
+Panels are code, so only their **placement** is saved, never behaviour.
+
+## Tracking an ML training run
+
+The panels above *are* the dashboard — no logging framework. Make each once,
+keep the handle, push from your loop:
+
+```python
+loss    = canvas.live_plot("loss", traces=["train", "val"], smoothing=0.6)
+weights = canvas.histogram("weights", bins=40)
+canvas.table({"lr": 3e-4, "batch": 64})       # flat dict → key/value table
+
+@canvas.background
+def train():
+    for step in range(steps):
+        loss.push({"train": train_loss, "val": val_loss}, x=step)
+        if step % 50 == 0:
+            weights.add(model.fc1.weight, step=step)
+            canvas.show(make_grid(batch), name="samples")
+
+canvas.serve()
+```
+
+Being bidirectional, the same loop can read controls TensorBoard can't offer (a
+pause button, a live LR slider). `live_plot`/`histogram` need `plotly`. See
+[`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py).
 
 ## Packaging a desktop app (`bake`)
 
@@ -753,6 +843,47 @@ canvas.bake(name="App", exclude=["torch"])        # skip a dep that breaks the b
 ```
 
 `serve(desktop=True)` opens the same native window in development.
+
+## How it works
+
+PyCanvas is two halves joined by **one WebSocket**: your Python process, and a
+pre-built browser frontend (tldraw + React) it serves. You never touch the
+frontend — it ships compiled in the package.
+
+**The model: Python owns state, the browser renders it.** Each panel you make is
+a Python *component* object with a unique id. The **bridge** turns your calls
+into small JSON frames — `register` (a panel appeared), `update` (its state
+changed), `remove` — and ships them to every connected browser. The browser keeps
+a tldraw canvas where each component is a *shape*: built-ins (slider, label, …)
+are native React widgets, `custom` is a sandboxed iframe, and `react` is your JSX
+compiled in the browser (Babel) and mounted as a real React subtree. User actions
+travel back as `input` / `layout` frames.
+
+**Replay is why reconnects "just work".** The browser is a pure renderer holding
+no source of truth, so on every (re)connect the bridge replays the full state —
+each panel's `register` + current payload — filtered by the viewer's role. That
+same path powers hot reload (a fresh worker replays everything) and the
+per-viewer model: a panel's props/layout are the shared base plus any
+role/client **overlays**, merged at replay (`register_props_for`, the layout
+overlay) and pushed live to matching viewers via `send_to_role` / `send_to_client`.
+
+**Threading.** An asyncio event loop owns the socket; your `@on_change` /
+`@on_message` / `@on_layout` handlers run on a separate **worker thread** (ordered
+per panel), so a slow handler never stalls the canvas, and outbound sends are
+marshalled back onto the loop. High-rate media (`VideoFeed`/`AudioFeed`,
+`push_binary`) skips JSON entirely on a binary frame.
+
+**Auth & sharing.** Roles come from the password used at login, carried in a
+signed session cookie (no server-side session store), so a viewer stays logged in
+across reconnects and restarts. Under `hot_reload`, a long-lived *monitor* process
+re-execs the worker on each save and owns the tunnel + the cookie secret, so the
+public URL and everyone's session survive edits.
+
+**Where to look:** `pycanvas/canvas.py` (the `Canvas` façade + factories),
+`pycanvas/bridge.py` (the wire / replay / per-viewer sends), `pycanvas/server.py`
+(FastAPI app + auth), `pycanvas/components/` (the panels), and
+`pycanvas/frontend/src/bridge.js` (the browser side). [GUIDE.md](GUIDE.md) goes
+deeper.
 
 ## Debugging the wire
 

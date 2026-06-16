@@ -99,6 +99,13 @@ class React(BaseComponent):
         # browser as a JSON string prop so they persist in the shape and replay to
         # a reconnecting client.
         self._data = dict(props or {})
+        # Per-viewer prop overlays for scoped updates (``update(roles=...)`` /
+        # ``update(client_id=...)``): role/id -> the props that override the
+        # shared ``_data`` for those viewers. Merged shared < role < client both
+        # on send and on reconnect replay, so a scoped update *persists* (unlike
+        # the one-shot ``push``).
+        self._role_data = {}
+        self._client_data = {}
         # Inbound ``canvas.send`` payloads are routed by ``payload[event_key]``;
         # the ``None`` slot holds catch-all handlers (``on_message`` / ``on()``).
         self._event_key = event_key
@@ -115,15 +122,32 @@ class React(BaseComponent):
         self._auto_h = False
         self._auto_w = False
 
-    def register_props(self):
+    def _compose_props(self, data):
         props = dict(self._props)  # label, w, h
         props["source"] = self._source
-        props["data"] = json.dumps(self._data)
+        props["data"] = json.dumps(data)
         props["css"] = self._css
         props["autoH"] = self._auto_h
         props["autoW"] = self._auto_w
         props["libs"] = json.dumps(self._libs)
         return props
+
+    def _data_for(self, role=None, client_id=None):
+        """The shared props with the overlays for one viewer merged on top
+        (shared < role < client)."""
+        data = dict(self._data)
+        if role is not None:
+            for r in ([role] if isinstance(role, str) else role):
+                data.update(self._role_data.get(r, {}))
+        if client_id is not None:
+            data.update(self._client_data.get(client_id, {}))
+        return data
+
+    def register_props(self):
+        return self._compose_props(self._data)
+
+    def register_props_for(self, role=None, client_id=None):
+        return self._compose_props(self._data_for(role, client_id))
 
     def _set_auto_h(self):
         """Enable content-fit height live (``comp.h = "auto"``).
@@ -253,41 +277,58 @@ class React(BaseComponent):
         """
 
     # -- write (Python -> panel) ---------------------------------------------
-    def update(self, **props):
+    def update(self, *, roles=None, client_id=None, **props):
         """Patch the component's ``props`` and re-render, live.
 
         Merges ``props`` into the current set (so ``update(label="Hi")`` leaves
-        the rest untouched) and pushes the merged dict to the panel.
+        the rest untouched) and pushes the merged dict to the panel. Returns
+        ``self``.
+
+        **Scope it to specific viewers** with ``roles=`` (a role name or list, as
+        in ``serve(passwords=)``) and/or ``client_id=`` (an id from
+        ``canvas.viewers``): the props are stored as a per-viewer *overlay* on the
+        shared state (precedence shared < role < client) and pushed to just those
+        viewers — and, unlike a one-shot :meth:`push`, they **persist and replay**
+        when such a viewer reconnects. So each viewer can be shown their own slice
+        — a per-team budget, a personalised greeting — with no client-side
+        filtering of a global blob::
+
+            panel.update(rows=catalogue)                 # everyone (shared)
+            panel.update(roles="Red", budget=1400)       # just the Red team
+            panel.update(client_id=v["id"], you=v["name"])
+
+        Omit both ``roles`` and ``client_id`` to update the shared state for
+        everyone. ``roles``/``client_id`` are reserved, so a prop can't use those
+        names (rename the prop if needed).
         """
-        self._data.update(props)
-        self._send_update({"data": json.dumps(self._data)})
+        if roles is None and client_id is None:
+            self._data.update(props)
+            self._send_update({"data": json.dumps(self._data)})
+            return self
+        if roles is not None:
+            for r in ([roles] if isinstance(roles, str) else roles):
+                self._role_data.setdefault(r, {}).update(props)
+                self._send_update_to(
+                    {"data": json.dumps(self._data_for(role=r))}, role=r)
+        if client_id is not None:
+            self._client_data.setdefault(client_id, {}).update(props)
+            self._send_update_to(
+                {"data": json.dumps(self._data_for(client_id=client_id))},
+                client_id=client_id)
+        return self
 
     def update_for(self, *, role=None, client_id=None, **props):
-        """Send props to specific viewers only — the per-recipient twin of
-        :meth:`update`.
+        """Deprecated alias for :meth:`update` with ``roles=`` / ``client_id=``.
 
-        Pushes the panel's current props merged with ``props`` to just the
-        viewers matching ``role`` (a name or list, as in ``serve(passwords=)``)
-        and/or ``client_id`` (an id from ``canvas.viewers``). Lets you show each
-        viewer their own slice — a per-team budget, a personalised greeting —
-        without the component filtering a global blob client-side::
-
-            for v in canvas.viewers:
-                panel.update_for(client_id=v["id"], balance=balances[v["role"]])
-
-        Unlike :meth:`update`, it does **not** change the panel's shared props, so
-        it's a live push: a viewer who reconnects sees the shared props again
-        (re-send from an on-connect/identity hook, or fold the per-viewer value
-        into your data model and broadcast). With neither ``role`` nor
-        ``client_id`` it's a no-op — use :meth:`update` to reach everyone.
-        Returns ``self``.
+        Kept for back-compat — prefer ``update(roles=..., client_id=..., ...)``.
+        Note the semantics now **persist** (the scoped props replay on reconnect),
+        where the original ``update_for`` was a one-shot push that reverted to the
+        shared props on reconnect. With neither ``role`` nor ``client_id`` it's a
+        no-op. Returns ``self``.
         """
         if role is None and client_id is None:
             return self
-        merged = {**self._data, **props}
-        self._send_update_to({"data": json.dumps(merged)},
-                             role=role, client_id=client_id)
-        return self
+        return self.update(roles=role, client_id=client_id, **props)
 
     def push(self, data):
         """Stream ``data`` to the component without a re-mount.
