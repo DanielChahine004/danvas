@@ -321,11 +321,16 @@ def _(viewer):
     table.update(data)
 ```
 
-It's the event-driven twin of [`canvas.background`](#background-workers) — both
-run a function on its own thread via the same primitive, and the thread lives
-exactly as long as the function does. The trade-off is concurrency: a threaded
-handler may run alongside others, so guard any shared state you mutate from it
-(plain handlers stay serialized and need no locks).
+**When the thread starts** is the whole distinction from
+[`canvas.background`](#background-workers): `threaded=True` launches a thread
+*per UI interaction* — it only kicks in when the bridge dispatches an event, so
+calling the handler from your own code (or a notebook cell) is a plain inline
+call, no thread. `canvas.background` launches a thread *once, when serving
+starts* — for producer loops (a camera, a sensor) that have no triggering event.
+Same underlying primitive; the thread lives exactly as long as the function
+runs. The trade-off either way is concurrency: a threaded function may run
+alongside others, so guard any shared state you mutate (plain serial handlers
+need no locks).
 
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
@@ -860,6 +865,12 @@ servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
 canvas.remove(servo)
 canvas.stop()
 ```
+
+Handlers keep working after `serve(block=False)` — they fire on UI events just
+as in a script, and [`threaded=True`](#receiving-input) behaves the same (it's
+triggered by the bridge, not by which cell you're in). `hot_reload` isn't
+available here, so `background`'s monitor caveat doesn't apply: its threads
+simply start when you call `serve(block=False)`, in the kernel.
 
 `canvas.capture_cells(cols=2)` (alias `pycanvas.autopanel(canvas)`) mirrors
 every expression cell's output to its own auto-arranged panel (rendered via
