@@ -125,6 +125,14 @@ class Bridge:
         # diffs; we accumulate the canonical set here, fan it out to the other
         # browsers, and replay it to anyone who connects later.
         self._drawings = {}  # record id -> tldraw record
+        # Optional callback fired (no args) whenever canvas state the user can
+        # mutate from the browser changes -- a panel moved/resized (``layout``)
+        # or a free-form drawing edited (``draw``). serve(persist=...) sets this
+        # to a debounced autosave; ``None`` (the default) means nobody is
+        # listening and the notify is a cheap no-op. May be invoked from either
+        # the event-loop thread (draw) or a dispatch thread (layout), so the
+        # listener must be thread-safe.
+        self._on_mutation = None
         # Per-connection viewer identity (id / display name / color) for the
         # presence roster and chat. ``_last_seen`` tracks each socket's most
         # recent inbound message so the reaper can drop silent (dead) ones.
@@ -926,6 +934,7 @@ class Bridge:
         if geom:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom},
                            exclude=ws)
+        self._notify_mutation()
 
     async def _send(self, ws, msg):
         """Serialize and send one frame to a single socket.
@@ -1181,6 +1190,20 @@ class Bridge:
                 self._drawings[rid] = pair[1]
         for rid in (diff.get("removed") or {}):
             self._drawings.pop(rid, None)
+        self._notify_mutation()
+
+    def _notify_mutation(self):
+        """Fire the optional ``_on_mutation`` listener (set by serve(persist=)).
+
+        Swallows the listener's exceptions so a failing autosave can never break
+        layout/draw sync -- the wire path must keep flowing regardless.
+        """
+        cb = self._on_mutation
+        if cb is not None:
+            try:
+                cb()
+            except Exception:
+                traceback.print_exc()
 
     def _panel_shape_ids(self):
         """tldraw shape ids of every pycanvas-managed panel and arrow.

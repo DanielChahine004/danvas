@@ -26,6 +26,10 @@ examples/saved_canvas.json
 examples/saved_layout.json
 examples/uploads/
 
+# Auto-persistence files written by serve(persist=...) — runtime canvas state,
+# not source (the default name is <script>.canvas.json next to the script).
+*.canvas.json
+
 # Live state written by the hackathon example (catalogue, teams, orders,
 # announcement board) — runtime data, not source.
 examples/hackathon/hackathon_inventory.csv

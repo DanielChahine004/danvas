@@ -886,6 +886,22 @@ fut.result()                                 # wait (and raise on error) when re
 
 Panels are code, so only their **placement** is saved, never behaviour.
 
+**Automatic persistence** — `serve(persist=...)` is the hands-off twin of the
+above: it loads the saved state on startup and re-saves on every change, so a
+canvas survives restarts with no `save`/`load` calls of your own.
+
+```python
+canvas.serve(persist=True)              # <script>.canvas.json next to your script
+canvas.serve(persist="board.json")      # or choose the file
+```
+
+When the file exists it's loaded once your panels are built — each snaps back to
+where the user last dragged it and their drawings reappear — then rewritten
+(debounced) on every move/resize/draw and once more on a clean shutdown
+(`Ctrl+C` / `canvas.stop()`). Delete a panel from your script and its stale
+saved position is simply ignored. Leave `persist=False` (the default) to run
+entirely fresh from the script every time, reading and writing nothing.
+
 ## Tracking an ML training run
 
 The panels above *are* the dashboard — no logging framework. Make each once,

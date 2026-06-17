@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 import uuid
 import warnings
 from collections import namedtuple
@@ -97,6 +98,16 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._background = []
         # Counter behind the auto-generated names for unnamed show() panels.
         self._show_seq = 0
+        # serve(persist=...) state. ``_persist_path`` is the JSON file the canvas
+        # auto-loads on startup and auto-saves to on every user change; None when
+        # persistence is off. The debounce coalesces a burst of edits (a text
+        # shape emits a draw diff per keystroke) into at most one write per
+        # window. The lock guards the timer/scheduling from the two threads that
+        # can trigger a save (the event loop for draws, a dispatch thread for
+        # layout) plus the flush on shutdown.
+        self._persist_path = None
+        self._persist_timer = None
+        self._persist_lock = threading.Lock()
         # Stack of active auto-layout containers (grid/column/row). The innermost
         # one places any panel inserted inside its `with` block that didn't get an
         # explicit x/y or relative anchor. Empty = panels auto-cascade as before.
@@ -972,6 +983,107 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    # -- automatic persistence (serve(persist=...)) ---------------------------
+    @staticmethod
+    def _default_persist_path():
+        """Where ``persist=True`` saves when no path is given: ``<script>.canvas.json``.
+
+        Derived from the running script (``__main__.__file__``) so the file sits
+        next to it and is named after it. Falls back to ``canvas.json`` in the
+        working directory when there is no script file (an interactive REPL or a
+        notebook, where ``__main__`` has no ``__file__``).
+        """
+        main = sys.modules.get("__main__")
+        script = getattr(main, "__file__", None)
+        if script and script.endswith(".py"):
+            script = os.path.abspath(script)
+            stem = os.path.splitext(os.path.basename(script))[0]
+            return os.path.join(os.path.dirname(script), f"{stem}.canvas.json")
+        return os.path.abspath("canvas.json")
+
+    def _persist_setup(self, persist):
+        """Resolve the persist file, load it if present, and arm the autosave.
+
+        ``persist`` is the ``serve(persist=...)`` value: ``True`` for the default
+        path, or a string path. Called once from serve() in the serving process.
+        """
+        path = persist if isinstance(persist, str) else self._default_persist_path()
+        self._persist_path = path
+        if os.path.exists(path):
+            try:
+                self._persist_load(path)
+            except Exception:
+                # A corrupt/half-written file must not stop the canvas from
+                # serving -- warn and start fresh; the next save overwrites it.
+                warnings.warn(f"persist: could not load {path!r}; starting fresh",
+                              stacklevel=2)
+                traceback.print_exc()
+        # Arm last, so the load above (which mutates layout) doesn't trigger a
+        # redundant save of what we just read back in.
+        self._bridge._on_mutation = self._schedule_persist
+
+    def _persist_load(self, path):
+        """Apply a persist file: restore the panel formation and seed drawings.
+
+        Reuses :meth:`_restore_layout` for the formation and seeds the bridge's
+        live drawing set directly (so the saved drawings replay on connect and
+        feed forward into the next autosave), rather than the full-document
+        ``load_snapshot`` path that :meth:`load` uses.
+        """
+        data = self._read_json(path)
+        if data.get("layout"):
+            self._restore_layout(data["layout"])
+        drawings = data.get("drawings")
+        if isinstance(drawings, dict):
+            self._bridge._drawings = dict(drawings)
+
+    def _schedule_persist(self):
+        """Debounce: (re)arm a one-shot timer that flushes after a quiet window.
+
+        Called from the bridge on every user layout/draw change, possibly from
+        the event loop (draw) or a dispatch thread (layout). Coalescing a burst
+        of edits into one write keeps a mid-typing text shape (a diff per
+        keystroke) from hammering the disk.
+        """
+        with self._persist_lock:
+            if self._persist_path is None:
+                return
+            if self._persist_timer is not None:
+                self._persist_timer.cancel()
+            self._persist_timer = threading.Timer(1.0, self._persist_flush)
+            self._persist_timer.daemon = True
+            self._persist_timer.start()
+
+    def _persist_flush(self):
+        """Write the current canvas state to the persist file, now.
+
+        The debounce target, and also called synchronously on shutdown to
+        capture the final state. Cancels any pending timer so a flush and a
+        debounced write can't both fire.
+        """
+        with self._persist_lock:
+            path = self._persist_path
+            if path is None:
+                return
+            if self._persist_timer is not None:
+                self._persist_timer.cancel()
+                self._persist_timer = None
+        data = {"layout": self._layout(), "drawings": dict(self._bridge._drawings)}
+        # Write to a temp file in the same directory and atomically replace, so a
+        # crash mid-write can never leave a truncated (unloadable) file behind.
+        tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, path)
+        except Exception:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            raise
+
     def wait_for_client(self, timeout=10.0):
         """Block until at least one browser is connected, or ``timeout`` elapses.
 
@@ -1051,7 +1163,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               cursors=None, view=None, desktop=None, window_title="PyCanvas",
               window_size=(1200, 800), password=None, passwords=None,
-              login_message=None, hot_reload=False, debug=False):
+              login_message=None, persist=False, hot_reload=False, debug=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1148,6 +1260,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         closed (``block`` doesn't apply); if pywebview isn't installed it warns
         and falls back to the browser. See :meth:`bake` to build the executable.
 
+        ``persist`` keeps the canvas across runs by saving it to a local JSON
+        file and reloading it on startup — the automatic twin of :meth:`save` /
+        :meth:`load`. ``persist=True`` uses a default path next to your script
+        (``<script>.canvas.json``); pass a string to choose the file. When the
+        file exists it is loaded once the panels your script created exist, so
+        each panel snaps back to where the user last dragged it and their
+        free-form drawings reappear; the file is then rewritten (debounced)
+        whenever a viewer moves/resizes a panel or edits a drawing, and once more
+        on a clean shutdown (``Ctrl+C`` / :meth:`stop`). Panels are code, so only
+        their *placement* is persisted, never their existence or behaviour —
+        delete a panel from your script and its stale saved position is simply
+        ignored. Leave it ``False`` (the default) to run entirely fresh from the
+        script every time, reading and writing nothing.
+
         ``debug=True`` logs every WebSocket frame to the console — what Python
         sends (``->``) and what each browser sends back (``<-``) — so "the panel
         isn't updating" turns into evidence: either the frame is on the wire or
@@ -1206,6 +1332,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # grab single-owner resources (a camera, a serial port) run here, never
         # in the monitor.
         self._start_background()
+        # Wire persistence (serve(persist=...)): load the saved formation +
+        # drawings now (before any client connects, so the seed replays on
+        # connect) and arm the debounced autosave. In the serving worker only --
+        # the hot-reload monitor returned above, so it never reads/writes the
+        # file or races the worker for it.
+        if persist:
+            self._persist_setup(persist)
         # Native-window mode: default to on only inside a baked executable, so a
         # plain `python script.py` still opens the browser. Blocks on the webview
         # loop (main thread), so the non-blocking branch below is skipped.
@@ -1321,6 +1454,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             server.run(self._bridge, port=port, open_browser=open_browser,
                        host=host, password=password, passwords=passwords)
         finally:
+            self._persist_flush()  # capture final state (no-op when persist off)
             self._stop_tunnel()
 
     def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
@@ -1521,6 +1655,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
     def stop(self):
         """Signal the background server to shut down and close any tunnel."""
+        # Flush the final canvas state before tearing down -- in background /
+        # desktop mode this is the controlled-closure path (no blocking
+        # serve() finally runs). A no-op when persistence is off.
+        self._persist_flush()
         if self._server is not None:
             self._server.should_exit = True
         self._stop_tunnel()
