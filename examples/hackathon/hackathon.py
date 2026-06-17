@@ -813,8 +813,8 @@ canvas.serve(
     host="0.0.0.0",
     passwords=PASSWORDS,
     login_message=(
-        "Spectators: enter  view  for a read-only big-screen view.\n"
-        "Teams & judges: enter the password you were given."
+        "Spectators: enter  'view' for a read-only big-screen view.\n"
+        "Teams: enter your password ."
     ),
     tunnel=True,
     ui_inspector=False,
