@@ -304,8 +304,8 @@ def _(msg):                        # msg["stock"]/["price"] are ints here
     inventory[msg["item"]] = {"stock": msg["stock"], "price": msg["price"]}
 ```
 
-`examples/action_routing.py` is a minimal demo; `examples/hackathon.py` uses the
-pattern at scale (one handler per admin/team action across several panels).
+`examples/action_routing.py` is a minimal demo; `examples/hackathon/hackathon.py`
+uses the pattern at scale (one handler per admin/team action across several panels).
 
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
@@ -385,13 +385,16 @@ bridge handle:
   pinned React-externalised builds; anything else passes through to esm.sh.
 - `React.from_uiverse(raw)` rewrites a `styled-components` snippet into plain
   React + CSS the in-browser pipeline accepts.
-- `h="auto"`/`w="auto"` shrink the panel to its content.
+- React panels **auto-height by default** (fit their content); pass a numeric `h`
+  to pin one. `w="auto"` opts into content-width too.
 
 Authoring conveniences (Python side):
 
 - **`css=` works with `source=` too** — keep a full component's styles in a
   separate string instead of an inline `<style>`; it's rendered ahead of the
-  component (scoped by your own selectors). `panel.set_css(...)` updates it live.
+  component (scoped by your own selectors). Load either half from a file with
+  `path=` (the JSX) / `css_path=` (the stylesheet) to keep both in sibling files.
+  `panel.set_css(...)` updates it live.
 - **`panel.update(roles=…, client_id=…, **props)`** — scope an update to specific
   viewers: a login role (from `serve(passwords=)`) and/or an id (from
   `canvas.viewers`). The props are stored as a per-viewer *overlay* on the shared
@@ -399,7 +402,7 @@ Authoring conveniences (Python side):
   replay on reconnect**, so each viewer sees only their own slice (a per-team
   budget, a personalised greeting) with no client-side filtering of a global blob.
   Omit both to update the shared state for everyone. (`update_for(role=…)` is a
-  deprecated alias. See `examples/hackathon.py`.)
+  deprecated alias. See `examples/hackathon/hackathon.py`.)
 - **`panel.validate()`** — a fast structural lint that catches a missing
   `Component` or unbalanced `()/[]/{}` before they become a cryptic browser
   error. Returns a list of problems (empty = OK); handy as `assert not
@@ -594,7 +597,8 @@ with canvas.column(roles="admin", gap=12, origin=(40, 40)):   # admins: a stack
 
 **Auto-height** — `h="auto"` fits a panel's height to its rendered content
 (Custom-/React-based panels: `markdown`, `custom`, `table`, `image`, `label`,
-controls). Also a live property:
+controls). React-based panels (`react`/`table`/`label`) auto-height by default —
+pass a numeric `h` to pin one. Also a live property:
 
 ```python
 notes = canvas.markdown("# Heading\n\nas tall as this text", h="auto")
@@ -887,7 +891,7 @@ canvas.serve()
 
 Being bidirectional, the same loop can read controls TensorBoard can't offer (a
 pause button, a live LR slider). `live_plot`/`histogram` need `plotly`. See
-[`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py).
+[`examples/train_dashboard.py`](examples/train_dashboard.py).
 
 ## Packaging a desktop app (`bake`)
 
@@ -1017,7 +1021,7 @@ python examples/chat_room.py              # shared chat with editable names
 python examples/moving_widget.py          # per-viewer cursor-following emoji
 python examples/public_tunnel.py          # share worldwide via HTTPS tunnel
 python examples/remote_control.py         # ⚠ stream + control this PC remotely (Windows)
-python training_dashboard/train_dashboard.py   # TensorBoard-style training tracker
+python examples/train_dashboard.py             # TensorBoard-style training tracker
 ```
 
 Notebooks: `examples/notebook_dynamic.ipynb` (live add/move/remove),

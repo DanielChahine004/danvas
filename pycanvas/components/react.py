@@ -62,8 +62,8 @@ class React(_EventRouter, BaseComponent):
     default_w = 380
     default_h = 320
 
-    def __init__(self, source=None, path=None, jsx=None, css=None, name="react",
-                 label=None, w=None, h=None, props=None, scope=None,
+    def __init__(self, source=None, path=None, jsx=None, css=None, css_path=None,
+                 name="react", label=None, w=None, h=None, props=None, scope=None,
                  event_key="event", queue="fifo"):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
@@ -77,6 +77,13 @@ class React(_EventRouter, BaseComponent):
         if source is not None and jsx is not None:
             raise ValueError("pass either source= (a full Component) or jsx= "
                              "(markup to be wrapped), not both")
+        # ``css_path`` is the css= twin of ``path=``: load the stylesheet from a
+        # file so a panel can keep both halves in sibling files (see canvas.react).
+        if css is not None and css_path is not None:
+            raise ValueError("pass either css= or css_path=, not both")
+        if css_path is not None:
+            with open(css_path, "r", encoding="utf-8") as f:
+                css = f.read()
         # CSS handling: with jsx= the styles are composed into the wrapper; with
         # source= they ride as a `css` prop that ReactHost renders into a <style>
         # ahead of the component — so a full component can keep its styles in a
@@ -114,12 +121,13 @@ class React(_EventRouter, BaseComponent):
         # event value -> the single handler whose *return value* is the reply.
         # Unlike ``_routes`` exactly one handler answers, so it's not a list.
         self._request_routes = {}
-        # h="auto"/w="auto": fit the panel height/width to the rendered React
-        # content. Unlike Custom (which measures inside its iframe), a native
-        # React panel is measured by ReactHost, which reports the content size
-        # back to resize the shape. The flags ride along in register_props as
-        # ``autoH``/``autoW``.
-        self._auto_h = False
+        # Auto-height is the default: a React panel fits its rendered content
+        # unless the caller pins a numeric height (``h is None`` → auto-fit; a
+        # number → fixed). Width stays fixed by default (opt in with w="auto").
+        # Unlike Custom (which measures inside its iframe), a native React panel is
+        # measured by ReactHost, which reports the content size back to resize the
+        # shape; the flags ride along in register_props as ``autoH``/``autoW``.
+        self._auto_h = h is None
         self._auto_w = False
 
     def _compose_props(self, data):

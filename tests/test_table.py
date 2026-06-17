@@ -93,7 +93,12 @@ def test_table_auto_height_sets_the_react_flag():
     assert t.register_props()["autoH"] is True
 
 
-def test_table_default_is_not_auto_height():
-    t = pycanvas.Table([{"x": 1}])           # no h="auto"
-    assert t._auto_h is False
-    assert t.register_props()["autoH"] is False
+def test_table_defaults_to_auto_height():
+    # React-based panels (Table included) fit their content by default; pinning a
+    # numeric height turns auto-height off.
+    t = pycanvas.Table([{"x": 1}])           # no height given → auto-fit
+    assert t._auto_h is True
+    assert t.register_props()["autoH"] is True
+    pinned = pycanvas.Table([{"x": 1}], h=300)
+    assert pinned._auto_h is False
+    assert pinned.register_props()["autoH"] is False

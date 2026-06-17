@@ -28,10 +28,10 @@ examples/uploads/
 
 # Live state written by the hackathon example (catalogue, teams, orders,
 # announcement board) — runtime data, not source.
-examples/hackathon_inventory.csv
-examples/hackathon_teams.csv
-examples/hackathon_orders.csv
-examples/hackathon_announcement.md
+examples/hackathon/hackathon_inventory.csv
+examples/hackathon/hackathon_teams.csv
+examples/hackathon/hackathon_orders.csv
+examples/hackathon/hackathon_announcement.md
 
 # Editor / OS / local agent state
 .claude/

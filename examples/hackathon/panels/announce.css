@@ -1,0 +1,33 @@
+.pc-ann{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:14px;
+        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3)}
+.pc-ann .hd{font-size:16px;font-weight:700;margin-bottom:10px;
+            display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pc-ann .st{font-size:11px;font-weight:700;color:#4ade80}
+.pc-ann .st.dirty{color:#fbbf24}
+.pc-ann .ta{width:100%;min-height:90px;flex:0 0 auto;resize:vertical;box-sizing:border-box;
+            padding:9px 11px;border-radius:8px;border:1.5px solid var(--pc-border,#30363d);
+            background:var(--pc-input-bg,#1b2230);color:inherit;outline:none;
+            font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-ann .ta:focus{border-color:#3b82f6}
+.pc-ann .row{display:flex;align-items:center;gap:8px;margin:8px 0}
+.pc-ann .btn{padding:7px 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;
+             border:none;background:#2563eb;color:#fff;transition:background .12s}
+.pc-ann .btn:not(:disabled):hover{background:#1d4ed8}
+.pc-ann .btn:disabled{opacity:.45;cursor:not-allowed}
+.pc-ann .btn.ghost{background:transparent;border:1.5px solid var(--pc-border,#30363d);color:#94a3b8}
+.pc-ann .btn.ghost:not(:disabled):hover{border-color:#3b82f6;color:var(--pc-text,#e6edf3)}
+.pc-ann .hint{font-size:11px;color:#64748b;margin-left:auto;text-align:right}
+.pc-ann .prev-hd{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+                 color:#64748b;margin:4px 2px 6px}
+.pc-ann .prev{flex:1;overflow:auto;border:1px solid var(--pc-border,#30363d);border-radius:8px;
+              padding:10px 12px;font-size:13px;line-height:1.5;background:rgba(255,255,255,.02)}
+.pc-ann .prev h1,.pc-ann .prev h2,.pc-ann .prev h3{margin:.4em 0 .3em;line-height:1.25}
+.pc-ann .prev h1{font-size:1.5em}.pc-ann .prev h2{font-size:1.3em}.pc-ann .prev h3{font-size:1.1em}
+.pc-ann .prev p{margin:.4em 0}.pc-ann .prev ul,.pc-ann .prev ol{margin:.4em 0;padding-left:1.4em}
+.pc-ann .prev a{color:#60a5fa}
+.pc-ann .prev code{background:rgba(255,255,255,.08);border-radius:4px;padding:1px 4px;
+                   font:12px ui-monospace,monospace}
+.pc-ann .prev pre{background:rgba(255,255,255,.06);border-radius:6px;padding:8px;overflow:auto}
+.pc-ann .prev pre code{background:none;padding:0}
+.pc-ann .prev blockquote{margin:.4em 0;padding:2px 10px;border-left:3px solid #3b82f6;color:#94a3b8}
+.pc-ann .prev hr{border:none;border-top:1px solid var(--pc-border,#30363d);margin:.6em 0}

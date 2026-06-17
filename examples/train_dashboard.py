@@ -19,7 +19,7 @@ handle, and push to it from your loop:
 Needs ``plotly`` (live plots + histogram) and ``matplotlib`` (the sample grid):
 
     pip install plotly matplotlib
-    python training_dashboard/train_dashboard.py
+    python examples/train_dashboard.py
 """
 
 import math

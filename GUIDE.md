@@ -209,7 +209,7 @@ flow: **in** (user → Python), **out** (Python → user), or **both**.
 > distribution (`weights.add(layer.weight, step=epoch)`), and `canvas.table(hparams)`
 > for the run config (a flat dict renders as a key/value table). `canvas.grid` /
 > `column` / `row` (see §6) arrange them. Full board:
-> [`training_dashboard/train_dashboard.py`](training_dashboard/train_dashboard.py).
+> [`examples/train_dashboard.py`](examples/train_dashboard.py).
 
 > **Matplotlib figures don't leak.** `Image` releases a figure from pyplot's
 > global registry after rasterizing it, so `img.update(fig)` with a fresh

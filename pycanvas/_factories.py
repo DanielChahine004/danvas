@@ -148,17 +148,18 @@ class _FactoryMixin:
         return self._make(FileBrowser, name=name, root=root, label=label,
                           pattern=pattern, show_hidden=show_hidden, **place)
 
-    def react(self, source=None, path=None, jsx=None, css=None, name="react",
-              label=None, props=None, scope=None, **place: Unpack[Place]):
+    def react(self, source=None, path=None, jsx=None, css=None, css_path=None,
+              name="react", label=None, props=None, scope=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.React` panel — the workhorse for custom UI.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
         file with ``path=``); alternatively pass just ``jsx`` markup plus optional
         ``css`` and the Component wrapper is added under the hood. ``css`` also
         works with ``source=`` (it rides as a ``<style>`` the host renders), so a
-        full component can keep its styles in a separate string. Use
-        :meth:`React.from_uiverse` to convert a uiverse.io styled-components
-        snippet. ``props`` is the initial props dict; ``scope`` is third-party
+        full component can keep its styles in a separate string — or load it from a
+        file with ``css_path=`` (the ``css`` twin of ``path=``), so a panel keeps
+        both halves in sibling files. Use :meth:`React.from_uiverse` to convert a
+        uiverse.io styled-components snippet. ``props`` is the initial props dict; ``scope`` is third-party
         library names (e.g. ``["d3"]``) loaded as ESM and exposed as ``libs``.
 
         Placement, visibility (``roles`` / ``lock_for``), the lock/chrome flags,
@@ -166,8 +167,8 @@ class _FactoryMixin:
         :class:`Place` keys your editor now autocompletes).
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
-                          name=name, label=label, props=props, scope=scope,
-                          **place)
+                          css_path=css_path, name=name, label=label, props=props,
+                          scope=scope, **place)
 
     def markdown(self, text="", name="markdown", label=None, **place: Unpack[Place]):
         """Insert a :class:`~pycanvas.Markdown` panel. See :meth:`insert` for ``place``."""

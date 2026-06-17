@@ -175,6 +175,7 @@ class Canvas:
         path: str | None = ...,
         jsx: str | None = ...,
         css: str | None = ...,
+        css_path: str | None = ...,
         name: str = ...,
         label: str | None = ...,
         props: dict[str, Any] | None = ...,

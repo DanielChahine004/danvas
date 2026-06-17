@@ -1,0 +1,35 @@
+.pc-ord{display:flex;flex-direction:column;height:100%;box-sizing:border-box;
+        font-family:system-ui,sans-serif;color:var(--pc-text,#e6edf3);padding:14px}
+.pc-ord .hd{font-size:16px;font-weight:700;margin-bottom:12px}
+.pc-ord .bar{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.pc-ord .filter{flex:1;min-width:140px;padding:7px 10px;border-radius:7px;font-size:13px;
+                box-sizing:border-box;border:1.5px solid var(--pc-border,#30363d);
+                background:var(--pc-input-bg,#1b2230);color:inherit;outline:none}
+.pc-ord .filter:focus{border-color:#3b82f6}
+.pc-ord .chip{padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;
+              border:1.5px solid var(--pc-border,#30363d);background:transparent;color:#94a3b8}
+.pc-ord .chip:hover{border-color:#3b82f6;color:var(--pc-text,#e6edf3)}
+.pc-ord .chip.on{background:#2563eb;border-color:#2563eb;color:#fff}
+.pc-ord .scroll{flex:1;overflow:auto;border:1px solid var(--pc-border,#30363d);border-radius:8px}
+.pc-ord table{border-collapse:collapse;width:100%;font-size:13px}
+.pc-ord th,.pc-ord td{padding:8px 10px;text-align:left;white-space:nowrap;
+                      border-bottom:1px solid var(--pc-border,#30363d)}
+.pc-ord thead th{position:sticky;top:0;background:var(--pc-input-bg,#1b2230);z-index:1;
+                 font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+                 color:#94a3b8;cursor:pointer;user-select:none}
+.pc-ord thead th.acth{cursor:default;text-align:right}
+.pc-ord thead th:hover{color:var(--pc-text,#e6edf3)}
+.pc-ord .arr{color:#3b82f6}
+.pc-ord tbody tr:hover td{background:rgba(255,255,255,.03)}
+.pc-ord td.rt{text-align:right;font-variant-numeric:tabular-nums}
+.pc-ord .badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+               padding:2px 7px;border-radius:999px}
+.pc-ord td.acts{text-align:right;white-space:nowrap}
+.pc-ord .act{width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;margin-left:4px;
+             font-size:13px;line-height:1;background:rgba(255,255,255,.06);color:inherit}
+.pc-ord .act.ok:hover{background:rgba(20,83,45,.5);color:#4ade80}
+.pc-ord .act.no:hover{background:rgba(127,29,29,.5);color:#f87171}
+.pc-ord .act.ed:hover{background:rgba(59,130,246,.4);color:#fff}
+.pc-ord .qedit{width:52px;padding:2px 5px;border-radius:5px;font:13px ui-monospace,monospace;
+               border:1.5px solid #3b82f6;background:var(--pc-input-bg,#1b2230);color:inherit;outline:none}
+.pc-ord .empty{color:#64748b;text-align:center;padding:24px}

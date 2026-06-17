@@ -1,0 +1,11 @@
+/* stock-level chip — shared by the inventory board and each team's catalogue */
+.chip{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.chip.in {background:rgba(20,83,45,.35);color:#4ade80;border:1px solid rgba(74,222,128,.2)}
+.chip.low{background:rgba(120,53,15,.35);color:#fbbf24;border:1px solid rgba(251,191,36,.2)}
+.chip.out{background:rgba(127,29,29,.35);color:#f87171;border:1px solid rgba(248,113,113,.2)}
+/* order-status colours — shared by a team's order list and the admin Orders
+   table; each panel keeps its own pill base (.ostat / .badge). */
+.st-pend{background:rgba(59,130,246,.2);color:#60a5fa}
+.st-ok{background:rgba(20,83,45,.35);color:#4ade80}
+.st-no{background:rgba(127,29,29,.35);color:#f87171}
+.st-ret{background:rgba(100,116,139,.25);color:#94a3b8}
