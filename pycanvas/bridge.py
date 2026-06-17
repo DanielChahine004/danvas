@@ -827,11 +827,17 @@ class Bridge:
                 )
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
-            # canonical record set and echo it to the other browsers so every
-            # open view converges (re-applying its own diff is idempotent).
+            # canonical record set and relay it to the *other* browsers so every
+            # open view converges. Exclude the sender (``exclude=ws``): it already
+            # applied the edit locally, and echoing the diff back is harmful while
+            # a record is being actively edited — a text shape mid-typing sends a
+            # diff per keystroke, and over network latency the echo of an earlier
+            # keystroke arrives after newer ones and `applyDiff` reverts them (the
+            # cursor jumps / characters vanish). Instant on localhost, so it only
+            # bit non-host devices. (Replay to fresh clients still uses _drawings.)
             diff = msg.get("diff") or {}
             self._apply_draw(diff)
-            self.broadcast({"type": "draw", "diff": diff})
+            self.broadcast({"type": "draw", "diff": diff}, exclude=ws)
         elif kind == "request":
             # A panel's ``canvas.request(data)`` — the awaitable twin of input.
             # Answer it off the loop (a slow handler can't stall rendering) and
@@ -900,19 +906,26 @@ class Bridge:
         self.broadcast(msg)
 
     def _dispatch_layout(self, comp, msg, ws=None):
-        """Apply a user move/resize (off the loop) and echo the new geometry.
+        """Apply a user move/resize (off the loop) and relay the new geometry.
 
-        Echoes to every client (a second browser, or a merge host) as an
+        Relays to the *other* clients (a second browser, or a merge host) as an
         ``update`` -- the server->browser form the frontend applies. The fields
         already carry the wire units the frontend expects (canvas x/y, radian
         rotation). The mover's viewer identity is threaded through so an
         ``on_layout`` handler with a second parameter learns who rearranged it.
+
+        ``exclude=ws`` keeps the mover from receiving its own geometry back: it
+        already applied the gesture locally, so echoing it is redundant traffic
+        and — the same hazard that bit free-form draw sync — a latent stale-
+        overwrite were these ever sent mid-gesture (they're debounced to settle
+        today, so it isn't a live bug, but excluding the sender is the right shape).
         """
         comp._apply_remote_layout(msg, self._viewers.get(ws, {}))
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
                 if msg.get(k) is not None}
         if geom:
-            self.broadcast({"type": "update", "id": comp.id, "payload": geom})
+            self.broadcast({"type": "update", "id": comp.id, "payload": geom},
+                           exclude=ws)
 
     async def _send(self, ws, msg):
         """Serialize and send one frame to a single socket.
