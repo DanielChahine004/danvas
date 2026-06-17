@@ -715,23 +715,29 @@ class Bridge:
     def resolve_viewer(self, viewer_id, role=None):
         """Build the uploader identity dict for an upload handler.
 
-        ``role`` is the server-trusted access level from the HTTP auth session —
-        always present (``None`` when no passwords are set) and safe to gate on.
-        ``viewer_id`` is the browser's self-reported roster id; when it matches a
-        *currently connected* viewer, the live ``id``/``name``/``color`` are
-        merged in for attribution. A stale or forged id simply doesn't resolve
-        (you still get ``role``), and because name/colour are read from the server
-        roster — never from the client — the only thing a client can claim is the
-        id of another viewer who is actually online. Don't trust name/id for
-        authorization; use ``role`` for that.
+        Returns the same shape as the viewer dict handed to in-canvas handlers
+        (``id``/``name``/``color``/``cursor``/``role`` — every key always
+        present), so handler code can read it uniformly. ``role`` is the
+        server-trusted access level from the HTTP auth session — always
+        meaningful (``None`` when no passwords are set) and safe to gate on. The
+        rest are attribution-only: an upload arrives over HTTP carrying the
+        browser's self-reported roster id, so when it matches a *currently
+        connected* viewer that viewer's live ``id``/``name``/``color``/``cursor``
+        are merged in; a stale or forged id (or an uploader who already
+        disconnected) simply leaves them ``None``. Because name/colour are read
+        from the server roster — never the client — the only thing a client can
+        claim is the id of a viewer who is actually online. Don't trust
+        ``id``/``name``/``color`` for authorization; use ``role``.
         """
-        info = {"role": role}
+        info = {"id": None, "name": None, "color": None,
+                "cursor": None, "role": role}
         if viewer_id:
             for v in list(self._viewers.values()):
                 if v.get("id") == viewer_id:
                     info["id"] = v.get("id")
                     info["name"] = v.get("name")
                     info["color"] = v.get("color")
+                    info["cursor"] = v.get("cursor")
                     break
         return info
 

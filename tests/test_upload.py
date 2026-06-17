@@ -182,18 +182,23 @@ def test_resolve_viewer_merges_roster_identity_with_trusted_role():
     bridge = Bridge()
     # Stand in for a live connection on the roster.
     bridge._viewers["ws-sentinel"] = {
-        "id": "abc123", "name": "Fox", "color": "#ef4444", "role": "viewer",
+        "id": "abc123", "name": "Fox", "color": "#ef4444",
+        "cursor": {"x": 1, "y": 2}, "role": "viewer",
     }
-    # role is the server-trusted value; id/name/color come from the roster.
+    # role is the server-trusted value; id/name/color/cursor come from the roster.
     info = bridge.resolve_viewer("abc123", role="manager")
     assert info == {"role": "manager", "id": "abc123", "name": "Fox",
-                    "color": "#ef4444"}
+                    "color": "#ef4444", "cursor": {"x": 1, "y": 2}}
 
 
-def test_resolve_viewer_unknown_id_falls_back_to_role_only():
+def test_resolve_viewer_unknown_id_keeps_uniform_shape():
+    # A stale/forged id (or a disconnected uploader) still returns the full
+    # shape so handlers read it uniformly -- only role is meaningful, the rest None.
     bridge = Bridge()
-    assert bridge.resolve_viewer("ghost", role="manager") == {"role": "manager"}
-    assert bridge.resolve_viewer("", role=None) == {"role": None}
+    assert bridge.resolve_viewer("ghost", role="manager") == {
+        "id": None, "name": None, "color": None, "cursor": None, "role": "manager"}
+    assert bridge.resolve_viewer("", role=None) == {
+        "id": None, "name": None, "color": None, "cursor": None, "role": None}
 
 
 def test_http_upload_attributes_to_a_connected_viewer():

@@ -346,7 +346,11 @@ cursors):
 
 Gate permissions on `role` only; `id`/`name`/`color`/`cursor` are reported by the
 browser, so they're great for attribution and per-viewer targeting but not for
-authorization.
+authorization. Every key is always present, but on an **upload** the attribution
+fields (`id`/`name`/`color`/`cursor`) are `None` unless the uploader is still
+connected — the file arrives over HTTP and is matched to the live roster by id,
+so a disconnected or unrecognised uploader leaves them `None` (only `role`, from
+the auth session, is guaranteed). Read them with `.get(...)` and a fallback.
 
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python
@@ -520,13 +524,16 @@ big = canvas.upload("files", dest="uploads/", multiple=True)   # streamed to dis
 ```python
 @up.on_upload
 def got(file, viewer):
-    # {"role": "manager", "id": "a1b2c3d4", "name": "Fox", "color": "#ef4444"}
-    file.save(f"uploads/{viewer.get('role') or viewer['name']}/")
+    # {"role": "manager", "id": "a1b2c3d4", "name": "Fox", "color": "#ef4444",
+    #  "cursor": None}  — id/name/color/cursor are None if the uploader has left
+    file.save(f"uploads/{viewer.get('role') or viewer.get('name') or 'anon'}/")
 ```
 
 It's the same [`viewer` dict](#the-viewer-dict) as everywhere else: gate
 permissions on the server-trusted `role`; `id`/`name`/`color` are client-reported
-(great for attribution/per-user folders, not for authorization).
+(great for attribution/per-user folders, not for authorization) and are `None`
+when the uploader isn't a currently-connected viewer — so read them with `.get`
+and a fallback, as above.
 
 **Audio** — `AudioFeed` streams PCM played back-to-back via Web Audio. Capture
 needs `[audio]`; playback needs nothing. Each viewer clicks **Enable audio**
