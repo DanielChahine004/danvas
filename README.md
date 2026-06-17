@@ -37,36 +37,6 @@ This README follows those five steps — [1. The canvas](#1-the-canvas),
 [5. Serving & sharing](#5-serving--sharing) — then
 [Beyond the five steps](#beyond-the-five-steps) for the rest.
 
-### Roles: one rule for everything per-viewer
-
-Pass `serve(passwords={role: pw})` and each viewer logs in as a **role**. Every
-viewer then renders the same canvas, but you can layer **per-viewer overrides** on
-top of the shared definition. There's exactly one rule:
-
-> **Precedence is `shared < role < client`.** Omit the scope and you set the
-> shared value (everyone); pass `roles=` and/or `client_id=` and you override it
-> for just those viewers.
-
-The same `roles=` / `client_id=` scoping works across four axes:
-
-| Axis | shared (everyone) | scoped to viewers |
-|---|---|---|
-| **Exists?** (visibility) | `canvas.react(..., roles=[])` = all | `roles=["admin"]` on the factory; `add_role`/`remove_role` live |
-| **Content** (props/state) | `panel.update(**props)` | `panel.update(roles=…, client_id=…, **props)` |
-| **Layout** (x/y/w/h, rotation, locks) | factory `x/y/w/h`, or `panel.set_layout(...)` | `panel.set_layout(roles=…, client_id=…, ...)` |
-| **View** (camera, chrome, `read_only`, `ui`) | `canvas.set_view(...)` | `canvas.set_view(roles=…, client_id=…, ...)` |
-
-Scoped overrides **persist and replay on reconnect**, so each viewer keeps their
-own slice — a per-team budget, an admin-only toolbar, a kiosk layout. When a user
-drags or resizes a panel, the change writes back to whichever layer their layout
-came from (their own overlay if any, else the shared base), so hand-arranged
-layouts stick. `lock_for=[roles]` is shorthand for "visible but not interactive
-for these roles."
-
-Roles can even be created **after** `serve()` (the `passwords=` dict is read live
-on every login). Full walkthrough — passwords, `lock_for`, runtime roles — in
-[Serving & sharing](#5-serving--sharing).
-
 ## Install
 
 ```bash
@@ -868,7 +838,33 @@ canvas.serve(
 It's shown as plain text (HTML-escaped, newlines kept) — so don't put a secret
 password in it; everyone reaching the login page can read it.
 
-**Roles** — serve different views to different users from the same port. Use
+### Roles: one rule for everything per-viewer
+
+Pass `serve(passwords={role: pw})` and each viewer logs in as a **role**. Every
+viewer then renders the same canvas, but you can layer **per-viewer overrides** on
+top of the shared definition. There's exactly one rule:
+
+> **Precedence is `shared < role < client`.** Omit the scope and you set the
+> shared value (everyone); pass `roles=` and/or `client_id=` and you override it
+> for just those viewers.
+
+The same `roles=` / `client_id=` scoping works across four axes:
+
+| Axis | shared (everyone) | scoped to viewers |
+|---|---|---|
+| **Exists?** (visibility) | `canvas.react(..., roles=[])` = all | `roles=["admin"]` on the factory; `add_role`/`remove_role` live |
+| **Content** (props/state) | `panel.update(**props)` | `panel.update(roles=…, client_id=…, **props)` |
+| **Layout** (x/y/w/h, rotation, locks) | factory `x/y/w/h`, or `panel.set_layout(...)` | `panel.set_layout(roles=…, client_id=…, ...)` |
+| **View** (camera, chrome, `read_only`, `ui`) | `canvas.set_view(...)` | `canvas.set_view(roles=…, client_id=…, ...)` |
+
+Scoped overrides **persist and replay on reconnect**, so each viewer keeps their
+own slice — a per-team budget, an admin-only toolbar, a kiosk layout. When a user
+drags or resizes a panel, the change writes back to whichever layer their layout
+came from (their own overlay if any, else the shared base), so hand-arranged
+layouts stick. `lock_for=[roles]` is shorthand for "visible but not interactive
+for these roles."
+
+In practice — serve different views to different users from the same port. Use
 `passwords=` (a `{role: password}` dict) instead of `password=`; mark panels
 with `roles=` to restrict visibility; use `lock_for=` to show a panel but make
 it non-interactive for certain roles; receive `viewer` as an optional second
