@@ -1407,17 +1407,23 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # loop (main thread), so the non-blocking branch below is skipped.
         use_desktop = bool(getattr(sys, "frozen", False)) if desktop is None \
             else bool(desktop)
+        # permessage-deflate is worth its CPU only on a bandwidth-constrained
+        # public tunnel, not a fast local/LAN link (see server._ws_opts). Keyed
+        # on `tunnel`, not `own_tunnel`: a hot-reload worker serves *through* the
+        # monitor's tunnel, so it's still a tunneled (slow-link) bind.
+        compress = tunnel
         if use_desktop:
             self._serve_desktop(port, host, own_tunnel, tunnel_provider,
                                 window_title, window_size, password,
-                                passwords=passwords)
+                                passwords=passwords, compress=compress)
             return self
         if not block:
             self._serve_background(port, open_browser, host, password,
-                                   passwords, own_tunnel, tunnel_provider, wait)
+                                   passwords, own_tunnel, tunnel_provider, wait,
+                                   compress=compress)
             return self
         self._serve_blocking(port, open_browser, host, password, passwords,
-                             own_tunnel, tunnel_provider)
+                             own_tunnel, tunnel_provider, compress=compress)
 
     def _resolve_exposure(self, host, tunnel, ui_inspector, cursors):
         """Resolve how far this serve() reaches, plus the telemetry defaults.
@@ -1491,7 +1497,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return _ReloadHandoff(False, None)
 
     def _serve_background(self, port, open_browser, host, password, passwords,
-                          own_tunnel, tunnel_provider, wait):
+                          own_tunnel, tunnel_provider, wait, compress=False):
         """Start the server in a daemon thread and return (serve(block=False)).
 
         ``wait`` blocks briefly until the event loop is ready so the first
@@ -1499,7 +1505,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """
         self._server = server.run_background(
             self._bridge, port=port, open_browser=open_browser, host=host,
-            password=password, passwords=passwords,
+            password=password, passwords=passwords, compress=compress,
         )
         if wait:
             self._wait_until_ready()
@@ -1508,20 +1514,21 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             self._start_tunnel(port, tunnel_provider)
 
     def _serve_blocking(self, port, open_browser, host, password, passwords,
-                        own_tunnel, tunnel_provider):
+                        own_tunnel, tunnel_provider, compress=False):
         """Run the server on this thread until shutdown (serve(block=True))."""
         self._serving = True
         if own_tunnel:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host, password=password, passwords=passwords)
+                       host=host, password=password, passwords=passwords,
+                       compress=compress)
         finally:
             self._persist_flush()  # capture final state (no-op when persist off)
             self._stop_tunnel()
 
     def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
-                       password=None, passwords=None):
+                       password=None, passwords=None, compress=False):
         """Serve in the background and show the canvas in a native window.
 
         Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
@@ -1540,7 +1547,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 self._start_tunnel(port, tunnel_provider)
             try:
                 server.run(self._bridge, port=port, open_browser=True, host=host,
-                           password=password, passwords=passwords)
+                           password=password, passwords=passwords,
+                           compress=compress)
             finally:
                 self._stop_tunnel()
             return
@@ -1549,7 +1557,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # window closes; tear the server down afterwards.
         self._server = server.run_background(
             self._bridge, port=port, open_browser=False, host=host,
-            password=password, passwords=passwords,
+            password=password, passwords=passwords, compress=compress,
         )
         self._wait_until_ready()
         self._serving = True

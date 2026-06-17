@@ -54,6 +54,20 @@ DIST_DIR = _dist_dir()
 _WS_OPTS = {"ws_ping_interval": None, "ws_ping_timeout": None}
 
 
+def _ws_opts(compress):
+    """uvicorn WebSocket options for this bind.
+
+    ``compress`` toggles permessage-deflate. It's off by default and on only for
+    a tunnel, because the trade-off flips with the link: deflate squeezes
+    repetitive *text* frames (plots/tables) well but barely dents already-
+    compressed *binary* media (JPEG/PCM ~3%), while costing real CPU per frame on
+    the event-loop thread (~1 ms per video frame, per viewer). On a fast
+    local/LAN link the bytes saved aren't worth that CPU (and it directly eats
+    into the broadcast fan-out budget); on a bandwidth-constrained public tunnel
+    they are. uvicorn exposes a single global switch, so we pick per bind."""
+    return {**_WS_OPTS, "ws_per_message_deflate": bool(compress)}
+
+
 def _lan_ip():
     """Best-effort LAN IP of this machine — the address other devices dial.
 
@@ -505,18 +519,18 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
 
 
 def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
-        passwords=None):
+        passwords=None, compress=False):
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning",
-                            **_WS_OPTS)
+                            **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
     server.run()  # blocks until Ctrl+C / shutdown
 
 
 def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
-                   password=None, passwords=None):
+                   password=None, passwords=None, compress=False):
     """Start the server in a daemon thread and return immediately.
 
     Returns the uvicorn ``Server`` so the caller can stop it later via
@@ -526,7 +540,7 @@ def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning",
-                            **_WS_OPTS)
+                            **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
     thread = threading.Thread(target=server.run, daemon=True)

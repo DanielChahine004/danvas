@@ -350,7 +350,8 @@ class Merge:
         """
         if not block:
             self._server = server.run_background(
-                self._bridge, port=port, open_browser=open_browser, host=host
+                self._bridge, port=port, open_browser=open_browser, host=host,
+                compress=tunnel,
             )
             if tunnel:
                 self._start_tunnel(port, tunnel_provider)
@@ -359,7 +360,7 @@ class Merge:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host)
+                       host=host, compress=tunnel)
         finally:
             self._stop_tunnel()
 
