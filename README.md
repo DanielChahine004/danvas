@@ -225,6 +225,12 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.stop()` / `canvas.wait()` | Shut down / park the main thread until shutdown |
 | | `canvas.bake(name=)` | Build a standalone desktop executable |
 
+Every `on_x` / `off_x` pair is just register / unregister: `on_connect(fn)`
+starts calling `fn`, `off_connect(fn)` stops calling that same `fn` (pass back
+the function you registered). You normally only need `on_x` — register once at
+startup and leave it; `off_x` is there for the rarer case of turning a handler
+off partway through.
+
 Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`,
 `@chat.on_message`) live on the components, not the canvas — see
 [Receiving input](#receiving-input); most accept `threaded=True`.
