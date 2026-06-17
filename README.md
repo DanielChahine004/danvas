@@ -194,6 +194,41 @@ canvas.insert(s, x=80, y=80)
 Or skip choosing a component: `canvas.show(value)` auto-renders any value as the
 best panel (see [Show anything](#show-anything)).
 
+## The canvas object
+
+Everything reachable from a `Canvas`, grouped by what it's for:
+
+| Category | Member | What it does |
+|---|---|---|
+| **Make panels** | `canvas.slider/button/toggle/label/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/repl/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
+| | `canvas.show(value, **place)` | Auto-pick the best panel for any value |
+| | `canvas.insert(component, **place)` | Add a hand-built component; returns it |
+| | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows |
+| | `canvas.connect(a, b, text=…)` / `canvas.disconnect(arrow)` | Draw / remove an arrow bound between two panels |
+| **Arrange** | `with canvas.grid(...) / column(...) / row(...):` | Auto-layout containers; panels inside take the next slot |
+| | `canvas.set_view(zoom=…, locked=…, ui=…, …, roles=, client_id=)` | Camera & chrome, scriptable and per-viewer |
+| **Reach panels** | `canvas[name]` / `canvas.<name>` | Fetch a panel (or arrow) by its name |
+| | `canvas.components` / `canvas.arrows` | Lists of what's on the canvas |
+| **Shared React** | `canvas.define(name, source/path)` | Register a JSX component usable in every `react()` panel |
+| | `canvas.style(css)` | Inject a global stylesheet for native panels |
+| **Viewers** | `canvas.viewers` | Live list of connected viewers (`len(...)` = count); each is the [viewer dict](#the-viewer-dict) |
+| | `canvas.on_connect(fn)` / `off_connect(fn)` | Run `fn(viewer)` when a viewer joins (e.g. adapt to mobile) |
+| | `canvas.on_disconnect(fn)` / `off_disconnect(fn)` | Run `fn(viewer)` when a viewer leaves (cleanup) |
+| | `canvas.on_cursor(fn)` / `off_cursor(fn)` | Stream viewer pointer moves (`serve(cursors=True)`) |
+| | `canvas.on_frame(fn)` / `off_frame(fn)` | Observe every WebSocket frame (debugging) |
+| **Background** | `canvas.background(fn)` | Register a producer loop, started on its own thread at `serve()` (worker-only) |
+| **REPL / notebook** | `canvas.enable_repl(namespace)` | Bind the namespace on-canvas `Repl` cells run against |
+| | `canvas.capture_cells(...)` / `stop_capturing_cells()` | Mirror notebook cell outputs onto the canvas |
+| **Persist** | `canvas.save(path)` / `canvas.load(source)` | Manual snapshot of formation + drawings (auto twin: `serve(persist=…)`) |
+| **Serve / run** | `canvas.serve(port=, host=, password=, tunnel=, persist=, hot_reload=, desktop=, view=, …)` | Start the server (blocks unless `block=False`) |
+| | `canvas.wait_for_client(timeout=)` | Block until a browser connects |
+| | `canvas.stop()` / `canvas.wait()` | Shut down / park the main thread until shutdown |
+| | `canvas.bake(name=)` | Build a standalone desktop executable |
+
+Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`,
+`@chat.on_message`) live on the components, not the canvas — see
+[Receiving input](#receiving-input); most accept `threaded=True`.
+
 ## The component catalogue
 
 | Component | Direction | API |
