@@ -77,6 +77,8 @@ def handle(value):
 canvas.serve(port=8000)   # opens the browser, blocks
 ```
 
+![The hello-world canvas in the browser: a SERVO_1 slider whose value live-updates a STATUS label reading "servo at 113"](docs/hello_world.png)
+
 The loop is always: build panels → register callbacks → `serve()`. Python owns
 all state; the browser renders it and reports user actions.
 
@@ -85,8 +87,9 @@ ordered worker thread, separate from the event loop — so a blocking handler
 (`time.sleep`, an HTTP call, a slow compute) never freezes rendering or live
 `update()` broadcasts, and handlers run **in order**. That one thread is shared
 across panels, though, so a genuinely slow handler delays other panels' handlers
-and the echo of other users' actions until it returns. For slow work, launch it
-on your own `threading.Thread` so the worker thread stays free.
+and the echo of other users' actions until it returns. For slow work, mark the
+handler [`threaded=True`](#receiving-input) so it runs on its own thread and the
+shared worker stays free.
 
 # 1. The canvas
 
