@@ -486,6 +486,7 @@ function LivePlotView({ shape }) {
           p.layout || {},
           { responsive: true, displayModeBar: false },
         )
+        adapt()
         return
       }
       if (pendingExt) {
@@ -504,18 +505,57 @@ function LivePlotView({ shape }) {
       }
       if (raf == null) raf = requestAnimationFrame(flush)
     }
+    // Adapt Plotly's fixed-pixel chrome (margins / legend / font) to the panel's
+    // real size, so a small panel shows a clean plot instead of being swamped by
+    // furniture. Runs after a full (re)render and on every container resize; the
+    // normal-sized case keeps the usual layout, so only genuinely small panels
+    // (e.g. squeezed onto a phone) drop the legend and tighten margins.
+    const adapt = () => {
+      if (!node) return
+      const w = node.clientWidth || 0
+      const h = node.clientHeight || 0
+      if (!w || !h) return
+      const small = w < 340 || h < 200
+      Plotly.relayout(node, {
+        margin: small
+          ? { l: 30, r: 10, t: 10, b: 24 }
+          : { l: 40, r: 15, t: 15, b: 30 },
+        showlegend: !small,
+        'font.size': small ? 9 : 12,
+      }).catch(() => {})
+    }
+
     registerLive(id, render)
+
+    // Keep Plotly synced to its container in *all* cases. Plotly's own
+    // responsive: only watches the window, so a container that resizes from a
+    // layout/fit/zoom-independent reflow — common on mobile — would otherwise
+    // leave the chart drawn at a stale size and looking scaled wrong. A
+    // ResizeObserver (debounced to one frame) catches every container size
+    // change, including the initial settle and Python-driven resizes.
+    let resizeRaf = null
+    let ro = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        if (resizeRaf != null) return
+        resizeRaf = requestAnimationFrame(() => {
+          resizeRaf = null
+          if (!node) return
+          Plotly.Plots.resize(node)
+          adapt()
+        })
+      })
+      ro.observe(node)
+    }
+
     return () => {
       unregisterLive(id)
       if (raf != null) cancelAnimationFrame(raf)
+      if (resizeRaf != null) cancelAnimationFrame(resizeRaf)
+      if (ro) ro.disconnect()
       if (node) Plotly.purge(node)
     }
   }, [id])
-
-  // Keep the chart sized to the (resizable) shape.
-  useEffect(() => {
-    if (ref.current) Plotly.Plots.resize(ref.current)
-  }, [shape.props.w, shape.props.h])
 
   return (
     <div
