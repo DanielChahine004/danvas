@@ -430,31 +430,84 @@ function LivePlotView({ shape }) {
 
   useEffect(() => {
     const node = ref.current
-    const render = (plot) => {
+    // Render on the browser's animation clock, not on every message. The bridge
+    // can hand us points faster than Plotly can repaint; calling Plotly inline
+    // per message saturates the main thread, which then can't drain the socket,
+    // so *everything* on it (labels, slider echo) backs up behind plot redraws.
+    // Instead we just stash incoming points (cheap, so messages keep draining)
+    // and flush at most once per frame, coalescing whatever arrived in between —
+    // the render rate self-limits to what the device can actually do.
+    let pendingFull = null // newest full figure (supersedes pending points)
+    let pendingExt = null // accumulated extend delta {indices, x, y, max}
+    let raf = null
+
+    const mergeExt = (acc, e) => {
+      if (!acc) {
+        return {
+          indices: e.indices.slice(),
+          x: e.x.map((a) => a.slice()),
+          y: e.y.map((a) => a.slice()),
+          max: e.max,
+        }
+      }
+      const pos = new Map(acc.indices.map((ti, k) => [ti, k]))
+      e.indices.forEach((ti, j) => {
+        if (pos.has(ti)) {
+          const k = pos.get(ti)
+          acc.x[k] = acc.x[k].concat(e.x[j])
+          acc.y[k] = acc.y[k].concat(e.y[j])
+        } else {
+          pos.set(ti, acc.indices.length)
+          acc.indices.push(ti)
+          acc.x.push(e.x[j].slice())
+          acc.y.push(e.y[j].slice())
+        }
+      })
+      acc.max = e.max
+      return acc
+    }
+
+    const flush = () => {
+      raf = null
       if (!node) return
-      // Streaming delta from LivePlot.push: grow the mounted traces in place.
-      if (plot && plot.__extend) {
-        const ext = plot.__extend
-        Plotly.extendTraces(node, { x: ext.x, y: ext.y }, ext.indices, ext.max)
+      if (pendingFull) {
+        const p = pendingFull
+        pendingFull = null
+        pendingExt = null // the full figure already carries everything
+        // Hand Plotly its own array copies so a later extendTraces mutating the
+        // node can't alias — and double-append to — the bridge's buffer.
+        Plotly.react(
+          node,
+          (p.data || []).map((t) => ({
+            ...t,
+            x: [...(t.x || [])],
+            y: [...(t.y || [])],
+          })),
+          p.layout || {},
+          { responsive: true, displayModeBar: false },
+        )
         return
       }
-      // Full figure (initial render, reconnect/replay, new trace, clear): hand
-      // Plotly its own copy of the arrays so a later extendTraces mutating the
-      // node can't alias — and double-append to — the buffer the bridge keeps.
-      Plotly.react(
-        node,
-        (plot.data || []).map((t) => ({
-          ...t,
-          x: [...(t.x || [])],
-          y: [...(t.y || [])],
-        })),
-        plot.layout || {},
-        { responsive: true, displayModeBar: false },
-      )
+      if (pendingExt) {
+        const e = pendingExt
+        pendingExt = null
+        Plotly.extendTraces(node, { x: e.x, y: e.y }, e.indices, e.max)
+      }
+    }
+
+    const render = (plot) => {
+      if (!node) return
+      if (plot && plot.__extend) pendingExt = mergeExt(pendingExt, plot.__extend)
+      else {
+        pendingFull = plot // full figure supersedes any pending points
+        pendingExt = null
+      }
+      if (raf == null) raf = requestAnimationFrame(flush)
     }
     registerLive(id, render)
     return () => {
       unregisterLive(id)
+      if (raf != null) cancelAnimationFrame(raf)
       if (node) Plotly.purge(node)
     }
   }, [id])

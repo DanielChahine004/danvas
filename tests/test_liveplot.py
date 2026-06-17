@@ -85,16 +85,17 @@ def test_ema_debiases_cold_start():
 # -- streaming on the wire: push sends a delta, not the whole buffer -----------
 
 class _CaptureBridge:
-    """Records what each push broadcasts (the fifo and latest send paths)."""
+    """Records what each push broadcasts. LivePlot streams through the conflated
+    path either way now: coalesce=True (fifo, append) or False (latest, replace)."""
     def __init__(self):
-        self.sent = []  # (policy, payload)
+        self.sent = []  # (coalesce, payload)
 
     def broadcast(self, msg, exclude=None):
-        self.sent.append(("fifo", msg["payload"]))
+        self.sent.append((None, msg["payload"]))  # not used by LivePlot streaming
 
     def broadcast_conflated(self, comp_id, *, msg=None, data=None,
-                            exclude=None, tap=True):
-        self.sent.append(("latest", msg["payload"]))
+                            exclude=None, tap=True, coalesce=False):
+        self.sent.append((coalesce, msg["payload"]))
 
 
 def _bound(plot):
@@ -108,9 +109,10 @@ def test_push_streams_extend_delta_not_full_figure():
     bridge = _bound(plot)
     plot.push({"train": 1.0, "val": 2.0})
     plot.push({"train": 1.5, "val": 2.5})
-    # A steady-state fifo push ships only the new point(s), keyed by trace index.
-    policy, payload = bridge.sent[-1]
-    assert policy == "fifo" and "plot_extend" in payload and "plot" not in payload
+    # A steady-state push ships only the new point(s), keyed by trace index, via
+    # the coalescing path (so it merges rather than queues under backpressure).
+    coalesce, payload = bridge.sent[-1]
+    assert coalesce is True and "plot_extend" in payload and "plot" not in payload
     ext = payload["plot_extend"]
     assert ext["indices"] == [0, 1]
     assert ext["x"] == [[2], [2]] and ext["y"] == [[1.5], [2.5]]
@@ -133,8 +135,8 @@ def test_latest_queue_sends_full_snapshot_not_delta():
     plot.queue = "latest"
     bridge = _bound(plot)
     plot.push({"a": 1.0})
-    policy, payload = bridge.sent[-1]
-    assert policy == "latest" and "plot" in payload and "plot_extend" not in payload
+    coalesce, payload = bridge.sent[-1]
+    assert coalesce is False and "plot" in payload and "plot_extend" not in payload
 
 
 def test_smoothing_delta_extends_raw_and_smoothed_traces():
@@ -158,3 +160,85 @@ def test_state_payload_still_replays_full_buffer():
         plot.push({"a": y})
     data = plot.state_payload()["plot"]["data"]
     assert data[0]["y"] == [1.0, 2.0, 3.0]
+
+
+# -- coalescing backpressure (the bridge merge that fixes the fifo backlog) -----
+
+def test_coalesce_extend_concatenates_per_trace_index():
+    from pycanvas.bridge import Bridge
+
+    def frame(xi, ys):
+        return {"type": "update", "id": "p",
+                "payload": {"plot_extend": {"indices": [0, 1],
+                                            "x": [[xi], [xi]],
+                                            "y": [[ys[0]], [ys[1]]], "max": None}}}
+    merged = Bridge._merge_live(None, frame(1, (10, 20)))
+    merged = Bridge._merge_live(merged, frame(2, (11, 21)))
+    ext = merged["payload"]["plot_extend"]
+    assert ext["x"] == [[1, 2], [1, 2]] and ext["y"] == [[10, 11], [20, 21]]
+
+
+def test_coalesce_appends_delta_onto_pending_snapshot():
+    # A full snapshot waiting to be sent absorbs a following delta, so order is
+    # preserved when a clear/new-trace frame and a push race.
+    from pycanvas.bridge import Bridge
+    snap = {"type": "update", "id": "p",
+            "payload": {"plot": {"data": [{"x": [1], "y": [10], "name": "a"}],
+                                 "layout": {}}}}
+    delta = {"type": "update", "id": "p",
+             "payload": {"plot_extend": {"indices": [0], "x": [[2, 3]],
+                                         "y": [[11, 12]], "max": None}}}
+    merged = Bridge._merge_live(Bridge._merge_live(None, snap), delta)
+    assert merged["payload"]["plot"]["data"][0]["x"] == [1, 2, 3]
+
+
+def test_coalesce_snapshot_supersedes_pending_delta():
+    from pycanvas.bridge import Bridge
+    delta = {"type": "update", "id": "p",
+             "payload": {"plot_extend": {"indices": [0], "x": [[1]], "y": [[9]],
+                                         "max": None}}}
+    snap = {"type": "update", "id": "p",
+            "payload": {"plot": {"data": [], "layout": {}}}}
+    merged = Bridge._merge_live(Bridge._merge_live(None, delta), snap)
+    assert "plot" in merged["payload"] and "plot_extend" not in merged["payload"]
+
+
+def test_coalesce_trims_to_rolling_max():
+    from pycanvas.bridge import Bridge
+    merged = None
+    for i in range(5):
+        f = {"type": "update", "id": "p",
+             "payload": {"plot_extend": {"indices": [0], "x": [[i]],
+                                         "y": [[i]], "max": 3}}}
+        merged = Bridge._merge_live(merged, f)
+    assert merged["payload"]["plot_extend"]["x"] == [[2, 3, 4]]
+
+
+def test_merge_live_does_not_alias_source_frame():
+    # The stored pending frame is a private copy: mutating the source after it's
+    # stored must not corrupt what will be sent.
+    from pycanvas.bridge import Bridge
+    src = {"type": "update", "id": "p",
+           "payload": {"plot_extend": {"indices": [0], "x": [[9]], "y": [[9]],
+                                       "max": None}}}
+    merged = Bridge._merge_live(None, src)
+    src["payload"]["plot_extend"]["x"][0].append(999)
+    assert merged["payload"]["plot_extend"]["x"] == [[9]]
+
+
+def test_push_uses_coalescing_for_fifo_and_replace_for_latest():
+    # fifo (default) opts into coalescing; latest keeps drop-stale replace.
+    seen = {}
+
+    class Bridge2:
+        def broadcast_conflated(self, cid, *, msg=None, data=None,
+                                exclude=None, tap=True, coalesce=False):
+            seen["coalesce"] = coalesce
+
+    p = pycanvas.LivePlot("m", traces=["a"])
+    p._bind("p1", Bridge2())
+    p.push({"a": 1.0})
+    assert seen["coalesce"] is True
+    p.queue = "latest"
+    p.push({"a": 2.0})
+    assert seen["coalesce"] is False

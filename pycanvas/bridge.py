@@ -6,6 +6,7 @@ schedules the actual send onto the server's asyncio event loop.
 """
 
 import asyncio
+import copy
 import json
 import math
 import random
@@ -1263,8 +1264,73 @@ class Bridge:
                 existing[k] = v
         return existing
 
+    @staticmethod
+    def _merge_live(existing, new_msg):
+        """Coalesce a LivePlot stream frame into the pending one (see
+        ``broadcast_conflated`` ``coalesce=``).
+
+        A full ``plot`` snapshot supersedes whatever is pending (it is the whole
+        current figure, e.g. after a new trace / clear / smoothing change). An
+        ``plot_extend`` delta is *appended*: folded onto a pending snapshot's
+        arrays, or concatenated onto a pending delta — so the single pending
+        frame always represents every sample since the last send, in order.
+        """
+        new_payload = new_msg.get("payload") or {}
+        if existing is None or "plot" in new_payload:
+            # Nothing pending, or a snapshot that replaces all of it: keep a
+            # private deep copy so later in-place merges never touch the
+            # component's own buffer or an already-sent frame.
+            return {**new_msg, "payload": copy.deepcopy(new_payload)}
+        ext = new_payload.get("plot_extend")
+        if ext is None:
+            return existing  # unrecognised frame; leave the pending one intact
+        pending = existing.get("payload") or {}
+        if "plot" in pending:
+            Bridge._append_extend_to_snapshot(pending["plot"], ext)
+        elif "plot_extend" in pending:
+            Bridge._coalesce_extend(pending["plot_extend"], ext)
+        return existing
+
+    @staticmethod
+    def _coalesce_extend(acc, new):
+        """Concatenate one ``plot_extend`` delta onto an accumulating one, by
+        trace index, trimming each trace to the rolling ``max`` if set."""
+        pos = {ti: k for k, ti in enumerate(acc["indices"])}
+        for j, ti in enumerate(new["indices"]):
+            if ti in pos:
+                k = pos[ti]
+                acc["x"][k] = acc["x"][k] + new["x"][j]
+                acc["y"][k] = acc["y"][k] + new["y"][j]
+            else:
+                pos[ti] = len(acc["indices"])
+                acc["indices"].append(ti)
+                acc["x"].append(list(new["x"][j]))
+                acc["y"].append(list(new["y"][j]))
+        mx = new.get("max")
+        if mx is not None:
+            acc["max"] = mx
+            for k in range(len(acc["x"])):
+                if len(acc["x"][k]) > mx:
+                    acc["x"][k] = acc["x"][k][-mx:]
+                    acc["y"][k] = acc["y"][k][-mx:]
+
+    @staticmethod
+    def _append_extend_to_snapshot(plot, ext):
+        """Append a ``plot_extend`` delta's points onto a pending full snapshot's
+        trace arrays, so a snapshot waiting to be sent stays current."""
+        data = plot.get("data") or []
+        mx = ext.get("max")
+        for j, ti in enumerate(ext["indices"]):
+            if 0 <= ti < len(data):
+                tr = data[ti]
+                tr["x"] = list(tr.get("x") or []) + ext["x"][j]
+                tr["y"] = list(tr.get("y") or []) + ext["y"][j]
+                if mx is not None and len(tr["x"]) > mx:
+                    tr["x"] = tr["x"][-mx:]
+                    tr["y"] = tr["y"][-mx:]
+
     def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None,
-                            tap=True):
+                            tap=True, coalesce=False):
         """Broadcast an update under the ``latest`` queue policy.
 
         Keeps only the most recent pending value per viewer for this component,
@@ -1272,6 +1338,15 @@ class Bridge:
         updates survive), binary frames replace wholesale. The per-viewer backlog
         is bounded to one in-flight send plus one pending value, so a fast
         producer (e.g. a camera) can't accumulate latency on a slow client.
+
+        ``coalesce=True`` switches the merge from *replace* to *append* for
+        LivePlot stream frames (:meth:`_merge_live`): instead of dropping the
+        stale pending frame, the new points are folded into it, so a client that
+        falls behind a fast producer gets one catch-up frame carrying every point
+        it missed — no backlog (the frame rate self-throttles to what the client
+        can render) and no loss (every sample is delivered, in order). This is
+        what lets a 75 push/s stream stay live without queuing 75 redraws/s at a
+        client that can only paint a handful.
 
         Pass exactly one of ``msg`` (a dict to JSON-send) or ``data`` (bytes).
         """
@@ -1294,7 +1369,8 @@ class Bridge:
                     self._conflate_pending[key] = ("bin", data)
                 else:
                     prev = self._conflate_pending.get(key)
-                    merged = self._merge_update(prev[1] if prev else None, msg)
+                    merge = self._merge_live if coalesce else self._merge_update
+                    merged = merge(prev[1] if prev else None, msg)
                     self._conflate_pending[key] = ("msg", merged)
                 if key in self._conflate_active:
                     continue  # a sender is draining this slot; it'll see the latest

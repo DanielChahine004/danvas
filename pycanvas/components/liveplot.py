@@ -115,7 +115,24 @@ class LivePlot(BaseComponent):
                 payload = {"plot": self._payload()}
             else:
                 payload = {"plot_extend": self._extend_payload(sample, xi)}
-        self._send_update(payload)
+        self._stream(payload)
+
+    def _stream(self, payload):
+        """Send one stream frame with backpressure that fits a live plot.
+
+        The default ``"fifo"`` *coalesces* under load (see
+        ``Bridge.broadcast_conflated`` ``coalesce=``): when the producer outruns
+        the client's redraw rate, pending points fold into a single catch-up
+        frame instead of queuing — so the curve stays complete *and* the UI stays
+        live, rather than lagging further behind every push. ``"latest"`` keeps
+        the older drop-stale behaviour (only the newest whole-figure snapshot
+        survives), for a gauge-style plot where intermediate frames don't matter.
+        """
+        if self._bridge is None:
+            return
+        msg = {"type": "update", "id": self.id, "payload": payload}
+        self._bridge.broadcast_conflated(
+            self.id, msg=msg, coalesce=(self._queue != "latest"))
 
     def _extend_payload(self, sample, xi):
         """The ``extend`` delta for the points just appended: the Plotly trace
@@ -165,7 +182,7 @@ class LivePlot(BaseComponent):
         with self._lock:
             self._smoothing = weight
             payload = self._payload()
-        self._send_update({"plot": payload})
+        self._stream({"plot": payload})
 
     def clear(self):
         with self._lock:
@@ -173,7 +190,7 @@ class LivePlot(BaseComponent):
                 self._x[name].clear()
                 self._y[name].clear()
             payload = self._payload()
-        self._send_update({"plot": payload})
+        self._stream({"plot": payload})
 
     def _payload(self):
         data = []
