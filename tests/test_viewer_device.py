@@ -43,3 +43,20 @@ def test_off_connect_removes_the_observer():
     canvas.off_connect(fn)
     canvas._bridge._tap_connect({"id": "a1"})
     assert seen == []
+
+
+def test_on_disconnect_fires_with_viewer():
+    canvas = pycanvas.Canvas()
+    left = []
+    canvas.on_disconnect(lambda v: left.append(v))
+    canvas._bridge._tap_disconnect({"id": "a1", "name": "Fox"})
+    assert left == [{"id": "a1", "name": "Fox"}]
+
+
+def test_off_disconnect_removes_the_observer():
+    canvas = pycanvas.Canvas()
+    left = []
+    fn = canvas.on_disconnect(lambda v: left.append(v))
+    canvas.off_disconnect(fn)
+    canvas._bridge._tap_disconnect({"id": "a1"})
+    assert left == []

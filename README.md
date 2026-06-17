@@ -372,6 +372,12 @@ It fires after the viewer's initial state is sent, so the override lands as a
 live tweak on top (a brief reflow on slow links). `device` is a best-effort,
 spoofable User-Agent guess — fine for layout, never for auth.
 
+`canvas.on_disconnect(fn)` is the symmetric twin — `fn(viewer)` once when a
+viewer leaves (the departed viewer's last-known dict) — for cleanup: release a
+per-viewer resource, log how long they stayed, drop them from your own
+bookkeeping. It runs after they're off the roster, so it's for teardown, not for
+messaging them.
+
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python
 replies via `panel.push(data)`, received in JS by `canvas.onPush(cb)`.

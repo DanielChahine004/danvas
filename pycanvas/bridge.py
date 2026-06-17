@@ -132,6 +132,10 @@ class Bridge:
         # the canvas to that viewer (e.g. a mobile layout via set_layout(
         # client_id=...)) without blocking the connect path.
         self._connect_taps = []
+        # Observers of viewer disconnections (canvas.on_disconnect) — the
+        # symmetric twin of _connect_taps, fired once per leave with the
+        # departed viewer's last-known dict.
+        self._disconnect_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
         self._any_connected = threading.Event()  # set while ≥1 client is connected
@@ -298,6 +302,28 @@ class Bridge:
 
     def _tap_connect(self, viewer):
         for fn in list(self._connect_taps):
+            try:
+                fn(viewer)
+            except Exception:
+                traceback.print_exc()
+
+    def add_disconnect_tap(self, fn):
+        """Register ``fn(viewer)`` to fire once when a viewer leaves (on_disconnect).
+
+        ``viewer`` is the departed viewer's last-known snapshot dict (same shape
+        as on_connect). Runs off the event loop on the dispatch thread; the
+        viewer is already gone from the roster, so use it to release per-viewer
+        resources or log the session, not to message that viewer.
+        """
+        self._disconnect_taps.append(fn)
+        return fn
+
+    def remove_disconnect_tap(self, fn):
+        if fn in self._disconnect_taps:
+            self._disconnect_taps.remove(fn)
+
+    def _tap_disconnect(self, viewer):
+        for fn in list(self._disconnect_taps):
             try:
                 fn(viewer)
             except Exception:
@@ -587,6 +613,12 @@ class Bridge:
                 if self._cursors:
                     self.broadcast({"type": "cursor_gone", "id": gone["id"]})
                 _diag(f"[pycanvas] viewer '{gone['name']}' disconnected")
+                # Fire on_disconnect observers off the loop (a snapshot, the
+                # symmetric twin of the on_connect tap), so a handler can release
+                # per-viewer resources or log the session without blocking teardown.
+                if self._disconnect_taps:
+                    self._dispatch.submit(
+                        lambda v=dict(gone): self._tap_disconnect(v))
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 

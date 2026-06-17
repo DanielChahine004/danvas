@@ -313,6 +313,34 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Remove a connect observer registered with :meth:`on_connect`."""
         self._bridge.remove_connect_tap(fn)
 
+    def on_disconnect(self, fn):
+        """Run ``fn(viewer)`` once each time a viewer leaves. Decorator-friendly.
+
+        The symmetric twin of :meth:`on_connect`: ``viewer`` is the departed
+        viewer's last-known dict (``id``/``name``/.../``role``). Use it to free
+        whatever you set up for that viewer — release a per-viewer resource, log
+        how long they stayed, drop them from your own bookkeeping::
+
+            sessions = {}
+
+            @canvas.on_connect
+            def _(v): sessions[v["id"]] = time.time()
+
+            @canvas.on_disconnect
+            def _(v):
+                started = sessions.pop(v["id"], None)
+                if started: print(v["name"], "stayed", time.time() - started, "s")
+
+        It fires after the viewer is already off the roster, so don't try to
+        message them from here — it's for cleanup. Runs on the dispatch thread
+        (off the event loop). Remove with :meth:`off_disconnect`.
+        """
+        return self._bridge.add_disconnect_tap(fn)
+
+    def off_disconnect(self, fn):
+        """Remove a disconnect observer registered with :meth:`on_disconnect`."""
+        self._bridge.remove_disconnect_tap(fn)
+
     def _debug_frame(self, direction, msg):
         """The ``serve(debug=True)`` tap: print one console line per frame."""
         arrow = "->" if direction == "out" else "<-"
