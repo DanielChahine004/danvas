@@ -650,6 +650,20 @@ plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" la
 degrees clockwise. Omit `x`/`y` → panels auto-arrange (left-to-right,
 top-to-bottom, packed by size). Omit `w`/`h` → component default.
 
+Every factory and `insert(...)` accepts the same `**place` options:
+
+| Option | What it does |
+|---|---|
+| `x` / `y` | canvas position; omit → auto-arrange |
+| `w` / `h` (`width` / `height`) | size in px; `"auto"` fits content (Custom/React panels) |
+| `rotation` | degrees clockwise |
+| `below` / `above` / `right_of` / `left_of` | place relative to another panel… |
+| `gap` | …this many px away (default 16) |
+| `queue` | backpressure policy: `"fifo"` (all, in order) or `"latest"` (drop stale) |
+| `roles` | login roles allowed to see the panel (`[]`/omit = everyone) |
+| `lock_for` | roles that get it non-interactive (`operable=False`) |
+| `locked` / `draggable` / `resizable` / `operable` / `grabbable` / `frame` | lock & chrome flags — see [Locking & interactivity](#locking--interactivity) |
+
 **Relative placement** — anchor to a placed panel; `gap` defaults to 16:
 
 ```python
@@ -792,6 +806,33 @@ override), since it can surface state to everyone.
 
 `canvas.serve(port=8000)` opens the browser and blocks. The rest of this section
 covers exposing that server to other people and machines.
+
+All of `serve()`'s options in one place:
+
+| Option | Default | What it does |
+|---|---|---|
+| `port` | `8000` | TCP port to serve on |
+| `host` | `"127.0.0.1"` | bind address; `"0.0.0.0"` exposes it on the LAN |
+| `open_browser` | `True` | open the system browser on start |
+| `block` | `True` | block until shutdown; `False` returns at once for live inserts (notebooks) |
+| `wait` | `True` | in background mode, wait until the loop is ready before returning |
+| `password` | – | gate the whole canvas behind one password (session cookie) |
+| `passwords` | – | `{role: password}` for role-based access (see [Roles](#roles-one-rule-for-everything-per-viewer)) |
+| `login_message` | – | host note shown on the password page |
+| `tunnel` | `False` | expose publicly through a tunnel |
+| `tunnel_provider` | `"cloudflared"` | tunnel backend (`"cloudflared"` / `"localtunnel"`) |
+| `allow_remote_exec` | `False` | permit a `Repl` on a non-local/tunneled bind (unauthenticated RCE — opt in deliberately) |
+| `persist` | `False` | auto-save/restore the canvas; `True` or a path (see [Saving & loading](#saving--loading)) |
+| `hot_reload` | `False` | restart the process when a `.py` changes (script entry only) |
+| `view` | – | camera & chrome dict (see [Views & navigation](#4-views--navigation)) |
+| `cursors` | auto¹ | viewers report pointer position (`canvas.viewers[i]["cursor"]`) |
+| `ui_inspector` | auto¹ | toolbar button letting viewers spawn an Inspector |
+| `desktop` | auto² | open a native window (pywebview) instead of the browser |
+| `window_title` / `window_size` | `"PyCanvas"` / `(1200, 800)` | native-window caption / size |
+| `debug` | `False` | log every WebSocket frame to the console |
+
+¹ on by default only for a private local bind (no tunnel, loopback host).
+² on by default only inside a baked executable (`sys.frozen`).
 
 ## Sharing
 
