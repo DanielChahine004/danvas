@@ -815,6 +815,31 @@ function updateComponent(id, payload) {
     return
   }
 
+  // LivePlot streaming delta: append the new point(s) rather than re-sending the
+  // whole figure (see LivePlot.push). We keep the buffered full figure current
+  // too — independent of whether the node is mounted — so a panel that unmounts
+  // and later remounts (tldraw viewport culling) re-renders with every point,
+  // not just those since the last full frame. The mounted node is grown with
+  // Plotly.extendTraces via the handler.
+  if (payload && payload.plot_extend) {
+    const ext = payload.plot_extend
+    const fig = liveBuffer.get(id)
+    if (!fig || !fig.data) return // no base figure yet; a full frame will seed it
+    ext.indices.forEach((ti, k) => {
+      const tr = fig.data[ti]
+      if (!tr) return
+      tr.x = (tr.x || []).concat(ext.x[k])
+      tr.y = (tr.y || []).concat(ext.y[k])
+      if (ext.max && tr.x.length > ext.max) {
+        tr.x = tr.x.slice(-ext.max)
+        tr.y = tr.y.slice(-ext.max)
+      }
+    })
+    const handler = liveHandlers.get(id)
+    if (handler) handler({ __extend: ext })
+    return
+  }
+
   // Custom panels: `push()` data is forwarded straight into the iframe (see
   // CustomView) instead of touching shape props, so streaming doesn't reload the
   // frame. Dropped if the panel isn't mounted yet (the next push will land).

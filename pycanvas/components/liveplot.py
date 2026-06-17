@@ -90,16 +90,61 @@ class LivePlot(BaseComponent):
 
         A key not seen before starts a new trace on the fly. ``x`` defaults to an
         auto-incrementing sample index (pass it to use a real step/epoch number).
+
+        On the wire this streams just the new point(s) as an ``extend`` delta —
+        the frontend appends them with ``Plotly.extendTraces`` rather than
+        re-diffing the whole figure — so a long run stays O(1) per push instead
+        of re-sending the entire rolling buffer every time. The full buffer is
+        still kept server-side and replayed in one shot to any (re)connecting
+        client (:meth:`state_payload`). Two cases fall back to a full ``plot``
+        frame because a delta can't express them: a brand-new trace (the figure
+        gains a curve) and the ``"latest"`` queue policy (which drops stale
+        pending frames, so it needs whole-snapshot replace semantics — an append
+        delta would lose the dropped points; the default ``"fifo"`` delivers
+        every point in order, where the delta is both safe and the whole point).
         """
         with self._lock:
             self._counter += 1
             xi = self._counter if x is None else x
+            new_trace = any(name not in self._y for name in sample)
             for name, yv in sample.items():
                 self._ensure(name)
                 self._x[name].append(xi)
                 self._y[name].append(yv)
-            payload = self._payload()
-        self._send_update({"plot": payload})
+            if new_trace or self._queue == "latest":
+                payload = {"plot": self._payload()}
+            else:
+                payload = {"plot_extend": self._extend_payload(sample, xi)}
+        self._send_update(payload)
+
+    def _extend_payload(self, sample, xi):
+        """The ``extend`` delta for the points just appended: the Plotly trace
+        index(es) to grow and the new x/y for each.
+
+        Mirrors the trace order :meth:`_payload` builds, so the frontend's trace
+        indices line up: without smoothing, logical trace *i* is Plotly trace
+        *i*; with smoothing each logical trace is two Plotly traces (faint raw at
+        ``2i``, bold smoothed at ``2i+1``), so a point extends both — the raw with
+        its value, the smoothed with the latest EMA over the current window
+        (recomputed like ``_payload`` so a streaming client and a reconnecting one
+        agree). ``max`` lets the frontend cap each trace to the same rolling
+        window as the server's deques.
+        """
+        indices, xs_out, ys_out = [], [], []
+        for name in sample:
+            i = self._traces.index(name)
+            if self._smoothing > 0:
+                indices.append(2 * i)
+                xs_out.append([xi])
+                ys_out.append([self._y[name][-1]])
+                indices.append(2 * i + 1)
+                xs_out.append([xi])
+                ys_out.append([_ema(list(self._y[name]), self._smoothing)[-1]])
+            else:
+                indices.append(i)
+                xs_out.append([xi])
+                ys_out.append([self._y[name][-1]])
+        return {"indices": indices, "x": xs_out, "y": ys_out, "max": self._max}
 
     # Alias: every other component sends data via ``update()``. LivePlot's
     # natural verb is ``push`` (append one sample), but accept ``update`` too so

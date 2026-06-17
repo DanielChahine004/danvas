@@ -432,10 +432,25 @@ function LivePlotView({ shape }) {
     const node = ref.current
     const render = (plot) => {
       if (!node) return
-      Plotly.react(node, plot.data || [], plot.layout || {}, {
-        responsive: true,
-        displayModeBar: false,
-      })
+      // Streaming delta from LivePlot.push: grow the mounted traces in place.
+      if (plot && plot.__extend) {
+        const ext = plot.__extend
+        Plotly.extendTraces(node, { x: ext.x, y: ext.y }, ext.indices, ext.max)
+        return
+      }
+      // Full figure (initial render, reconnect/replay, new trace, clear): hand
+      // Plotly its own copy of the arrays so a later extendTraces mutating the
+      // node can't alias — and double-append to — the buffer the bridge keeps.
+      Plotly.react(
+        node,
+        (plot.data || []).map((t) => ({
+          ...t,
+          x: [...(t.x || [])],
+          y: [...(t.y || [])],
+        })),
+        plot.layout || {},
+        { responsive: true, displayModeBar: false },
+      )
     }
     registerLive(id, render)
     return () => {

@@ -80,3 +80,81 @@ def test_ema_debiases_cold_start():
     # (no drag toward zero); a flat series stays flat.
     assert _ema([5.0, 5.0, 5.0], 0.9) == pytest.approx([5.0, 5.0, 5.0])
     assert _ema([], 0.5) == []
+
+
+# -- streaming on the wire: push sends a delta, not the whole buffer -----------
+
+class _CaptureBridge:
+    """Records what each push broadcasts (the fifo and latest send paths)."""
+    def __init__(self):
+        self.sent = []  # (policy, payload)
+
+    def broadcast(self, msg, exclude=None):
+        self.sent.append(("fifo", msg["payload"]))
+
+    def broadcast_conflated(self, comp_id, *, msg=None, data=None,
+                            exclude=None, tap=True):
+        self.sent.append(("latest", msg["payload"]))
+
+
+def _bound(plot):
+    bridge = _CaptureBridge()
+    plot._bind("p1", bridge)
+    return bridge
+
+
+def test_push_streams_extend_delta_not_full_figure():
+    plot = pycanvas.LivePlot("m", traces=["train", "val"])
+    bridge = _bound(plot)
+    plot.push({"train": 1.0, "val": 2.0})
+    plot.push({"train": 1.5, "val": 2.5})
+    # A steady-state fifo push ships only the new point(s), keyed by trace index.
+    policy, payload = bridge.sent[-1]
+    assert policy == "fifo" and "plot_extend" in payload and "plot" not in payload
+    ext = payload["plot_extend"]
+    assert ext["indices"] == [0, 1]
+    assert ext["x"] == [[2], [2]] and ext["y"] == [[1.5], [2.5]]
+    assert ext["max"] == plot._max
+
+
+def test_new_trace_falls_back_to_full_figure():
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    bridge = _bound(plot)
+    plot.push({"a": 1.0})                       # known trace -> delta
+    assert "plot_extend" in bridge.sent[-1][1]
+    plot.push({"b": 9.0})                        # new trace -> full snapshot
+    assert "plot" in bridge.sent[-1][1] and "plot_extend" not in bridge.sent[-1][1]
+
+
+def test_latest_queue_sends_full_snapshot_not_delta():
+    # Under "latest" the bridge drops stale pending frames, so an append delta
+    # would lose points; the policy needs whole-figure replace semantics.
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot.queue = "latest"
+    bridge = _bound(plot)
+    plot.push({"a": 1.0})
+    policy, payload = bridge.sent[-1]
+    assert policy == "latest" and "plot" in payload and "plot_extend" not in payload
+
+
+def test_smoothing_delta_extends_raw_and_smoothed_traces():
+    plot = pycanvas.LivePlot("m", traces=["loss"], smoothing=0.6)
+    bridge = _bound(plot)
+    plot.push({"loss": 10.0})
+    plot.push({"loss": 20.0})
+    ext = bridge.sent[-1][1]["plot_extend"]
+    # One logical trace -> two Plotly traces: faint raw (idx 0) + smoothed (idx 1).
+    assert ext["indices"] == [0, 1]
+    assert ext["y"][0] == [20.0]                              # raw is the value
+    assert ext["y"][1][0] == pytest.approx(_ema([10.0, 20.0], 0.6)[-1])  # EMA
+
+
+def test_state_payload_still_replays_full_buffer():
+    # Reconnecting clients get the whole series in one shot (deltas are only for
+    # the live append path), so a late joiner sees the full curve.
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    _bound(plot)
+    for y in (1.0, 2.0, 3.0):
+        plot.push({"a": y})
+    data = plot.state_payload()["plot"]["data"]
+    assert data[0]["y"] == [1.0, 2.0, 3.0]
