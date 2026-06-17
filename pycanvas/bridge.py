@@ -140,6 +140,13 @@ class Bridge:
         # the welcome frame so the button only shows where it's allowed.
         self._canvas = None
         self._ui_inspector = False
+        # True when serve() was given a password/passwords. Advertised in the
+        # welcome frame so the frontend shows a sign-out button (POST-less nav to
+        # /__logout__); no auth means there's nothing to sign out of.
+        self._auth = False
+        # Optional host note shown on the password page (serve(login_message=...));
+        # read by server.create_app. None = the default prompt only.
+        self._login_message = None
         # When True, browsers report their pointer position (in canvas/page
         # coords) so Python can read it off the roster as ``viewer["cursor"]``.
         # Advertised in the welcome frame; gated like ``_ui_inspector`` (default
@@ -434,6 +441,7 @@ class Bridge:
             view_for_client = self._view_for(viewer["id"], role)
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
+                                  "auth": self._auth,
                                   "cursors": self._cursors,
                                   "view": view_for_client,
                                   "runId": self._run_id,

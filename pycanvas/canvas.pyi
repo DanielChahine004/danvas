@@ -59,6 +59,8 @@ class Canvas:
         window_title: str = ...,
         window_size: tuple[int, int] = ...,
         password: str | None = ...,
+        passwords: dict[str, str] | None = ...,
+        login_message: str | None = ...,
         hot_reload: bool = ...,
         debug: bool = ...,
     ) -> Canvas | None: ...

@@ -1051,7 +1051,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               cursors=None, view=None, desktop=None, window_title="PyCanvas",
               window_size=(1200, 800), password=None, passwords=None,
-              hot_reload=False, debug=False):
+              login_message=None, hot_reload=False, debug=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1115,7 +1115,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         it. The check is per-browser-session (a cookie), so each viewer enters it
         once. It is independent of ``allow_remote_exec`` — a password controls who
         may connect, not whether a Repl may run, so a public Repl still needs the
-        explicit opt-in even behind a password.
+        explicit opt-in even behind a password. A password-protected canvas also
+        shows a built-in **Sign out** button (clears the session, returns the
+        password page) so a viewer can switch accounts.
+
+        ``login_message`` adds a host note to that password page (above the
+        field) — handy with ``passwords=`` to tell viewers which password to use,
+        e.g. ``login_message='Spectators enter "view"; teams enter your team
+        password.'`` It is shown as plain text (HTML-escaped, newlines kept).
 
         ``view`` configures how the tldraw canvas is presented and navigated, so
         the same canvas can be a free creative workspace or a fixed UI. Pass a
@@ -1174,6 +1181,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._allow_remote_exec = allow_remote_exec
         self._bridge._ui_inspector = exposure.ui_inspector
         self._bridge._cursors = exposure.cursors
+        # When a password is set, advertise it so the frontend offers a built-in
+        # sign-out button (clears the session cookie via /__logout__, then the
+        # login page reappears — letting a viewer switch accounts). No auth → no
+        # button, nothing to sign out of.
+        self._bridge._auth = bool(password or passwords)
+        # Optional note rendered on the password page (e.g. which password each
+        # kind of viewer should enter). Stored on the bridge; create_app reads it.
+        self._bridge._login_message = login_message
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
         # — Windows consoles often run cp1252, which can't print "▼"/"▲".

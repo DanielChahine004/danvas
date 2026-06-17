@@ -556,6 +556,7 @@ function handle(msg) {
     if (msg.runId) lastRunId = msg.runId
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
+    setAuthEnabled(!!msg.auth)
     setCursorsEnabled(!!msg.cursors)
     setViewConfig(msg.view || null)
   } else if (msg.type === 'shared') {
@@ -923,6 +924,31 @@ export function subscribeUiInspector(cb) {
   uiInspectorListeners.add(cb)
   cb(uiInspector) // prime with the latest known state
   return () => uiInspectorListeners.delete(cb)
+}
+
+// Whether this canvas is password-protected (welcome.auth). When true the app
+// shows a sign-out button that navigates to /__logout__ (the server clears the
+// session cookie and the password page returns). Shown regardless of a `ui:false`
+// kiosk view — signing out is an auth escape hatch, not app chrome — so even a
+// chrome-free viewer can switch accounts.
+let authEnabled = false
+const authListeners = new Set()
+
+function setAuthEnabled(enabled) {
+  authEnabled = enabled
+  for (const cb of authListeners) cb(authEnabled)
+}
+
+export function subscribeAuth(cb) {
+  authListeners.add(cb)
+  cb(authEnabled) // prime with the latest known state
+  return () => authListeners.delete(cb)
+}
+
+export function signOut() {
+  // Full-page nav: the server clears the httponly cookie and redirects to the
+  // login page. (A plain link would do, but this keeps the call site declarative.)
+  window.location.href = '/__logout__'
 }
 
 export function toggleUiInspector() {

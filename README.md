@@ -710,6 +710,24 @@ session cookie carries them (the password is never stored in the cookie):
 canvas.serve(port=8000, host="0.0.0.0", password="let-me-in")
 ```
 
+A password-protected canvas gets two things for free. A **Sign out** button
+(bottom-right) clears the session and returns the password page, so a viewer can
+switch accounts without restarting — it shows whenever a password is set, even
+under a `ui=False` kiosk view (signing out is an auth escape hatch, not app
+chrome). And `login_message=` puts a host note on the password page — handy with
+`passwords=` to say which password each kind of viewer should enter:
+
+```python
+canvas.serve(
+    port=8000, host="0.0.0.0",
+    passwords={"admin": "secret-admin-pw", "viewer": "view"},
+    login_message='Spectators enter "view"; teams enter the password you were given.',
+)
+```
+
+It's shown as plain text (HTML-escaped, newlines kept) — so don't put a secret
+password in it; everyone reaching the login page can read it.
+
 **Roles** — serve different views to different users from the same port. Use
 `passwords=` (a `{role: password}` dict) instead of `password=`; mark panels
 with `roles=` to restrict visibility; use `lock_for=` to show a panel but make

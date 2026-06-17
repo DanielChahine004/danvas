@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import json
 import os
 import secrets
@@ -189,9 +190,16 @@ def _attachment_headers(filename):
     }
 
 
-def _login_page(error=False):
-    """The minimal password prompt shown before an unauthenticated view loads."""
-    msg = ("<p class='err'>Wrong password — try again.</p>" if error else "")
+def _login_page(error=False, message=None):
+    """The minimal password prompt shown before an unauthenticated view loads.
+
+    ``message`` is an optional host-provided note (``serve(login_message=...)``)
+    shown above the field — e.g. which password each kind of viewer should enter.
+    It is HTML-escaped (newlines preserved) so it renders as plain text, never
+    markup.
+    """
+    err = ("<p class='err'>Wrong password — try again.</p>" if error else "")
+    note = (f"<p class='note'>{html.escape(str(message))}</p>" if message else "")
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -200,9 +208,12 @@ def _login_page(error=False):
         "background:#0f172a;color:#e2e8f0}"
         ".wrap{height:100%;display:flex;align-items:center;justify-content:center}"
         "form{background:#1e293b;padding:28px 28px 24px;border-radius:12px;"
-        "border:1px solid #334155;min-width:260px}"
+        "border:1px solid #334155;min-width:260px;max-width:360px}"
         "h1{font-size:18px;margin:0 0 4px}p{color:#94a3b8;font-size:13px;margin:0 0 16px}"
         ".err{color:#f87171}"
+        ".note{white-space:pre-line;line-height:1.5;color:#cbd5e1;"
+        "background:rgba(255,255,255,.04);border:1px solid #334155;"
+        "border-radius:8px;padding:10px 12px}"
         "input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:7px;"
         "border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:14px}"
         "button{margin-top:12px;width:100%;padding:9px;border:0;border-radius:7px;"
@@ -210,7 +221,7 @@ def _login_page(error=False):
         "button:hover{background:#2563eb}</style></head><body><div class='wrap'>"
         "<form method='post' action='/__auth__'>"
         "<h1>PyCanvas</h1><p>This canvas is password protected.</p>"
-        f"{msg}"
+        f"{note}{err}"
         "<input type='password' name='password' placeholder='Password' autofocus>"
         "<button type='submit'>Enter</button></form></div></body></html>"
     )
@@ -307,6 +318,11 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
 
     auth_required = role_map is not None or single_pw is not None
 
+    # Optional host note shown on the login page (serve(login_message=...)). Read
+    # off the bridge — serve stores it there — so it rides along without threading
+    # an extra arg through run()/run_background()/the _serve_* helpers.
+    login_message = getattr(bridge, "_login_message", None)
+
     # Sessions are stateless: the role rides in a signed cookie (see
     # _sign_session), so there's no in-memory token map to lose on a restart —
     # which is what lets hot reload reconnect a viewer without re-login.
@@ -335,22 +351,36 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
                         matched_role = role
                         break
                 if matched_role is None:
-                    return HTMLResponse(_login_page(error=True), status_code=401)
+                    return HTMLResponse(_login_page(error=True, message=login_message),
+                                        status_code=401)
                 token = _sign_session(matched_role, secret)
             else:
                 if not secrets.compare_digest(str(given), str(single_pw)):
-                    return HTMLResponse(_login_page(error=True), status_code=401)
+                    return HTMLResponse(_login_page(error=True, message=login_message),
+                                        status_code=401)
                 token = _sign_session(None, secret)
             resp = RedirectResponse(url="/", status_code=303)
             resp.set_cookie(_AUTH_COOKIE, token, httponly=True,
                             samesite="lax", max_age=86400)
             return resp
 
+        @app.get("/__logout__")
+        async def logout():
+            # Clear the session cookie and bounce back to the login page. The
+            # cookie is httponly (JS can't delete it), so sign-out has to
+            # round-trip the server; the next request then fails the gate and
+            # the viewer sees the password prompt — free to log in as another
+            # role. Reachable only by an already-authed viewer (the gate lets
+            # them through); an unauthed hit just gets the login page anyway.
+            resp = RedirectResponse(url="/", status_code=303)
+            resp.delete_cookie(_AUTH_COOKIE, path="/", samesite="lax")
+            return resp
+
         @app.middleware("http")
         async def gate(request, call_next):
             if request.url.path == "/__auth__" or _authed(request):
                 return await call_next(request)
-            return HTMLResponse(_login_page(), status_code=401)
+            return HTMLResponse(_login_page(message=login_message), status_code=401)
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket):

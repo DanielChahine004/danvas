@@ -3,7 +3,7 @@ import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
-import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig, subscribePeerCursors, getEditor } from './bridge'
+import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig, subscribePeerCursors, getEditor, subscribeAuth, signOut } from './bridge'
 
 export default function App() {
   // `hideUi` is a <Tldraw> prop (decided before/at render), unlike the camera
@@ -18,6 +18,10 @@ export default function App() {
     <div style={{ position: 'fixed', inset: 0 }}>
       <PresenceBadge />
       <CursorLayer />
+      {/* Sign-out is an auth escape hatch, not app chrome, so it shows whenever
+          the canvas is password-protected — even under a `ui: false` kiosk view —
+          so any viewer can switch accounts. */}
+      <SignOutButton />
       {/* The Inspector button is part of the app's UI chrome, so a `ui: false`
           view (chrome-free surface) hides it alongside tldraw's own toolbars. */}
       {!hideUi && <InspectorButton />}
@@ -213,6 +217,49 @@ function InspectorButton() {
     >
       <span style={{ fontSize: 14, lineHeight: 1 }}>🔍</span>
       {state.open ? 'Inspector ✕' : 'Inspector'}
+    </button>
+  )
+}
+
+// A floating sign-out button, shown only on a password-protected canvas
+// (welcome.auth). Clicking it navigates to /__logout__, where the server clears
+// the session cookie and the login page returns — so a viewer can re-log in as a
+// different role. Sits bottom-right (clear of the presence badge top-center, the
+// Inspector button bottom-left, and tldraw's menus); rendered outside tldraw's
+// container, so it uses self-contained colours rather than the --pc-* theme vars.
+function SignOutButton() {
+  const [enabled, setEnabled] = useState(false)
+  useEffect(() => subscribeAuth(setEnabled), [])
+  if (!enabled) return null
+  return (
+    <button
+      onClick={signOut}
+      title="Sign out and return to the password page"
+      style={{
+        // Above tldraw's bottom-right help menu (shown when ui chrome is on),
+        // mirroring how InspectorButton clears the bottom-left zoom menu.
+        position: 'absolute',
+        bottom: 54,
+        right: 8,
+        zIndex: 300,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 12px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: 'rgba(20, 20, 22, 0.82)',
+        color: '#f87171',
+        border: '1px solid rgba(255, 255, 255, 0.18)',
+        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: 12,
+        fontWeight: 600,
+        userSelect: 'none',
+      }}
+    >
+      <span style={{ fontSize: 14, lineHeight: 1 }}>🔓</span>
+      Sign out
     </button>
   )
 }
