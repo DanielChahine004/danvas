@@ -19,7 +19,8 @@ speed  = canvas.slider("speed", min=0, max=100)   # 2. make components (panels)
 status = canvas.label("status", "idle")
 
 @speed.on_change                                  #    read user input back …
-def _(v): status.update(f"speed {v}")             #    … and push state out
+def _(v, viewer):                                 #    … with who did it (optional 2nd arg)
+    status.update(f"{viewer['name']} set speed to {v}")   # … and push state out
 
 speed.set_layout(x=40, y=40, w=320)               # 3. place/size it (optional —
                                                   #    factory x=/y=/w=/h= work too)
