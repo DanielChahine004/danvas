@@ -16,6 +16,27 @@ import threading
 import traceback
 
 
+def spawn(fn, *args, name=None, **kwargs):
+    """Run ``fn(*args, **kwargs)`` on a fresh daemon thread; log any exception.
+
+    The single "give this its own thread" primitive behind both
+    :meth:`Canvas.background` (a producer loop started at serve) and the
+    ``threaded=True`` input handlers (run off the shared dispatch thread so a
+    slow handler doesn't hold up the others). The thread lives exactly as long
+    as ``fn`` runs: a ``while True`` loop keeps it alive for the app's lifetime,
+    a handler that returns lets it collapse on its own. Daemon, so it never
+    blocks interpreter shutdown or a hot-reload teardown. Returns the thread.
+    """
+    def run():
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            traceback.print_exc()
+    thread = threading.Thread(target=run, name=name, daemon=True)
+    thread.start()
+    return thread
+
+
 class Kernel:
     """One daemon thread running submitted callables in FIFO order."""
 

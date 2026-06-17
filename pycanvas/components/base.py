@@ -1,5 +1,6 @@
 """Base class shared by all PyCanvas components."""
 
+import functools
 import inspect
 import math
 import threading
@@ -7,6 +8,25 @@ import traceback
 import warnings
 
 from .._flags import LAYOUT_FLAGS
+from ..kernel import spawn
+
+
+def _mark_threaded(fn):
+    """Tag a callback so the dispatcher runs it on its own thread (``spawn``).
+
+    Sets a marker attribute on the callable. Bound methods and builtins can't
+    take attributes, so those fall back to a thin ``functools.wraps`` wrapper
+    (which preserves the signature, so the viewer-arity detection still works).
+    """
+    try:
+        fn._pc_threaded = True
+        return fn
+    except (AttributeError, TypeError):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+        wrapper._pc_threaded = True
+        return wrapper
 
 
 class BaseComponent:
@@ -544,10 +564,29 @@ class BaseComponent:
         self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
 
     # -- input (browser -> Python) -------------------------------------------
-    def on_change(self, fn):
-        """Decorator: register a callback fired on input from the browser."""
-        self._callbacks.append(fn)
-        return fn
+    def on_change(self, fn=None, *, threaded=False):
+        """Decorator: register a callback fired on input from the browser.
+
+        Handlers normally run one at a time on a shared dispatch thread (off the
+        event loop, so the UI never freezes — but a slow handler holds up the
+        others behind it). Pass ``threaded=True`` to run *this* handler on its
+        own daemon thread instead, so a slow call (a network request, a
+        ``time.sleep``, a long compute) doesn't stall other panels::
+
+            @speed.on_change(threaded=True)
+            def _(v, viewer):
+                result = slow_api_call(v)   # doesn't block other handlers
+                status.update(result)
+
+        The trade-off is concurrency: a threaded handler may run alongside
+        others, so guard any shared state you mutate from it. It's the
+        event-driven twin of :meth:`Canvas.background` (both run a function on
+        its own thread via the same primitive).
+        """
+        def register(f):
+            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
 
     @staticmethod
     def _accepts_viewer(fn, n_call_args):
@@ -579,13 +618,18 @@ class BaseComponent:
         compatible: existing one-arg handlers are never changed.
         """
         for cb in callbacks:
-            try:
-                if self._accepts_viewer(cb, len(call_args)):
-                    cb(*call_args, viewer or {})
-                else:
-                    cb(*call_args)
-            except Exception:
-                traceback.print_exc()
+            args = (*call_args, viewer or {}) \
+                if self._accepts_viewer(cb, len(call_args)) else call_args
+            if getattr(cb, "_pc_threaded", False):
+                # Run on its own daemon thread so a slow handler doesn't hold up
+                # the rest; spawn() logs any exception (default-arg capture so
+                # the loop variable isn't shared across iterations).
+                spawn(lambda c=cb, a=args: c(*a), name=f"pc-handler-{self.name}")
+            else:
+                try:
+                    cb(*args)
+                except Exception:
+                    traceback.print_exc()
 
     def _handle_input(self, payload, viewer=None):
         if "value" in payload:

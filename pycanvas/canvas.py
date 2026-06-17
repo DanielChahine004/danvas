@@ -24,7 +24,7 @@ from ._flags import LAYOUT_FLAGS
 from .arrow import Arrow, _arrow_props
 from .bridge import Bridge
 from .components import Inspector  # spawned directly by the toolbar UI toggle
-from .kernel import Kernel
+from .kernel import Kernel, spawn
 from ._layout import _FlowLayout, _LayoutMixin  # noqa: F401  (_FlowLayout re-exported)
 from ._factories import _FactoryMixin
 
@@ -178,12 +178,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Spawn each registered background worker as a daemon thread.
 
         Called from serve() in the serving process only (not the hot-reload
-        monitor). Daemon so they don't block interpreter shutdown / a reload's
-        process teardown.
+        monitor). Uses the same ``spawn`` primitive as the ``threaded=True``
+        input handlers — a daemon thread that lives as long as the worker runs
+        (a producer loop runs for the app's lifetime), so neither blocks
+        interpreter shutdown / a reload's teardown, and a crash is logged.
         """
         for fn, args, kwargs in self._background:
-            threading.Thread(target=fn, args=args, kwargs=kwargs,
-                             daemon=True).start()
+            spawn(fn, *args, name="pc-background", **kwargs)
 
     @property
     def components(self):

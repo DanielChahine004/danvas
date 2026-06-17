@@ -308,6 +308,25 @@ def _(msg):                        # msg["stock"]/["price"] are ints here
 `examples/action_routing.py` is a minimal demo; `examples/hackathon/hackathon.py`
 uses the pattern at scale (one handler per admin/team action across several panels).
 
+**Slow handlers — `threaded=True`.** Handlers run one at a time on a shared
+dispatch thread (off the event loop, so the UI never freezes — but a slow
+handler holds up the ones queued behind it). Mark a handler `threaded=True` to
+run *it* on its own daemon thread, so a network call, a `time.sleep`, or a long
+compute doesn't stall the other panels:
+
+```python
+@fetch.on_click(threaded=True)        # also on_change / on(event) / on_message
+def _(viewer):
+    data = slow_api_call()            # doesn't block other handlers
+    table.update(data)
+```
+
+It's the event-driven twin of [`canvas.background`](#background-workers) — both
+run a function on its own thread via the same primitive, and the thread lives
+exactly as long as the function does. The trade-off is concurrency: a threaded
+handler may run alongside others, so guard any shared state you mutate from it
+(plain handlers stay serialized and need no locks).
+
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,
 cursors):
@@ -807,7 +826,11 @@ working version keeps serving. Needs `block=True` and a real script entry point.
 ## Background workers
 
 Register producer loops (camera, sensor, telemetry) with `@canvas.background` —
-`serve()` runs each on a daemon thread in the serving process only.
+`serve()` runs each on a daemon thread in the serving process only. It's the
+no-event side of the same "give this its own thread" primitive behind
+[`threaded=True` handlers](#receiving-input): a `while True` loop here keeps its
+thread alive for the app's lifetime; a handler that returns lets its thread
+collapse.
 
 ```python
 feed = canvas.video("webcam")

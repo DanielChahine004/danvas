@@ -9,6 +9,7 @@ called with no arguments. ``value`` reads the running click count.
 
 import traceback
 
+from .base import _mark_threaded
 from .react import React
 
 # Scoped under `.pc-button`; colours follow the canvas theme with safe fallbacks.
@@ -63,10 +64,18 @@ class Button(React):
         """
         super().update(text=text)
 
-    def on_click(self, fn):
-        """Decorator: register a handler fired (with no args) on each click."""
-        self._callbacks.append(fn)
-        return fn
+    def on_click(self, fn=None, *, threaded=False):
+        """Decorator: register a handler fired (with no args) on each click.
+
+        Pass ``threaded=True`` to run the handler on its own daemon thread so a
+        slow click handler (a network call, a long compute) doesn't hold up
+        other handlers — see :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the trade-off (you then own any shared-state safety).
+        """
+        def register(f):
+            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
 
     def _handle_input(self, _payload, viewer=None):
         with self._lock:

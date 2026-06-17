@@ -9,6 +9,8 @@ a mixin; React layers request/response routing (``on_request``) on top.
 
 import sys
 
+from .base import _mark_threaded
+
 
 def _warn(msg):
     """Print a routing diagnostic to the kernel's real stderr.
@@ -43,7 +45,7 @@ class _EventRouter:
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
 
-    def on(self, event=None, *, fields=None):
+    def on(self, event=None, *, fields=None, threaded=False):
         """Decorator: handle inbound ``canvas.send`` messages.
 
         ``@panel.on("tick")`` fires only for messages whose ``event`` field (see
@@ -64,9 +66,15 @@ class _EventRouter:
             @panel.on("award", fields={"id": str, "points": int})
             def _(msg):                 # msg["points"] is an int here
                 teams[msg["id"]]["points"] += msg["points"]
+
+        ``threaded=True`` runs the handler on its own daemon thread so a slow one
+        (a network call, a long compute) doesn't hold up the others; you then own
+        any shared-state safety (see ``on_change``).
         """
         def deco(fn):
             handler = self._with_fields(event, fn, fields) if fields else fn
+            if threaded:
+                handler = _mark_threaded(handler)
             self._routes.setdefault(event, []).append(handler)
             return fn   # return the original so it stays usable/named by the caller
         return deco
@@ -111,10 +119,17 @@ class _EventRouter:
                 return None
         return out
 
-    def on_message(self, fn):
-        """Decorator: handle *every* inbound message (a catch-all ``on()``)."""
-        self._routes.setdefault(None, []).append(fn)
-        return fn
+    def on_message(self, fn=None, *, threaded=False):
+        """Decorator: handle *every* inbound message (a catch-all ``on()``).
+
+        ``threaded=True`` runs the handler on its own daemon thread (see
+        :meth:`on`), so a slow catch-all doesn't hold up other handlers.
+        """
+        def register(f):
+            self._routes.setdefault(None, []).append(
+                _mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
 
     def _handle_input(self, payload, viewer=None):
         with self._lock:

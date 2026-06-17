@@ -21,7 +21,7 @@ from fastapi import WebSocketDisconnect
 
 from ._flags import LAYOUT_FLAGS
 from ._protocol import BINARY_FRAME_CODES
-from .kernel import Kernel
+from .kernel import Kernel, spawn
 
 
 def _diag(msg):
@@ -615,11 +615,21 @@ class Bridge:
         }
         self._chat_history.append(entry)
         self.broadcast(entry)
+        self._fan_out_chat(entry)
+
+    def _fan_out_chat(self, entry):
+        """Deliver a chat entry to every Python sink (off ``_handle_chat`` /
+        ``post_chat``). Sinks run inline on the event loop unless marked
+        ``threaded=True`` (Chat.on_message), which runs them on their own thread
+        so a slow one can't stall the canvas."""
         for sink in self._chat_sinks:
-            try:
-                sink(entry)
-            except Exception:
-                traceback.print_exc()
+            if getattr(sink, "_pc_threaded", False):
+                spawn(lambda s=sink: s(entry), name="pc-chat-sink")
+            else:
+                try:
+                    sink(entry)
+                except Exception:
+                    traceback.print_exc()
 
     def post_chat(self, text, name="host", color="#64748b"):
         """Inject a chat message from Python (e.g. a system/host announcement)."""
@@ -633,11 +643,7 @@ class Bridge:
         }
         self._chat_history.append(entry)
         self.broadcast(entry)
-        for sink in self._chat_sinks:
-            try:
-                sink(entry)
-            except Exception:
-                traceback.print_exc()
+        self._fan_out_chat(entry)
 
     def add_chat_sink(self, fn):
         """Register a callback fired with every chat entry (Chat panel handle)."""
