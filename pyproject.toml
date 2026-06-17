@@ -24,6 +24,12 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "websockets>=12",
+    # ~10x faster JSON encoding for the wire than stdlib json (the dominant
+    # per-broadcast cost on the single event-loop thread). Ships prebuilt wheels
+    # for every common platform; pycanvas/bridge.py falls back to stdlib json
+    # transparently if it's ever unavailable, so it's a free speedup, not a hard
+    # requirement.
+    "orjson>=3.9",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

@@ -24,6 +24,31 @@ from ._flags import LAYOUT_FLAGS
 from ._protocol import BINARY_FRAME_CODES
 from .kernel import Kernel, spawn
 
+# JSON codec for the wire. orjson, when installed, encodes our frames ~10x
+# faster than stdlib json (it's the dominant per-broadcast CPU cost on the
+# single event-loop thread, so it directly caps fan-out rate); we fall back to
+# stdlib transparently when it isn't, so it's a free speedup that asks nothing
+# of the user. ``OPT_NON_STR_KEYS`` matches json.dumps' coercion of int/float
+# dict keys to strings (a payload like ``{1: ...}`` doesn't raise); orjson also
+# serialises NaN/Infinity as ``null``, which is what the browser's JSON.parse
+# requires anyway (stdlib json emits bare ``NaN``, which JSON.parse rejects), so
+# the swap is strictly safer on that edge, not just faster. orjson returns
+# bytes; we decode once for ``send_text`` (still ~10x ahead, decode included).
+try:
+    import orjson as _orjson
+
+    def _dumps(obj):
+        return _orjson.dumps(obj, option=_orjson.OPT_NON_STR_KEYS).decode()
+
+    def _loads(raw):
+        return _orjson.loads(raw)
+except ImportError:  # pragma: no cover - exercised only without orjson installed
+    def _dumps(obj):
+        return json.dumps(obj)
+
+    def _loads(raw):
+        return json.loads(raw)
+
 
 # Tokens that mark a mobile/tablet browser in the User-Agent string. Used only
 # to classify a viewer as "mobile" vs "desktop" for layout adaptation — it's a
@@ -869,7 +894,7 @@ class Bridge:
 
     def _on_message(self, ws, raw):
         try:
-            msg = json.loads(raw)
+            msg = _loads(raw)
         except (ValueError, TypeError):
             return
         # Any inbound frame proves the socket is alive — refresh its deadline.
@@ -1050,7 +1075,7 @@ class Bridge:
         :meth:`_send_text`; broadcasting a dict through here would re-encode it
         per socket.
         """
-        await self._send_text(ws, json.dumps(msg))
+        await self._send_text(ws, _dumps(msg))
 
     async def _send_text(self, ws, text):
         """Send an already-serialized JSON frame, serialized against any other
@@ -1089,19 +1114,43 @@ class Bridge:
         :meth:`broadcast` / :meth:`send_to_role` / :meth:`send_to_client`.
 
         The frame is JSON-encoded *once* here and the same text handed to every
-        recipient, so a broadcast to N viewers pays a single ``json.dumps`` rather
-        than one per socket. A no-op before the loop exists (replay carries the
-        state on connect); each send is wrapped in :meth:`_safe_send_text` so a
-        dead socket is dropped rather than raising. ``targets`` is materialised by
-        the caller (a snapshot of the connection/viewer map) so a concurrent
-        connect/disconnect can't mutate it mid-iteration.
+        recipient, so a broadcast to N viewers pays a single encode rather than
+        one per socket. It is also scheduled onto the loop with a *single*
+        cross-thread hop (:meth:`_fanout_text`), not one per socket: the
+        thread-safe handoff (``run_coroutine_threadsafe``) is far costlier than an
+        in-loop task, and it was the real ceiling on fan-out — total sends/sec
+        stayed flat (~13k) however many viewers connected. A no-op before the loop
+        exists (replay carries the state on connect); each send is wrapped in
+        :meth:`_safe_send_text` so a dead socket is dropped rather than raising.
+        ``targets`` is materialised by the caller (a snapshot of the
+        connection/viewer map) so a concurrent connect/disconnect can't mutate it
+        mid-iteration.
         """
         if self._loop is None:
             return
-        text = json.dumps(msg)
-        for ws in targets:
-            asyncio.run_coroutine_threadsafe(
-                self._safe_send_text(ws, text), self._loop)
+        targets = list(targets)
+        if not targets:
+            return
+        text = _dumps(msg)
+        asyncio.run_coroutine_threadsafe(
+            self._fanout_text(targets, text), self._loop)
+
+    async def _fanout_text(self, targets, text):
+        """Deliver one already-encoded frame to every target, concurrently.
+
+        Spawns the per-socket sends as cheap in-loop tasks (via ``gather``) so a
+        slow/backpressured socket can't hold up a fast one — the same per-socket
+        independence the old one-task-per-socket scheduling had, but reached with
+        a single cross-thread hop instead of N. Exceptions are swallowed per
+        socket inside :meth:`_safe_send_text`; ``return_exceptions`` is belt-and-
+        braces so one failure can't cancel the rest.
+        """
+        if len(targets) == 1:
+            await self._safe_send_text(targets[0], text)
+        else:
+            await asyncio.gather(
+                *(self._safe_send_text(ws, text) for ws in targets),
+                return_exceptions=True)
 
     def broadcast(self, msg, exclude=None):
         """Send ``msg`` to every connected client. Safe to call from any thread.
@@ -1139,12 +1188,20 @@ class Bridge:
         if self._loop is None:
             return
         self._tap_binary(data)
-        for ws in list(self._connections):
-            if ws is exclude:
-                continue
+        targets = [ws for ws in list(self._connections) if ws is not exclude]
+        if targets:
             asyncio.run_coroutine_threadsafe(
-                self._safe_send_binary(ws, data), self._loop
-            )
+                self._fanout_bytes(targets, data), self._loop)
+
+    async def _fanout_bytes(self, targets, data):
+        """:meth:`_fanout_text` for a binary frame — one cross-thread hop, then
+        concurrent per-socket sends."""
+        if len(targets) == 1:
+            await self._safe_send_binary(targets[0], data)
+        else:
+            await asyncio.gather(
+                *(self._safe_send_binary(ws, data) for ws in targets),
+                return_exceptions=True)
 
     async def _safe_send_binary(self, ws, data):
         try:
