@@ -1050,9 +1050,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Where ``persist=True`` saves when no path is given: ``<script>.canvas.json``.
 
         Derived from the running script (``__main__.__file__``) so the file sits
-        next to it and is named after it. Falls back to ``canvas.json`` in the
-        working directory when there is no script file (an interactive REPL or a
-        notebook, where ``__main__`` has no ``__file__``).
+        next to it and is named after it. Falls back to ``pycanvas.canvas.json``
+        in the working directory when there is no script file (an interactive
+        REPL or a notebook, where ``__main__`` has no ``.py`` ``__file__``). Both
+        end in ``.canvas.json`` so the default ``*.canvas.json`` gitignore catches
+        them.
         """
         main = sys.modules.get("__main__")
         script = getattr(main, "__file__", None)
@@ -1060,7 +1062,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             script = os.path.abspath(script)
             stem = os.path.splitext(os.path.basename(script))[0]
             return os.path.join(os.path.dirname(script), f"{stem}.canvas.json")
-        return os.path.abspath("canvas.json")
+        return os.path.abspath("pycanvas.canvas.json")
 
     def _persist_setup(self, persist):
         """Resolve the persist file, load it if present, and arm the autosave.

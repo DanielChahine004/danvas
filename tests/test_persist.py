@@ -99,7 +99,25 @@ def test_persist_off_is_inert():
     canvas._persist_flush()                   # safe no-op when off
 
 
-def test_default_path_named_after_script():
+def test_default_path_named_after_script(monkeypatch, tmp_path):
+    # Deterministic regardless of how the suite is launched (python -m pytest vs
+    # the pytest console script give __main__ different __file__s): drive it off
+    # a controlled __main__.
+    import sys
+    import types
+    fake_main = types.ModuleType("__main__")
+    fake_main.__file__ = str(tmp_path / "myapp.py")
+    monkeypatch.setitem(sys.modules, "__main__", fake_main)
     p = pycanvas.Canvas._default_persist_path()
     assert os.path.isabs(p)
-    assert p.endswith(".canvas.json")
+    assert os.path.basename(p) == "myapp.canvas.json"
+
+
+def test_default_path_falls_back_without_a_script(monkeypatch):
+    # No .py __file__ (REPL / notebook) -> a fixed name that still ends in
+    # .canvas.json, so the *.canvas.json gitignore still catches it.
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, "__main__", types.ModuleType("__main__"))
+    p = pycanvas.Canvas._default_persist_path()
+    assert os.path.basename(p) == "pycanvas.canvas.json"
