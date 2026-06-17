@@ -281,6 +281,38 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Remove a cursor observer registered with :meth:`on_cursor`."""
         self._bridge.remove_cursor_tap(fn)
 
+    def on_connect(self, fn):
+        """Run ``fn(viewer)`` once each time a viewer connects. Decorator-friendly.
+
+        ``viewer`` is the same dict handed to every handler —
+        ``id``/``name``/``color``/``cursor``/``device``/``role`` — so a single
+        hook lets you tailor the canvas to *who* (or *what*) just joined. The
+        common case is adapting the layout to a phone, reusing the per-viewer
+        ``client_id=`` scoping that :meth:`~pycanvas.components.base.BaseComponent.set_layout`
+        already supports::
+
+            @canvas.on_connect
+            def adapt(viewer):
+                if viewer["device"] == "mobile":
+                    for i, panel in enumerate(panels):
+                        panel.set_layout(client_id=viewer["id"],
+                                         x=0, y=i * 220, w=360)
+
+        The same pattern targets any viewer attribute (``role``, ``name``, …),
+        so you don't need a separate scoping axis per attribute. It fires after
+        the viewer's initial state has been sent, so a ``set_layout``/``update``
+        here arrives as a live tweak on top — run on the dispatch thread (off the
+        event loop), so it's safe to drive components from it. ``device`` is a
+        best-effort, spoofable User-Agent classification, so use it for
+        presentation, never authorization (gate those on ``role``). Remove with
+        :meth:`off_connect`.
+        """
+        return self._bridge.add_connect_tap(fn)
+
+    def off_connect(self, fn):
+        """Remove a connect observer registered with :meth:`on_connect`."""
+        self._bridge.remove_connect_tap(fn)
+
     def _debug_frame(self, direction, msg):
         """The ``serve(debug=True)`` tap: print one console line per frame."""
         arrow = "->" if direction == "out" else "<-"

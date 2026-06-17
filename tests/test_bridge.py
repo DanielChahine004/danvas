@@ -107,10 +107,10 @@ def test_emit_is_noop_before_serving():
 
 def test_make_viewer_reuses_valid_requested_identity():
     b = Bridge()
-    v = b._make_viewer(role="admin",
+    v = b._make_viewer(role="admin", device="mobile",
                        requested={"id": "a1b2c3d4", "name": "Fox", "color": "#ef4444"})
     assert v == {"id": "a1b2c3d4", "name": "Fox", "color": "#ef4444",
-                 "cursor": None, "role": "admin"}
+                 "cursor": None, "device": "mobile", "role": "admin"}
 
 
 def test_make_viewer_rejects_bad_id_and_color():

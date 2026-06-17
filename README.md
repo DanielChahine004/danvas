@@ -341,16 +341,36 @@ cursors):
 | `id` | stable per-connection roster id (use with `client_id=`) | client-side — attribution only |
 | `name` | viewer's editable display name | client-side |
 | `color` | roster color | client-side |
+| `device` | `"mobile"` or `"desktop"`, from the User-Agent | client-side — presentation only |
 | `role` | login level from `serve(passwords=)`, else `None` | **server-trusted — authorize on this** |
 | `cursor` | `{"x", "y"}` in canvas coords, or `None` (only with `serve(cursors=True)`) | client-side |
 
-Gate permissions on `role` only; `id`/`name`/`color`/`cursor` are reported by the
-browser, so they're great for attribution and per-viewer targeting but not for
-authorization. Every key is always present, but on an **upload** the attribution
-fields (`id`/`name`/`color`/`cursor`) are `None` unless the uploader is still
-connected — the file arrives over HTTP and is matched to the live roster by id,
-so a disconnected or unrecognised uploader leaves them `None` (only `role`, from
-the auth session, is guaranteed). Read them with `.get(...)` and a fallback.
+Gate permissions on `role` only; `id`/`name`/`color`/`device`/`cursor` are
+reported by the browser, so they're great for attribution and per-viewer
+targeting but not for authorization. Every key is always present, but on an
+**upload** the attribution fields (`id`/`name`/`color`/`device`/`cursor`) are
+`None` unless the uploader is still connected — the file arrives over HTTP and is
+matched to the live roster by id, so a disconnected or unrecognised uploader
+leaves them `None` (only `role`, from the auth session, is guaranteed). Read them
+with `.get(...)` and a fallback.
+
+**Adapt to who joins — `canvas.on_connect`.** Runs `fn(viewer)` once each time a
+viewer connects, so you can tailor the canvas to *who* (or *what*) joined. The
+common case is a mobile layout — and rather than a separate scoping axis per
+attribute, you reuse the per-viewer `client_id=` that `set_layout`/`update`
+already take, so the same hook handles `device`, `role`, `name`, anything:
+
+```python
+@canvas.on_connect
+def adapt(viewer):
+    if viewer["device"] == "mobile":            # also: viewer["role"], ["name"], …
+        for i, panel in enumerate(panels):
+            panel.set_layout(client_id=viewer["id"], x=0, y=i * 220, w=360)
+```
+
+It fires after the viewer's initial state is sent, so the override lands as a
+live tweak on top (a brief reflow on slow links). `device` is a best-effort,
+spoofable User-Agent guess — fine for layout, never for auth.
 
 **Custom panels (your own protocol):** browser JS calls
 `canvas.send({event:'x', ...})`; Python routes with `@panel.on("x")`; Python

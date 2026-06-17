@@ -9,6 +9,7 @@ import asyncio
 import json
 import math
 import random
+import re
 import secrets
 import sys
 import threading
@@ -22,6 +23,24 @@ from fastapi import WebSocketDisconnect
 from ._flags import LAYOUT_FLAGS
 from ._protocol import BINARY_FRAME_CODES
 from .kernel import Kernel, spawn
+
+
+# Tokens that mark a mobile/tablet browser in the User-Agent string. Used only
+# to classify a viewer as "mobile" vs "desktop" for layout adaptation — it's a
+# best-effort, client-reported, spoofable signal (and iPadOS reports a desktop
+# UA), so it's presentation-only, never an authorization input.
+_MOBILE_UA_RE = re.compile(
+    r"Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|"
+    r"Windows Phone|webOS",
+    re.I,
+)
+
+
+def _device_from_ua(user_agent):
+    """Classify a User-Agent as ``"mobile"`` or ``"desktop"`` (best effort)."""
+    if user_agent and _MOBILE_UA_RE.search(user_agent):
+        return "mobile"
+    return "desktop"
 
 
 def _diag(msg):
@@ -108,6 +127,11 @@ class Bridge:
         # frame taps: cursors are high-rate and intentionally off the wire-tap
         # path, so they neither flood debug logs nor pay the frame-tap guard.
         self._cursor_taps = []
+        # Observers of viewer connections (canvas.on_connect). Fired once per
+        # join with the viewer dict, off the event loop, so a handler can adapt
+        # the canvas to that viewer (e.g. a mobile layout via set_layout(
+        # client_id=...)) without blocking the connect path.
+        self._connect_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
         self._any_connected = threading.Event()  # set while ≥1 client is connected
@@ -252,6 +276,28 @@ class Bridge:
 
     def _tap_cursor(self, viewer):
         for fn in list(self._cursor_taps):
+            try:
+                fn(viewer)
+            except Exception:
+                traceback.print_exc()
+
+    def add_connect_tap(self, fn):
+        """Register ``fn(viewer)`` to fire once when a viewer connects (on_connect).
+
+        ``viewer`` is a snapshot dict (``id``/``name``/``color``/``cursor``/
+        ``device``/``role``). Runs off the event loop on the dispatch thread, so
+        a handler may safely drive the canvas (e.g. ``set_layout(client_id=...)``
+        to adapt the layout to that viewer's device).
+        """
+        self._connect_taps.append(fn)
+        return fn
+
+    def remove_connect_tap(self, fn):
+        if fn in self._connect_taps:
+            self._connect_taps.remove(fn)
+
+    def _tap_connect(self, viewer):
+        for fn in list(self._connect_taps):
             try:
                 fn(viewer)
             except Exception:
@@ -440,7 +486,11 @@ class Bridge:
         qp = getattr(ws, "query_params", {})
         requested = {"id": qp.get("vid"), "name": qp.get("vname"),
                      "color": qp.get("vcolor")}
-        viewer = self._make_viewer(role=role, requested=requested)
+        # Classify the connecting device from the handshake User-Agent (no client
+        # cooperation needed) so a handler can adapt the layout to mobile.
+        headers = getattr(ws, "headers", {})
+        device = _device_from_ua(headers.get("user-agent"))
+        viewer = self._make_viewer(role=role, requested=requested, device=device)
         self._viewers[ws] = viewer
         self._broadcast_roster()  # tell everyone a viewer joined
         try:
@@ -503,6 +553,13 @@ class Bridge:
                   f"(replayed {len(self._components)} panels, "
                   f"{len(self._arrows)} arrows)")
 
+            # Fire on_connect observers off the loop (a snapshot, like cursor
+            # taps) once the client has its initial state — so a handler that
+            # adapts the layout (set_layout(client_id=...)) lands as a live
+            # update on top of what was just replayed.
+            if self._connect_taps:
+                self._dispatch.submit(lambda v=dict(viewer): self._tap_connect(v))
+
             while True:
                 raw = await ws.receive_text()
                 self._on_message(ws, raw)
@@ -533,14 +590,17 @@ class Bridge:
             self._last_seen.pop(ws, None)
             self._broadcast_roster()  # tell everyone a viewer left
 
-    def _make_viewer(self, role=None, requested=None):
+    def _make_viewer(self, role=None, requested=None, device="desktop"):
         """Mint a viewer identity (id + friendly editable name + color + role).
 
         ``requested`` carries a browser-supplied id/name/color from a reconnect
         (see handle_connection): when its id looks valid it's reused so a tab that
         flaps keeps a single, stable identity instead of being renamed each time.
         These three fields are client-reported either way (only ``role`` is
-        trusted), so honouring them changes no trust boundary.
+        trusted), so honouring them changes no trust boundary. ``device`` is the
+        connection's classified device (``"mobile"``/``"desktop"``) for layout
+        adaptation — also client-reported (from the User-Agent), so attribution
+        only, never authorization.
         """
         rid = (requested or {}).get("id")
         if rid and rid.isalnum() and len(rid) <= 32:
@@ -550,7 +610,8 @@ class Bridge:
                      and all(c in "0123456789abcdefABCDEF" for c in rcolor[1:])
                      else random.choice(_VIEWER_COLORS))
             return {"id": rid, "name": rname or random.choice(_VIEWER_ANIMALS),
-                    "color": color, "cursor": None, "role": role}
+                    "color": color, "cursor": None, "device": device,
+                    "role": role}
         existing = {v["name"] for v in self._viewers.values()}
         animal = random.choice(_VIEWER_ANIMALS)
         name = animal
@@ -564,7 +625,7 @@ class Bridge:
         # populated when cursor reporting is enabled). Read it via canvas.viewers.
         # ``role`` is the access level granted at login (None when no passwords set).
         return {"id": uuid.uuid4().hex[:8], "name": name, "color": color,
-                "cursor": None, "role": role}
+                "cursor": None, "device": device, "role": role}
 
     def _broadcast_roster(self):
         """Push the live-viewer roster (and count) to every connected browser.
@@ -730,7 +791,7 @@ class Bridge:
         ``id``/``name``/``color`` for authorization; use ``role``.
         """
         info = {"id": None, "name": None, "color": None,
-                "cursor": None, "role": role}
+                "cursor": None, "device": None, "role": role}
         if viewer_id:
             for v in list(self._viewers.values()):
                 if v.get("id") == viewer_id:
@@ -738,6 +799,7 @@ class Bridge:
                     info["name"] = v.get("name")
                     info["color"] = v.get("color")
                     info["cursor"] = v.get("cursor")
+                    info["device"] = v.get("device")
                     break
         return info
 

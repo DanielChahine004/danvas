@@ -183,12 +183,13 @@ def test_resolve_viewer_merges_roster_identity_with_trusted_role():
     # Stand in for a live connection on the roster.
     bridge._viewers["ws-sentinel"] = {
         "id": "abc123", "name": "Fox", "color": "#ef4444",
-        "cursor": {"x": 1, "y": 2}, "role": "viewer",
+        "cursor": {"x": 1, "y": 2}, "device": "mobile", "role": "viewer",
     }
-    # role is the server-trusted value; id/name/color/cursor come from the roster.
+    # role is the server-trusted value; id/name/color/cursor/device from the roster.
     info = bridge.resolve_viewer("abc123", role="manager")
     assert info == {"role": "manager", "id": "abc123", "name": "Fox",
-                    "color": "#ef4444", "cursor": {"x": 1, "y": 2}}
+                    "color": "#ef4444", "cursor": {"x": 1, "y": 2},
+                    "device": "mobile"}
 
 
 def test_resolve_viewer_unknown_id_keeps_uniform_shape():
@@ -196,9 +197,11 @@ def test_resolve_viewer_unknown_id_keeps_uniform_shape():
     # shape so handlers read it uniformly -- only role is meaningful, the rest None.
     bridge = Bridge()
     assert bridge.resolve_viewer("ghost", role="manager") == {
-        "id": None, "name": None, "color": None, "cursor": None, "role": "manager"}
+        "id": None, "name": None, "color": None, "cursor": None,
+        "device": None, "role": "manager"}
     assert bridge.resolve_viewer("", role=None) == {
-        "id": None, "name": None, "color": None, "cursor": None, "role": None}
+        "id": None, "name": None, "color": None, "cursor": None,
+        "device": None, "role": None}
 
 
 def test_http_upload_attributes_to_a_connected_viewer():
