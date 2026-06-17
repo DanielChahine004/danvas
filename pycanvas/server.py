@@ -95,8 +95,17 @@ def _announce(host, port):
               "   <- open this on another device on the same Wi-Fi")
 
 
+# Precompressed-encoding preferences, best ratio first. The build
+# (frontend/scripts/precompress.mjs) emits a ``.br`` and ``.gz`` sibling for each
+# compressible asset; we serve whichever the client advertises rather than the
+# raw ~7 MB bundle. Browsers only offer ``br`` over HTTPS (the tunnel) but send
+# ``gzip`` over plain HTTP (the local/LAN bind), so both pull their weight.
+_PRECOMPRESSED = (("br", ".br"), ("gzip", ".gz"))
+
+
 class _FrontendStatic(StaticFiles):
-    """Serve the built frontend, but never let the browser cache index.html.
+    """Serve the built frontend: precompressed when the client accepts it, and
+    never letting the browser cache index.html.
 
     The JS/CSS bundles are content-hashed (safe to cache forever), but the HTML
     that points at them changes every rebuild. Without this, a browser holding a
@@ -108,6 +117,41 @@ class _FrontendStatic(StaticFiles):
         response = await super().get_response(path, scope)
         if path in (".", "", "index.html") or path.endswith(".html"):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return self._maybe_precompressed(scope, response)
+
+    @staticmethod
+    def _maybe_precompressed(scope, response):
+        """Swap a plain file response for its ``.br``/``.gz`` sibling when one
+        exists and the client advertised that encoding.
+
+        Only ever swaps a straight ``200`` file response, and never for a Range
+        request (a partial read over the *encoded* bytes is a needless footgun) —
+        every other case (304, redirect, missing file) falls through untouched.
+        The compressed file's own size/etag are used (a distinct representation),
+        the original ``Content-Type`` and any ``Cache-Control`` are carried over,
+        and ``Vary: Accept-Encoding`` is set so caches key on the encoding.
+        """
+        if getattr(response, "status_code", None) != 200:
+            return response
+        full = getattr(response, "path", None)
+        if not full:
+            return response
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        if "range" in headers:
+            return response
+        accepted = {t.split(";")[0].strip()
+                    for t in headers.get("accept-encoding", "").split(",")}
+        for token, ext in _PRECOMPRESSED:
+            if token in accepted and os.path.isfile(full + ext):
+                swapped = FileResponse(
+                    full + ext, media_type=response.headers.get("content-type"))
+                cache_control = response.headers.get("cache-control")
+                if cache_control:
+                    swapped.headers["Cache-Control"] = cache_control
+                swapped.headers["Content-Encoding"] = token
+                swapped.headers["Vary"] = "Accept-Encoding"
+                return swapped
         return response
 
 
