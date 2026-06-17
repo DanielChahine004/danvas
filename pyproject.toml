@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -18,7 +18,7 @@ version = "0.1.0"
 description = "A browser-based spatial canvas with UI panels defined and controlled from Python."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "AGPL-3.0-or-later"
 authors = [{ name = "Daniel Chahine", email = "daniel.chahine004@gmail.com" }]
 dependencies = [
     "fastapi>=0.110",
@@ -27,7 +27,6 @@ dependencies = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Visualization",

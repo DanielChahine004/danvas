@@ -1222,3 +1222,9 @@ npm run build          # npm run dev + http://localhost:5173/?demo for standalon
 ```
 
 See [GUIDE.md](GUIDE.md) for deeper detail.
+
+## Licence
+
+pycanvas is licensed under the [GNU Affero General Public License v3.0](LICENSE)
+(AGPL-3.0). Commercial licences are available on request via
+daniel.chahine004@gmail.com.
