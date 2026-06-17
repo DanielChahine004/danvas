@@ -219,7 +219,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe) |
-| `LivePlot` | output | streaming telemetry; `.push({trace: y}, x=)`, `.clear()`, `smoothing=` |
+| `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
 | `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)` |
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
@@ -251,6 +251,18 @@ weights.add(layer.weight, step=epoch) # record: one distribution row at this ste
 `Plot` re-renders a full Plotly figure each `.update`; `LivePlot` streams just
 the data onto a mounted chart (smooth at 10+ Hz). Trace keys need not be
 declared — `traces=` only fixes legend order; pushing a new key adds a trace.
+
+`LivePlot.push` also takes a **batch** — a list/array per trace — to add many
+points in one call instead of a loop, with `x` a matching list (or omitted to
+auto-index). This is your lever on update *rate*: buffer in your loop and flush
+when you choose, so a fast producer needn't render every step (the server
+coalesces updates a slow client can't keep up with, as a safety ceiling for when
+you don't).
+
+```python
+plot.push({"train": losses, "val": vals}, x=steps)   # many points at once
+plot.push({"train": losses})                         # x auto-indexes each point
+```
 
 ## Controlling panels live
 

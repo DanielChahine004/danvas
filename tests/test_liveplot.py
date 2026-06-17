@@ -151,6 +151,63 @@ def test_smoothing_delta_extends_raw_and_smoothed_traces():
     assert ext["y"][1][0] == pytest.approx(_ema([10.0, 20.0], 0.6)[-1])  # EMA
 
 
+# -- batch push: many points per trace in one call ----------------------------
+
+def test_push_batch_with_explicit_x_appends_all_points():
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    bridge = _bound(plot)
+    plot.push({"a": [1.0, 2.0, 3.0]}, x=[10, 20, 30])
+    (trace,) = plot._payload()["data"]
+    assert trace["x"] == [10.0, 20.0, 30.0] and trace["y"] == [1.0, 2.0, 3.0]
+    # one extend frame carrying all three points, not three frames
+    ext = bridge.sent[-1][1]["plot_extend"]
+    assert ext["x"] == [[10.0, 20.0, 30.0]] and ext["y"] == [[1.0, 2.0, 3.0]]
+
+
+def test_push_batch_auto_indexes_each_point():
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    _bound(plot)
+    plot.push({"a": [5.0, 6.0]})            # no x -> auto 1, 2
+    plot.push({"a": [7.0]})                 # continues from 3
+    (trace,) = plot._payload()["data"]
+    assert trace["x"] == [1, 2, 3] and trace["y"] == [5.0, 6.0, 7.0]
+
+
+def test_push_batch_spans_multiple_traces():
+    plot = pycanvas.LivePlot("m", traces=["a", "b"])
+    _bound(plot)
+    plot.push({"a": [1.0, 2.0], "b": [3.0, 4.0]}, x=[0, 1])
+    data = {t["name"]: t["y"] for t in plot._payload()["data"]}
+    assert data["a"] == [1.0, 2.0] and data["b"] == [3.0, 4.0]
+
+
+def test_push_batch_length_mismatch_raises():
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    _bound(plot)
+    with pytest.raises(ValueError):
+        plot.push({"a": [1.0, 2.0, 3.0]}, x=[10, 20])      # x too short
+    with pytest.raises(ValueError):
+        plot.push({"a": [1.0, 2.0]}, x=5)                  # scalar x, batch values
+
+
+def test_push_batch_trims_to_rolling_max():
+    plot = pycanvas.LivePlot("m", traces=["a"], max_points=3)
+    bridge = _bound(plot)
+    plot.push({"a": [1.0, 2.0, 3.0, 4.0, 5.0]}, x=[1, 2, 3, 4, 5])
+    (trace,) = plot._payload()["data"]
+    assert trace["y"] == [3.0, 4.0, 5.0]                   # buffer keeps last 3
+    ext = bridge.sent[-1][1]["plot_extend"]
+    assert ext["y"] == [[3.0, 4.0, 5.0]] and ext["x"] == [[3, 4, 5]]  # so does the delta
+
+
+def test_push_single_point_unchanged_by_batch_support():
+    plot = pycanvas.LivePlot("m", traces=["a"])
+    bridge = _bound(plot)
+    plot.push({"a": 9.0}, x=42)
+    ext = bridge.sent[-1][1]["plot_extend"]
+    assert ext["x"] == [[42]] and ext["y"] == [[9.0]]
+
+
 def test_state_payload_still_replays_full_buffer():
     # Reconnecting clients get the whole series in one shot (deltas are only for
     # the live append path), so a late joiner sees the full curve.

@@ -91,31 +91,79 @@ class LivePlot(BaseComponent):
         A key not seen before starts a new trace on the fly. ``x`` defaults to an
         auto-incrementing sample index (pass it to use a real step/epoch number).
 
+        **Batch form** — pass a list/array per trace to add several points in one
+        call, instead of a loop of single pushes::
+
+            plot.push({"loss": [0.5, 0.4, 0.3]}, x=[10, 11, 12])
+            plot.push({"loss": losses})                 # x auto-indexes each point
+
+        Every trace in the call must supply the same number of points, and ``x``
+        (when given) must match that length; omit ``x`` to auto-index. Batching is
+        the user's lever on update *rate*: buffer points in your loop and flush a
+        batch when you choose, so a fast producer doesn't have to render every
+        step (the server-side coalescing is only the safety ceiling for when you
+        don't).
+
         On the wire this streams just the new point(s) as an ``extend`` delta —
         the frontend appends them with ``Plotly.extendTraces`` rather than
-        re-diffing the whole figure — so a long run stays O(1) per push instead
-        of re-sending the entire rolling buffer every time. The full buffer is
-        still kept server-side and replayed in one shot to any (re)connecting
-        client (:meth:`state_payload`). Two cases fall back to a full ``plot``
-        frame because a delta can't express them: a brand-new trace (the figure
-        gains a curve) and the ``"latest"`` queue policy (which drops stale
-        pending frames, so it needs whole-snapshot replace semantics — an append
-        delta would lose the dropped points; the default ``"fifo"`` delivers
+        re-diffing the whole figure — so a long run stays O(new points) per push
+        instead of re-sending the entire rolling buffer every time. The full
+        buffer is still kept server-side and replayed in one shot to any
+        (re)connecting client (:meth:`state_payload`). Two cases fall back to a
+        full ``plot`` frame because a delta can't express them: a brand-new trace
+        (the figure gains a curve) and the ``"latest"`` queue policy (which drops
+        stale pending frames, so it needs whole-snapshot replace semantics — an
+        append delta would lose the dropped points; the default ``"fifo"`` delivers
         every point in order, where the delta is both safe and the whole point).
         """
         with self._lock:
-            self._counter += 1
-            xi = self._counter if x is None else x
+            # Resolve the batch length n and its x-coordinates. x or any trace
+            # value given as a list/array is a batch; bare scalars are one point.
+            if self._is_seq(x):
+                xs = [float(v) for v in x]
+                n = len(xs)
+            else:
+                n = next((len(v) for v in sample.values()
+                          if self._is_seq(v)), 1)
+                if x is None:
+                    xs = [self._counter + i + 1 for i in range(n)]
+                elif n == 1:
+                    xs = [x]
+                else:
+                    raise ValueError(
+                        "LivePlot.push: x must be a sequence matching the batch "
+                        "length, or omitted to auto-index the points")
+            self._counter += n
             new_trace = any(name not in self._y for name in sample)
-            for name, yv in sample.items():
+            for name, val in sample.items():
                 self._ensure(name)
-                self._x[name].append(xi)
-                self._y[name].append(yv)
+                if self._is_seq(val):
+                    vals = [float(v) for v in val]
+                elif n == 1:
+                    vals = [float(val)]
+                else:
+                    raise ValueError(
+                        f"LivePlot.push: trace {name!r} needs {n} values to "
+                        f"match the batch length, got a single value")
+                if len(vals) != n:
+                    raise ValueError(
+                        f"LivePlot.push: trace {name!r} has {len(vals)} values "
+                        f"but the batch length is {n}")
+                for xi, yv in zip(xs, vals):
+                    self._x[name].append(xi)
+                    self._y[name].append(yv)
             if new_trace or self._queue == "latest":
                 payload = {"plot": self._payload()}
             else:
-                payload = {"plot_extend": self._extend_payload(sample, xi)}
+                payload = {"plot_extend": self._extend_payload(sample, xs)}
         self._stream(payload)
+
+    @staticmethod
+    def _is_seq(v):
+        """True for a batched value (a list/tuple/1-D array of points), not a
+        scalar — so ``push`` can tell ``{"a": [1, 2]}`` from ``{"a": 1}``."""
+        return isinstance(v, (list, tuple)) or (
+            hasattr(v, "__len__") and not isinstance(v, (str, bytes, dict)))
 
     def _stream(self, payload):
         """Send one stream frame with backpressure that fits a live plot.
@@ -134,33 +182,38 @@ class LivePlot(BaseComponent):
         self._bridge.broadcast_conflated(
             self.id, msg=msg, coalesce=(self._queue != "latest"))
 
-    def _extend_payload(self, sample, xi):
-        """The ``extend`` delta for the points just appended: the Plotly trace
+    def _extend_payload(self, sample, xs):
+        """The ``extend`` delta for the point(s) just appended: the Plotly trace
         index(es) to grow and the new x/y for each.
 
-        Mirrors the trace order :meth:`_payload` builds, so the frontend's trace
-        indices line up: without smoothing, logical trace *i* is Plotly trace
-        *i*; with smoothing each logical trace is two Plotly traces (faint raw at
-        ``2i``, bold smoothed at ``2i+1``), so a point extends both — the raw with
-        its value, the smoothed with the latest EMA over the current window
-        (recomputed like ``_payload`` so a streaming client and a reconnecting one
-        agree). ``max`` lets the frontend cap each trace to the same rolling
-        window as the server's deques.
+        ``xs`` is the x-coords of the new batch (one point or many). For each
+        trace the last ``keep`` appended points are the survivors — a batch larger
+        than the rolling ``max_points`` keeps only its tail, matching the deque.
+        Mirrors the trace order :meth:`_payload` builds so the frontend's indices
+        line up: without smoothing, logical trace *i* is Plotly trace *i*; with
+        smoothing each is two Plotly traces (faint raw at ``2i``, bold smoothed at
+        ``2i+1``), so each point extends both — the raw with its value, the
+        smoothed with the EMA tail over the current window (recomputed like
+        ``_payload`` so a streaming client and a reconnecting one agree). ``max``
+        lets the frontend cap each trace to the same rolling window.
         """
+        keep = len(xs) if self._max is None else min(len(xs), self._max)
+        xs_keep = list(xs[-keep:])
         indices, xs_out, ys_out = [], [], []
         for name in sample:
             i = self._traces.index(name)
+            y_keep = list(self._y[name])[-keep:]
             if self._smoothing > 0:
                 indices.append(2 * i)
-                xs_out.append([xi])
-                ys_out.append([self._y[name][-1]])
+                xs_out.append(list(xs_keep))
+                ys_out.append(y_keep)
                 indices.append(2 * i + 1)
-                xs_out.append([xi])
-                ys_out.append([_ema(list(self._y[name]), self._smoothing)[-1]])
+                xs_out.append(list(xs_keep))
+                ys_out.append(_ema(list(self._y[name]), self._smoothing)[-keep:])
             else:
                 indices.append(i)
-                xs_out.append([xi])
-                ys_out.append([self._y[name][-1]])
+                xs_out.append(list(xs_keep))
+                ys_out.append(y_keep)
         return {"indices": indices, "x": xs_out, "y": ys_out, "max": self._max}
 
     # Alias: every other component sends data via ``update()``. LivePlot's
