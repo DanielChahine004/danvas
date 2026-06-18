@@ -679,6 +679,24 @@ with canvas.column(width=320, gap=12):    # stacks; each keeps its natural heigh
 `row(height=…)` is the horizontal twin of `column`. An explicit position or
 relative anchor still wins per panel.
 
+Placement is one-shot, at insert. If a panel later grows — an `h="auto"` panel
+whose content expanded, a resized plot — keep the container handle and call
+`refit()` to re-pack the column/row at the panels' current sizes:
+
+```python
+with canvas.column(gap=16, origin=(1060, 40)) as summary:
+    log   = canvas.markdown(run_log(), h="auto")
+    preds = canvas.image(grid, h="auto")
+
+log.update(run_log())   # grew — the panel below would now overlap
+summary.refit()         # re-pack; restores the gaps
+```
+
+It's manual on purpose: a routinely-resizing panel doesn't make its neighbours
+jitter — they move only when you call `refit()`. The re-pack runs in the browser
+(where the real measured sizes live) and settles a resize you triggered in the
+same breath, so it's a no-op until a viewer is connected.
+
 Pass `roles=` (or `client_id=`) to a container and the whole block is laid out
 for just those viewers — each slot is written as that audience's layout *overlay*
 (via `set_layout(roles=…)`) instead of the shared base, so one role can have its

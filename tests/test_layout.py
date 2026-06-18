@@ -139,3 +139,83 @@ def test_label_default_auto_height_yields_to_grid_slot():
         a = canvas.label("a")
     assert a.h == 50
     assert a._auto_h is False
+
+
+def _capture_broadcast(canvas):
+    """Record every frame the bridge would broadcast (the wire is inert in tests,
+    so a shared column/row refit's reflow request only shows up here)."""
+    sent = []
+    canvas._bridge.broadcast = lambda msg, **kw: sent.append(msg)
+    return sent
+
+
+def test_shared_column_refit_requests_a_browser_reflow():
+    # A shared column packs in the browser, where the panels' real measured sizes
+    # live — Python just sends the ordered group + origin/gap; the browser does
+    # the placement (and re-runs it once a pending content-fit settles).
+    canvas = pycanvas.Canvas()
+    with canvas.column(width=200, gap=10, origin=(40, 40)) as col:
+        a = canvas.label("a", h=50)
+        b = canvas.label("b", h=50)
+        c = canvas.label("c", h=50)
+    sent = _capture_broadcast(canvas)
+    col.refit()
+    assert len(sent) == 1
+    m = sent[0]
+    assert m["type"] == "reflow" and m["kind"] == "column"
+    assert m["ids"] == [a.id, b.id, c.id]            # insertion order = pack order
+    assert (m["x0"], m["y0"], m["gap"]) == (40, 40, 10)
+
+
+def test_shared_row_refit_requests_a_row_reflow():
+    canvas = pycanvas.Canvas()
+    with canvas.row(height=50, gap=10, origin=(0, 0)) as r:
+        a = canvas.label("a", w=80)
+        b = canvas.label("b", w=80)
+    sent = _capture_broadcast(canvas)
+    r.refit()
+    assert sent[0]["kind"] == "row"
+    assert sent[0]["ids"] == [a.id, b.id]
+
+
+def test_shared_refit_excludes_panels_removed_since_insert():
+    canvas = pycanvas.Canvas()
+    with canvas.column(gap=10, origin=(0, 0)) as col:
+        a = canvas.label("a")
+        b = canvas.label("b")
+        c = canvas.label("c")
+    canvas.remove(b)
+    sent = _capture_broadcast(canvas)
+    col.refit()
+    assert sent[0]["ids"] == [a.id, c.id]            # the gone panel drops out
+
+
+def test_grid_refit_repacks_locally_by_slot():
+    # A grid keeps uniform fixed slots, so it re-packs in Python (no browser
+    # round-trip) straight back onto the slot grid.
+    canvas = pycanvas.Canvas()
+    with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)) as g:
+        a = canvas.label("a")
+        b = canvas.label("b")
+        c = canvas.label("c")
+    a.set_layout(x=999, y=999)                       # knock one out of place
+    g.refit()
+    assert (a.x, a.y) == (0, 0)
+    assert (b.x, b.y) == (110, 0)
+    assert (c.x, c.y) == (0, 60)
+
+
+def test_role_scoped_column_refit_rewrites_the_overlay():
+    # A per-viewer-scoped column can't be expressed as a shared reflow, so it
+    # re-packs locally from the panels' base sizes, re-emitting the role overlay.
+    canvas = pycanvas.Canvas()
+    with canvas.column(roles="admin", gap=10, origin=(100, 100)) as col:
+        a = canvas.label("a", w=200, h=50)
+        b = canvas.label("b", w=200, h=50)
+    a.set_layout(h=120)
+    col.refit()
+    reg = canvas._bridge.register_message
+    rb = reg(b, role="admin")
+    assert (rb["x"], rb["y"]) == (100, 100 + 120 + 10)   # admin overlay re-packed
+    # The shared base stays unset — refit kept the scoping.
+    assert b.y is None

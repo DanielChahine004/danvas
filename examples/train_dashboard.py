@@ -81,10 +81,12 @@ lr_plot = canvas.live_plot("lr_plot", label="learning rate", max_points=None, be
 weights = canvas.histogram("weights", bins=40, below=lr_plot, w=580, h=300)
 
 # --- run summary: hyperparameters, sample predictions, a text log -----------
-with canvas.column(w=460, gap=16, origin=(1060, 40)):
+# Keep the column handle: its panels are h="auto", so when the predictions image
+# or the log grows the column can call summary.refit() to re-pack (see the loop).
+with canvas.column(w=460, gap=16, origin=(1060, 40)) as summary:
     canvas.table(HPARAMS, name="hparams", h="auto")        # flat dict -> table
-    preds = canvas.image(sample_grid(0), name="predictions", h="auto")
     log = canvas.markdown("### run log\n\n_waiting to start…_", name="run log", h="auto")
+    preds = canvas.image(sample_grid(0), name="predictions", h="auto")
 
 state = {"running": False, "step": 0, "weights": rng.normal(0, 0.5, 2048)}
 log_lines = []
@@ -110,7 +112,6 @@ def _reset():
 def _set_smoothing(value):
     loss.smoothing = value
     acc.smoothing = value
-
 
 @canvas.background
 def train():
@@ -149,6 +150,11 @@ def train():
             preds.update(sample_grid(step))
             log_lines.append(f"- epoch **{epoch + 1}** — train {train_loss:.3f}, val {val_loss:.3f}")
             log.update("### run log\n\n" + "\n".join(log_lines[-12:]))
+            # The log/image are h="auto"; appending a line regrows the log and
+            # pushes the panel below it. One refit() per epoch re-packs the column
+            # — it settles in the browser once the new heights are measured, so the
+            # gaps stay clean without us tracking sizes by hand.
+            summary.refit()
 
         state["step"] += 1
         time.sleep(0.04)

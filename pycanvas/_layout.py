@@ -31,6 +31,8 @@ class _FlowLayout:
         self._ox, self._oy = origin
         self._i = 0
         self._cursor = list(origin)        # running (x, y) for column/row flow
+        self._members = []                 # panels placed here, in insert order
+                                           # (for refit, which re-flows them)
         # When set, the layout this container computes is written as a per-viewer
         # *overlay* (via set_layout) for these roles / this client, not the shared
         # base — so one role can have its own arrangement (precedence shared <
@@ -55,6 +57,7 @@ class _FlowLayout:
         dimension keeps the component's own size); an ``h="auto"`` panel keeps
         fitting its content rather than being pinned to the slot height.
         """
+        self._members.append(component)
         if w is None and self._slot_w is not None:
             w = self._slot_w
         if h is None and self._slot_h is not None and not auto_h:
@@ -75,6 +78,87 @@ class _FlowLayout:
             self._cursor[0] += occ_w + self._gap
         self._i += 1
         return x, y, w, h
+
+    def refit(self):
+        """Re-pack this container's panels at their **current** sizes.
+
+        A ``column``/``row`` places each panel once, when it's inserted, using
+        the size known then — but an ``h="auto"`` panel only learns its real
+        content height later (it's measured in the browser), and a panel resized
+        afterwards (auto-height content that grew, a plot you enlarged) can then
+        extend over or under its neighbour. ``refit`` re-flows the panels this
+        block placed — same order, same ``origin``/``gap`` — at their *present*
+        size, so the stacking and gaps are restored::
+
+            with canvas.column(origin=(1060, 40)) as col:
+                canvas.table(HPARAMS, h="auto")
+                preds = canvas.image(grid_for(0), h="auto")
+                canvas.markdown(run_log(), h="auto")
+
+            preds.update(grid_for(step))   # taller now — pushes into the panel below
+            col.refit()                    # restore the gaps
+
+        It is **manual** by design: a panel that routinely changes height won't
+        make its neighbours jitter — they only move when you call ``refit``. For
+        a ``column``/``row`` the re-pack runs in the browser, where each panel's
+        real measured size lives, and it accounts for a resize you triggered in
+        the *same breath* (e.g. the ``log.update`` just above a ``refit``): it
+        packs immediately and then once more when that panel's new height settles,
+        so you don't have to defer the call. Panels removed since insert are
+        skipped. Returns ``self``.
+        """
+        # A shared (un-scoped) column/row hands the re-pack to the browser: it
+        # knows each panel's true measured height *now* and re-runs once the
+        # pending content-fit lands, so a just-grown auto-height panel is packed
+        # at its new size, not the stale one Python last heard about. A grid
+        # (uniform fixed slots) or a per-viewer-scoped container can't express
+        # that as a shared reflow, so they re-pack from Python-side sizes instead.
+        if self._kind in ("column", "row") \
+                and self._roles is None and self._client_id is None:
+            self._refit_remote()
+        else:
+            self._refit_local()
+        return self
+
+    def _refit_remote(self):
+        live = set(self._canvas._components)
+        ids = [c.id for c in self._members if c in live]
+        if ids:
+            self._canvas._bridge.broadcast({
+                "type": "reflow",
+                "key": id(self),          # stable per container; repeats re-arm
+                "ids": ids,               # insertion order = pack order
+                "kind": self._kind,
+                "x0": self._ox, "y0": self._oy, "gap": self._gap,
+            })
+
+    def _refit_local(self):
+        live = set(self._canvas._components)
+        cursor = [self._ox, self._oy]
+        i = 0
+        for comp in self._members:
+            if comp not in live:
+                continue  # removed/replaced since insert
+            if self._kind == "grid":
+                col, row = i % self._cols, i // self._cols
+                x = self._ox + col * (self._slot_w + self._gap)
+                y = self._oy + row * (self._slot_h + self._gap)
+            elif self._kind == "column":
+                x, y = self._ox, cursor[1]
+                cursor[1] += comp.h + self._gap
+            else:  # "row"
+                x, y = cursor[0], self._oy
+                cursor[0] += comp.w + self._gap
+            i += 1
+            # Reposition only — width/height stay as the panel currently is (a
+            # column keeps natural heights, a manual resize is respected); the
+            # overlap is purely a placement problem. Scoped containers re-emit the
+            # move as the same audience's overlay, matching the original placement.
+            if self._roles is None and self._client_id is None:
+                comp.set_layout(x=x, y=y)
+            else:
+                comp.set_layout(x=x, y=y, roles=self._roles,
+                                client_id=self._client_id)
 
 
 class _LayoutMixin:
@@ -124,6 +208,11 @@ class _LayoutMixin:
         explicit position or relative anchor still wins for that panel. ``w`` is
         accepted as an alias for ``width``. ``roles=`` / ``client_id=`` scope the
         arrangement to those viewers (see :meth:`grid`).
+
+        Placement is one-shot, at insert; if a panel later grows (auto-height
+        content, a resized plot) it can overlap its neighbour. Keep the returned
+        container and call :meth:`~_FlowLayout.refit` to re-pack the column at the
+        panels' current sizes.
         """
         if w is not None:
             if width is not None:
@@ -141,6 +230,11 @@ class _LayoutMixin:
         (``None`` keeps each panel's own); ``gap`` is the horizontal spacing.
         ``h`` is accepted as an alias for ``height``. ``roles=`` / ``client_id=``
         scope the arrangement to those viewers (see :meth:`grid`).
+
+        Placement is one-shot, at insert; if a panel later grows it can overlap
+        its neighbour. Keep the returned container and call
+        :meth:`~_FlowLayout.refit` to re-pack the row at the panels' current
+        sizes.
         """
         if h is not None:
             if height is not None:

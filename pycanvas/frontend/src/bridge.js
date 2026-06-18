@@ -105,7 +105,66 @@ function resetFlow() {
   flowY = FLOW_Y0
   flowRowH = 0
   flowItems.clear()
+  armedReflows.clear()
   if (relayoutTimer) { clearTimeout(relayoutTimer); relayoutTimer = null }
+}
+
+// Explicit re-pack of a Python `canvas.column`/`row` (column.refit()). Unlike the
+// masonry flow above this is *manual*: it never re-packs on its own, so a panel
+// that routinely changes height doesn't make its neighbours jitter. A refit packs
+// the group at the panels' current sizes right now, then arms a short one-shot so
+// the next content-fit a member reports re-packs once more — catching the resize
+// the refit() was called for (e.g. a log line just added in Python, whose taller
+// height hasn't been measured here yet when the reflow message arrives) — then
+// disarms. Keyed by the Python container's id so repeated refits just re-arm.
+const armedReflows = new Map() // key -> { spec, deadline }
+const REFLOW_ARM_MS = 800
+
+// Lay a group's members out in insertion order along one axis at their current
+// sizes: a column pins x and stacks y by each panel's height; a row pins y and
+// advances x by each width. Moves are applied as a remote change (no echo) and
+// reported to Python so the new positions persist across reconnects.
+function packFlow(spec) {
+  if (!editor || !spec || !spec.ids || !spec.ids.length) return
+  const moves = []
+  applyRemote(() => {
+    let cx = spec.x0
+    let cy = spec.y0
+    for (const cid of spec.ids) {
+      const shapeId = createShapeId(cid)
+      const shape = editor.getShape(shapeId)
+      if (!shape) continue // removed since insert — skip, don't reserve space
+      const x = spec.kind === 'row' ? cx : spec.x0
+      const y = spec.kind === 'row' ? spec.y0 : cy
+      if (Math.abs(shape.x - x) >= 0.5 || Math.abs(shape.y - y) >= 0.5) {
+        editor.updateShape({ id: shapeId, type: shape.type, x, y })
+        moves.push({ id: cid, x, y })
+      }
+      if (spec.kind === 'row') cx += shape.props.w + spec.gap
+      else cy += shape.props.h + spec.gap
+    }
+  })
+  for (const m of moves) sendRaw({ type: 'layout', ...m })
+}
+
+function reflowGroup(msg) {
+  const spec = { ids: msg.ids || [], kind: msg.kind, x0: msg.x0, y0: msg.y0, gap: msg.gap }
+  packFlow(spec) // settle the already-known sizes immediately…
+  if (spec.ids.length) {
+    // …and once more on the imminent fit of whichever member just changed.
+    armedReflows.set(msg.key, { spec, deadline: Date.now() + REFLOW_ARM_MS })
+  }
+}
+
+// A member's content-fit just settled (see fitFromIframe / fitNative). If a recent
+// refit() armed its group, re-pack now that this panel's real height is known.
+function settleArmedReflows(componentId) {
+  if (!armedReflows.size) return
+  const now = Date.now()
+  for (const [key, entry] of armedReflows) {
+    if (now > entry.deadline) { armedReflows.delete(key); continue }
+    if (entry.spec.ids.includes(componentId)) packFlow(entry.spec)
+  }
 }
 
 // component id <-> tldraw shape id helpers.
@@ -522,6 +581,8 @@ function handle(msg) {
     reorderComponent(msg.id, msg.op)
   } else if (msg.type === 'remove') {
     removeComponent(msg.id)
+  } else if (msg.type === 'reflow') {
+    reflowGroup(msg)              // column.refit(): manual re-pack of a flow group
   } else if (msg.type === 'get_snapshot') {
     // Python is asking for the user's free-form drawings only — pycanvas panels
     // and connector arrows are recreated from code, not persisted.
@@ -1273,6 +1334,7 @@ function fitFromIframe(sourceWin, fit) {
   sendRaw(report)
   // The panel's footprint changed — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
+  settleArmedReflows(fit.id) // and re-pack a column.refit() group waiting on it
 }
 
 // Content-fit for native panels (the React `h="auto"` / `w="auto"` path). The
@@ -1309,6 +1371,7 @@ export function fitNative(componentId, hostEl, fit) {
   sendRaw(report)
   // The panel grew/shrank — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
+  settleArmedReflows(componentId) // and a column.refit() group waiting on it
 }
 
 // Global helper available on the top-level page (non-iframe Custom usage).
