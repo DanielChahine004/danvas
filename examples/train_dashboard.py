@@ -37,7 +37,7 @@ HPARAMS = {
     "model": "tiny-cnn",
     "optimizer": "adam",
     "batch_size": 64,
-    "epochs": 30,
+    "epochs": 300,
     "steps_per_epoch": 50,
     "dropout": 0.2,
 }
