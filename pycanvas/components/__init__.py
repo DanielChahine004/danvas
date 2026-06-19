@@ -20,6 +20,7 @@ from .repl import Repl
 from .inspector import Inspector
 from .upload import Upload, UploadedFile
 from .webview import WebView
+from .textfield import TextField
 
 __all__ = [
     "BaseComponent",
@@ -45,4 +46,5 @@ __all__ = [
     "Upload",
     "UploadedFile",
     "WebView",
+    "TextField",
 ]

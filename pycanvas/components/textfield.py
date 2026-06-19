@@ -1,0 +1,112 @@
+"""TextField: a text-entry input, rendered as a native React panel.
+
+Single-line (default) or multiline (``multiline=True``). Callbacks receive the
+committed value — on Enter-key or focus-loss for single-line, on focus-loss for
+multiline. ``update(value)`` pushes new text to the browser live.
+"""
+
+from .base import _mark_threaded
+from .react import React
+
+_FIELD_CSS = """
+.pc-field{box-sizing:border-box;width:100%;height:100%;padding:10px 12px;
+ display:flex;align-items:stretch}
+.pc-field input,.pc-field textarea{flex:1;min-height:0;min-width:0;
+ box-sizing:border-box;padding:6px 8px;
+ background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
+ border-radius:6px;color:var(--pc-text,#e6edf3);
+ font:13px system-ui,-apple-system,sans-serif;resize:none;outline:none}
+.pc-field input:focus,.pc-field textarea:focus{border-color:var(--pc-accent,#3b82f6)}
+.pc-field textarea{resize:vertical}
+"""
+
+# Single-line: fires on Enter (then blurs the field) and on blur.
+# Multiline: fires on blur only (Enter inserts a newline).
+# Both modes keep local state so typing is always smooth, independent of Python.
+_FIELD_SOURCE = """
+function Component({ canvas, value, props }) {
+  const initial = value != null ? value : (props.value != null ? props.value : "");
+  const [text, setText] = React.useState(initial);
+  React.useEffect(() => { if (value != null) setText(value); }, [value]);
+  function commit(v) { canvas.send({ value: v }); }
+  if (props.multiline) {
+    return (
+      <>
+        <style>{`__CSS__`}</style>
+        <div className="pc-field">
+          <textarea placeholder={props.placeholder || ""}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={(e) => commit(e.target.value)} />
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <style>{`__CSS__`}</style>
+      <div className="pc-field">
+        <input type="text" placeholder={props.placeholder || ""}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { commit(e.target.value); e.target.blur(); }
+          }} />
+      </div>
+    </>
+  );
+}
+""".replace("__CSS__", _FIELD_CSS)
+
+
+class TextField(React):
+    """A text-entry field that notifies Python when the user commits a value.
+
+    Single-line (default): fires ``on_change`` on Enter or when the field loses
+    focus. Multiline: fires on focus-loss. ``value`` reads the last committed text.
+    """
+
+    default_w = 240
+    default_h = 80
+
+    def __init__(self, name, placeholder="", default="", multiline=False,
+                 label=None):
+        super().__init__(source=_FIELD_SOURCE, name=name, label=label,
+                         props={"value": default, "placeholder": placeholder,
+                                "multiline": bool(multiline)})
+        self._value = default
+
+    def update(self, value):
+        """Push a new text value to the field in the browser, live.
+
+        Streams over the push channel so the field updates without a full
+        re-mount, and keeps the baked prop current for reconnecting clients.
+        """
+        with self._lock:
+            self._value = value
+        self._data["value"] = value
+        self.push(value)
+
+    def state_payload(self):
+        v = self._value
+        return {"post": v} if v is not None else None
+
+    def on_change(self, fn=None, *, threaded=False):
+        """Decorator: called with the committed text each time the user submits.
+
+        Pass ``threaded=True`` to run the handler on its own daemon thread —
+        useful when the handler does slow I/O (network call, file write) and
+        you don't want it to delay other events.
+        """
+        def register(f):
+            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
+
+    def _handle_input(self, payload, viewer=None):
+        if "value" in payload:
+            with self._lock:
+                self._value = payload["value"]
+            self._data["value"] = self._value
+        self._dispatch_callbacks(self._callbacks, (self.value,), viewer)

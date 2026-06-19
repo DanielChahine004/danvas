@@ -31,6 +31,7 @@ re-renders with fresh data.
 
 from collections import Counter
 
+from .base import _mark_threaded
 from .react import React
 
 # The full dataset is shipped to the panel and the browser renders one
@@ -81,6 +82,25 @@ _TABLE_CSS = """
 .pc-tbl .pc-page{width:46px;padding:3px 4px;border:1px solid #cbd5e1;
  border-radius:4px;font-size:11px;text-align:right}
 .pc-tbl .pc-pages{color:#64748b;font-size:11px;white-space:nowrap}
+.pc-tbl th.pc-idx,.pc-tbl td.pc-idx{color:#94a3b8;text-align:right;font-size:11px;
+ min-width:2.5ch}
+.pc-tbl th.pc-idx{cursor:default;font-weight:500;user-select:none}
+.pc-tbl .pc-col-wrap{position:relative}
+.pc-tbl .pc-col-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;
+ background:#fff;border:1px solid #e2e8f0;border-radius:6px;
+ box-shadow:0 4px 12px rgba(0,0,0,.1);padding:4px 0;
+ min-width:140px;max-height:220px;overflow-y:auto}
+.pc-tbl .pc-col-item{display:flex;align-items:center;gap:6px;padding:4px 10px;
+ cursor:pointer;font-size:12px;color:#334155;white-space:nowrap;user-select:none}
+.pc-tbl .pc-col-item:hover{background:#f1f5f9}
+.pc-tbl .pc-col-item input[type=checkbox]{cursor:pointer;accent-color:#2563eb;
+ flex:none}
+.pc-tbl .pc-overlay{position:fixed;inset:0;z-index:99}
+.pc-tbl th.pc-sel-col,.pc-tbl td.pc-sel-col{width:28px;min-width:28px;
+ padding:2px 6px;text-align:center}
+.pc-tbl th.pc-sel-col{cursor:pointer;font-weight:400}
+.pc-tbl th.pc-sel-col input,.pc-tbl td.pc-sel-col input{cursor:pointer;
+ accent-color:#2563eb}
 """
 
 # The React component. Written as a plain string (no str.format/f-string) so its
@@ -88,7 +108,7 @@ _TABLE_CSS = """
 # carries cols / numeric / rows (display strings) / profiles / dists / pageSize;
 # all sort/filter/pagination state lives in React, operating over the full data.
 _TABLE_SOURCE = """
-function Component({ props }) {
+function Component({ canvas, props }) {
   const cols = props.cols || [];
   const numeric = props.numeric || [];
   const rows = props.rows || [];
@@ -102,6 +122,12 @@ function Component({ props }) {
   const [q, setQ] = React.useState("");
   const [colFilter, setColFilter] = React.useState(null);
   const [page, setPage] = React.useState(1);
+  const [showIdx, setShowIdx] = React.useState(false);
+  const [hiddenCols, setHiddenCols] = React.useState(new Set());
+  const [colMenuOpen, setColMenuOpen] = React.useState(false);
+  const [showSel, setShowSel] = React.useState(false);
+  const [selectedRows, setSelectedRows] = React.useState(new Set());
+  const selAllRef = React.useRef(null);
 
   // One lowercased haystack per row for the free-text filter. The \\u0001
   // separator keeps a query from matching across a cell boundary.
@@ -146,6 +172,12 @@ function Component({ props }) {
   const pg = Math.min(Math.max(1, page), npages);  // clamp for render
   const pageRows = view.slice((pg - 1) * PAGE, (pg - 1) * PAGE + PAGE);
 
+  React.useEffect(() => {
+    if (!selAllRef.current) return;
+    const nSelVis = view.filter((ri) => selectedRows.has(ri)).length;
+    selAllRef.current.indeterminate = nSelVis > 0 && nSelVis < view.length;
+  }, [selectedRows, view]);
+
   function clickHeader(i) {
     if (sortCol !== i) { setSortCol(i); setSortDir(1); return; }
     const nd = sortDir === 1 ? -1 : (sortDir === -1 ? 0 : 1);
@@ -168,6 +200,29 @@ function Component({ props }) {
       : (!colFilter.num && colFilter.val === bar.val);
   }
   function gotoPage(v) { if (!isNaN(v)) setPage(Math.min(npages, Math.max(1, v))); }
+  function toggleCol(i) {
+    setHiddenCols((prev) => {
+      const s = new Set(prev);
+      s.has(i) ? s.delete(i) : s.add(i);
+      return s;
+    });
+  }
+  const visCols = cols.map((_, i) => i).filter((i) => !hiddenCols.has(i));
+  function toggleRow(ri) {
+    const s = new Set(selectedRows);
+    s.has(ri) ? s.delete(ri) : s.add(ri);
+    setSelectedRows(s);
+    canvas.send({ selected: [...s] });
+  }
+  function toggleAllVisible() {
+    const nSelVis = view.filter((ri) => selectedRows.has(ri)).length;
+    const s = new Set(selectedRows);
+    if (nSelVis === view.length) { view.forEach((ri) => s.delete(ri)); }
+    else { view.forEach((ri) => s.add(ri)); }
+    setSelectedRows(s);
+    canvas.send({ selected: [...s] });
+  }
+  function clearSelection() { setSelectedRows(new Set()); canvas.send({ selected: [] }); }
 
   function spark(c, dist) {
     if (!dist || !dist.bars || !dist.bars.length) return null;
@@ -198,9 +253,37 @@ function Component({ props }) {
       <div className="pc-bar">
         <input className="pc-filter" placeholder="filter rows\\u2026" value={q}
                onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+        <button className={"pc-btn" + (showIdx ? " on" : "")} title="show row index"
+                onClick={() => setShowIdx((v) => !v)}>#</button>
+        <button className={"pc-btn" + (showSel ? " on" : "")} title="row selection"
+                onClick={() => setShowSel((v) => !v)}>sel</button>
+        <div className="pc-col-wrap">
+          <button className={"pc-btn" + (hiddenCols.size ? " on" : "")} title="show/hide columns"
+                  onClick={() => setColMenuOpen((v) => !v)}>cols {"\\u25be"}</button>
+          {colMenuOpen && (
+            <>
+              <div className="pc-overlay" onClick={() => setColMenuOpen(false)} />
+              <div className="pc-col-menu">
+                {cols.map((c, i) => (
+                  <label key={i} className="pc-col-item">
+                    <input type="checkbox" checked={!hiddenCols.has(i)}
+                           disabled={!hiddenCols.has(i) && visCols.length === 1}
+                           onChange={() => toggleCol(i)} />
+                    {c || ("col " + i)}
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         {colFilter
           ? <button className="pc-btn pc-chip on" onClick={() => { setColFilter(null); setPage(1); }}>
               {colFilter.label + "  \\u2715"}
+            </button>
+          : null}
+        {showSel && selectedRows.size > 0
+          ? <button className="pc-btn pc-chip on" onClick={clearSelection}>
+              {selectedRows.size + " selected  \\u2715"}
             </button>
           : null}
         <span className="pc-count">{count}</span>
@@ -221,11 +304,22 @@ function Component({ props }) {
         <table>
           <thead>
             <tr className="pc-head">
-              {cols.map((c, i) => (
+              {showSel
+                ? <th className="pc-sel-col">
+                    <input type="checkbox" ref={selAllRef}
+                           checked={view.length > 0 && view.every((ri) => selectedRows.has(ri))}
+                           onChange={toggleAllVisible} />
+                  </th>
+                : null}
+              {showIdx
+                ? <th className="pc-idx" title="row index (0-based)"
+                      onClick={() => { setSortCol(-1); setSortDir(0); }}>#</th>
+                : null}
+              {visCols.map((i) => (
                 <th key={i} data-num={numeric[i] ? 1 : 0}
                     title={profiles[i] ? profiles[i].tip : ""}
                     onClick={() => clickHeader(i)}>
-                  {c}
+                  {cols[i]}
                   <span className="pc-arrow">
                     {sortCol === i ? (sortDir === 1 ? "\\u25B2" : sortDir === -1 ? "\\u25BC" : "") : ""}
                   </span>
@@ -235,7 +329,9 @@ function Component({ props }) {
               ))}
             </tr>
             <tr className="pc-dist">
-              {cols.map((c, i) => (
+              {showSel ? <th className="pc-sel-col"></th> : null}
+              {showIdx ? <th className="pc-idx"></th> : null}
+              {visCols.map((i) => (
                 <th key={i}>
                   {spark(i, dists[i])}
                   {dists[i] && dists[i].cap
@@ -250,7 +346,14 @@ function Component({ props }) {
           <tbody>
             {pageRows.map((ri) => (
               <tr key={ri}>
-                {rows[ri].map((cell, ci) => <td key={ci}>{cell == null ? "" : cell}</td>)}
+                {showSel
+                  ? <td className="pc-sel-col">
+                      <input type="checkbox" checked={selectedRows.has(ri)}
+                             onChange={() => toggleRow(ri)} />
+                    </td>
+                  : null}
+                {showIdx ? <td className="pc-idx">{ri}</td> : null}
+                {rows[ri].map((cell, ci) => hiddenCols.has(ci) ? null : <td key={ci}>{cell == null ? "" : cell}</td>)}
               </tr>
             ))}
           </tbody>
@@ -270,6 +373,35 @@ class Table(React):
         cols, rows = _normalize(data)
         super().__init__(source=_TABLE_SOURCE, name=name, label=label, w=w, h=h,
                          props=_table_props(cols, rows))
+        self._selected = []
+        self._select_callbacks = []
+
+    @property
+    def selected(self):
+        """The 0-based indices of currently selected rows in the original data."""
+        with self._lock:
+            return list(self._selected)
+
+    def on_select(self, fn=None, *, threaded=False):
+        """Decorator: called with a list of selected row indices on each selection change.
+
+        The indices are 0-based positions in the original Python data structure
+        (the same values shown in the ``#`` index column). Fires on every checkbox
+        toggle, including when the selection is cleared (empty list).
+        Pass ``threaded=True`` to run the handler on its own daemon thread.
+        """
+        def register(f):
+            self._select_callbacks.append(_mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
+
+    def _handle_input(self, payload, viewer=None):
+        if isinstance(payload, dict) and "selected" in payload:
+            with self._lock:
+                self._selected = list(payload["selected"])
+            self._dispatch_callbacks(self._select_callbacks, (list(self._selected),), viewer)
+            return
+        super()._handle_input(payload, viewer)
 
     def update(self, data):
         """Replace the table contents, live."""

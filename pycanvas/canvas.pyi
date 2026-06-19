@@ -23,6 +23,7 @@ from .components import (
     Repl,
     Slider,
     Table,
+    TextField,
     Toggle,
     VideoFeed,
     WebView,
@@ -199,6 +200,15 @@ class Canvas:
     def table(
         self, data: Any, name: str = ..., label: str | None = ..., **place: Any
     ) -> Table: ...
+    def text_field(
+        self,
+        name: str,
+        placeholder: str = ...,
+        default: str = ...,
+        multiline: bool = ...,
+        label: str | None = ...,
+        **place: Any,
+    ) -> TextField: ...
     def webview(
         self, url: str, name: str = ..., label: str | None = ..., **place: Any
     ) -> WebView: ...

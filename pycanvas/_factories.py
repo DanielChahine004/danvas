@@ -30,6 +30,7 @@ from .components import (
     Repl,
     Slider,
     Table,
+    TextField,
     Toggle,
     Upload,
     VideoFeed,
@@ -187,6 +188,17 @@ class _FactoryMixin:
         ``data`` is a pandas DataFrame/Series, a list of dicts/rows, or a dict.
         """
         return self._make(Table, data, name=name, label=label, **place)
+
+    def text_field(self, name, placeholder="", default="", multiline=False,
+                   label=None, **place: Unpack[Place]):
+        """Insert a :class:`~pycanvas.TextField`. See :meth:`insert` for ``place``.
+
+        Single-line (default): fires ``on_change`` on Enter or focus-loss.
+        Pass ``multiline=True`` for a textarea that fires on focus-loss.
+        """
+        return self._make(TextField, name, placeholder=placeholder,
+                          default=default, multiline=multiline, label=label,
+                          **place)
 
     def show(self, value, name=None, label=None, **place: Unpack[Place]):
         """Auto-render any value as the best-fitting panel and insert it.
