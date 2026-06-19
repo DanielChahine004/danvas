@@ -89,6 +89,10 @@ class BaseComponent:
         # frontend auto-cascade. Set by Canvas.insert. Width/height are passed
         # through register_props instead (they are real shape props).
         self._position = None
+        # Panels placed below= or right_of= this one; populated by Canvas.insert
+        # so height/y changes cascade through the layout chain automatically.
+        self._below_deps = []
+        self._right_of_deps = []
         # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
         # read and incremented. Like position, it is a top-level shape field.
         self._rotation = 0

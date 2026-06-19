@@ -575,6 +575,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 x = rx
             if y is None:
                 y = ry
+            if below is not None:
+                _anchor = self._named.get(below) if isinstance(below, str) else below
+                if _anchor is not None:
+                    _anchor._below_deps.append((component, gap))
+            if right_of is not None:
+                _anchor = self._named.get(right_of) if isinstance(right_of, str) else right_of
+                if _anchor is not None:
+                    _anchor._right_of_deps.append((component, gap))
         # Auto-layout: inside a `with canvas.grid(...)`/`column`/`row` block, a
         # panel given neither an explicit position nor a relative anchor takes the
         # next slot (and the layout's default slot size, unless w/h were given).

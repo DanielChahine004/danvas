@@ -1077,13 +1077,34 @@ class Bridge:
         overwrite were these ever sent mid-gesture (they're debounced to settle
         today, so it isn't a live bug, but excluding the sender is the right shape).
         """
+        old_h = comp.h
         comp._apply_remote_layout(msg, self._viewers.get(ws, {}))
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
                 if msg.get(k) is not None}
         if geom:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom},
                            exclude=ws)
+        if "h" in msg and old_h is not None and comp.h != old_h:
+            self._cascade_height(comp, comp.h - old_h)
         self._notify_mutation()
+
+    def _cascade_height(self, comp, dh):
+        """When comp's height changes by dh, shift all panels anchored below= it."""
+        for dep, _gap in getattr(comp, "_below_deps", []):
+            if dep.id in self._components and dep.y is not None:
+                self._move_y(dep, dh)
+
+    def _move_y(self, comp, dh):
+        """Shift comp's y by dh and propagate to every panel whose y derives from comp's."""
+        new_y = comp.y + dh
+        comp._store_base_layout({"y": new_y})
+        self.broadcast({"type": "update", "id": comp.id, "payload": {"y": new_y}})
+        for dep, _gap in getattr(comp, "_below_deps", []):
+            if dep.id in self._components and dep.y is not None:
+                self._move_y(dep, dh)
+        for dep, _gap in getattr(comp, "_right_of_deps", []):
+            if dep.id in self._components and dep.y is not None:
+                self._move_y(dep, dh)
 
     async def _send(self, ws, msg):
         """Serialize and send one frame to a single socket.

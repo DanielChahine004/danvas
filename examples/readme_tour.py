@@ -36,15 +36,15 @@ install = canvas.markdown("""## Install
 pip install dans-pycanvas
 ```
 Optional extras: `[video]`  `[audio]`  `[tunnel]`  `[desktop]`
-""", name="install", below=title, x=40, w=W)
+""", name="install", below=title, gap=GAP, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Hello World
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-hw_hdr = canvas.markdown("## Hello World", name="hw_hdr", below=install, x=40, w=W)
+hw_hdr = canvas.markdown("## Hello World", name="hw_hdr", below=install, gap=GAP, x=40, w=W)
 
 servo     = canvas.slider("servo_1", min=0, max=180, default=90, label="Servo 1",
-                           below=hw_hdr, x=40, w=320)
+                           below=hw_hdr, gap=GAP, x=40, w=320)
 hw_status = canvas.label("hw_status", "idle", right_of=servo, gap=GAP, w=276)
 
 @servo.on_change
@@ -64,7 +64,7 @@ The lifecycle is always the same five steps:
 5. `canvas.serve(port=8000)` — opens the browser, blocks
 
 **Python owns all state; the browser renders it and reports user actions.**
-""", name="mental_model", below=servo, x=40, w=W)
+""", name="mental_model", below=servo, gap=GAP, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # §1 The Canvas
@@ -73,10 +73,10 @@ s1 = canvas.markdown("""# 1. The Canvas
 `Canvas()` is the document everything hangs off.
 Reach panels by name (`canvas.my_panel` / `canvas["my_panel"]`),
 connect them with arrows, or `clear()` / `save()` / `load()` the formation.
-""", name="section_1", below=mental, x=40, w=W)
+""", name="section_1", below=mental, gap=GAP, x=40, w=W)
 
-node_a = canvas.label("node_a", "Panel A", below=s1, x=40, w=W // 2)
-node_b = canvas.label("node_b", "Panel B", below=node_a, x=40, w=W // 2)
+node_a = canvas.label("node_a", "Panel A", below=s1, gap=GAP, x=40, w=W // 2)
+node_b = canvas.label("node_b", "Panel B", right_of=node_a, gap=380, w=W // 2)
 canvas.connect(node_a, node_b, text="canvas.connect(a, b)", color="blue")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -87,15 +87,15 @@ s2 = canvas.markdown("""# 2. Components
 Input panels (`slider`, `toggle`, `button`, `text_field`) report user actions.
 Output panels (`label`, `image`, `markdown`, `plot`, `live_plot`) receive `.update()`.
 Bidirectional: `table`, `chat`, `react`, `custom`.
-""", name="section_2", below=node_b, x=40, w=W)
+""", name="section_2", below=node_a, gap=GAP, x=40, w=W)
 
 speed_sl   = canvas.slider("speed",   min=0, max=100, default=50, label="Speed",
-                            below=s2, x=40, w=200)
+                            below=s2, gap=GAP, x=40, w=300)
 enabled_tg = canvas.toggle("enabled", ["off", "on"], default="on", label="Enabled",
-                            right_of=speed_sl, gap=16, w=160)
+                            right_of=speed_sl, gap=GAP, w=160)
 reset_bt   = canvas.button("reset",   text="Reset",
-                            right_of=enabled_tg, gap=16, w=112)
-comp_out   = canvas.label("comp_out", "interact above ↑", below=speed_sl, x=40, w=W)
+                            right_of=enabled_tg, gap=GAP, w=112)
+comp_out   = canvas.label("comp_out", "interact above ↑", below=speed_sl, gap=GAP, x=40, w=W)
 
 @speed_sl.on_change
 def _(v):
@@ -118,7 +118,7 @@ verbs = canvas.markdown("""## The three data verbs
 | `.update(value)` | **replace** whole state | ✅ | Label, Table, Slider, … |
 | `.push(sample)` | **append** one point | ❌ | LivePlot, Custom, React |
 | `.add(values, step)` | **record** a distribution snapshot | ✅ | Histogram |
-""", name="data_verbs", below=comp_out, x=40, w=W)
+""", name="data_verbs", below=comp_out, gap=GAP, x=40, w=W)
 
 # --- Receiving input ---
 input_hdr = canvas.markdown("""## Receiving input
@@ -126,11 +126,11 @@ input_hdr = canvas.markdown("""## Receiving input
 
 Any handler may declare a trailing `viewer` arg to see who acted:
 `def _(value, viewer):` — gives `viewer["name"]`, `viewer["role"]`, …
-""", name="input_hdr", below=verbs, x=40, w=W)
+""", name="input_hdr", below=verbs, gap=GAP, x=40, w=W)
 
 name_fld = canvas.text_field("visitor_name", label="Your name",
                               placeholder="type here and press Enter…",
-                              below=input_hdr, x=40, w=300)
+                              below=input_hdr, gap=GAP, x=40, w=300)
 greeting  = canvas.label("greeting", "Enter your name →",
                           right_of=name_fld, gap=GAP, w=296)
 
@@ -142,18 +142,18 @@ def _(text, viewer):
 show_hdr = canvas.markdown("""## Show anything
 `canvas.show(value)` inspects the value and inserts the best panel automatically —
 like a notebook deciding how to render an `Out[...]`, but works in plain scripts.
-""", name="show_hdr", below=name_fld, x=40, w=W)
+""", name="show_hdr", below=name_fld, gap=GAP, x=40, w=W)
 
 show_dict = canvas.show({"status": "ok", "temp": 42.1, "rpm": 1200},
-                         name="show_dict", below=show_hdr, x=40, w=310)
+                         name="show_dict", below=show_hdr, gap=GAP, x=40, w=310)
 canvas.show("# Heading\n`canvas.show()` rendered this **Markdown** from a string.",
-             name="show_md", right_of=show_dict, gap=16, w=310)
+             name="show_md", right_of=show_dict, gap=GAP, w=310)
 
 # --- Table ---
 table_hdr = canvas.markdown("""## Table — `canvas.table(data)`
 Accepts a DataFrame, list-of-dicts, or plain dict.
 `@table.on_select` fires with the selected row indices; `table.selected` is always live.
-""", name="table_hdr", below=show_dict, x=40, w=W)
+""", name="table_hdr", below=show_dict, gap=GAP, x=40, w=W)
 
 _catalog = [
     {"Component": "slider",     "Direction": "→ Python",   "Key API": "on_change(v)"},
@@ -171,10 +171,10 @@ _catalog = [
 ]
 demo_table = canvas.table(_catalog, name="component_catalogue",
                            label="Component catalogue",
-                           below=table_hdr, x=40, w=W, h=280)
+                           below=table_hdr, gap=GAP, x=40, w=W, h=280)
 
 tbl_sel = canvas.label("tbl_sel", "Select a row to see its component →",
-                        below=demo_table, x=40, w=W)
+                        below=demo_table, gap=GAP, x=40, w=W)
 
 @demo_table.on_select
 def _(indices):
@@ -188,11 +188,11 @@ def _(indices):
 frameless_hdr = canvas.markdown("""## Frameless panels — `frame=False`
 Pass `frame=False` to `canvas.insert()` (or any factory) to strip the card chrome.
 Add `grabbable=False` to make the panel behave like pure ambient content.
-""", name="frameless_hdr", below=tbl_sel, x=40, w=W)
+""", name="frameless_hdr", below=tbl_sel, gap=GAP, x=40, w=W)
 
 fl_label = canvas.label("fl_label",
                          "✦  No card border, no title bar — just content floating on the canvas.",
-                         below=frameless_hdr, x=40, w=W,
+                         below=frameless_hdr, gap=GAP, x=40, w=W,
                          frame=False, grabbable=False)
 
 # Uiverse radio-button widget converted from styled-components → plain React
@@ -263,14 +263,14 @@ _radio_src = _React.from_uiverse(_radio_raw)
 
 radio_panel = canvas.react(source=_radio_src, name="radio_widget",
                             label="Uiverse radio (frame=False)",
-                            below=fl_label, x=40, w=W, h=80,
+                            below=fl_label, gap=GAP, x=40, w=W, h=80,
                             frame=False, grabbable=False)
 
 # --- React panels ---
 react_hdr = canvas.markdown("""## React panels
 `canvas.react(source=...)` compiles your JSX in-browser — no npm, inherits the canvas theme.
 `canvas.send({...})` posts up to Python; `panel.push(data)` sends down as the `value` prop.
-""", name="react_hdr", below=radio_panel, x=40, w=W)
+""", name="react_hdr", below=radio_panel, gap=GAP, x=40, w=W)
 
 _count = 0
 counter_panel = canvas.react(
@@ -293,7 +293,7 @@ function Component({ canvas, value }) {
 }
 """,
     name="counter", label="React counter",
-    below=react_hdr, x=40, w=240, h=140,
+    below=react_hdr, gap=GAP, x=40, w=240,
 )
 
 @counter_panel.on_message
@@ -311,15 +311,15 @@ s3 = canvas.markdown("""# 3. Layout
 Relative: `below=`, `right_of=`, `left_of=`, `above=` (+ `gap=`).
 Containers: `canvas.grid(cols=N)` · `canvas.column()` · `canvas.row()`.
 `column.refit()` re-packs after a member panel grows.
-""", name="section_3", below=counter_panel, x=40, w=W)
+""", name="section_3", below=counter_panel, gap=GAP, x=40, w=W)
 
 # 3×2 grid of labels demonstrating grid-like layout
-ga = canvas.label("ga", "grid slot 1", below=s3,  x=40,  w=200)
-gb = canvas.label("gb", "grid slot 2", right_of=ga, gap=12, w=200)
-gc = canvas.label("gc", "grid slot 3", right_of=gb, gap=12, w=200)
-gd = canvas.label("gd", "grid slot 4", below=ga,   x=40,  w=200)
-ge = canvas.label("ge", "grid slot 5", right_of=gd, gap=12, w=200)
-gf = canvas.label("gf", "grid slot 6", right_of=ge, gap=12, w=200)
+ga = canvas.label("ga", "grid slot 1", below=s3,   gap=GAP, x=40, w=200)
+gb = canvas.label("gb", "grid slot 2", right_of=ga, gap=GAP, w=200)
+gc = canvas.label("gc", "grid slot 3", right_of=gb, gap=GAP, w=200)
+gd = canvas.label("gd", "grid slot 4", below=ga,   gap=GAP, x=40, w=200)
+ge = canvas.label("ge", "grid slot 5", right_of=gd, gap=GAP, w=200)
+gf = canvas.label("gf", "grid slot 6", right_of=ge, gap=GAP, w=200)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # §4 Views & Navigation
@@ -328,11 +328,11 @@ s4 = canvas.markdown("""# 4. Views & Navigation
 Pass `view=` to `serve()` or call `canvas.set_view()` live.
 Keys: `x`, `y`, `zoom`, `locked`, `ui`, `grid`, `read_only`, `min_zoom`, `max_zoom`.
 Scope to a role or single client with `roles=` / `client_id=`.
-""", name="section_4", below=gd, x=40, w=W)
+""", name="section_4", below=gd, gap=GAP, x=40, w=W)
 
-zoom_in_bt  = canvas.button("zoom_in",  text="Zoom in (1.5×)",  below=s4, x=40, w=180)
-zoom_out_bt = canvas.button("zoom_out", text="Zoom out (0.5×)", right_of=zoom_in_bt,  gap=12, w=180)
-zoom_rst_bt = canvas.button("zoom_rst", text="Zoom 100%",       right_of=zoom_out_bt, gap=12, w=140)
+zoom_in_bt  = canvas.button("zoom_in",  text="Zoom in (1.5×)",  below=s4,          gap=GAP, x=40, w=180)
+zoom_out_bt = canvas.button("zoom_out", text="Zoom out (0.5×)", right_of=zoom_in_bt,  gap=GAP, w=180)
+zoom_rst_bt = canvas.button("zoom_rst", text="Zoom 100%",       right_of=zoom_out_bt, gap=GAP, w=140)
 
 @zoom_in_bt.on_click
 def _(): canvas.set_view(zoom=1.5)
@@ -361,7 +361,7 @@ canvas.serve(namespace=globals())                # share script globals with Ins
 **Roles** — `serve(passwords={role: pw})` gates access per role.
 The same `roles=` / `client_id=` scoping then applies to panel visibility,
 content, layout, and view — precedence is `shared < role < client`.
-""", name="section_5", below=zoom_in_bt, x=40, w=W)
+""", name="section_5", below=zoom_in_bt, gap=GAP, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Beyond the five steps — live telemetry
@@ -374,10 +374,10 @@ hot reloading, notebooks (`block=False`), canvas merging, and more.
 `push({trace: y}, x=step)` appends one point per call. The server coalesces
 frames a slow client can't keep up with; `.push([batch], x=[xs])` flushes
 many points at once.
-""", name="beyond", below=s5, x=40, w=W)
+""", name="beyond", below=s5, gap=GAP, x=40, w=W)
 
 lp = canvas.live_plot("telemetry", traces=["sin", "cos"],
-                       label="Live telemetry", below=beyond, x=40, w=W, h=220)
+                       label="Live telemetry", below=beyond, gap=GAP, x=40, w=W, h=220)
 
 @canvas.background
 def _stream():
@@ -394,11 +394,11 @@ insp_hdr = canvas.markdown("""## Inspector
 A live variable/panel explorer. Switch between **panels** (component state +
 geometry) and **globals** (script namespace). Also spawnable on demand via the
 🔍 toolbar button.
-""", name="insp_hdr", below=lp, x=40, w=W)
+""", name="insp_hdr", below=lp, gap=GAP, x=40, w=W)
 
 canvas.inspector(name="readme_inspector", label="Inspector",
                  source="components", refresh=2.0,
-                 below=insp_hdr, x=40, w=W, h=280)
+                 below=insp_hdr, gap=GAP, x=40, w=W, h=280)
 
 canvas.serve(hot_reload=True, namespace=globals(),
              view={"x": 375, "y": 230, "zoom": 1.8})
