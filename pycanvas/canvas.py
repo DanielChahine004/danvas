@@ -1226,7 +1226,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               cursors=None, view=None, desktop=None, window_title="PyCanvas",
               window_size=(1200, 800), password=None, passwords=None,
-              login_message=None, persist=False, hot_reload=False, debug=False):
+              login_message=None, persist=False, hot_reload=False, debug=False,
+              namespace=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1342,12 +1343,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         isn't updating" turns into evidence: either the frame is on the wire or
         it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
         ("viewer connected / disconnected") are always printed, debug or not.
+
+        ``namespace`` is a shorthand for :meth:`enable_repl`: pass
+        ``namespace=globals()`` to share your script's variables with
+        :class:`~pycanvas.Repl` panels and the Inspector's globals view. Ignored
+        if ``None`` (the default); if :meth:`enable_repl` was already called
+        explicitly this has no effect.
         """
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.
         handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
                                              tunnel_provider)
+        if namespace is not None and self._namespace is None:
+            self.enable_repl(namespace)
         if handoff.should_return:
             return self
         if handoff.open_browser is not None:

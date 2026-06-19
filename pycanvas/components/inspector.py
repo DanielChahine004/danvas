@@ -571,12 +571,24 @@ class Inspector(React):
         outside cell execution -- would not see it, and globals mode would come
         up empty. The imported function returns the live shell singleton from
         any thread, at any time.
+
+        Falls back to ``canvas._namespace`` (set by :meth:`Canvas.enable_repl`)
+        so that plain ``.py`` scripts calling ``canvas.enable_repl(globals())``
+        work even when the Inspector was spawned via the toolbar button (which
+        never receives an explicit namespace) or inserted before enable_repl was
+        called.
         """
         if self._namespace is not None:
             return self._namespace
         try:
             from IPython import get_ipython
         except ImportError:
-            return None
-        ip = get_ipython()
-        return ip.user_ns if ip is not None else None
+            pass
+        else:
+            ip = get_ipython()
+            if ip is not None:
+                return ip.user_ns
+        canvas = self._canvas
+        if canvas is not None:
+            return canvas._namespace
+        return None
