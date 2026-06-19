@@ -148,11 +148,130 @@ show_dict = canvas.show({"status": "ok", "temp": 42.1, "rpm": 1200},
 canvas.show("# Heading\n`canvas.show()` rendered this **Markdown** from a string.",
              name="show_md", right_of=show_dict, gap=16, w=310)
 
+# --- Table ---
+table_hdr = canvas.markdown("""## Table — `canvas.table(data)`
+Accepts a DataFrame, list-of-dicts, or plain dict.
+`@table.on_select` fires with the selected row indices; `table.selected` is always live.
+""", name="table_hdr", below=show_dict, x=40, w=W, h=95)
+
+_catalog = [
+    {"Component": "slider",     "Direction": "→ Python",   "Key API": "on_change(v)"},
+    {"Component": "toggle",     "Direction": "→ Python",   "Key API": "on_change(v)"},
+    {"Component": "button",     "Direction": "→ Python",   "Key API": "on_click()"},
+    {"Component": "text_field", "Direction": "→ Python",   "Key API": "on_change(text)"},
+    {"Component": "label",      "Direction": "Python →",   "Key API": "update(value)"},
+    {"Component": "markdown",   "Direction": "Python →",   "Key API": "update(text)"},
+    {"Component": "image",      "Direction": "Python →",   "Key API": "update(src)"},
+    {"Component": "live_plot",  "Direction": "Python →",   "Key API": "push({trace: y})"},
+    {"Component": "table",      "Direction": "↔ both",     "Key API": "update(data) / on_select(idxs)"},
+    {"Component": "react",      "Direction": "↔ both",     "Key API": "push(value) / on_message(msg)"},
+    {"Component": "chat",       "Direction": "↔ both",     "Key API": "send(msg) / on_message(msg)"},
+    {"Component": "show",       "Direction": "Python →",   "Key API": "auto-detects best panel"},
+]
+demo_table = canvas.table(_catalog, name="component_catalogue",
+                           label="Component catalogue",
+                           below=table_hdr, x=40, w=W, h=280)
+
+tbl_sel = canvas.label("tbl_sel", "Select a row to see its component →",
+                        below=demo_table, x=40, w=W)
+
+@demo_table.on_select
+def _(indices):
+    if not indices:
+        tbl_sel.update("Select a row to see its component →")
+    else:
+        row = _catalog[indices[0]]
+        tbl_sel.update(f"{row['Component']}  ·  {row['Direction']}  ·  {row['Key API']}")
+
+# --- Frameless panels ---
+frameless_hdr = canvas.markdown("""## Frameless panels — `frame=False`
+Pass `frame=False` to `canvas.insert()` (or any factory) to strip the card chrome.
+Add `grabbable=False` to make the panel behave like pure ambient content.
+""", name="frameless_hdr", below=tbl_sel, x=40, w=W, h=95)
+
+fl_label = canvas.label("fl_label",
+                         "✦  No card border, no title bar — just content floating on the canvas.",
+                         below=frameless_hdr, x=40, w=W,
+                         frame=False, grabbable=False)
+
+# Uiverse radio-button widget converted from styled-components → plain React
+_radio_raw = """
+import React, { useState } from 'react';
+import styled from 'styled-components';
+
+const StyledWrapper = styled.div`
+  .radio-inputs {
+    display: flex;
+    flex-wrap: wrap;
+    border-radius: 0.5rem;
+    background-color: #EEE;
+    box-sizing: border-box;
+    padding: 0.25rem;
+    gap: 0.25rem;
+  }
+  .radio-inputs .radio {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+  .radio-inputs .radio input {
+    display: none;
+  }
+  .radio-inputs .radio .name {
+    display: flex;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    border: none;
+    padding: .5rem 0;
+    color: #666;
+    transition: all .15s ease-in-out;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .radio-inputs .radio input:checked + .name {
+    background-color: #fff;
+    color: #222;
+    font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  }
+`;
+
+const RadioCard = () => {
+  const [selected, setSelected] = React.useState('slider');
+  const options = ['slider', 'label', 'table', 'react'];
+  return (
+    <StyledWrapper>
+      <div className="radio-inputs">
+        {options.map(opt => (
+          <label className="radio" key={opt}>
+            <input type="radio" name="demo" value={opt}
+                   checked={selected === opt}
+                   onChange={() => setSelected(opt)} />
+            <span className="name">{opt}</span>
+          </label>
+        ))}
+      </div>
+    </StyledWrapper>
+  );
+};
+
+export default RadioCard;
+"""
+
+from pycanvas import React as _React
+_radio_src = _React.from_uiverse(_radio_raw)
+
+radio_panel = canvas.react(source=_radio_src, name="radio_widget",
+                            label="Uiverse radio (frame=False)",
+                            below=fl_label, x=40, w=W, h=80,
+                            frame=False, grabbable=False)
+
 # --- React panels ---
 react_hdr = canvas.markdown("""## React panels
 `canvas.react(source=...)` compiles your JSX in-browser — no npm, inherits the canvas theme.
 `canvas.send({...})` posts up to Python; `panel.push(data)` sends down as the `value` prop.
-""", name="react_hdr", below=show_dict, x=40, w=W, h=140)
+""", name="react_hdr", below=radio_panel, x=40, w=W, h=140)
 
 _count = 0
 counter_panel = canvas.react(
