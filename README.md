@@ -6,6 +6,9 @@ user input back in real time over one WebSocket.
 
 Built on [tldraw](https://tldraw.dev) + React + Vite (frontend) and FastAPI +
 WebSockets (backend). The frontend ships pre-built; you never touch Node or npm.
+The Python backend is ~560 kB of source with four core dependencies; the browser
+page loads under 1 MB gzip (tldraw + React bridge). The Monaco-powered Repl is
+code-split and only downloaded when a Repl panel first appears.
 
 ## Install
 
