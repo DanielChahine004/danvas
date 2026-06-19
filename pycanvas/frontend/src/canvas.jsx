@@ -13,7 +13,7 @@ import {
 // only loads when a Repl panel is shown (see MonacoRepl.jsx).
 const MonacoRepl = lazy(() => import('./MonacoRepl'))
 
-// The React-panel host bundles a JSX compiler (Babel, ~3 MB), so it too is
+// The React-panel host bundles a JSX compiler (Sucrase, ~200 kB), so it too is
 // code-split and only loaded the first time a React panel appears.
 const ReactHost = lazy(() => import('./ReactHost'))
 

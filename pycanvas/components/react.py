@@ -5,7 +5,7 @@ HTML in a *sandboxed iframe* (isolated, no theme or bridge access), ``React``
 takes JSX *source* and mounts it as an ordinary React subtree **inside the
 panel** — so it inherits the canvas theme, dark mode, and selection chrome, and
 talks to Python directly with no postMessage hop. The JSX is compiled in the
-browser at runtime (Babel, lazily loaded), so users author components from
+browser at runtime (Sucrase, lazily loaded), so users author components from
 Python with no ``npm`` build.
 
 The component must be named ``Component`` and receives three props:
@@ -232,7 +232,7 @@ class React(_EventRouter, BaseComponent):
 
         uiverse exports React widgets as a component wrapped in a
         ``styled-components`` ``StyledWrapper``. styled-components needs an npm
-        build, which the in-browser Babel pipeline doesn't have — so this
+        build, which the in-browser Sucrase pipeline doesn't have — so this
         rewrites the snippet into plain React + a ``<style>`` tag:
 
         * each ``const X = styled.tag`...``` definition is removed and its CSS

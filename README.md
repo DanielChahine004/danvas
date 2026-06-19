@@ -1163,7 +1163,7 @@ into small JSON frames — `register` (a panel appeared), `update` (its state
 changed), `remove` — and ships them to every connected browser. The browser keeps
 a tldraw canvas where each component is a *shape*: built-ins (slider, label, …)
 are native React widgets, `custom` is a sandboxed iframe, and `react` is your JSX
-compiled in the browser (Babel) and mounted as a real React subtree. User actions
+compiled in the browser (Sucrase) and mounted as a real React subtree. User actions
 travel back as `input` / `layout` frames.
 
 **Replay is why reconnects "just work".** The browser is a pure renderer holding
