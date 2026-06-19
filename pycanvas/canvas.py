@@ -663,6 +663,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             component._props["w"] = w
         if h is not None:
             component._props["h"] = h
+        # Snapshot Python-defined layout so canvas.reset_layout() can restore it.
+        # Captured here, after all placement logic resolves, before any browser
+        # feedback can alter the values. Deleted panels (canvas.remove) are skipped
+        # by reset_layout() because they leave self._bridge._components at removal.
+        component._initial_layout = {
+            "x": component.x, "y": component.y,
+            "w": component.w, "h": component.h,
+        }
         if rotation is not None:
             component._rotation = rotation
         # Apply each lock/chrome flag only when it differs from the default, so
@@ -792,6 +800,30 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         if callable(on_removed):
             on_removed()
         return component
+
+    def reset_layout(self):
+        """Restore every live panel to its Python-defined position and size.
+
+        Replays the (x, y, w, h) captured at :meth:`insert` time for every panel
+        currently registered on the canvas. Panels removed via :meth:`remove` are
+        skipped automatically because they leave the bridge registry at removal time.
+        Panels the user deleted in the tldraw UI (without going through Python) are
+        still in the registry and will have their stored geometry refreshed; they
+        will reappear on next reconnect at their original positions.
+
+        For single-viewer canvases this fully undoes all hand-drags. For role/client-
+        scoped layouts the shared base is restored; per-viewer overlays (set via
+        ``set_layout(roles=…)`` or ``set_layout(client_id=…)``) are left untouched.
+        """
+        for comp in list(self._bridge._components.values()):
+            il = getattr(comp, "_initial_layout", None)
+            if il is None:
+                continue
+            kwargs = {"w": il["w"], "h": il["h"]}
+            if il["x"] is not None and il["y"] is not None:
+                kwargs["x"] = il["x"]
+                kwargs["y"] = il["y"]
+            comp.set_layout(**kwargs)
 
     def clear(self):
         """Remove all panels and arrows from the canvas. Works live while serving."""

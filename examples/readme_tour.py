@@ -330,9 +330,10 @@ Keys: `x`, `y`, `zoom`, `locked`, `ui`, `grid`, `read_only`, `min_zoom`, `max_zo
 Scope to a role or single client with `roles=` / `client_id=`.
 """, name="section_4", below=gd, gap=GAP, x=40, w=W)
 
-zoom_in_bt  = canvas.button("zoom_in",  text="Zoom in (1.5×)",  below=s4,          gap=GAP, x=40, w=180)
-zoom_out_bt = canvas.button("zoom_out", text="Zoom out (0.5×)", right_of=zoom_in_bt,  gap=GAP, w=180)
-zoom_rst_bt = canvas.button("zoom_rst", text="Zoom 100%",       right_of=zoom_out_bt, gap=GAP, w=140)
+zoom_in_bt    = canvas.button("zoom_in",    text="Zoom in (1.5×)",  below=s4,             gap=GAP, x=40, w=180)
+zoom_out_bt   = canvas.button("zoom_out",   text="Zoom out (0.5×)", right_of=zoom_in_bt,  gap=GAP, w=180)
+zoom_rst_bt   = canvas.button("zoom_rst",   text="Zoom 100%",       right_of=zoom_out_bt, gap=GAP, w=140)
+layout_rst_bt = canvas.button("layout_rst", text="↺ Reset layout",  below=zoom_in_bt,     gap=GAP, x=40, w=180)
 
 @zoom_in_bt.on_click
 def _(): canvas.set_view(zoom=1.5)
@@ -342,6 +343,9 @@ def _(): canvas.set_view(zoom=0.5)
 
 @zoom_rst_bt.on_click
 def _(): canvas.set_view(zoom=1.0)
+
+@layout_rst_bt.on_click
+def _(): canvas.reset_layout()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # §5 Serving & Sharing
@@ -361,7 +365,7 @@ canvas.serve(namespace=globals())                # share script globals with Ins
 **Roles** — `serve(passwords={role: pw})` gates access per role.
 The same `roles=` / `client_id=` scoping then applies to panel visibility,
 content, layout, and view — precedence is `shared < role < client`.
-""", name="section_5", below=zoom_in_bt, gap=GAP, x=40, w=W)
+""", name="section_5", below=layout_rst_bt, gap=GAP, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Beyond the five steps — live telemetry
