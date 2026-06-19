@@ -179,6 +179,7 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows |
 | | `canvas.connect(a, b, text=…)` / `canvas.disconnect(arrow)` | Draw / remove an arrow bound between two panels |
 | **Arrange** | `with canvas.grid(...) / column(...) / row(...):` | Auto-layout containers; panels inside take the next slot |
+| | `canvas.reset_layout()` | Restore all panels to their Python-defined positions without moving the camera |
 | | `canvas.set_view(zoom=…, locked=…, ui=…, …, roles=, client_id=)` | Camera & chrome, scriptable and per-viewer |
 | **Reach panels** | `canvas[name]` / `canvas.<name>` | Fetch a panel (or arrow) by its name |
 | | `canvas.components` / `canvas.arrows` | Lists of what's on the canvas |
@@ -662,7 +663,9 @@ button   = canvas.button("go", below=controls, right_of=plot)   # two anchors = 
 
 `below`/`above` align left edges; `right_of`/`left_of` align tops. An explicit
 `x`/`y` overrides the derived coordinate. The anchor must already have a
-position.
+position. When an auto-height panel (`h="auto"`) settles its final height in the
+browser, every panel anchored `below=` it (and panels anchored below those)
+shift automatically to close or open the gap — no manual refit needed.
 
 **Auto-layout containers** — open a `with` block; panels inside without an
 explicit position drop into the next slot:
@@ -808,6 +811,12 @@ A toolbar button (bottom-left) spawns an ephemeral `Inspector` on demand —
 offered only on a local bind by default (`ui_inspector=True`/`False` to
 override), since it can surface state to everyone.
 
+A second button (**Graveyard**, stacked just above it) lists any panel the user
+has deleted from the canvas. Python keeps the component alive — callbacks and
+state intact — and clicking **Restore** re-registers the shape without restarting
+the script. On by default for a private local bind; override with
+`serve(ui_graveyard=True/False)`.
+
 # 5. Serving & sharing
 
 `canvas.serve(port=8000)` opens the browser and blocks. The rest of this section
@@ -833,6 +842,7 @@ All of `serve()`'s options in one place:
 | `view` | – | camera & chrome dict (see [Views & navigation](#4-views--navigation)) |
 | `cursors` | auto¹ | viewers report pointer position (`canvas.viewers[i]["cursor"]`) |
 | `ui_inspector` | auto¹ | toolbar button letting viewers spawn an Inspector |
+| `ui_graveyard` | auto¹ | toolbar button listing panels deleted from the canvas (restore without restarting) |
 | `desktop` | auto² | open a native window (pywebview) instead of the browser |
 | `window_title` / `window_size` | `"PyCanvas"` / `(1200, 800)` | native-window caption / size |
 | `debug` | `False` | log every WebSocket frame to the console |
