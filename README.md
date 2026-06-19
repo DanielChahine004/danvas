@@ -181,9 +181,15 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.insert(component, **place)` | Add a hand-built component; returns it |
 | | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows |
 | | `canvas.connect(a, b, text=…)` / `canvas.disconnect(arrow)` | Draw / remove an arrow bound between two panels |
+| **Shapes** | `canvas.geo/text/note/draw/highlight/line/frame(...)` | Place a managed tldraw shape, Python-owned and live-updatable |
+| | `canvas.shapes` | List of managed shapes currently on the canvas |
+| | `canvas.drawings` | Snapshot dict of user-drawn ephemeral shapes |
+| | `canvas.on_draw(fn)` / `off_draw(fn)` | Stream draw events when users draw, move, or delete shapes |
+| | `canvas.remove_shape(shape_or_name)` | Remove a managed shape by object or name |
 | **Arrange** | `with canvas.grid(...) / column(...) / row(...):` | Auto-layout containers; panels inside take the next slot |
 | | `canvas.reset_layout()` | Restore all panels to their Python-defined positions without moving the camera |
 | | `canvas.set_view(zoom=…, locked=…, ui=…, …, roles=, client_id=)` | Camera & chrome, scriptable and per-viewer |
+| | `canvas.camera = mode` | Navigation mode: `'free'` (default), `'scroll_y'`, `'scroll_x'`; or `(mode, zoom)` tuple to also lock the zoom level |
 | **Reach panels** | `canvas[name]` / `canvas.<name>` | Fetch a panel (or arrow) by its name |
 | | `canvas.components` / `canvas.arrows` | Lists of what's on the canvas |
 | **Shared React** | `canvas.define(name, source/path)` | Register a JSX component usable in every `react()` panel |
@@ -226,7 +232,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe) |
 | `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
-| `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)` |
+| `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)`; `canvas.sendBinary(buf)` (browser→Python raw bytes); `canvas.requestCamera(opts)`/`canvas.requestMicrophone(opts)` (parent-page device capture → `@on_binary`) |
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=` |
@@ -238,6 +244,127 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `Upload` | input | a button / drop-zone that receives a viewer's file into Python; `@on_upload`, `.value`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |
 | `Inspector` | output | live panel/globals state browser |
+
+## Canvas shapes
+
+Beyond panels, you can place **managed tldraw shapes** directly on the canvas —
+vector shapes, freehand strokes, text, sticky notes, lines, artboard frames, and
+highlighter marks. These are Python-owned: they survive page reload, update live,
+and are excluded from the free-form drawing sync. User-drawn shapes are *ephemeral*
+— they live in the tldraw store only — but `on_draw` lets Python observe and react
+to them.
+
+### Shape factories
+
+All return a shape object whose properties you can read and set live.
+
+| Factory | Creates | Key kwargs |
+|---|---|---|
+| `canvas.geo(x, y, w, h, geo=…)` | Rectangle, ellipse, cloud, star, diamond, triangle, etc. | `geo`, `color`, `fill`, `dash`, `size`, `text` |
+| `canvas.text(x, y, text=…)` | Floating plain text | `color`, `size`, `font`, `align` |
+| `canvas.note(x, y, text=…)` | Sticky note (coloured background) | `color`, `size`, `font` |
+| `canvas.draw(points, …)` | Freehand stroke (list of `(x, y)` or `(x, y, pressure)` tuples) | `color`, `size`, `dash`, `isClosed`, `isPen` |
+| `canvas.highlight(points, …)` | Semi-transparent highlighter | `color`, `size` |
+| `canvas.line(points, …)` | Polyline / cubic spline through control points | `color`, `dash`, `size`, `spline="cubic"` |
+| `canvas.frame(x, y, w, h, label=…)` | Named artboard container | `label` |
+
+Every factory also accepts `name=` (the Python identity key — reach it via
+`canvas.<name>`) and `x=`/`y=`/`rotation=`/`opacity=`.  `geo=` values: `"rectangle"`,
+`"ellipse"`, `"cloud"`, `"star"`, `"diamond"`, `"triangle"`, `"pentagon"`,
+`"hexagon"`, `"octagon"`, `"arrow"`, `"cross"`, `"check-box"`, `"heart"`,
+`"oval"`, `"rhombus"`, `"rhombus-2"`, `"trapezoid"`, `"x-box"`. `color`
+values: `"black"`, `"blue"`, `"green"`, `"grey"`, `"light-blue"`, `"light-green"`,
+`"light-red"`, `"light-violet"`, `"orange"`, `"red"`, `"violet"`, `"white"`,
+`"yellow"`. `fill` values: `"none"`, `"semi"`, `"solid"`, `"pattern"`. `dash`:
+`"draw"`, `"dashed"`, `"dotted"`, `"solid"`. `size`: `"s"`, `"m"`, `"l"`, `"xl"`.
+
+```python
+import math
+import pycanvas
+
+canvas = pycanvas.Canvas()
+
+# Geo shapes
+box   = canvas.geo(x=40, y=40, w=200, h=120, geo="rectangle", color="blue", fill="semi")
+ell   = canvas.geo(x=260, y=40, w=160, h=120, geo="ellipse", color="green", fill="solid")
+cloud = canvas.geo(x=440, y=40, w=180, h=120, geo="cloud", color="light-blue", fill="semi",
+                   text="cloud", name="cloud-box")
+
+# Freehand stroke (list of (x, y) tuples; origin is derived automatically)
+wave = canvas.draw(
+    [(40 + i * 4, 220 + int(25 * math.sin(i * 0.4))) for i in range(60)],
+    color="red", size="m", name="wave",
+)
+
+# Polyline / cubic spline
+canvas.line([(40, 300), (120, 250), (200, 300), (280, 250)], color="black", name="zig")
+canvas.line([(320, 300), (400, 250), (480, 300)], color="blue", spline="cubic")
+
+# Sticky note and floating text
+canvas.note(x=560, y=40, text="Sticky!", color="yellow")
+canvas.text(x=560, y=180, text="Floating text", color="grey", size="l")
+
+# Artboard frame
+canvas.frame(x=40, y=360, w=700, h=200, label="Overview", name="frame")
+
+canvas.serve(port=8000)
+```
+
+### Live updates
+
+Every shape property can be written after creation; writing broadcasts the change:
+
+```python
+cloud_box.color = "orange"          # color setter
+cloud_box.text  = "updated"         # text setter (geo/text/note only)
+cloud_box.w = 240; cloud_box.h = 140    # size setters (geo/frame)
+
+box.update(x=100, opacity=0.7, color="red")   # any mix of top-level + props
+
+box.move(x=200)                     # move along one axis only
+box.remove()                        # delete it
+canvas.remove_shape("cloud-box")    # by name, or pass the object
+```
+
+`canvas.shapes` is the current list of managed shapes.
+
+### Observing user-drawn shapes
+
+User freehand drawing is ephemeral (Python can't pre-place it), but `on_draw`
+fires whenever viewers draw, move, or delete shapes:
+
+```python
+@canvas.on_draw
+def on_user_draw(event):
+    # event = {"added": [DrawingShape, …],
+    #           "updated": [DrawingShape, …],
+    #           "removed": [shape_id_str, …]}
+    for s in event["added"]:
+        print(f"new {s.type} at ({s.x:.0f}, {s.y:.0f})  color={s.color}")
+    for s in event["updated"]:
+        print(f"moved/resized {s.id}")
+    for sid in event["removed"]:
+        print(f"deleted {sid}")
+```
+
+`canvas.drawings` is a live snapshot `{id: DrawingShape}` of all user-drawn shapes.
+Each `DrawingShape` exposes `.id`, `.type`, `.x`, `.y`, `.rotation`, `.opacity`,
+`.props`, `.color`, `.text`, and `.update(**kw)` / `.remove()` — so Python can
+mutate or delete ephemeral shapes too:
+
+```python
+@canvas.on_draw
+def tidy(event):
+    for s in event["added"]:
+        if s.type == "draw" and s.color == "red":
+            s.update(color="blue")   # immediately recolour user strokes
+```
+
+`canvas.off_draw(fn)` deregisters. Use `canvas.on_draw` as a decorator or call it
+with a function directly — both forms work.
+
+See [`examples/tldraw_shapes.py`](examples/tldraw_shapes.py) for a runnable demo
+covering all shape types and the drawing observer.
 
 ## The three data verbs
 
@@ -276,7 +403,8 @@ Every panel:
 ```python
 panel.update(...)                 # push new state (signature varies per component)
 panel.move(x, y); panel.resize(w, h); panel.rotate(deg)
-panel.set_layout(x=, y=, w=, h=, rotation=, locked=, ...)   # any combo, one message
+panel.opacity = 0.5               # live fade; 1.0 is fully opaque (default)
+panel.set_layout(x=, y=, w=, h=, rotation=, opacity=, locked=, ...)   # any combo, one message
 panel.set_layout(x=, y=, roles=["admin"])         # scope to roles/client_id (per-viewer layout)
 panel.to_front(); panel.to_back(); panel.forward(); panel.backward()   # z-order
 panel.x, panel.y, panel.w, panel.h, panel.rotation   # read/write live
@@ -525,6 +653,48 @@ def handle(msg):
 - `panel.push_binary(bytes)` streams raw bytes on a binary frame (no JSON/base64,
   same fast path as video); `canvas.onPush` receives an `ArrayBuffer`. Honours
   `queue=`.
+- **`canvas.sendBinary(buf)`** — the upward twin: transfers an `ArrayBuffer` from
+  the iframe to Python with zero JSON/base64 overhead. Python receives the raw
+  bytes with `@panel.on_binary`:
+
+  ```python
+  @panel.on_binary
+  def got(data: bytes, viewer):
+      frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+  ```
+
+  Accepts `threaded=True` like every other handler.
+
+- **`canvas.requestCamera(opts)`** / **`canvas.releaseCamera()`** — capture
+  the webcam from the **parent page** (browsers block `getUserMedia` inside a
+  sandboxed null-origin iframe even with `allow="camera"`). The parent runs
+  `getUserMedia`, encodes each frame as JPEG, and relays it in two directions
+  simultaneously: up to Python as a `BIN_INPUT` frame (received by `@on_binary`)
+  and back down into the iframe via `canvas.onPush` (as an `ArrayBuffer`) so
+  the panel can display it without a Python round-trip. `opts`: `width` (320),
+  `height` (240), `fps` (0 = max rate ≤60), `quality` (0.7). No `fps` or `fps=0`
+  means the loop fires on every animation frame and self-throttles when JPEG
+  encoding is still in progress (never queues up).
+
+- **`canvas.requestMicrophone(opts)`** / **`canvas.releaseMicrophone()`** — same
+  pattern for microphone audio. Before the first chunk arrives, a JSON
+  `{event: 'mic_start', sampleRate, channels}` is sent via `canvas.send()` so
+  Python knows the stream format. Each subsequent chunk is int16 PCM at the
+  browser's native sample rate (~48 kHz), received by `@on_binary`:
+
+  ```python
+  @panel.on('mic_start')
+  def started(msg, viewer):
+      print(msg['sampleRate'], 'Hz')
+
+  @panel.on_binary
+  def got_audio(data: bytes, viewer):
+      samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768
+  ```
+
+  `opts`: `bufferSize` (default 4096 samples ≈ 85–93 ms per chunk). Requires a
+  user gesture (e.g. a button click) before calling `requestMicrophone()`.
+
 - `event_key=` changes the routing field (default `event`).
 - Anything that renders to HTML works: matplotlib (`savefig` → base64 `<img>`),
   Plotly (`fig.to_html(include_plotlyjs='cdn')`, stays interactive).
@@ -649,12 +819,19 @@ Every factory and `insert(...)` accepts the same `**place` options:
 | `x` / `y` | canvas position; omit → auto-arrange |
 | `w` / `h` (`width` / `height`) | size in px; `"auto"` fits content (Custom/React panels) |
 | `rotation` | degrees clockwise |
+| `opacity` | 0.0 = fully transparent → 1.0 = fully opaque (default) |
 | `below` / `above` / `right_of` / `left_of` | place relative to another panel… |
 | `gap` | …this many px away (default 16) |
 | `queue` | backpressure policy: `"fifo"` (all, in order) or `"latest"` (drop stale) |
 | `roles` | login roles allowed to see the panel (`[]`/omit = everyone) |
 | `lock_for` | roles that get it non-interactive (`operable=False`) |
 | `locked` / `draggable` / `resizable` / `operable` / `grabbable` / `frame` | lock & chrome flags — see [Locking & interactivity](#locking--interactivity) |
+
+> **Recommended: use relative placement to avoid overlapping panels.** Hard-coded
+> `x`/`y` coordinates are brittle — change one panel's size and everything below
+> it needs manual adjustment. `below=`, `above=`, `right_of=`, and `left_of=` pin
+> each panel relative to its neighbour, so the layout stays gap-correct no matter
+> what changes around it.
 
 **Relative placement** — anchor to a placed panel; `gap` defaults to 16:
 
@@ -819,6 +996,41 @@ has deleted from the canvas. Python keeps the component alive — callbacks and
 state intact — and clicking **Restore** re-registers the shape without restarting
 the script. On by default for a private local bind; override with
 `serve(ui_graveyard=True/False)`.
+
+## Camera navigation mode
+
+By default the canvas uses tldraw's free navigation: pinch/scroll to zoom,
+drag to pan. `canvas.camera` switches to a constrained mode that limits or
+locks one axis — useful for vertical dashboards or horizontal timelines where
+you want the scroll wheel to actually scroll rather than zoom.
+
+```python
+canvas.camera = 'scroll_y'           # vertical scroll only; wheel scrolls down
+canvas.camera = 'scroll_x'           # horizontal scroll only; wheel scrolls right
+canvas.camera = 'free'               # restore default free navigation (default)
+```
+
+Pass a `(mode, zoom)` tuple to lock the zoom level at the same time:
+
+```python
+canvas.camera = ('scroll_y', 0.75)   # vertical scroll, fixed at 75% zoom
+canvas.camera = ('scroll_x', 1.5)    # horizontal scroll, fixed at 150% zoom
+canvas.camera = ('scroll_y', 1.0)    # vertical scroll, fixed at 100% zoom
+```
+
+In a constrained mode:
+
+- The scroll wheel (or trackpad two-finger swipe) **pans** the canvas along
+  the free axis instead of zooming.
+- The locked axis is fixed — you cannot pan horizontally in `scroll_y` or
+  vertically in `scroll_x`.
+- Zoom is locked at the supplied level (default 1.0 = 100%); pinch gestures
+  do not change it.
+- The canvas opens immediately at the correct position and zoom — there is no
+  auto-fit re-centre on first scroll.
+
+`canvas.camera` is replayed to every reconnecting viewer, so the constraint
+persists across page reloads and hot-reloads.
 
 # 5. Serving & sharing
 
@@ -1229,7 +1441,11 @@ All JSON at `ws://localhost:{port}/ws`:
 
 High-rate media (`VideoFeed`/`AudioFeed`, `push_binary`) skips JSON: a binary
 frame of `[type][id-length]` + id + raw payload (JPEG / int16 PCM), fed straight
-into a `Blob`/`ArrayBuffer`. Server → browser: `register`/`update`/`remove`;
+into a `Blob`/`ArrayBuffer`. The same binary frame format travels in both
+directions: server → browser for `push_binary` / `VideoFeed` / `AudioFeed`, and
+browser → server for `canvas.sendBinary()` / `canvas.requestCamera()` /
+`canvas.requestMicrophone()` (the `BIN_INPUT` type), all routed to
+`@panel.on_binary` in Python. Server → browser: `register`/`update`/`remove`;
 browser → server: `input`.
 
 ## Examples
@@ -1240,6 +1456,9 @@ python examples/frontend_backend_tour.py  # interactive tour of the wire, live f
 python examples/sensor_dashboard.py       # live VideoFeed + worker thread
 python examples/custom_html.py            # hand-written bidirectional HTML panel
 python examples/custom_binary_stream.py   # high-rate binary telemetry (push_binary)
+python examples/tldraw_shapes.py          # managed geo/text/note/draw/line/frame/highlight + on_draw observer
+python examples/binary_input_test.py      # webcam → Python via canvas.requestCamera (browser→host)
+python examples/audio_input_test.py       # microphone → Python via canvas.requestMicrophone
 python examples/react_canvas_api.py       # React: canvas.viewport / setView / chat
 python examples/matplotlib_panel.py       # slider re-renders a matplotlib figure
 python examples/plotly_panel.py           # interactive Plotly chart
