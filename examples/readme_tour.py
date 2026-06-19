@@ -14,7 +14,7 @@ canvas = pycanvas.Canvas()
 W = 660   # main column width
 GAP = 24  # section gap
 
-with canvas.column(w=W, gap=GAP, origin=(40, 40)):
+with canvas.column(w=W, gap=GAP, origin=(40, 40)) as col:
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Intro
@@ -390,6 +390,10 @@ geometry) and **globals** (script namespace). Also spawnable on demand via the
 
     canvas.inspector(name="readme_inspector", label="Inspector",
                      source="components", refresh=2.0, h=280)
+
+@canvas.on_connect
+def _(_):
+    col.refit()
 
 canvas.serve(hot_reload=True, namespace=globals(),
              view={"x": 375, "y": 230, "zoom": 1.8})

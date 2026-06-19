@@ -179,6 +179,10 @@ class Bridge:
         # diffs; we accumulate the canonical set here, fan it out to the other
         # browsers, and replay it to anyone who connects later.
         self._drawings = {}  # record id -> tldraw record
+        # Reflow requests from col/row.refit() — keyed by container id so each
+        # column's latest reflow supersedes its previous one. Replayed on connect
+        # so auto-height panels stay correctly stacked for every joining client.
+        self._reflows = {}  # container key -> reflow message
         # Optional callback fired (no args) whenever canvas state the user can
         # mutate from the browser changes -- a panel moved/resized (``layout``)
         # or a free-form drawing edited (``draw``). serve(persist=...) sets this
@@ -426,6 +430,15 @@ class Bridge:
         self._arrows.pop(arrow_id, None)
         self.broadcast({"type": "remove", "id": arrow_id})
 
+    def store_reflow(self, msg):
+        """Persist a reflow message so connecting clients receive it on join.
+
+        Each column/row container has a stable ``key`` (``id(container)``); a
+        later ``refit()`` call on the same container replaces the earlier one,
+        so only the most-recent layout for each container is replayed.
+        """
+        self._reflows[msg["key"]] = msg
+
     def set_loop(self, loop):
         self._loop = loop
         loop.create_task(self._reap_loop())
@@ -585,6 +598,10 @@ class Bridge:
             # Arrows bind to panels, so replay them after every panel exists.
             for arrow in self._arrows.values():
                 await self._send(ws, arrow.register_message())
+            # Replay stored reflows so auto-height columns/rows are stacked at
+            # real browser-measured heights for every joining client.
+            for reflow in self._reflows.values():
+                await self._send(ws, reflow)
             # Replay the live free-form drawings as a single "added" diff so a
             # fresh (or reloaded) browser sees what others have drawn.
             if self._drawings:

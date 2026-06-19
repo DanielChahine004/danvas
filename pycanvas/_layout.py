@@ -124,13 +124,15 @@ class _FlowLayout:
         live = set(self._canvas._components)
         ids = [c.id for c in self._members if c in live]
         if ids:
-            self._canvas._bridge.broadcast({
+            msg = {
                 "type": "reflow",
                 "key": id(self),          # stable per container; repeats re-arm
                 "ids": ids,               # insertion order = pack order
                 "kind": self._kind,
                 "x0": self._ox, "y0": self._oy, "gap": self._gap,
-            })
+            }
+            self._canvas._bridge.broadcast(msg)
+            self._canvas._bridge.store_reflow(msg)
 
     def _refit_local(self):
         live = set(self._canvas._components)
