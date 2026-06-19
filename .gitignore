@@ -48,3 +48,4 @@ claude.ps1
 # Added by code-review-graph
 .code-review-graph/
 .codebaser/
+examples/test.py
