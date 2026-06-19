@@ -282,4 +282,5 @@ canvas.inspector(name="readme_inspector", label="Inspector",
                  source="components", refresh=2.0,
                  below=insp_hdr, x=40, w=W, h=280)
 
-canvas.serve(hot_reload=True, namespace=globals())
+canvas.serve(hot_reload=True, namespace=globals(),
+             view={"x": 375, "y": 230, "zoom": 1.8})
