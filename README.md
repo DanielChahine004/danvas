@@ -7,36 +7,6 @@ user input back in real time over one WebSocket.
 Built on [tldraw](https://tldraw.dev) + React + Vite (frontend) and FastAPI +
 WebSockets (backend). The frontend ships pre-built; you never touch Node or npm.
 
-## Mental model
-
-The lifecycle is always the same handful of steps:
-
-```python
-import pycanvas
-
-canvas = pycanvas.Canvas()                        # 1. make a canvas
-speed  = canvas.slider("speed", min=0, max=100)   # 2. make components (panels)
-status = canvas.label("status", "idle")
-
-@speed.on_change                                  #    read user input back …
-def _(v, viewer):                                 #    … with who did it (optional 2nd arg)
-    status.update(f"{viewer['name']} set speed to {v}")   # … and push state out
-
-speed.set_layout(x=40, y=40, w=320)               # 3. place/size it (optional —
-                                                  #    factory x=/y=/w=/h= work too)
-canvas.set_view(zoom=1.0, ui=True)                # 4. set the camera/chrome (optional)
-canvas.serve(port=8000)                           # 5. serve — opens the browser, blocks
-```
-
-**Python owns all state; the browser renders it and reports user actions.** The
-loop is always: make panels → register callbacks → `serve()`.
-
-This README follows those five steps — [1. The canvas](#1-the-canvas),
-[2. Components](#2-components), [3. Layout](#3-layout),
-[4. Views & navigation](#4-views--navigation),
-[5. Serving & sharing](#5-serving--sharing) — then
-[Beyond the five steps](#beyond-the-five-steps) for the rest.
-
 ## Install
 
 ```bash
@@ -90,6 +60,36 @@ across panels, though, so a genuinely slow handler delays other panels' handlers
 and the echo of other users' actions until it returns. For slow work, mark the
 handler [`threaded=True`](#receiving-input) so it runs on its own thread and the
 shared worker stays free.
+
+## Mental model
+
+The lifecycle is always the same handful of steps:
+
+```python
+import pycanvas
+
+canvas = pycanvas.Canvas()                        # 1. make a canvas
+speed  = canvas.slider("speed", min=0, max=100)   # 2. make components (panels)
+status = canvas.label("status", "idle")
+
+@speed.on_change                                  #    read user input back …
+def _(v, viewer):                                 #    … with who did it (optional 2nd arg)
+    status.update(f"{viewer['name']} set speed to {v}")   # … and push state out
+
+speed.set_layout(x=40, y=40, w=320)               # 3. place/size it (optional —
+                                                  #    factory x=/y=/w=/h= work too)
+canvas.set_view(zoom=1.0, ui=True)                # 4. set the camera/chrome (optional)
+canvas.serve(port=8000)                           # 5. serve — opens the browser, blocks
+```
+
+**Python owns all state; the browser renders it and reports user actions.** The
+loop is always: make panels → register callbacks → `serve()`.
+
+This README follows those five steps — [1. The canvas](#1-the-canvas),
+[2. Components](#2-components), [3. Layout](#3-layout),
+[4. Views & navigation](#4-views--navigation),
+[5. Serving & sharing](#5-serving--sharing) — then
+[Beyond the five steps](#beyond-the-five-steps) for the rest.
 
 # 1. The canvas
 
