@@ -586,8 +586,8 @@ class Inspector(React):
             pass  # pynvml not installed or no NVIDIA GPU — silently omit
 
         # --- Active threads --------------------------------------------------
-        pc_markers = {"PyCanvas", "asyncio", "pycanvas", "_ticker", "uvicorn",
-                      "starlette", "watchdog"}
+        pc_markers = {"PyCanvas", "asyncio", "pycanvas", "_ticker", "_tick_loop",
+                      "uvicorn", "starlette", "watchdog", "AnyIO", "_run"}
         main_thread = threading.main_thread()
         for t in sorted(threading.enumerate(), key=lambda t: t.name.lower()):
             if t is main_thread:
