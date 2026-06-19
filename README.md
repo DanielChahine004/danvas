@@ -173,7 +173,7 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 
 | Category | Member | What it does |
 |---|---|---|
-| **Make panels** | `canvas.slider/button/toggle/label/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/repl/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
+| **Make panels** | `canvas.slider/button/toggle/label/text_field/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/repl/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
 | | `canvas.show(value, **place)` | Auto-pick the best panel for any value |
 | | `canvas.insert(component, **place)` | Add a hand-built component; returns it |
 | | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows |
@@ -215,6 +215,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `Slider` | bidirectional | `.value`, `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True` (report only on let-go) |
 | `Toggle` | bidirectional | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
 | `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)` |
+| `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=` |
 | `Label` | output | escaped text/number; `.update(text)`; `h="auto"` |
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
@@ -225,7 +226,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=` |
-| `Table` | output | DataFrame/Series/records/dict → sortable, filterable; `.update(data)` |
+| `Table` | bidirectional | DataFrame/Series/records/dict → sortable, filterable, paginated; toolbar buttons toggle a `#` index column, a `cols ▾` column-visibility checklist, and a `sel` row-selection column; `@on_select` fires with the list of selected 0-based row indices; `.selected`, `.update(data)` |
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
@@ -288,6 +289,8 @@ nudge only.
 @slider.on_change         # fn(value)
 @toggle.on_change         # fn(value)
 @button.on_click          # fn()
+@text_field.on_change     # fn(text); fires on Enter or blur (single-line), or blur (multiline)
+@table.on_select          # fn(indices); list of selected 0-based row indices
 @panel.on_layout          # fn(comp), after a user drag/resize (geometry synced)
 @chat.on_message          # fn(entry); reply with chat.post(text)
 ```
