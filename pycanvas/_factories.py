@@ -258,3 +258,65 @@ class _FactoryMixin:
         """Insert an :class:`~pycanvas.Inspector`. See :meth:`insert` for ``place``."""
         return self._make(Inspector, name=name, refresh=refresh, source=source,
                           namespace=namespace, label=label, **place)
+
+    def graveyard(self, name="graveyard", label="Deleted panels",
+                  **place: Unpack[Place]):
+        """Insert a graveyard panel that lists panels the user deleted in tldraw.
+
+        When the user presses Delete on a pycanvas-managed shape, Python keeps the
+        component (callbacks, state and all) but marks it as deleted and adds it here.
+        A *Restore* button re-registers the shape so it reappears at its original
+        position without restarting the script.
+
+        At most one graveyard panel per canvas is meaningful (the last one inserted
+        wins). See :meth:`insert` for placement kwargs.
+        """
+        _source = """
+function Component({ canvas, value }) {
+  const items = value || [];
+  if (!items.length) return (
+    <div style={{padding:'8px 12px',
+                 color:'var(--pc-text-dim,#888)',
+                 fontSize:13,fontStyle:'italic'}}>
+      No deleted panels
+    </div>
+  );
+  return (
+    <div>
+      {items.map(item => (
+        <div key={item.id} style={{
+          display:'flex', alignItems:'center', gap:8,
+          padding:'6px 12px',
+          borderBottom:'1px solid var(--pc-border,#333)'
+        }}>
+          <span style={{flex:1, fontSize:13,
+                        fontFamily:'ui-monospace,SFMono-Regular,monospace'}}>
+            {item.label || item.id}
+          </span>
+          <button
+            onClick={() => canvas.send({action:'restore', id:item.id})}
+            style={{padding:'3px 12px', fontSize:12, cursor:'pointer',
+                    background:'var(--pc-accent,#3b82f6)', color:'#fff',
+                    border:'none', borderRadius:4}}>
+            Restore
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+"""
+        comp = self._make(React, source=_source, name=name, label=label, **place)
+        self._bridge._graveyard_panel = comp
+
+        @comp.on_message
+        def _(msg):
+            if msg.get("action") == "restore":
+                comp_id = msg.get("id")
+                restored = self._bridge._graveyarded.pop(comp_id, None)
+                if restored is not None:
+                    restored._graveyarded = False
+                    self._bridge.register_live(restored)
+                    self._bridge._refresh_graveyard()
+
+        return comp

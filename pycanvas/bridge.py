@@ -191,6 +191,11 @@ class Bridge:
         # the event-loop thread (draw) or a dispatch thread (layout), so the
         # listener must be thread-safe.
         self._on_mutation = None
+        # Graveyard: panels the user deleted in tldraw (but Python still owns).
+        # Keyed by component id so lookup is O(1). A separate React panel
+        # (_graveyard_panel) shows the list and handles restore requests.
+        self._graveyarded = {}   # comp_id -> comp
+        self._graveyard_panel = None
         # Per-connection viewer identity (id / display name / color) for the
         # presence roster and chat. ``_last_seen`` tracks each socket's most
         # recent inbound message so the reaper can drop silent (dead) ones.
@@ -982,6 +987,15 @@ class Bridge:
                 self._dispatch.submit(
                     lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
+        elif kind == "graveyard":
+            # User deleted a pycanvas-managed shape in tldraw. Python keeps the
+            # component (callbacks, state all intact) but marks it as deleted so
+            # the graveyard panel can list it and offer a Restore button.
+            comp = self._components.get(msg.get("id"))
+            if comp is not None and not getattr(comp, "_graveyarded", False):
+                comp._graveyarded = True
+                self._graveyarded[comp.id] = comp
+                self._dispatch.submit(self._refresh_graveyard)
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
             # canonical record set and relay it to the *other* browsers so every
@@ -1085,7 +1099,15 @@ class Bridge:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom},
                            exclude=ws)
         if "h" in msg and old_h is not None and comp.h != old_h:
-            self._cascade_height(comp, comp.h - old_h)
+            dh = comp.h - old_h
+            # Auto-height measurement arrives with h only (no x/y from a drag).
+            # Track the settled h in _initial_layout so reset_layout() restores
+            # the cascade-correct position, not the raw default_h placeholder.
+            if "x" not in msg and "y" not in msg:
+                il = getattr(comp, "_initial_layout", None)
+                if il is not None:
+                    il["h"] = comp.h
+            self._cascade_height(comp, dh)
         self._notify_mutation()
 
     def _cascade_height(self, comp, dh):
@@ -1094,10 +1116,26 @@ class Bridge:
             if dep.id in self._components and dep.y is not None:
                 self._move_y(dep, dh)
 
+    def _refresh_graveyard(self):
+        """Push the current graveyard list to the graveyard panel (if one exists)."""
+        panel = self._graveyard_panel
+        if panel is None:
+            return
+        items = [
+            {"id": c.id, "label": c._props.get("label") or c.name}
+            for c in self._graveyarded.values()
+        ]
+        panel.push(items)
+
     def _move_y(self, comp, dh):
         """Shift comp's y by dh and propagate to every panel whose y derives from comp's."""
         new_y = comp.y + dh
         comp._store_base_layout({"y": new_y})
+        # Track the cascade-settled y so reset_layout() restores the correct
+        # position rather than the raw insert-time placeholder.
+        il = getattr(comp, "_initial_layout", None)
+        if il is not None and il.get("y") is not None:
+            il["y"] = new_y
         self.broadcast({"type": "update", "id": comp.id, "payload": {"y": new_y}})
         for dep, _gap in getattr(comp, "_below_deps", []):
             if dep.id in self._components and dep.y is not None:

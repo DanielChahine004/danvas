@@ -182,6 +182,7 @@ export function setEditor(e) {
   setupGeometrySync(e)
   setupSelectionFilter(e)
   setupDrawSync(e)
+  setupGraveyardSync(e)
   setupCursorReporting(e)
   // The view config usually arrives (in `welcome`) just after mount, but if it
   // was already known before this editor instance existed, apply it now.
@@ -406,6 +407,24 @@ function setupDrawSync(ed) {
     ({ changes }) => {
       const diff = filterDiff(changes)
       if (diff) sendRaw({ type: 'draw', diff })
+    },
+    { source: 'user', scope: 'document' }
+  )
+}
+
+// Detect when the user deletes a pycanvas-managed shape in tldraw and notify
+// Python. Python keeps the component (callbacks etc. stay live) and shows it
+// in the graveyard panel so it can be restored without restarting the script.
+// { source: 'user' } means this only fires for user-initiated deletes, not
+// Python-initiated removes (which go through applyRemote / mergeRemoteChanges).
+function setupGraveyardSync(ed) {
+  ed.store.listen(
+    ({ changes }) => {
+      for (const [id, rec] of Object.entries(changes.removed || {})) {
+        if (rec.typeName === 'shape' && managedIds.has(id)) {
+          sendRaw({ type: 'graveyard', id: id.replace(/^shape:/, '') })
+        }
+      }
     },
     { source: 'user', scope: 'document' }
   )
