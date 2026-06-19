@@ -636,9 +636,12 @@ function handle(msg) {
     if (msg.runId) lastRunId = msg.runId
     setIdentity(msg.you || null)
     setUiInspectorEnabled(!!msg.uiInspector)
+    setGraveyardEnabled(!!msg.uiGraveyard)
     setAuthEnabled(!!msg.auth)
     setCursorsEnabled(!!msg.cursors)
     setViewConfig(msg.view || null)
+  } else if (msg.type === 'graveyard_update') {
+    setGraveyardItems(msg.items || [])
   } else if (msg.type === 'shared') {
     applyShared(msg)              // canvas.define / canvas.style assets
   } else if (msg.type === 'chat') {
@@ -769,6 +772,7 @@ function clearManaged() {
   liveHandlers.clear()
   liveBuffer.clear()
   setUiInspectorOpen(false)
+  setGraveyardItems([])
   // Rewind the auto-placement flow so panels without an explicit x/y land in
   // the same spots after the reload as before it. The server replays components
   // in stable insertion order, so from the start the same panels get the same
@@ -1029,6 +1033,42 @@ export function subscribeUiInspector(cb) {
   uiInspectorListeners.add(cb)
   cb(uiInspector) // prime with the latest known state
   return () => uiInspectorListeners.delete(cb)
+}
+
+// --- built-in graveyard panel -----------------------------------------------
+// The server advertises (in `welcome`) whether this canvas shows the Graveyard
+// button. When a user deletes a managed shape, Python keeps the component and
+// broadcasts a `graveyard_update` with the current list of deleted panel names.
+// The button opens a floating overlay; clicking Restore sends `{type:'restore'}`
+// to Python, which re-registers the shape without restarting the script.
+let uiGraveyard = { enabled: false, open: false, items: [] }
+const uiGraveyardListeners = new Set()
+
+function emitUiGraveyard() {
+  for (const cb of uiGraveyardListeners) cb(uiGraveyard)
+}
+function setGraveyardEnabled(enabled) {
+  uiGraveyard = { ...uiGraveyard, enabled }
+  emitUiGraveyard()
+}
+function setGraveyardItems(items) {
+  uiGraveyard = { ...uiGraveyard, items }
+  emitUiGraveyard()
+}
+
+export function subscribeGraveyard(cb) {
+  uiGraveyardListeners.add(cb)
+  cb(uiGraveyard)
+  return () => uiGraveyardListeners.delete(cb)
+}
+
+export function toggleGraveyard() {
+  uiGraveyard = { ...uiGraveyard, open: !uiGraveyard.open }
+  emitUiGraveyard()
+}
+
+export function sendRestore(id) {
+  sendRaw({ type: 'restore', id })
 }
 
 // Whether this canvas is password-protected (welcome.auth). When true the app

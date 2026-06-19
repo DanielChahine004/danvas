@@ -34,7 +34,7 @@ from ._factories import _FactoryMixin
 # truth-table lives in a pure function so it can be unit-tested. ``_ReloadHandoff``
 # tells serve() whether to return early (the call spawned the file-watch monitor)
 # and whether to override open_browser (a reload restart reuses the existing tab).
-_Exposure = namedtuple("_Exposure", "public_bind ui_inspector cursors")
+_Exposure = namedtuple("_Exposure", "public_bind ui_inspector ui_graveyard cursors")
 _ReloadHandoff = namedtuple("_ReloadHandoff", "should_return open_browser")
 
 
@@ -1264,7 +1264,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
               allow_remote_exec=False, block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
-              cursors=None, view=None, desktop=None, window_title="PyCanvas",
+              ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="PyCanvas",
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None):
@@ -1414,10 +1414,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # Inspector + cursor reporting). Remembered on self so a Repl inserted
         # live (serve(block=False)) gets the same gate; a password doesn't lift it
         # (auth'd users still get RCE), so allow_remote_exec stays the opt-in.
-        exposure = self._resolve_exposure(host, tunnel, ui_inspector, cursors)
+        exposure = self._resolve_exposure(host, tunnel, ui_inspector,
+                                          ui_graveyard, cursors)
         self._public_bind = exposure.public_bind
         self._allow_remote_exec = allow_remote_exec
         self._bridge._ui_inspector = exposure.ui_inspector
+        self._bridge._ui_graveyard = exposure.ui_graveyard
         self._bridge._cursors = exposure.cursors
         # When a password is set, advertise it so the frontend offers a built-in
         # sign-out button (clears the session cookie via /__logout__, then the
@@ -1474,22 +1476,23 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._serve_blocking(port, open_browser, host, password, passwords,
                              own_tunnel, tunnel_provider, compress=compress)
 
-    def _resolve_exposure(self, host, tunnel, ui_inspector, cursors):
+    def _resolve_exposure(self, host, tunnel, ui_inspector, ui_graveyard, cursors):
         """Resolve how far this serve() reaches, plus the telemetry defaults.
 
         A pure function of the bind arguments (no side effects), so the gating
         truth-table is unit-testable in isolation. ``public_bind`` is whether
         browsers off this machine can reach the canvas (a tunnel, or a
-        non-loopback host). The UI Inspector and cursor reporting both expose
-        viewer state/telemetry to the host, so each defaults on *only* for a
-        private, non-tunneled bind unless the caller forces it with an explicit
-        ``ui_inspector=`` / ``cursors=``.
+        non-loopback host). The UI Inspector, graveyard, and cursor reporting
+        all expose viewer state/telemetry to the host, so each defaults on
+        *only* for a private, non-tunneled bind unless the caller forces it.
         """
         local = host in ("127.0.0.1", "localhost")
         default_private = local and not tunnel
         return _Exposure(
             public_bind=tunnel or not local,
             ui_inspector=bool(ui_inspector) if ui_inspector is not None
+            else default_private,
+            ui_graveyard=bool(ui_graveyard) if ui_graveyard is not None
             else default_private,
             cursors=bool(cursors) if cursors is not None else default_private,
         )

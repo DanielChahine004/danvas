@@ -192,10 +192,11 @@ class Bridge:
         # listener must be thread-safe.
         self._on_mutation = None
         # Graveyard: panels the user deleted in tldraw (but Python still owns).
-        # Keyed by component id so lookup is O(1). A separate React panel
-        # (_graveyard_panel) shows the list and handles restore requests.
+        # Keyed by component id so lookup is O(1). When uiGraveyard is enabled
+        # in serve(), the frontend shows a toolbar button that toggles a floating
+        # graveyard panel; restore requests arrive as {type:"restore"} messages.
         self._graveyarded = {}   # comp_id -> comp
-        self._graveyard_panel = None
+        self._ui_graveyard = False  # set by serve() / canvas.py
         # Per-connection viewer identity (id / display name / color) for the
         # presence roster and chat. ``_last_seen`` tracks each socket's most
         # recent inbound message so the reaper can drop silent (dead) ones.
@@ -569,6 +570,7 @@ class Bridge:
             view_for_client = self._view_for(viewer["id"], role)
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "uiInspector": self._ui_inspector,
+                                  "uiGraveyard": self._ui_graveyard,
                                   "auth": self._auth,
                                   "cursors": self._cursors,
                                   "view": view_for_client,
@@ -607,6 +609,10 @@ class Bridge:
             # real browser-measured heights for every joining client.
             for reflow in self._reflows.values():
                 await self._send(ws, reflow)
+            # Replay current graveyard list so a freshly connected client sees
+            # panels deleted before it joined.
+            if self._graveyarded:
+                await self._send(ws, self._graveyard_message())
             # Replay the live free-form drawings as a single "added" diff so a
             # fresh (or reloaded) browser sees what others have drawn.
             if self._drawings:
@@ -990,11 +996,18 @@ class Bridge:
         elif kind == "graveyard":
             # User deleted a pycanvas-managed shape in tldraw. Python keeps the
             # component (callbacks, state all intact) but marks it as deleted so
-            # the graveyard panel can list it and offer a Restore button.
+            # the graveyard toolbar panel can list it and offer a Restore button.
             comp = self._components.get(msg.get("id"))
             if comp is not None and not getattr(comp, "_graveyarded", False):
                 comp._graveyarded = True
                 self._graveyarded[comp.id] = comp
+                self._dispatch.submit(self._refresh_graveyard)
+        elif kind == "restore":
+            # User clicked Restore in the graveyard panel; re-register the shape.
+            comp = self._graveyarded.pop(msg.get("id"), None)
+            if comp is not None:
+                comp._graveyarded = False
+                self.register_live(comp)
                 self._dispatch.submit(self._refresh_graveyard)
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
@@ -1116,16 +1129,18 @@ class Bridge:
             if dep.id in self._components and dep.y is not None:
                 self._move_y(dep, dh)
 
-    def _refresh_graveyard(self):
-        """Push the current graveyard list to the graveyard panel (if one exists)."""
-        panel = self._graveyard_panel
-        if panel is None:
-            return
+    def _graveyard_message(self):
         items = [
             {"id": c.id, "label": c._props.get("label") or c.name}
             for c in self._graveyarded.values()
         ]
-        panel.push(items)
+        return {"type": "graveyard_update", "items": items}
+
+    def _broadcast_graveyard(self):
+        self.broadcast(self._graveyard_message())
+
+    def _refresh_graveyard(self):
+        self._broadcast_graveyard()
 
     def _move_y(self, comp, dh):
         """Shift comp's y by dh and propagate to every panel whose y derives from comp's."""

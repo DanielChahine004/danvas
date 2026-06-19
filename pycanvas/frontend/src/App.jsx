@@ -3,7 +3,7 @@ import { Tldraw, createShapeId } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // PyCanvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
-import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig, subscribePeerCursors, getEditor, subscribeAuth, signOut } from './bridge'
+import { setEditor, subscribePresence, subscribeUiInspector, toggleUiInspector, subscribeViewConfig, subscribePeerCursors, getEditor, subscribeAuth, signOut, subscribeGraveyard, toggleGraveyard, sendRestore } from './bridge'
 
 export default function App() {
   // `hideUi` is a <Tldraw> prop (decided before/at render), unlike the camera
@@ -22,9 +22,11 @@ export default function App() {
           the canvas is password-protected — even under a `ui: false` kiosk view —
           so any viewer can switch accounts. */}
       <SignOutButton />
-      {/* The Inspector button is part of the app's UI chrome, so a `ui: false`
-          view (chrome-free surface) hides it alongside tldraw's own toolbars. */}
+      {/* The Inspector and Graveyard buttons are part of the app's UI chrome, so
+          a `ui: false` view (chrome-free surface) hides them alongside tldraw's
+          own toolbars. */}
       {!hideUi && <InspectorButton />}
+      {!hideUi && <GraveyardButton />}
       <Tldraw
         hideUi={hideUi}
         shapeUtils={shapeUtils}
@@ -261,6 +263,130 @@ function SignOutButton() {
       <span style={{ fontSize: 14, lineHeight: 1 }}>🔓</span>
       Sign out
     </button>
+  )
+}
+
+// A floating toolbar button that opens a panel listing panels the user deleted
+// in tldraw. Panels are never destroyed in Python — their callbacks and state
+// stay live — so clicking Restore re-registers them on the canvas without
+// restarting the script. Only shown when the server permits it (local bind by
+// default; see Canvas.serve ui_graveyard=). Sits bottom-left, above the
+// Inspector button.
+function GraveyardButton() {
+  const [state, setState] = useState({ enabled: false, open: false, items: [] })
+  useEffect(() => subscribeGraveyard(setState), [])
+  if (!state.enabled) return null
+  const count = state.items.length
+  return (
+    <>
+      <button
+        onClick={toggleGraveyard}
+        title={state.open ? 'Close the graveyard panel' : 'Show panels deleted from the canvas'}
+        style={{
+          position: 'absolute',
+          bottom: 100,
+          left: 8,
+          zIndex: 300,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 12px',
+          borderRadius: 8,
+          cursor: 'pointer',
+          background: state.open ? '#2563eb' : 'rgba(20, 20, 22, 0.82)',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
+          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: 12,
+          fontWeight: 600,
+          userSelect: 'none',
+        }}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🗑️</span>
+        Graveyard{count > 0 ? ` (${count})` : ''}
+        {state.open ? ' ✕' : ''}
+      </button>
+      {state.open && <GraveyardPanel items={state.items} />}
+    </>
+  )
+}
+
+function GraveyardPanel({ items }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 144,
+        left: 8,
+        zIndex: 300,
+        width: 280,
+        maxHeight: 320,
+        overflowY: 'auto',
+        background: 'rgba(20, 20, 22, 0.95)',
+        border: '1px solid rgba(255, 255, 255, 0.18)',
+        borderRadius: 10,
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
+        fontFamily: 'system-ui, sans-serif',
+        color: '#fff',
+      }}
+    >
+      <div style={{
+        padding: '8px 12px 6px',
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'rgba(255,255,255,0.45)',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        Deleted panels
+      </div>
+      {items.length === 0 ? (
+        <div style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(255,255,255,0.45)', fontStyle: 'italic' }}>
+          No deleted panels
+        </div>
+      ) : items.map((item) => (
+        <div
+          key={item.id}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '7px 12px',
+            borderBottom: '1px solid rgba(255,255,255,0.07)',
+          }}
+        >
+          <span style={{
+            flex: 1,
+            fontSize: 12,
+            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {item.label || item.id}
+          </span>
+          <button
+            onClick={() => sendRestore(item.id)}
+            style={{
+              flexShrink: 0,
+              padding: '3px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              background: '#2563eb',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 5,
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Restore
+          </button>
+        </div>
+      ))}
+    </div>
   )
 }
 

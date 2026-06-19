@@ -404,8 +404,5 @@ inspector = canvas.inspector(name="readme_inspector", label="Inspector",
                              source="components", refresh=2.0,
                              below=insp_hdr, gap=GAP, x=40, w=W, h=280)
 
-canvas.graveyard(name="readme_graveyard", label="Deleted panels",
-                 below=inspector, gap=GAP, x=40, w=W)
-
 canvas.serve(hot_reload=True, namespace=globals(),
              view={"x": 375, "y": 230, "zoom": 1.8})
