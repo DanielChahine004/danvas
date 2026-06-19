@@ -37,7 +37,8 @@ from .react import React
 
 # Column sets sent to the frontend per source; the table renders exactly these.
 _COMPONENT_COLS = ["name", "label", "type", "value", "x", "y", "w", "h"]
-_GLOBALS_COLS = ["name", "type", "value"]
+_GLOBALS_COLS   = ["name", "type", "value"]
+_SYSTEM_COLS    = ["name", "type", "value"]
 
 # The React component: a port of the former native InspectorView/DetailView,
 # driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
@@ -217,6 +218,7 @@ function Component({ canvas, props }) {
         <select value={source} onChange={(e) => switchSource(e.target.value)} style={controlStyle} title="what to inspect">
           <option value="components">panels</option>
           <option value="globals">globals</option>
+          <option value="system">system</option>
         </select>
         <input placeholder="search name…" value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -346,9 +348,10 @@ class Inspector(React):
         auto-refresh period in seconds (``None`` = manual only); with a period
         set, a daemon thread rebuilds the table on that cadence while the canvas
         is serving and a browser is connected."""
-        if source not in ("components", "globals"):
-            raise ValueError("source must be 'components' or 'globals'")
-        cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
+        if source not in ("components", "globals", "system"):
+            raise ValueError("source must be 'components', 'globals', or 'system'")
+        cols = (_GLOBALS_COLS if source == "globals" else
+                _SYSTEM_COLS  if source == "system"  else _COMPONENT_COLS)
         # The table/detail data rides in the React props (``data`` JSON blob),
         # replayed on reconnect. ``source`` here is the *view mode*, distinct from
         # React's own ``source`` (the JSX); tracked internally as ``self._view``.
@@ -429,21 +432,24 @@ class Inspector(React):
                 self.update(detail=self._build_detail(key))
 
     def _set_view(self, source):
-        """Switch the live view between "components" and "globals" and rebuild.
+        """Switch the live view between "components", "globals", and "system".
 
         Driven by the frontend's header dropdown; sends the new view, its column
         set and freshly built rows in one update.
         """
-        if source not in ("components", "globals") or source == self._view:
+        if source not in ("components", "globals", "system") or source == self._view:
             return
         self._view = source
         self._open_detail_key = None
-        cols = _GLOBALS_COLS if source == "globals" else _COMPONENT_COLS
+        cols = (_GLOBALS_COLS if source == "globals" else
+                _SYSTEM_COLS  if source == "system"  else _COMPONENT_COLS)
         self.update(source=source, cols=json.dumps(cols), rows=self._build())
 
     def _build(self):
         if self._view == "globals":
             return self._build_globals()
+        if self._view == "system":
+            return self._build_system()
         return self._build_components()
 
     def _build_components(self):
@@ -521,6 +527,82 @@ class Inspector(React):
                 "type": type(value).__name__,
                 "value": _short(value),
             })
+        return json.dumps(rows)
+
+    def _build_system(self):
+        """Rows for the "system" view: CPU/RAM/GPU metrics + active threads.
+
+        CPU and RAM require ``psutil`` (optional); GPU requires ``pynvml``
+        (optional, NVIDIA only). Active threads are always shown via
+        ``threading.enumerate()`` with no extra dependencies.
+        """
+        self._row_targets = {}
+        rows = []
+
+        # --- CPU / RAM (psutil) ----------------------------------------------
+        try:
+            import psutil
+            cpu_pct = psutil.cpu_percent(interval=None)
+            cpu_count = psutil.cpu_count(logical=True)
+            mem = psutil.virtual_memory()
+            used_gb  = mem.used  / 1024 ** 3
+            total_gb = mem.total / 1024 ** 3
+            cpu_data = {"percent": cpu_pct, "logical_cores": cpu_count,
+                        "physical_cores": psutil.cpu_count(logical=False)}
+            mem_data = {"used_gb": round(used_gb, 2), "total_gb": round(total_gb, 2),
+                        "percent": mem.percent, "available_gb": round(mem.available / 1024**3, 2)}
+            self._row_targets["cpu"] = cpu_data
+            self._row_targets["ram"] = mem_data
+            rows.append({"key": "cpu", "name": "cpu", "type": "metric",
+                         "value": f"{cpu_pct:.1f}%  ({cpu_count} logical cores)"})
+            rows.append({"key": "ram", "name": "ram", "type": "metric",
+                         "value": f"{used_gb:.1f} / {total_gb:.1f} GB  ({mem.percent:.0f}%)"})
+        except ImportError:
+            hint = {"hint": "pip install psutil"}
+            self._row_targets["_psutil"] = hint
+            rows.append({"key": "_psutil", "name": "cpu / ram", "type": "hint",
+                         "value": "install psutil for CPU & RAM metrics"})
+
+        # --- GPU (pynvml, NVIDIA only) ----------------------------------------
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            for i in range(pynvml.nvmlDeviceGetCount()):
+                h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                gpu_name = pynvml.nvmlDeviceGetName(h)
+                if isinstance(gpu_name, bytes):
+                    gpu_name = gpu_name.decode()
+                util = pynvml.nvmlDeviceGetUtilizationRates(h)
+                mi   = pynvml.nvmlDeviceGetMemoryInfo(h)
+                gpu_data = {"name": gpu_name, "util_gpu": util.gpu, "util_mem": util.memory,
+                            "mem_used_gb": round(mi.used / 1024**3, 1),
+                            "mem_total_gb": round(mi.total / 1024**3, 1)}
+                key = f"gpu:{i}"
+                self._row_targets[key] = gpu_data
+                rows.append({"key": key, "name": key, "type": "metric",
+                             "value": (f"{gpu_name}  {util.gpu}% util  "
+                                       f"{gpu_data['mem_used_gb']}/{gpu_data['mem_total_gb']} GB vram")})
+        except Exception:
+            pass  # pynvml not installed or no NVIDIA GPU — silently omit
+
+        # --- Active threads --------------------------------------------------
+        pc_markers = {"PyCanvas", "asyncio", "pycanvas", "_ticker", "uvicorn",
+                      "starlette", "watchdog"}
+        main_thread = threading.main_thread()
+        for t in sorted(threading.enumerate(), key=lambda t: t.name.lower()):
+            if t is main_thread:
+                kind = "main"
+            elif any(m.lower() in t.name.lower() for m in pc_markers):
+                kind = "pycanvas"
+            elif t.daemon:
+                kind = "daemon"
+            else:
+                kind = "thread"
+            key = f"thread:{t.ident}"
+            self._row_targets[key] = t
+            rows.append({"key": key, "name": t.name, "type": kind,
+                         "value": f"alive={t.is_alive()}  ident={t.ident}"})
+
         return json.dumps(rows)
 
     def _build_detail(self, key):

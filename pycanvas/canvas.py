@@ -1531,14 +1531,23 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 "(`python yourscript.py`), not from an interactive session."
             )
         if os.environ.get("_PYCANVAS_RELOAD_WORKER") != "1":
-            from .hotreload import run_monitor
-            # The monitor outlives every worker restart, so it — not the
-            # short-lived worker — owns the tunnel: one tunnel is opened at the
-            # fixed port and stays put across reloads (no per-edit cloudflared
-            # churn, and a stable public URL). Workers serve the port behind it.
-            run_monitor(main_file, tunnel=tunnel, port=port,
-                        tunnel_provider=tunnel_provider)
-            return _ReloadHandoff(True, None)
+            # Spawn a *clean* monitor subprocess that never ran user code, so
+            # user-launched daemon threads (camera, sensor, etc.) don't leak into
+            # the monitor and double-grab resources alongside the worker.
+            # The original process exits immediately via os._exit so its daemon
+            # threads die with it; the monitor subprocess owns file-watching and
+            # worker restarts from here on.
+            import secrets as _secrets, subprocess as _subprocess
+            env = {**os.environ}
+            env.setdefault("_PYCANVAS_RELOAD_SECRET", _secrets.token_urlsafe(32))
+            _subprocess.Popen(
+                [sys.executable, "-m", "pycanvas._hotreload_monitor",
+                 main_file, str(port),
+                 str(int(bool(tunnel))),
+                 str(tunnel_provider or "cloudflared")],
+                env=env,
+            )
+            os._exit(0)
         if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
             # Already opened on first launch; a reload reuses the existing tab
             # (the frontend reconnects its websocket) instead of popping another.
