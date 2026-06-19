@@ -284,7 +284,7 @@ function GraveyardButton() {
         title={state.open ? 'Close the graveyard panel' : 'Show panels deleted from the canvas'}
         style={{
           position: 'absolute',
-          bottom: 92,
+          bottom: 88,
           left: 8,
           zIndex: 300,
           display: 'flex',
@@ -317,7 +317,7 @@ function GraveyardPanel({ items }) {
     <div
       style={{
         position: 'absolute',
-        bottom: 136,
+        bottom: 130,
         left: 8,
         zIndex: 300,
         width: 280,
