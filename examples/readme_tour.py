@@ -25,7 +25,7 @@ Built on tldraw + React (frontend) and FastAPI + WebSockets (backend).
 The frontend ships pre-built; you never touch Node or npm.
 
 > Scroll down — each section matches a README heading.
-""", x=40, y=40, w=W)
+""", name="intro", x=40, y=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Install
@@ -35,12 +35,12 @@ install = canvas.markdown("""## Install
 pip install dans-pycanvas
 ```
 Optional extras: `[video]`  `[audio]`  `[tunnel]`  `[desktop]`
-""", below=title, x=40, w=W)
+""", name="install", below=title, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Hello World
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-hw_hdr = canvas.markdown("## Hello World", below=install, x=40, w=W)
+hw_hdr = canvas.markdown("## Hello World", name="hw_hdr", below=install, x=40, w=W)
 
 servo = canvas.slider("servo_1", min=0, max=180, default=90, label="Servo 1",
                       below=hw_hdr, x=40, w=320)
@@ -63,7 +63,7 @@ The lifecycle is always the same five steps:
 5. `canvas.serve(port=8000)` — opens the browser, blocks
 
 **Python owns all state; the browser renders it and reports user actions.**
-""", below=servo, x=40, w=W)
+""", name="mental_model", below=servo, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # §1 The Canvas
@@ -72,7 +72,7 @@ s1 = canvas.markdown("""# 1. The Canvas
 `Canvas()` is the document everything hangs off.
 Reach panels by name (`canvas.my_panel` / `canvas["my_panel"]`),
 connect them with arrows, or `clear()` / `save()` / `load()` the formation.
-""", below=mental, x=40, w=W)
+""", name="section_1", below=mental, x=40, w=W)
 
 node_a = canvas.label("node_a", "Panel A", below=s1, x=40, w=200)
 node_b = canvas.label("node_b", "Panel B", right_of=node_a, gap=240, w=200)
@@ -86,11 +86,11 @@ s2 = canvas.markdown("""# 2. Components
 Input panels (`slider`, `toggle`, `button`, `text_field`) report user actions.
 Output panels (`label`, `image`, `markdown`, `plot`, `live_plot`) receive `.update()`.
 Bidirectional: `table`, `chat`, `react`, `custom`.
-""", below=node_a, x=40, w=W)
+""", name="section_2", below=node_a, x=40, w=W)
 
-speed_sl  = canvas.slider("speed",   min=0, max=100, default=50, label="Speed",
-                           below=s2, x=40, w=200)
-enabled_tg = canvas.toggle("enabled", label="Enabled",
+speed_sl   = canvas.slider("speed",   min=0, max=100, default=50, label="Speed",
+                            below=s2, x=40, w=200)
+enabled_tg = canvas.toggle("enabled", ["off", "on"], default="on", label="Enabled",
                             right_of=speed_sl, gap=16, w=160)
 reset_bt   = canvas.button("reset",   text="Reset",
                             right_of=enabled_tg, gap=16, w=112)
@@ -107,7 +107,7 @@ def _(v):
 @reset_bt.on_click
 def _():
     speed_sl.update(50)
-    enabled_tg.update(False)
+    enabled_tg.update("on")
     comp_out.update("reset ↺")
 
 # --- The three data verbs ---
@@ -117,7 +117,7 @@ verbs = canvas.markdown("""## The three data verbs
 | `.update(value)` | **replace** whole state | ✅ | Label, Table, Slider, … |
 | `.push(sample)` | **append** one point | ❌ | LivePlot, Custom, React |
 | `.add(values, step)` | **record** a distribution snapshot | ✅ | Histogram |
-""", below=comp_out, x=40, w=W)
+""", name="data_verbs", below=comp_out, x=40, w=W)
 
 # --- Receiving input ---
 input_hdr = canvas.markdown("""## Receiving input
@@ -125,7 +125,7 @@ input_hdr = canvas.markdown("""## Receiving input
 
 Any handler may declare a trailing `viewer` arg to see who acted:
 `def _(value, viewer):` — gives `viewer["name"]`, `viewer["role"]`, …
-""", below=verbs, x=40, w=W)
+""", name="input_hdr", below=verbs, x=40, w=W)
 
 name_fld = canvas.text_field("visitor_name", label="Your name",
                               placeholder="type here and press Enter…",
@@ -141,7 +141,7 @@ def _(text, viewer):
 show_hdr = canvas.markdown("""## Show anything
 `canvas.show(value)` inspects the value and inserts the best panel automatically —
 like a notebook deciding how to render an `Out[...]`, but works in plain scripts.
-""", below=name_fld, x=40, w=W)
+""", name="show_hdr", below=name_fld, x=40, w=W)
 
 show_dict = canvas.show({"status": "ok", "temp": 42.1, "rpm": 1200},
                          name="show_dict", below=show_hdr, x=40, w=310)
@@ -152,7 +152,7 @@ canvas.show("# Heading\n`canvas.show()` rendered this **Markdown** from a string
 react_hdr = canvas.markdown("""## React panels
 `canvas.react(source=...)` compiles your JSX in-browser — no npm, inherits the canvas theme.
 `canvas.send({...})` posts up to Python; `panel.push(data)` sends down as the `value` prop.
-""", below=show_dict, x=40, w=W)
+""", name="react_hdr", below=show_dict, x=40, w=W)
 
 _count = 0
 counter_panel = canvas.react(
@@ -193,9 +193,9 @@ s3 = canvas.markdown("""# 3. Layout
 Relative: `below=`, `right_of=`, `left_of=`, `above=` (+ `gap=`).
 Containers: `canvas.grid(cols=N)` · `canvas.column()` · `canvas.row()`.
 `column.refit()` re-packs after a member panel grows.
-""", below=counter_panel, x=40, w=W)
+""", name="section_3", below=counter_panel, x=40, w=W)
 
-# 3×2 grid of labels demonstrating grid layout
+# 3×2 grid of labels demonstrating grid-like layout
 ga = canvas.label("ga", "grid slot 1", below=s3,  x=40,  w=200)
 gb = canvas.label("gb", "grid slot 2", right_of=ga, gap=12, w=200)
 gc = canvas.label("gc", "grid slot 3", right_of=gb, gap=12, w=200)
@@ -210,7 +210,7 @@ s4 = canvas.markdown("""# 4. Views & Navigation
 Pass `view=` to `serve()` or call `canvas.set_view()` live.
 Keys: `x`, `y`, `zoom`, `locked`, `ui`, `grid`, `read_only`, `min_zoom`, `max_zoom`.
 Scope to a role or single client with `roles=` / `client_id=`.
-""", below=gd, x=40, w=W)
+""", name="section_4", below=gd, x=40, w=W)
 
 zoom_in_bt  = canvas.button("zoom_in",  text="Zoom in (1.5×)",  below=s4, x=40, w=180)
 zoom_out_bt = canvas.button("zoom_out", text="Zoom out (0.5×)", right_of=zoom_in_bt,  gap=12, w=180)
@@ -243,7 +243,7 @@ canvas.serve(namespace=globals())                # share script globals with Ins
 **Roles** — `serve(passwords={role: pw})` gates access per role.
 The same `roles=` / `client_id=` scoping then applies to panel visibility,
 content, layout, and view — precedence is `shared < role < client`.
-""", below=zoom_in_bt, x=40, w=W)
+""", name="section_5", below=zoom_in_bt, x=40, w=W)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Beyond the five steps — live telemetry
@@ -256,7 +256,7 @@ hot reloading, notebooks (`block=False`), canvas merging, and more.
 `push({trace: y}, x=step)` appends one point per call. The server coalesces
 frames a slow client can't keep up with; `.push([batch], x=[xs])` flushes
 many points at once.
-""", below=s5, x=40, w=W)
+""", name="beyond", below=s5, x=40, w=W)
 
 lp = canvas.live_plot("telemetry", traces=["sin", "cos"],
                        label="Live telemetry", below=beyond, x=40, w=W, h=220)
@@ -276,7 +276,7 @@ insp_hdr = canvas.markdown("""## Inspector
 A live variable/panel explorer. Switch between **panels** (component state +
 geometry) and **globals** (script namespace). Also spawnable on demand via the
 🔍 toolbar button.
-""", below=lp, x=40, w=W)
+""", name="insp_hdr", below=lp, x=40, w=W)
 
 canvas.inspector(name="readme_inspector", label="Inspector",
                  source="components", refresh=2.0,
