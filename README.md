@@ -1010,10 +1010,11 @@ def stream():
 canvas.serve(hot_reload=True)
 ```
 
-**Required, not just tidy, with `hot_reload=True`:** a hand-started thread at
-module scope runs in *both* the file-watching monitor and the worker, so it
-would double-grab a single-owner resource (camera, serial port). `background`
-defers the thread to the worker only.
+**Prefer `background` with `hot_reload=True`:** a hand-started thread at module
+scope starts fresh in every worker on each reload, which is fine for stateless
+loops but can briefly double-grab a single-owner resource (camera, serial port)
+during the transition between the old and new worker. `background` makes the
+intent explicit and is the idiomatic choice here.
 
 ## Notebooks
 

@@ -587,7 +587,7 @@ class Inspector(React):
 
         # --- Active threads --------------------------------------------------
         pc_markers = {"PyCanvas", "asyncio", "pycanvas", "_ticker", "_tick_loop",
-                      "uvicorn", "starlette", "watchdog", "AnyIO", "_run"}
+                      "uvicorn", "starlette", "watchdog", "AnyIO", "_run", "_scan"}
         main_thread = threading.main_thread()
         for t in sorted(threading.enumerate(), key=lambda t: t.name.lower()):
             if t is main_thread:

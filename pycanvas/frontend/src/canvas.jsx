@@ -147,7 +147,13 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
     [editor, shape.id]
   )
   return (
-    <HTMLContainer className="pc-card" style={cardStyle(shape)}>
+    // `pointer-events: all` overrides tl-html-container's CSS `pointer-events:
+    // none`, so empty card space (no interactive child at that coordinate) is
+    // captured by the card rather than falling through to an interactive element
+    // in a panel stacked below. The event is not stopped, so it still bubbles to
+    // tldraw for correct shape selection. Ghost panels opt out (they are purely
+    // decorative and intentionally click-through).
+    <HTMLContainer className="pc-card" style={ghost ? cardStyle(shape) : { ...cardStyle(shape), pointerEvents: 'all' }}>
       {children}
       {/* A persistent grip (stays up while selected, unlike the grab cover) so a
           body-interactive panel always has a drag/select point even when its
