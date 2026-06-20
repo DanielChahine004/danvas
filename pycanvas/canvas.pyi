@@ -137,6 +137,7 @@ class Canvas:
         default: float | None = ...,
         step: float = ...,
         on_release: bool = ...,
+        color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
         **place: Any,
     ) -> Slider: ...
@@ -145,11 +146,17 @@ class Canvas:
         name: str,
         options: Any,
         default: Any = ...,
+        color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
         **place: Any,
     ) -> Toggle: ...
     def button(
-        self, name: str, text: str | None = ..., label: str | None = ..., **place: Any
+        self,
+        name: str,
+        text: str | None = ...,
+        color: tuple[int, int, int] | str | None = ...,
+        label: str | None = ...,
+        **place: Any,
     ) -> Button: ...
     def label(
         self, name: str, value: str = ..., label: str | None = ..., **place: Any
@@ -220,6 +227,7 @@ class Canvas:
         placeholder: str = ...,
         default: str = ...,
         multiline: bool = ...,
+        color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
         **place: Any,
     ) -> TextField: ...

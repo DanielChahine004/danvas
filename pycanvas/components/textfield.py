@@ -5,6 +5,7 @@ committed value — on Enter-key or focus-loss for single-line, on focus-loss fo
 multiline. ``update(value)`` pushes new text to the browser live.
 """
 
+from . import _theme
 from .base import _mark_threaded
 from .react import React
 
@@ -16,7 +17,9 @@ _FIELD_CSS = """
  background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
  border-radius:6px;color:var(--pc-text,#e6edf3);
  font:13px system-ui,-apple-system,sans-serif;resize:none;outline:none}
-.pc-field input:focus,.pc-field textarea:focus{border-color:var(--pc-accent,#3b82f6)}
+.pc-field input:focus,.pc-field textarea:focus{
+ border-color:var(--pc-accent,#3b82f6);
+ box-shadow:0 0 0 3px var(--pc-accent-t,rgba(59,130,246,.25))}
 .pc-field textarea{resize:vertical}
 """
 
@@ -29,11 +32,12 @@ function Component({ canvas, value, props }) {
   const [text, setText] = React.useState(initial);
   React.useEffect(() => { if (value != null) setText(value); }, [value]);
   function commit(v) { canvas.send({ value: v }); }
+  const _th = props._th || {};
   if (props.multiline) {
     return (
       <>
         <style>{`__CSS__`}</style>
-        <div className="pc-field">
+        <div className="pc-field" style={_th}>
           <textarea placeholder={props.placeholder || ""}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -45,7 +49,7 @@ function Component({ canvas, value, props }) {
   return (
     <>
       <style>{`__CSS__`}</style>
-      <div className="pc-field">
+      <div className="pc-field" style={_th}>
         <input type="text" placeholder={props.placeholder || ""}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -71,10 +75,11 @@ class TextField(React):
     default_h = 80
 
     def __init__(self, name, placeholder="", default="", multiline=False,
-                 label=None):
+                 color=None, label=None):
         super().__init__(source=_FIELD_SOURCE, name=name, label=label,
                          props={"value": default, "placeholder": placeholder,
-                                "multiline": bool(multiline)})
+                                "multiline": bool(multiline),
+                                "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
 
     def update(self, value):

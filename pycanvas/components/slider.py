@@ -6,6 +6,7 @@ so dragging is smooth even though Python doesn't echo each value back; Python
 pushes only override it (``update``) or read the settled value (``on_change``).
 """
 
+from . import _theme
 from .react import React
 
 _SLIDER_CSS = """
@@ -17,7 +18,8 @@ _SLIDER_CSS = """
  background:none;border:none;border-bottom:1px solid transparent;color:inherit;
  font:inherit;padding:0;cursor:text;outline:none}
 .pc-slider .val:hover{border-bottom-color:rgba(255,255,255,.25)}
-.pc-slider .val:focus{border-bottom-color:var(--pc-accent,#3b82f6)}
+.pc-slider .val:focus{border-bottom-color:var(--pc-accent,#3b82f6);
+ box-shadow:0 2px 0 var(--pc-accent-t,rgba(59,130,246,.3))}
 """
 
 # Controlled range input: local state tracks the thumb live, a Python ``push``
@@ -49,10 +51,11 @@ function Component({ canvas, value, props }) {
     canvas.send({ value: clean });
   }
 
+  const _th = props._th || {};
   return (
     <>
       <style>{`__CSS__`}</style>
-      <div className="pc-slider">
+      <div className="pc-slider" style={_th}>
         <input type="range" min={props.min} max={props.max} step={props.step}
           value={v}
           onChange={(e) => {
@@ -93,7 +96,7 @@ class Slider(React):
     default_h = 96
 
     def __init__(self, name, min=0, max=100, default=None, step=1,
-                 on_release=False, label=None):
+                 on_release=False, color=None, label=None):
         if default is None:
             default = min
         # ``step`` controls granularity and signals int vs. float (a fractional
@@ -102,7 +105,8 @@ class Slider(React):
         super().__init__(source=_SLIDER_SOURCE, name=name, label=label,
                          props={"min": min, "max": max, "step": step,
                                 "default": default, "value": default,
-                                "on_release": on_release})
+                                "on_release": on_release,
+                                "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
 
     def update(self, value):

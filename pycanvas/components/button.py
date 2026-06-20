@@ -9,16 +9,21 @@ called with no arguments. ``value`` reads the running click count.
 
 import traceback
 
+from . import _theme
 from .base import _mark_threaded
 from .react import React
 
-# Scoped under `.pc-button`; colours follow the canvas theme with safe fallbacks.
+# Scoped under `.pc-button`; when a color theme is set via --pc-accent the button
+# renders in that colour; otherwise falls back to the neutral surface palette.
 _BUTTON_CSS = """
 .pc-button{box-sizing:border-box;width:100%;height:100%;padding:8px 12px;
- font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3);
- background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
- border-radius:8px;cursor:pointer;transition:background .12s}
-.pc-button:hover{background:var(--pc-surface-hover,#232c3d)}
+ font:600 13px system-ui,-apple-system,sans-serif;
+ color:var(--pc-accent-text,var(--pc-text,#e6edf3));
+ background:var(--pc-accent,var(--pc-surface,#1b2230));
+ border:1px solid var(--pc-accent,var(--pc-border,#30363d));
+ border-radius:8px;cursor:pointer;transition:background .12s,border-color .12s}
+.pc-button:hover{background:var(--pc-accent-dk,var(--pc-surface-hover,#232c3d));
+ border-color:var(--pc-accent-dk,var(--pc-border,#30363d))}
 .pc-button:active{transform:translateY(1px)}
 """
 
@@ -26,10 +31,11 @@ _BUTTON_CSS = """
 # registered handlers. ``props.text`` is the face (replayed on reconnect).
 _BUTTON_SOURCE = """
 function Component({ canvas, props }) {
+  const _th = props._th || {};
   return (
     <>
       <style>{`__CSS__`}</style>
-      <button className="pc-button" onClick={() => canvas.send({})}>
+      <button className="pc-button" style={_th} onClick={() => canvas.send({})}>
         {props.text}
       </button>
     </>
@@ -48,12 +54,13 @@ class Button(React):
     default_w = 200
     default_h = 84
 
-    def __init__(self, name, text=None, label=None):
+    def __init__(self, name, text=None, color=None, label=None):
         # ``text`` is the button face; it defaults to the label/name so naming the
         # button is enough to caption it.
         caption = text if text is not None else (label if label is not None else name)
         super().__init__(source=_BUTTON_SOURCE, name=name, label=label,
-                         props={"text": caption})
+                         props={"text": caption,
+                                "_th": _theme.derive(color) if color is not None else {}})
         self._value = 0  # number of clicks seen
 
     def update(self, text):

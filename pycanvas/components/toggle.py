@@ -6,6 +6,7 @@ on click) and is mirrored to Python via ``canvas.send({value})``; a Python
 ``update`` overrides it.
 """
 
+from . import _theme
 from .react import React
 
 _TOGGLE_CSS = """
@@ -16,7 +17,7 @@ _TOGGLE_CSS = """
  background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
  border-radius:7px;transition:background .12s}
 .pc-toggle button.sel{background:var(--pc-accent,#3b82f6);border-color:transparent;
- color:#fff}
+ color:var(--pc-accent-text,#fff)}
 """
 
 # Segmented control: one button per option, the selected one styled ``.sel``.
@@ -28,10 +29,11 @@ function Component({ canvas, value, props }) {
                 : (props.value != null ? props.value : props.options[0]);
   const [sel, setSel] = React.useState(initial);
   React.useEffect(() => { if (value != null) setSel(value); }, [value]);
+  const _th = props._th || {};
   return (
     <>
       <style>{`__CSS__`}</style>
-      <div className="pc-toggle">
+      <div className="pc-toggle" style={_th}>
         {props.options.map((opt) => (
           <button key={opt}
             className={opt === sel ? "sel" : ""}
@@ -50,14 +52,15 @@ class Toggle(React):
     default_w = 260
     default_h = 84
 
-    def __init__(self, name, options, default=None, label=None):
+    def __init__(self, name, options, default=None, color=None, label=None):
         options = list(options)
         if not options:
             raise ValueError("Toggle requires at least one option")
         if default is None:
             default = options[0]
         super().__init__(source=_TOGGLE_SOURCE, name=name, label=label,
-                         props={"options": options, "value": default})
+                         props={"options": options, "value": default,
+                                "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
 
     def update(self, value):
