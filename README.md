@@ -1425,8 +1425,7 @@ public URL and everyone's session survive edits.
 **Where to look:** `pycanvas/canvas.py` (the `Canvas` façade + factories),
 `pycanvas/bridge.py` (the wire / replay / per-viewer sends), `pycanvas/server.py`
 (FastAPI app + auth), `pycanvas/components/` (the panels), and
-`pycanvas/frontend/src/bridge.js` (the browser side). [GUIDE.md](GUIDE.md) goes
-deeper.
+`pycanvas/frontend/src/bridge.js` (the browser side).
 
 ## Debugging the wire
 
@@ -1504,8 +1503,6 @@ cd pycanvas/frontend
 npm install
 npm run build          # npm run dev + http://localhost:5173/?demo for standalone UI work
 ```
-
-See [GUIDE.md](GUIDE.md) for deeper detail.
 
 ## Licence
 
