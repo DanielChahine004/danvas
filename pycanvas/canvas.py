@@ -27,6 +27,11 @@ from .components import Inspector  # spawned directly by the toolbar UI toggle
 from .kernel import Kernel, spawn
 from ._layout import _FlowLayout, _LayoutMixin  # noqa: F401  (_FlowLayout re-exported)
 from ._factories import _FactoryMixin
+from .shapes import (
+    BaseShape, DrawingShape,
+    Geo, Text, Note, Draw, Highlight, Line, Frame,
+    _segments_from_points, _line_points,
+)
 
 
 # serve() helper return types (see Canvas._resolve_exposure /
@@ -66,6 +71,26 @@ class Place(TypedDict, total=False):
     frame: bool
 
 
+_NAV_MODES = frozenset(("free", "scroll_y", "scroll_x"))
+
+
+def _coerce_navigation(value):
+    """Normalise a ``navigation=`` argument to ``{"mode": ..., "zoom": ...}``."""
+    if isinstance(value, str):
+        if value not in _NAV_MODES:
+            raise ValueError(
+                f"navigation must be one of {sorted(_NAV_MODES)!r}, got {value!r}")
+        return {"mode": value, "zoom": 1.0}
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        mode, zoom = value
+        if mode not in _NAV_MODES:
+            raise ValueError(
+                f"navigation must be one of {sorted(_NAV_MODES)!r}, got {mode!r}")
+        return {"mode": str(mode), "zoom": float(zoom)}
+    raise TypeError(
+        f"navigation must be a mode string or (mode, zoom) tuple, got {value!r}")
+
+
 class Canvas(_FactoryMixin, _LayoutMixin):
     def __init__(self):
         self._bridge = Bridge()
@@ -74,7 +99,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._bridge._canvas = self
         self._components = []
         self._arrows = []
-        self._named = {}  # name -> component, for canvas.<name> / canvas["<name>"]
+        self._shapes = []   # managed tldraw shapes (geo/text/note/draw/line/frame/highlight)
+        self._named = {}  # name -> component/arrow/shape, for canvas.<name>
         self._serving = False
         self._server = None
         self._tunnel = None
@@ -340,6 +366,62 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def off_disconnect(self, fn):
         """Remove a disconnect observer registered with :meth:`on_disconnect`."""
         self._bridge.remove_disconnect_tap(fn)
+
+    @property
+    def shapes(self):
+        """Return a list of all managed tldraw shapes on the canvas.
+
+        These are the shapes created with :meth:`geo`, :meth:`text`,
+        :meth:`note`, :meth:`draw`, :meth:`line`, :meth:`frame`, and
+        :meth:`highlight` — not the panels (:attr:`components`) and not the
+        user's free-form drawings (:attr:`drawings`).
+        """
+        return list(self._shapes)
+
+    @property
+    def drawings(self):
+        """Live snapshot of user-drawn (ephemeral) shapes as a dict.
+
+        Keys are tldraw shape ids (``'shape:…'`` strings).  Values are
+        :class:`~pycanvas.shapes.DrawingShape` objects with ``update()`` and
+        ``remove()`` methods that broadcast tldraw draw diffs to every browser.
+        The snapshot is fresh on each access — it reflects the current server
+        shadow store, which is kept in step with every browser's drawing state::
+
+            for sid, s in canvas.drawings.items():
+                if s.type == 'text':
+                    s.update(color='red')
+        """
+        return {
+            k: DrawingShape(v, self._bridge)
+            for k, v in self._bridge._drawings.items()
+        }
+
+    def on_draw(self, fn):
+        """Register ``fn`` to be called whenever user-drawn shapes change.
+
+        ``fn(event)`` receives a dict with three keys:
+
+        - ``added``   — list of :class:`~pycanvas.shapes.DrawingShape` for
+          shapes just created by a user
+        - ``updated`` — list of :class:`~pycanvas.shapes.DrawingShape` for
+          shapes just modified (each reflects the new state)
+        - ``removed`` — list of tldraw shape id strings for deleted shapes
+
+        Fires off the event loop on the dispatch thread, so it is safe to call
+        ``shape.update()``, drive panels, or read ``canvas.drawings`` from
+        inside it.  Remove with :meth:`off_draw`::
+
+            @canvas.on_draw
+            def _(event):
+                for shape in event['added']:
+                    print('new', shape.type, 'at', shape.x, shape.y)
+        """
+        return self._bridge.add_draw_tap(fn)
+
+    def off_draw(self, fn):
+        """Remove a draw observer registered with :meth:`on_draw`."""
+        self._bridge.remove_draw_tap(fn)
 
     def _debug_frame(self, direction, msg):
         """The ``serve(debug=True)`` tap: print one console line per frame."""
@@ -782,6 +864,223 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     # canvas.slider / button / react / markdown / show / … live in _FactoryMixin
     # (pycanvas/_factories.py); _make() and _INSERT_KEYS moved there too.
 
+    # -- tldraw shape factories -----------------------------------------------
+
+    def _add_shape(self, shape):
+        """Register a managed shape, handle name eviction, wire to bridge."""
+        if shape.name is None:
+            shape.name = self._auto_name(shape._type)
+        name = shape.name
+        old = self._named.get(name)
+        if old is not None and old is not shape:
+            if isinstance(old, BaseShape):
+                if old in self._shapes:
+                    self._shapes.remove(old)
+                self._bridge.remove_shape(old.id)
+            elif old in self._arrows:
+                self.disconnect(old)
+            elif old in self._components:
+                self.remove(old)
+        self._named[name] = shape
+        self._shapes.append(shape)
+        self._bridge.add_shape(shape)
+        return shape
+
+    def _shape_place(self, x, y, right_of, left_of, below, above, gap,
+                     new_w=200, new_h=200):
+        """Resolve optional relative placement keywords for shape factories.
+
+        Any canvas object (panel or shape) or a name string is accepted as an
+        anchor.  Returns the final ``(x, y)`` to use.
+        """
+        def resolve(ref):
+            return self._named.get(ref) if isinstance(ref, str) else ref
+
+        def dim(ref, d):
+            v = getattr(ref, d, None)
+            if v is None and hasattr(ref, "_props"):
+                v = ref._props.get(d)
+            return float(v) if v is not None else 200.0
+
+        right_of = resolve(right_of)
+        left_of  = resolve(left_of)
+        below    = resolve(below)
+        above    = resolve(above)
+
+        if below is not None:
+            x, y = below.x, below.y + dim(below, "h") + gap
+        elif above is not None:
+            x, y = above.x, above.y - gap - new_h
+        if right_of is not None:
+            x = right_of.x + dim(right_of, "w") + gap
+            if below is None and above is None:
+                y = right_of.y
+        elif left_of is not None:
+            x = left_of.x - gap - new_w
+            if below is None and above is None:
+                y = left_of.y
+
+        return float(x), float(y)
+
+    def geo(self, x=0, y=0, w=200, h=150, geo="rectangle", name=None,
+            right_of=None, left_of=None, below=None, above=None, gap=16,
+            **props):
+        """Place a geo shape (rectangle, ellipse, cloud, star, …) on the canvas.
+
+        ``geo`` selects the sub-type; ``w``/``h`` set dimensions.  Style
+        kwargs: ``color``, ``fill``, ``dash``, ``size``, ``font``, ``align``.
+        ``name`` is the eviction key (re-inserting under the same name replaces
+        the old shape).  Returns a live handle::
+
+            box = canvas.geo(x=100, y=100, w=200, h=80, geo='ellipse',
+                             color='blue', fill='semi')
+            box.text = 'hello'   # live update
+            box.color = 'red'
+        """
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            x, y = self._shape_place(x, y, right_of, left_of, below, above,
+                                     gap, new_w=w, new_h=h)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Geo(shape_id, x, y, w=w, h=h, geo=geo,
+                                   name=name, **props))
+
+    def text(self, x=0, y=0, text="", name=None,
+             right_of=None, left_of=None, below=None, above=None, gap=16,
+             **props):
+        """Place a plain floating text shape on the canvas.
+
+        Style kwargs: ``color``, ``size``, ``font`` (draw/sans/serif/mono).
+        Returns a live handle::
+
+            lbl = canvas.text(x=200, y=50, text='Hello', font='sans', size='xl')
+            lbl.text = 'World'
+        """
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            x, y = self._shape_place(x, y, right_of, left_of, below, above, gap)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Text(shape_id, x, y, text=text, name=name, **props))
+
+    def note(self, x=0, y=0, text="", name=None,
+             right_of=None, left_of=None, below=None, above=None, gap=16,
+             **props):
+        """Place a sticky note on the canvas.
+
+        Style kwargs: ``color``, ``size``, ``font``, ``align``.
+        Returns a live handle::
+
+            n = canvas.note(x=400, y=100, text='TODO', color='yellow')
+            n.text = 'DONE'
+        """
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            x, y = self._shape_place(x, y, right_of, left_of, below, above, gap)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Note(shape_id, x, y, text=text, name=name, **props))
+
+    def draw(self, points, x=None, y=None, name=None,
+             right_of=None, left_of=None, below=None, above=None, gap=16,
+             **props):
+        """Place a freehand stroke on the canvas.
+
+        ``points`` is a list of ``(x, y)`` or ``(x, y, pressure)`` tuples, or
+        a list of tldraw segment dicts ``{type, points}``.  The bounding-box
+        origin becomes the shape's ``x``/``y`` unless overridden.  Style
+        kwargs: ``color``, ``fill``, ``dash``, ``size``::
+
+            canvas.draw([(0,0),(40,20),(80,5),(120,30)], color='red', size='l')
+        """
+        ox, oy, segments = _segments_from_points(points)
+        fx = x if x is not None else ox
+        fy = y if y is not None else oy
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            fx, fy = self._shape_place(fx, fy, right_of, left_of, below, above, gap)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Draw(shape_id, fx, fy, segments, name=name, **props))
+
+    def highlight(self, points, x=None, y=None, name=None,
+                  right_of=None, left_of=None, below=None, above=None, gap=16,
+                  **props):
+        """Place a semi-transparent highlighter stroke on the canvas.
+
+        Same point format as :meth:`draw`.  Style kwargs: ``color``, ``size``::
+
+            canvas.highlight([(10,10),(200,10)], color='yellow', size='l')
+        """
+        ox, oy, segments = _segments_from_points(points)
+        fx = x if x is not None else ox
+        fy = y if y is not None else oy
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            fx, fy = self._shape_place(fx, fy, right_of, left_of, below, above, gap)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Highlight(shape_id, fx, fy, segments,
+                                         name=name, **props))
+
+    def line(self, points, x=None, y=None, name=None,
+             right_of=None, left_of=None, below=None, above=None, gap=16,
+             **props):
+        """Place a polyline (or cubic spline) on the canvas.
+
+        ``points`` is a list of ``(x, y)`` tuples; the first point becomes the
+        shape's position and all others are stored relative to it.
+        ``spline='cubic'`` makes tldraw curve smoothly through them.
+        Style kwargs: ``color``, ``dash``, ``size``::
+
+            canvas.line([(0,0),(100,50),(200,0)], color='black', spline='cubic')
+        """
+        if not points:
+            raise ValueError("line() requires at least one point")
+        ox, oy = float(points[0][0]), float(points[0][1])
+        fx = x if x is not None else ox
+        fy = y if y is not None else oy
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            fx, fy = self._shape_place(fx, fy, right_of, left_of, below, above, gap)
+        pts_dict = _line_points(points)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Line(shape_id, fx, fy, pts_dict, name=name, **props))
+
+    def frame(self, x=0, y=0, w=400, h=300, label="", name=None,
+              right_of=None, left_of=None, below=None, above=None, gap=16,
+              **props):
+        """Place a tldraw artboard frame on the canvas.
+
+        ``label`` is the visible frame title (use ``name`` for the Python
+        identity / eviction key).  Returns a live handle::
+
+            art = canvas.frame(x=50, y=300, w=800, h=500, label='Slide 1')
+            art.label = 'Slide 2'
+            art.w = 1000
+        """
+        if right_of is not None or left_of is not None \
+                or below is not None or above is not None:
+            x, y = self._shape_place(x, y, right_of, left_of, below, above,
+                                     gap, new_w=w, new_h=h)
+        shape_id = uuid.uuid4().hex
+        return self._add_shape(Frame(shape_id, x, y, w=w, h=h, label=label,
+                                     name=name, **props))
+
+    def remove_shape(self, shape):
+        """Remove a managed shape returned by :meth:`geo` / :meth:`text` / etc.
+
+        Works live while serving.  Safe to call on a shape that was already
+        removed; then it is a no-op.
+        """
+        if isinstance(shape, str):
+            shape = self._named.get(shape)
+        if shape is None or shape not in self._shapes:
+            return
+        self._shapes.remove(shape)
+        for nm, obj in list(self._named.items()):
+            if obj is shape:
+                del self._named[nm]
+        self._bridge.remove_shape(shape.id)
+        shape._bridge = None
+        return shape
+
     def remove(self, component):
         """Pull a panel off the canvas. Works live while serving.
 
@@ -1040,6 +1339,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 "w": c.w,
                 "h": c.h,
                 "rotation": c.rotation,
+                "opacity": c.opacity,
                 # Every lock/chrome flag, straight from the shared table.
                 **{name: getattr(c, name) for name in LAYOUT_FLAGS},
             }
@@ -1075,6 +1375,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 w=item.get("w"),
                 h=item.get("h"),
                 rotation=item.get("rotation"),
+                opacity=item.get("opacity"),
                 # Flags absent from an older save stay None (left unchanged).
                 **{name: item.get(name) for name in LAYOUT_FLAGS},
             )
@@ -1232,6 +1533,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         "x": float, "y": float, "zoom": float,
         "min_zoom": float, "max_zoom": float,
         "locked": bool, "ui": bool, "grid": bool, "read_only": bool,
+        "navigation": _coerce_navigation,
     }
 
     @classmethod

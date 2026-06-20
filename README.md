@@ -188,8 +188,7 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.remove_shape(shape_or_name)` | Remove a managed shape by object or name |
 | **Arrange** | `with canvas.grid(...) / column(...) / row(...):` | Auto-layout containers; panels inside take the next slot |
 | | `canvas.reset_layout()` | Restore all panels to their Python-defined positions without moving the camera |
-| | `canvas.set_view(zoom=…, locked=…, ui=…, …, roles=, client_id=)` | Camera & chrome, scriptable and per-viewer |
-| | `canvas.camera = mode` | Navigation mode: `'free'` (default), `'scroll_y'`, `'scroll_x'`; or `(mode, zoom)` tuple to also lock the zoom level |
+| | `canvas.set_view(zoom=…, locked=…, ui=…, navigation=…, roles=, client_id=)` | Camera, chrome & navigation mode — scriptable and per-viewer |
 | **Reach panels** | `canvas[name]` / `canvas.<name>` | Fetch a panel (or arrow) by its name |
 | | `canvas.components` / `canvas.arrows` | Lists of what's on the canvas |
 | **Shared React** | `canvas.define(name, source/path)` | Register a JSX component usable in every `react()` panel |
@@ -963,6 +962,7 @@ Pass a `view` dict to `serve` (all keys optional):
 | `ui` | `False` hides tldraw chrome **and** the Inspector button |
 | `grid` | `True` shows the background grid |
 | `read_only` | `True` blocks freehand drawing |
+| `navigation` | `'free'` (default), `'scroll_y'`, `'scroll_x'`, or `(mode, zoom)` tuple — see [Camera navigation mode](#camera-navigation-mode) |
 
 ```python
 canvas.serve(view={"x": 200, "y": 160, "zoom": 1.0, "locked": True, "ui": False})
@@ -1000,22 +1000,29 @@ the script. On by default for a private local bind; override with
 ## Camera navigation mode
 
 By default the canvas uses tldraw's free navigation: pinch/scroll to zoom,
-drag to pan. `canvas.camera` switches to a constrained mode that limits or
-locks one axis — useful for vertical dashboards or horizontal timelines where
-you want the scroll wheel to actually scroll rather than zoom.
+drag to pan. Pass `navigation=` to `set_view` to switch to a constrained mode
+— useful for vertical dashboards or horizontal timelines where you want the
+scroll wheel to actually scroll rather than zoom.
 
 ```python
-canvas.camera = 'scroll_y'           # vertical scroll only; wheel scrolls down
-canvas.camera = 'scroll_x'           # horizontal scroll only; wheel scrolls right
-canvas.camera = 'free'               # restore default free navigation (default)
+canvas.set_view(navigation='scroll_y')   # vertical scroll only; wheel scrolls down
+canvas.set_view(navigation='scroll_x')   # horizontal scroll only; wheel scrolls right
+canvas.set_view(navigation='free')       # restore default free navigation
 ```
 
 Pass a `(mode, zoom)` tuple to lock the zoom level at the same time:
 
 ```python
-canvas.camera = ('scroll_y', 0.75)   # vertical scroll, fixed at 75% zoom
-canvas.camera = ('scroll_x', 1.5)    # horizontal scroll, fixed at 150% zoom
-canvas.camera = ('scroll_y', 1.0)    # vertical scroll, fixed at 100% zoom
+canvas.set_view(navigation=('scroll_y', 0.75))   # vertical scroll, fixed 75% zoom
+canvas.set_view(navigation=('scroll_x', 1.5))    # horizontal scroll, fixed 150% zoom
+```
+
+Because `navigation=` is a regular `set_view` key it obeys the same scoping
+rules as every other view option — scope it to a role or a single viewer:
+
+```python
+canvas.set_view(navigation='scroll_y', roles=['kiosk'])   # kiosk viewers scroll only
+canvas.set_view(navigation='free', client_id=some_id)     # one viewer gets free nav
 ```
 
 In a constrained mode:
@@ -1029,8 +1036,9 @@ In a constrained mode:
 - The canvas opens immediately at the correct position and zoom — there is no
   auto-fit re-centre on first scroll.
 
-`canvas.camera` is replayed to every reconnecting viewer, so the constraint
-persists across page reloads and hot-reloads.
+Navigation mode is stored in the view overlay and replayed to every
+reconnecting viewer, so the constraint persists across page reloads and
+hot-reloads.
 
 # 5. Serving & sharing
 

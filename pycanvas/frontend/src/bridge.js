@@ -1,6 +1,6 @@
 import { createShapeId, createBindingId } from 'tldraw'
 import { COMPONENT_TO_SHAPE } from './canvas'
-import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT } from './protocol.generated.js'
+import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
 
 // Single shared WebSocket connection. All components are multiplexed over it,
 // keyed by component id. State lives in Python + tldraw shape props only.
@@ -594,6 +594,10 @@ function handle(msg) {
     registerComponent(msg)
   } else if (msg.type === 'arrow') {
     createArrow(msg)
+  } else if (msg.type === 'shape') {
+    createManagedShape(msg)
+  } else if (msg.type === 'shape_update') {
+    updateManagedShape(msg)
   } else if (msg.type === 'update') {
     updateComponent(msg.id, msg.payload || {})
   } else if (msg.type === 'order') {
@@ -769,6 +773,8 @@ function clearManaged() {
     }
   })
   managedIds.clear()
+  for (const compId of [..._camPanels.keys()]) stopCameraCapture(compId)
+  for (const compId of [..._micPanels.keys()]) stopMicCapture(compId)
   liveHandlers.clear()
   liveBuffer.clear()
   setUiInspectorOpen(false)
@@ -782,6 +788,8 @@ function clearManaged() {
 
 function removeComponent(id) {
   if (id === UI_INSPECTOR_ID) setUiInspectorOpen(false)
+  stopCameraCapture(id) // stop any parent-side camera capture for this panel
+  stopMicCapture(id)    // stop any parent-side mic capture for this panel
   // Drop any live-data wiring (LivePlot) so its buffer doesn't leak.
   liveHandlers.delete(id)
   liveBuffer.delete(id)
@@ -809,7 +817,7 @@ function lockMeta(base, movable, resizable, interactive, selectable, frame) {
   return meta
 }
 
-function registerComponent({ id, component, props = {}, x, y, rotation, locked, movable, resizable, interactive, selectable, frame }) {
+function registerComponent({ id, component, props = {}, x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame }) {
   const shapeType = COMPONENT_TO_SHAPE[component]
   if (!shapeType) return
 
@@ -836,6 +844,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, locked, 
     props: { ...props },
   }
   if (typeof rotation === 'number') shape.rotation = rotation // radians
+  if (typeof opacity === 'number') shape.opacity = opacity
   if (typeof locked === 'boolean') shape.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
       typeof interactive === 'boolean' || typeof selectable === 'boolean' ||
@@ -886,6 +895,148 @@ function createArrow({ id, start, end, props = {} }) {
       }))
     )
   })
+}
+
+// Convert a Python plain-text string to a minimal tldraw richText document.
+// All text-bearing shapes (geo, text, note) now use richText internally;
+// sending a bare `text` prop is silently dropped by tldraw >= 3.x.
+function toRichText(s) {
+  return {
+    type: 'doc',
+    content: s
+      ? [{ type: 'paragraph', content: [{ type: 'text', text: s }] }]
+      : [{ type: 'paragraph' }],
+  }
+}
+
+// Normalise Python-supplied props before handing them to tldraw.createShape.
+// • text -> richText conversion for all text-bearing shape types.
+// • geo/line/draw/highlight/note/frame are all expected here; arrow is handled
+//   separately by createArrow.
+function normaliseManagedProps(shapeType, props) {
+  const p = { ...props }
+  // Text-bearing shape types
+  if (['geo', 'text', 'note', 'arrow'].includes(shapeType) && p.text !== undefined) {
+    p.richText = toRichText(p.text)
+    delete p.text
+  }
+  return p
+}
+
+// Create a Python-managed tldraw shape (geo, text, note, draw, line, frame,
+// highlight).  Added to managedIds so the free-form drawing sync ignores it.
+// Camera mode -------------------------------------------------------------------
+
+const CAMERA_LARGE = 100_000
+const DEFAULT_ZOOM_STEPS = [0.1, 0.25, 0.5, 1, 2, 4, 8]
+
+// Wheel-event interceptor installed when a scroll mode is active.
+// tldraw 3.x has no wheelBehavior option, so we capture the event before
+// tldraw sees it, prevent its default zoom, and manually pan the camera.
+let _wheelCleanup = null
+
+function setupScrollWheelPan(mode) {
+  if (_wheelCleanup) {
+    _wheelCleanup()
+    _wheelCleanup = null
+  }
+  if (!mode || mode === 'free') return
+
+  const container = editor.getContainer()
+
+  const onWheel = (e) => {
+    if (!editor) return
+    e.preventDefault()
+    e.stopPropagation() // stop tldraw's bubble-phase zoom handler
+
+    const camera = editor.getCamera()
+    // deltaMode: 0 = pixels, 1 = lines (~20 px), 2 = pages (~400 px)
+    const scale = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? 400 : 1
+
+    if (mode === 'scroll_y') {
+      // Vertical scroll → vertical pan.  Horizontal delta is discarded;
+      // the x:'fixed' constraint would block it anyway.
+      editor.setCamera({ x: camera.x, y: camera.y - e.deltaY * scale, z: camera.z })
+    } else {
+      // scroll_x: map vertical scroll to horizontal pan so a standard
+      // mouse wheel advances the timeline/deck without needing shift.
+      const dx = (e.deltaX + e.deltaY) * scale
+      editor.setCamera({ x: camera.x - dx, y: camera.y, z: camera.z })
+    }
+  }
+
+  // capture: true fires before tldraw's bubble-phase handler
+  container.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  _wheelCleanup = () => container.removeEventListener('wheel', onWheel, { capture: true })
+}
+
+function applyCameraMode(mode, zoom = 1) {
+  if (mode === 'free') {
+    editor.setCameraOptions({
+      constraints: undefined,
+      zoomSteps: DEFAULT_ZOOM_STEPS,
+    })
+    setupScrollWheelPan('free')
+    return
+  }
+  const behavior = mode === 'scroll_y'
+    ? { x: 'fixed', y: 'free' }
+    : { x: 'free',  y: 'fixed' }
+  editor.setCameraOptions({
+    constraints: {
+      bounds: { x: 0, y: 0, w: CAMERA_LARGE, h: CAMERA_LARGE },
+      padding: { x: 0, y: 0 },
+      origin: { x: 0, y: 0 },
+      initialZoom: 'default',
+      baseZoom: 'default',
+      behavior,
+    },
+    zoomSteps: [zoom],  // lock to the requested zoom; wheel handler prevents gesture zoom
+  })
+  setupScrollWheelPan(mode)
+  // scheduleInitialFit fires 180 ms after the last shape registers — after
+  // this applyCameraMode call — and would re-centre + re-fit the content,
+  // overriding the position we set.  Cancelling the timer and marking the
+  // fit as done prevents that; we own the camera from here on.
+  if (initialFitTimer) { clearTimeout(initialFitTimer); initialFitTimer = null }
+  initialFitDone = true
+  editor.setCamera({ x: 0, y: 0, z: zoom })
+}
+
+// Managed tldraw shapes --------------------------------------------------------
+
+function createManagedShape({ id, shapeType, x, y, rotation, opacity, props = {} }) {
+  const shapeId = createShapeId(id)
+  managedIds.add(shapeId) // exclude from free-form drawing sync and graveyard sync
+  if (editor.getShape(shapeId)) return // already on canvas (reconnect)
+  applyRemote(() => {
+    editor.createShape({
+      id: shapeId,
+      type: shapeType,
+      x: x ?? 0,
+      y: y ?? 0,
+      rotation: rotation ?? 0,
+      opacity: opacity ?? 1,
+      props: normaliseManagedProps(shapeType, props),
+    })
+  })
+}
+
+// Apply a live shape_update message from Python: patch top-level fields
+// (x, y, rotation, opacity) and/or shape props.
+function updateManagedShape({ id, x, y, rotation, opacity, props }) {
+  const shapeId = createShapeId(id)
+  const shape = editor.getShape(shapeId)
+  if (!shape) return
+  const patch = { id: shapeId, type: shape.type }
+  if (x != null) patch.x = x
+  if (y != null) patch.y = y
+  if (rotation != null) patch.rotation = rotation
+  if (opacity != null) patch.opacity = opacity
+  if (props && Object.keys(props).length) {
+    patch.props = normaliseManagedProps(shape.type, props)
+  }
+  applyRemote(() => editor.updateShape(patch))
 }
 
 function updateComponent(id, payload) {
@@ -941,11 +1092,12 @@ function updateComponent(id, payload) {
   if (!shape) return
   // x/y/rotation are top-level shape fields, not props; everything else
   // (incl. w/h) is a shape prop. Split them so live move/resize/rotate works.
-  const { x, y, rotation, locked, movable, resizable, interactive, selectable, frame, ...props } = payload
+  const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, ...props } = payload
   const patch = { id: shapeId, type: shape.type, props: { ...props } }
   if (typeof x === 'number') patch.x = x
   if (typeof y === 'number') patch.y = y
   if (typeof rotation === 'number') patch.rotation = rotation
+  if (typeof opacity === 'number') patch.opacity = opacity
   if (typeof locked === 'boolean') patch.isLocked = locked
   if (typeof movable === 'boolean' || typeof resizable === 'boolean' ||
       typeof interactive === 'boolean' || typeof selectable === 'boolean' ||
@@ -987,9 +1139,183 @@ export function unregisterLive(id) {
   liveHandlers.delete(id)
 }
 
+// --- parent-side camera capture (Custom panels' canvas.requestCamera) --------
+// getUserMedia is blocked inside sandboxed iframes without allow-same-origin,
+// which would break panel isolation. Instead the panel requests camera access
+// via postMessage; the parent runs getUserMedia and relays each JPEG frame
+// both to Python (as BIN_INPUT, same path as canvas.sendBinary) and back into
+// the iframe (via liveHandlers, same path as push_binary → canvas.onPush).
+// One shared MediaStream is reused across all panels requesting camera access.
+
+let _camStream = null   // shared MediaStream (one getUserMedia for all panels)
+let _camVideo = null    // hidden <video> element that consumes the stream
+let _camPending = null  // in-flight getUserMedia Promise (de-duplicates concurrent requests)
+const _camPanels = new Map() // compId -> { interval }
+
+async function startCameraCapture(compId, opts) {
+  if (_camPanels.has(compId)) return
+  // fps > 0 throttles to that rate; 0 / omitted = max rate (every rAF tick).
+  const fps = typeof opts.fps === 'number' && opts.fps > 0 ? opts.fps : 0
+  const minInterval = fps > 0 ? 1000 / fps : 0
+  const quality = typeof opts.quality === 'number' ? opts.quality : 0.7
+  const width = typeof opts.width === 'number' ? opts.width : 320
+  const height = typeof opts.height === 'number' ? opts.height : 240
+
+  try {
+    // One shared stream: if getUserMedia is already in flight or done, reuse it.
+    if (!_camStream && !_camPending) {
+      _camPending = navigator.mediaDevices.getUserMedia({ video: { width, height } })
+    }
+    if (_camPending) {
+      const stream = await _camPending
+      // Only the first awaiter sets up the shared objects; concurrent awaiters
+      // see _camStream already set (single-threaded microtask ordering).
+      if (!_camStream) {
+        _camStream = stream
+        _camPending = null
+        _camVideo = document.createElement('video')
+        _camVideo.srcObject = _camStream
+        _camVideo.autoplay = true
+        _camVideo.muted = true
+        _camVideo.playsInline = true
+        _camVideo.play().catch(() => {}) // getUserMedia is already user-gestured
+      }
+    }
+
+    const cap = document.createElement('canvas')
+    cap.width = width
+    cap.height = height
+    const ctx = cap.getContext('2d')
+
+    // rAF loop: runs at display rate (≤60 fps) and skips a tick when the
+    // previous blob encode hasn't finished, so frames never pile up.
+    const entry = { rafId: null, lastCapture: 0, pending: false }
+    _camPanels.set(compId, entry)
+
+    const capture = () => {
+      if (!_camPanels.has(compId)) return
+      entry.rafId = requestAnimationFrame(capture)
+      if (!_camVideo || _camVideo.readyState < 2 || entry.pending) return
+      const now = performance.now()
+      if (minInterval > 0 && now - entry.lastCapture < minInterval) return
+      entry.lastCapture = now
+      entry.pending = true
+      ctx.drawImage(_camVideo, 0, 0, width, height)
+      cap.toBlob((blob) => {
+        entry.pending = false
+        if (!blob || !_camPanels.has(compId)) return
+        blob.arrayBuffer().then((buf) => {
+          if (!_camPanels.has(compId)) return
+          sendBinary(compId, buf) // up to Python as BIN_INPUT (copies buf internally)
+          const handler = liveHandlers.get(compId)
+          if (handler) handler(buf) // down into the iframe — transfers buf, so call last
+        })
+      }, 'image/jpeg', quality)
+    }
+    entry.rafId = requestAnimationFrame(capture)
+  } catch (err) {
+    console.warn('[pycanvas] camera unavailable for panel', compId, '—', err.message)
+  }
+}
+
+function stopCameraCapture(compId) {
+  const entry = _camPanels.get(compId)
+  if (!entry) return
+  if (entry.rafId != null) cancelAnimationFrame(entry.rafId)
+  _camPanels.delete(compId)
+  if (_camPanels.size === 0 && _camStream) {
+    _camStream.getTracks().forEach((t) => t.stop())
+    _camStream = null
+    _camVideo = null
+  }
+}
+
+// --- parent-side microphone capture (Custom panels' canvas.requestMicrophone) -
+// getUserMedia({audio}) is blocked inside sandboxed iframes for the same null-
+// origin reason as camera. The parent captures mic audio via ScriptProcessorNode
+// (fires on the main thread — no cross-thread postMessage hop needed), converts
+// float32 to int16 PCM, and relays each chunk to Python (BIN_INPUT) and into
+// the iframe (liveHandlers → canvas.onPush). A JSON mic_start event is sent
+// first so Python knows sampleRate / channels before audio data arrives.
+// Each panel gets its own AudioContext + MediaStream (no shared stream here —
+// multiple mic panels are uncommon, and sharing an AudioContext across panels
+// with different buffer sizes would complicate the graph).
+
+const _micPanels = new Map() // compId -> { stream, ctx, source, processor, silencer }
+
+async function startMicCapture(compId, opts) {
+  if (_micPanels.has(compId)) return
+  // bufferSize must be a power of 2: 256 … 16384. 4096 ≈ 85–93 ms per chunk.
+  const bufferSize = 4096
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    const ctx = new AudioContext()
+    await ctx.resume() // ensure context is running (autoplay policy)
+
+    // Tell Python the stream parameters before the first audio chunk arrives.
+    sendInput(compId, { event: 'mic_start', sampleRate: ctx.sampleRate, channels: 1 })
+
+    const source = ctx.createMediaStreamSource(stream)
+    const processor = ctx.createScriptProcessor(bufferSize, 1, 1)
+
+    processor.onaudioprocess = (e) => {
+      if (!_micPanels.has(compId)) return
+      const float32 = e.inputBuffer.getChannelData(0)
+      // Convert float32 [-1, 1] → int16 (half the wire size; same format
+      // AudioFeed uses on the downward path).
+      const int16 = new Int16Array(float32.length)
+      for (let i = 0; i < float32.length; i++) {
+        int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32767))
+      }
+      sendBinary(compId, int16.buffer) // up to Python as BIN_INPUT (copies internally)
+      const handler = liveHandlers.get(compId)
+      if (handler) handler(int16.buffer) // down into iframe — transfers buf, call last
+    }
+
+    // ScriptProcessorNode must be connected to destination to fire; a zero-gain
+    // node in between keeps the mic audio from playing through speakers.
+    const silencer = ctx.createGain()
+    silencer.gain.value = 0
+    source.connect(processor)
+    processor.connect(silencer)
+    silencer.connect(ctx.destination)
+
+    _micPanels.set(compId, { stream, ctx, source, processor, silencer })
+  } catch (err) {
+    console.warn('[pycanvas] microphone unavailable for panel', compId, '—', err.message)
+  }
+}
+
+function stopMicCapture(compId) {
+  const entry = _micPanels.get(compId)
+  if (!entry) return
+  try {
+    entry.source.disconnect()
+    entry.processor.disconnect()
+    entry.silencer.disconnect()
+    entry.ctx.close()
+  } catch { /* ignore if already torn down */ }
+  entry.stream.getTracks().forEach((t) => t.stop())
+  _micPanels.delete(compId)
+}
+
 // Browser -> Python: user input from a component (slider move, etc.).
 export function sendInput(id, payload) {
   sendRaw({ type: 'input', id, payload })
+}
+
+// Send a raw binary frame to Python: ``[BIN_INPUT][idLen][id bytes][payload]``.
+// Used by canvas.sendBinary() in Custom iframes and React panels.
+export function sendBinary(compId, buffer) {
+  if (!ws) return
+  const id = new TextEncoder().encode(compId)
+  const frame = new Uint8Array(2 + id.length + buffer.byteLength)
+  frame[0] = BIN_INPUT
+  frame[1] = id.length
+  frame.set(id, 2)
+  frame.set(new Uint8Array(buffer), 2 + id.length)
+  ws.send(frame.buffer)
 }
 
 // --- presence: how many browsers are connected to this canvas ---------------
@@ -1167,6 +1493,13 @@ function applyViewOptions() {
   if (typeof v.read_only === 'boolean') inst.isReadonly = v.read_only
   if (typeof v.grid === 'boolean') inst.isGridMode = v.grid
   if (Object.keys(inst).length) editor.updateInstanceState(inst)
+
+  // Navigation mode (scroll_y / scroll_x / free): constrain the pan axis and
+  // lock zoom.  Applied after the zoom-step/lock options above so scroll-mode's
+  // zoomSteps: [zoom] wins over any min/max zoom setting.
+  if (v.navigation) {
+    applyCameraMode(v.navigation.mode, v.navigation.zoom ?? 1)
+  }
 }
 
 // --- initial auto-fit --------------------------------------------------------
@@ -1453,6 +1786,17 @@ if (typeof window !== 'undefined') {
       fitFromIframe(e.source, d.__pycanvas_fit)
     } else if (d.__pycanvas) {
       sendInput(d.__pycanvas, d.data)
+    } else if (d.__pycanvas_binary && d.data instanceof ArrayBuffer) {
+      // canvas.sendBinary(buf) from a Custom iframe: forward as a binary WS frame.
+      sendBinary(d.__pycanvas_binary, d.data)
+    } else if (d.__pycanvas_camera) {
+      // canvas.requestCamera / releaseCamera from a Custom iframe.
+      if (d.action === 'start') startCameraCapture(d.__pycanvas_camera, d.opts || {})
+      else if (d.action === 'stop') stopCameraCapture(d.__pycanvas_camera)
+    } else if (d.__pycanvas_mic) {
+      // canvas.requestMicrophone / releaseMicrophone from a Custom iframe.
+      if (d.action === 'start') startMicCapture(d.__pycanvas_mic, d.opts || {})
+      else if (d.action === 'stop') stopMicCapture(d.__pycanvas_mic)
     }
   })
 }

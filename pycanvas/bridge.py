@@ -118,6 +118,7 @@ BINARY_VIDEO = BINARY_FRAME_CODES["VIDEO"]   # JPEG-encoded frame bytes
 BINARY_AUDIO = BINARY_FRAME_CODES["AUDIO"]   # little-endian int16 PCM (interleaved)
 BINARY_CUSTOM = BINARY_FRAME_CODES["CUSTOM"]  # opaque -> Custom.push_binary -> canvas.onPush
 BINARY_REACT = BINARY_FRAME_CODES["REACT"]   # opaque -> React.push_binary -> canvas.onFrame
+BINARY_INPUT = BINARY_FRAME_CODES["INPUT"]   # browser -> Python (canvas.sendBinary -> @on_binary)
 
 
 def encode_binary_frame(type_code, comp_id, payload):
@@ -135,6 +136,7 @@ class Bridge:
     def __init__(self):
         self._components = {}  # id -> BaseComponent
         self._arrows = {}  # id -> Arrow
+        self._shapes = {}   # id -> BaseShape (geo/text/note/draw/line/frame/highlight)
         # Identity of this server *run*. Component ids are minted fresh every
         # run, so a browser whose socket reconnects to a new run (re-running the
         # script, a crash, a hot reload) still shows the previous run's panels —
@@ -162,6 +164,9 @@ class Bridge:
         # symmetric twin of _connect_taps, fired once per leave with the
         # departed viewer's last-known dict.
         self._disconnect_taps = []
+        # Observers of ephemeral drawing changes (canvas.on_draw).  Each is
+        # called off the event loop with a dict {added, updated, removed}.
+        self._draw_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
         self._any_connected = threading.Event()  # set while ≥1 client is connected
@@ -391,6 +396,37 @@ class Bridge:
         except Exception:
             pass
 
+    def _on_binary_input(self, ws, data):
+        """Route an inbound binary frame (browser → Python) to the right component.
+
+        Frame layout: ``[type][idLen][id bytes][payload]`` — the same envelope as
+        outbound frames. Currently only ``BINARY_INPUT`` (type 5) is valid here;
+        other codes are silently ignored (they are server→browser-only directions).
+        """
+        if len(data) < 2:
+            return
+        type_code = data[0]
+        id_len = data[1]
+        if len(data) < 2 + id_len:
+            return
+        comp_id = data[2:2 + id_len].decode("utf-8", "replace")
+        payload = data[2 + id_len:]
+        if self._frame_taps:
+            self._tap_frame("in", {"type": "binary", "id": comp_id,
+                                   "bytes": len(data)})
+        if type_code == BINARY_INPUT:
+            comp = self._components.get(comp_id)
+            if comp is not None:
+                self._dispatch.submit(
+                    lambda c=comp, d=payload: self._dispatch_binary_input(c, d, ws)
+                )
+
+    def _dispatch_binary_input(self, comp, data, ws):
+        """Call a component's binary-input handler off the event loop."""
+        handle = getattr(comp, "_receive_binary", None)
+        if handle is not None:
+            handle(data, self._viewers.get(ws, {}))
+
     # -- wiring --------------------------------------------------------------
     def add_component(self, component):
         self._components[component.id] = component
@@ -436,6 +472,50 @@ class Bridge:
         self._arrows.pop(arrow_id, None)
         self.broadcast({"type": "remove", "id": arrow_id})
 
+    def add_shape(self, shape):
+        """Store a managed tldraw shape and broadcast its register message."""
+        self._shapes[shape.id] = shape
+        shape._bridge = self
+        self.broadcast(shape.register_message())
+
+    def remove_shape(self, shape_id):
+        """Forget a managed shape and tell connected clients to drop it.
+
+        Reuses the existing ``remove`` message type; ``removeComponent`` on the
+        JS side handles ``managedIds.delete`` + ``editor.deleteShape`` for any
+        id, including non-panel shapes.
+        """
+        self._shapes.pop(shape_id, None)
+        self.broadcast({"type": "remove", "id": shape_id})
+
+    def add_draw_tap(self, fn):
+        """Register ``fn`` as an ephemeral-drawing observer (canvas.on_draw)."""
+        self._draw_taps.append(fn)
+        return fn
+
+    def remove_draw_tap(self, fn):
+        """Remove a draw observer registered with :meth:`add_draw_tap`."""
+        try:
+            self._draw_taps.remove(fn)
+        except ValueError:
+            pass
+
+    def _tap_draw(self, diff):
+        """Fire draw observers off the event loop with structured DrawingShape lists."""
+        from .shapes import DrawingShape
+        added = [DrawingShape(r, self) for r in (diff.get("added") or {}).values()]
+        updated = [
+            DrawingShape(p[1] if isinstance(p, (list, tuple)) else p, self)
+            for p in (diff.get("updated") or {}).values()
+        ]
+        removed = list((diff.get("removed") or {}).keys())
+        event = {"added": added, "updated": updated, "removed": removed}
+        for fn in list(self._draw_taps):
+            try:
+                fn(event)
+            except Exception:
+                traceback.print_exc()
+
     def store_reflow(self, msg):
         """Persist a reflow message so connecting clients receive it on join.
 
@@ -468,6 +548,9 @@ class Bridge:
         rot = getattr(component, "_rotation", None)
         if rot is not None:
             msg["rotation"] = math.radians(rot)
+        op = getattr(component, "_opacity", 1.0)
+        if op != 1.0:
+            msg["opacity"] = op
         # Lock/chrome flags: send each only when it differs from its default
         # (e.g. locked=True, or draggable=False as movable=False), matching
         # set_layout's payload and the frontend's lockMeta. The Python names
@@ -490,6 +573,8 @@ class Bridge:
                 msg["y"] = overlay["y"]
             if "rotation" in overlay:
                 msg["rotation"] = math.radians(overlay["rotation"])
+            if "opacity" in overlay:
+                msg["opacity"] = float(overlay["opacity"])
             if "w" in overlay:
                 msg["props"]["w"] = overlay["w"]
             if "h" in overlay:
@@ -605,6 +690,9 @@ class Bridge:
             # Arrows bind to panels, so replay them after every panel exists.
             for arrow in self._arrows.values():
                 await self._send(ws, arrow.register_message())
+            # Replay managed tldraw shapes (geo, text, note, draw, line, frame, highlight).
+            for shape in self._shapes.values():
+                await self._send(ws, shape.register_message())
             # Replay stored reflows so auto-height columns/rows are stacked at
             # real browser-measured heights for every joining client.
             for reflow in self._reflows.values():
@@ -631,7 +719,7 @@ class Bridge:
             # it was seeded with.
             _diag(f"[pycanvas] viewer '{viewer['name']}' connected "
                   f"(replayed {len(self._components)} panels, "
-                  f"{len(self._arrows)} arrows)")
+                  f"{len(self._arrows)} arrows, {len(self._shapes)} shapes)")
 
             # Fire on_connect observers off the loop (a snapshot, like cursor
             # taps) once the client has its initial state — so a handler that
@@ -641,8 +729,15 @@ class Bridge:
                 self._dispatch.submit(lambda v=dict(viewer): self._tap_connect(v))
 
             while True:
-                raw = await ws.receive_text()
-                self._on_message(ws, raw)
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    raise WebSocketDisconnect(msg.get("code", 1000))
+                raw_bytes = msg.get("bytes")
+                raw_text = msg.get("text")
+                if raw_bytes:
+                    self._on_binary_input(ws, raw_bytes)
+                elif raw_text:
+                    self._on_message(ws, raw_text)
         except WebSocketDisconnect:
             pass
         except Exception:
@@ -1521,6 +1616,8 @@ class Bridge:
         for rid in (diff.get("removed") or {}):
             self._drawings.pop(rid, None)
         self._notify_mutation()
+        if self._draw_taps:
+            self._dispatch.submit(lambda d=dict(diff): self._tap_draw(d))
 
     def _notify_mutation(self):
         """Fire the optional ``_on_mutation`` listener (set by serve(persist=)).
@@ -1536,14 +1633,17 @@ class Bridge:
                 traceback.print_exc()
 
     def _panel_shape_ids(self):
-        """tldraw shape ids of every pycanvas-managed panel and arrow.
+        """tldraw shape ids of every pycanvas-managed entity (panels, arrows, shapes).
 
-        The frontend keys shapes as ``shape:<component id>``; these are the
-        shapes we own (panels + connector arrows) and want to exclude from a
-        saved canvas, leaving only the user's free-form drawings.
+        The frontend keys all shapes as ``shape:<id>``; these are the ones we
+        own and want to exclude from a saved canvas, leaving only the user's
+        free-form drawings.
         """
-        return [f"shape:{cid}" for cid in self._components] + \
-               [f"shape:{aid}" for aid in self._arrows]
+        return (
+            [f"shape:{cid}" for cid in self._components]
+            + [f"shape:{aid}" for aid in self._arrows]
+            + [f"shape:{sid}" for sid in self._shapes]
+        )
 
     # -- user-drawing snapshot (request/response with the browser) ------------
     def request_snapshot(self, timeout=5.0):
