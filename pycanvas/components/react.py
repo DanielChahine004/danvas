@@ -307,7 +307,8 @@ class React(_EventRouter, BaseComponent):
         if css.strip():
             inner = f"""<style>{{`
                         {top_rules}
-                        .pc-uiverse {{ {scoped_css} }}
+                        .pc-uiverse {{ flex:1;min-height:0;display:flex;flex-direction:column;width:100%; {scoped_css} }}
+                        .pc-uiverse > * {{ flex:1;min-height:0; }}
                     `}}</style>
                     <div className="pc-uiverse">
                         <{original_name} {{...props}} />

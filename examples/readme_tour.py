@@ -268,7 +268,7 @@ export default RadioCard;
 """
 col.add(canvas.react(source=_radio_raw, name="radio_widget",
                      label="Uiverse radio (frame=False)",
-                     h=80, grabbable=False))
+                     frame=False, h=80, grabbable=False))
 
 col.add(canvas.react(source="""
 import React from 'react';
@@ -388,8 +388,7 @@ const StyledWrapper = styled.div`
 `;
 
 export default Radio;
-""", name="cyber_radio", label="Uiverse cyber radio (frame=False)",
-                     h=60, grabbable=False))
+""", name="cyber_radio", label="Uiverse cyber radio (frame=False)", frame=False, grabbable=False))
 
 _colors_raw = """
 import React from 'react';
@@ -509,7 +508,7 @@ const StyledWrapper = styled.div`
 export default Card;
 """
 col.add(canvas.react(source=_colors_raw, name="color_picker",
-                     label="Uiverse color picker (frame=False)", grabbable=False))
+                     label="Uiverse color picker (frame=False)", frame=False, grabbable=False))
 
 _pills_raw = """
 import React, { useState } from 'react';
@@ -577,7 +576,7 @@ export default PillTabs;
 """
 col.add(canvas.react(source=_pills_raw, name="pill_tabs",
                      label="Uiverse pill tabs (frame=False)",
-                     h=80, grabbable=False))
+                     frame=False, h=80, grabbable=False))
 
 _matrix_raw = """
 import React from 'react';
@@ -702,7 +701,7 @@ export default Pattern;
 """
 col.add(canvas.react(source=_matrix_raw, name="matrix_rain",
                      label="Uiverse matrix rain (frame=False)",
-                     h=200, grabbable=False))
+                     frame=False, h=200, grabbable=False))
 
 _earth_raw = """
 import React from 'react';
@@ -823,7 +822,7 @@ export default Loader;
 """
 col.add(canvas.react(source=_earth_raw, name="earth_loader",
                      label="Uiverse earth loader (frame=False)",
-                     h=160, grabbable=False))
+                     frame=False, h=160, grabbable=False))
 
 _count = 0
 counter_panel = col.add(canvas.react(
