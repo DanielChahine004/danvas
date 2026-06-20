@@ -13,7 +13,7 @@ _SLIDER_CSS = """
  display:flex;gap:10px;align-items:center;
  font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3)}
 .pc-slider input[type=range]{flex:1;min-width:0;accent-color:var(--pc-accent,#3b82f6)}
-.pc-slider .val{width:5ch;text-align:right;font-variant-numeric:tabular-nums;
+.pc-slider .val{width:5ch;text-align:center;font-variant-numeric:tabular-nums;
  background:none;border:none;border-bottom:1px solid transparent;color:inherit;
  font:inherit;padding:0;cursor:text;outline:none}
 .pc-slider .val:hover{border-bottom-color:rgba(255,255,255,.25)}
@@ -67,7 +67,7 @@ function Component({ canvas, value, props }) {
           type="text"
           inputMode={isFloat ? "decimal" : "numeric"}
           value={raw !== null ? raw : show}
-          onFocus={() => setRaw(show)}
+          onFocus={(e) => { setRaw(show); const t = e.target; requestAnimationFrame(() => t.select()); }}
           onChange={(e) => setRaw(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
