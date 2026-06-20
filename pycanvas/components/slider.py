@@ -13,22 +13,42 @@ _SLIDER_CSS = """
  display:flex;gap:10px;align-items:center;
  font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3)}
 .pc-slider input[type=range]{flex:1;min-width:0;accent-color:var(--pc-accent,#3b82f6)}
-.pc-slider .val{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
+.pc-slider .val{width:5ch;text-align:right;font-variant-numeric:tabular-nums;
+ background:none;border:none;border-bottom:1px solid transparent;color:inherit;
+ font:inherit;padding:0;cursor:text;outline:none}
+.pc-slider .val:hover{border-bottom-color:rgba(255,255,255,.25)}
+.pc-slider .val:focus{border-bottom-color:var(--pc-accent,#3b82f6)}
 """
 
 # Controlled range input: local state tracks the thumb live, a Python ``push``
 # (the ``value`` prop) overrides it, and drags emit ``canvas.send({value})`` —
 # continuously, or once on release when ``props.on_release``. ``props.value``
 # (replayed on reconnect) falls back to ``props.default``.
+# The numeric label is a typeable input: blur or Enter commits, clamping to
+# [min, max] and snapping to the nearest step multiple.
 _SLIDER_SOURCE = """
 function Component({ canvas, value, props }) {
   const initial = value != null ? value
                 : (props.value != null ? props.value : props.default);
   const [v, setV] = React.useState(initial);
+  const [raw, setRaw] = React.useState(null);
   React.useEffect(() => { if (value != null) setV(value); }, [value]);
   const onRelease = props.on_release;
+  const lo = Number(props.min), hi = Number(props.max), st = Number(props.step);
   const isFloat = String(props.step).indexOf(".") >= 0;
-  const show = isFloat ? Number(v).toFixed(2) : v;
+  const show = isFloat ? Number(v).toFixed(2) : String(v);
+
+  function commit() {
+    if (raw === null) return;
+    const parsed = parseFloat(raw);
+    const clamped = isNaN(parsed) ? v : Math.max(lo, Math.min(hi, parsed));
+    const snapped = Math.round((clamped - lo) / st) * st + lo;
+    const clean = Math.round(snapped * 1e10) / 1e10;
+    setV(clean);
+    setRaw(null);
+    canvas.send({ value: clean });
+  }
+
   return (
     <>
       <style>{`__CSS__`}</style>
@@ -43,7 +63,14 @@ function Component({ canvas, value, props }) {
           onPointerUp={onRelease
             ? (e) => canvas.send({ value: Number(e.target.value) })
             : undefined} />
-        <span className="val">{show}</span>
+        <input className="val"
+          type="text"
+          inputMode={isFloat ? "decimal" : "numeric"}
+          value={raw !== null ? raw : show}
+          onFocus={() => setRaw(show)}
+          onChange={(e) => setRaw(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
       </div>
     </>
   );
