@@ -12,6 +12,9 @@ include = ["pycanvas*"]
 [tool.setuptools.package-data]
 pycanvas = ["frontend/dist/**/*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project]
 name = "dans-pycanvas"
 version = "0.1.0"
