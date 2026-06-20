@@ -113,6 +113,22 @@ def test_default_path_named_after_script(monkeypatch, tmp_path):
     assert os.path.basename(p) == "myapp.canvas.json"
 
 
+def test_opacity_round_trips_through_persist(tmp_path):
+    path = str(tmp_path / "board.canvas.json")
+    # Run 1: set opacity and flush.
+    c1 = pycanvas.Canvas()
+    s1, _ = _build(c1)
+    s1.opacity = 0.3
+    c1._persist_setup(path)
+    c1._persist_flush()
+
+    # Run 2: recreate panels, load — opacity should be restored.
+    c2 = pycanvas.Canvas()
+    s2, _ = _build(c2)
+    c2._persist_setup(path)
+    assert abs(s2.opacity - 0.3) < 1e-9
+
+
 def test_default_path_falls_back_without_a_script(monkeypatch):
     # No .py __file__ (REPL / notebook) -> a fixed name that still ends in
     # .canvas.json, so the *.canvas.json gitignore still catches it.

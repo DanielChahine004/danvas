@@ -44,6 +44,7 @@ class _EventRouter:
         # on_change callbacks already on the base component.
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
+        self._binary_handlers = []
 
     def on(self, event=None, *, fields=None, threaded=False):
         """Decorator: handle inbound ``canvas.send`` messages.
@@ -130,6 +131,30 @@ class _EventRouter:
                 _mark_threaded(f) if threaded else f)
             return f
         return register(fn) if fn is not None else register
+
+    def on_binary(self, fn=None, *, threaded=False):
+        """Decorator: handle raw binary data sent by ``canvas.sendBinary()``
+        in a Custom or React panel.
+
+        The handler receives ``data: bytes`` (and optionally ``viewer``)::
+
+            @panel.on_binary
+            def got_frame(data: bytes, viewer):
+                frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                ...
+
+        ``threaded=True`` runs the handler on its own daemon thread so slow
+        processing (a model inference, a codec decode) doesn't hold up other
+        handlers.
+        """
+        def register(f):
+            self._binary_handlers.append(_mark_threaded(f) if threaded else f)
+            return f
+        return register(fn) if fn is not None else register
+
+    def _receive_binary(self, data: bytes, viewer=None):
+        """Called by the bridge when an inbound binary frame arrives for this panel."""
+        self._dispatch_callbacks(list(self._binary_handlers), (data,), viewer)
 
     def _handle_input(self, payload, viewer=None):
         with self._lock:

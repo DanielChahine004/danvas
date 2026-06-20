@@ -8,6 +8,7 @@ reconnect-stable identity, without needing a running event loop.
 
 import json
 
+import pytest
 import pycanvas
 from pycanvas.bridge import Bridge
 
@@ -57,6 +58,51 @@ def test_register_merges_layout_overlay_by_role():
     assert adm["x"] == 999 and adm["y"] == 20      # overlay x, base y merged
     assert adm["props"]["w"] == 100                # size inherited from base
     assert b.register_message(p, role="other")["x"] == 10  # others see base
+
+
+# -- opacity -------------------------------------------------------------------
+
+def test_opacity_absent_at_default():
+    b = Bridge()
+    p = _panel(b)
+    msg = b.register_message(p)
+    assert "opacity" not in msg          # default 1.0 is omitted from the wire
+
+
+def test_opacity_present_when_non_default():
+    b = Bridge()
+    p = _panel(b)
+    p.set_layout(opacity=0.4)
+    msg = b.register_message(p)
+    assert msg["opacity"] == pytest.approx(0.4)
+
+
+def test_opacity_setter_roundtrip():
+    b = Bridge()
+    p = _panel(b)
+    p.opacity = 0.5
+    assert p.opacity == pytest.approx(0.5)
+    msg = b.register_message(p)
+    assert msg["opacity"] == pytest.approx(0.5)
+
+
+def test_opacity_overlay_by_role():
+    b = Bridge()
+    p = _panel(b)
+    p.set_layout(opacity=0.8)                  # shared
+    p.set_layout(roles="vip", opacity=0.2)     # role override
+    base = b.register_message(p)
+    vip  = b.register_message(p, role="vip")
+    assert base["opacity"] == pytest.approx(0.8)
+    assert vip["opacity"]  == pytest.approx(0.2)
+
+
+def test_opacity_reset_to_default_omits_from_wire():
+    b = Bridge()
+    p = _panel(b)
+    p.opacity = 0.3
+    p.opacity = 1.0                            # back to default
+    assert "opacity" not in b.register_message(p)
 
 
 # -- targeted-send selection (the _emit refactor) ------------------------------

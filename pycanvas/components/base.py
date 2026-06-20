@@ -96,6 +96,10 @@ class BaseComponent:
         # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
         # read and incremented. Like position, it is a top-level shape field.
         self._rotation = 0
+        # Opacity: 0.0 = fully transparent, 1.0 = fully opaque. tldraw top-level
+        # field (same tier as x/y/rotation). Omitted from messages at the default
+        # so existing wire protocol is unchanged.
+        self._opacity = 1.0
         # Lock / chrome flags, all defaulted from the single table in _flags.py:
         # ``locked`` (full lock, top-level tldraw isLocked); ``draggable`` /
         # ``resizable`` / ``operable`` / ``grabbable`` (interaction-preserving
@@ -282,6 +286,15 @@ class BaseComponent:
     def rotation(self, value):
         self.set_layout(rotation=value)
 
+    @property
+    def opacity(self):
+        """Panel opacity: 0.0 = fully transparent, 1.0 = fully opaque."""
+        return self._opacity
+
+    @opacity.setter
+    def opacity(self, value):
+        self.set_layout(opacity=value)
+
     # The lock/chrome flag properties (``locked``, ``draggable``, ``resizable``,
     # ``operable``, ``grabbable``, ``frame``) are generated from LAYOUT_FLAGS at
     # the bottom of this module — one read-back property + a setter that routes
@@ -426,6 +439,7 @@ class BaseComponent:
         self._bridge.reorder_component(self.id, op)
 
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
+                   opacity=None,
                    locked=None, draggable=None, resizable=None, operable=None,
                    grabbable=None, frame=None, *, roles=None, client_id=None):
         """Update position, size, rotation and/or lock state in one live message.
@@ -449,10 +463,10 @@ class BaseComponent:
         """
         fields = {}
         for key, val in (("x", x), ("y", y), ("w", w), ("h", h),
-                         ("rotation", rotation), ("locked", locked),
-                         ("draggable", draggable), ("resizable", resizable),
-                         ("operable", operable), ("grabbable", grabbable),
-                         ("frame", frame)):
+                         ("rotation", rotation), ("opacity", opacity),
+                         ("locked", locked), ("draggable", draggable),
+                         ("resizable", resizable), ("operable", operable),
+                         ("grabbable", grabbable), ("frame", frame)):
             if val is not None:
                 fields[key] = val
         if not fields:
@@ -481,6 +495,8 @@ class BaseComponent:
                 payload[key] = fields[key]
         if "rotation" in fields:
             payload["rotation"] = math.radians(fields["rotation"])
+        if "opacity" in fields:
+            payload["opacity"] = float(fields["opacity"])
         for name in LAYOUT_FLAGS:
             if name in fields:
                 payload[LAYOUT_FLAGS[name].wire] = bool(fields[name])
@@ -502,6 +518,8 @@ class BaseComponent:
             self._props["h"] = fields["h"]
         if "rotation" in fields:
             self._rotation = fields["rotation"]
+        if "opacity" in fields:
+            self._opacity = float(fields["opacity"])
         for name in LAYOUT_FLAGS:
             if name in fields:
                 setattr(self, LAYOUT_FLAGS[name].attr, bool(fields[name]))

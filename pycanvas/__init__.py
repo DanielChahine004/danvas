@@ -29,6 +29,10 @@ from .components import (
     WebView,
 )
 from .dispatch import panel_for
+from .shapes import (
+    BaseShape, DrawingShape,
+    Geo, Text, Note, Draw, Highlight, Line, Frame,
+)
 
 # Single source of truth is the installed package metadata (pyproject `version`).
 # Fall back to 0.0.0 when running straight from a source tree that was never
@@ -69,6 +73,15 @@ __all__ = [
     "UploadedFile",
     "WebView",
     "BaseComponent",
+    "BaseShape",
+    "DrawingShape",
+    "Geo",
+    "Text",
+    "Note",
+    "Draw",
+    "Highlight",
+    "Line",
+    "Frame",
 ]
 
 

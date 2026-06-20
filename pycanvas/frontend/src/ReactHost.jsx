@@ -26,7 +26,7 @@
 import { transform as transformJsx } from 'sucrase'
 import React from 'react'
 import { useEditor } from 'tldraw'
-import { sendInput, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
+import { sendInput, sendBinary, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
 
@@ -220,6 +220,7 @@ export default function ReactHost({ shape }) {
   const canvas = React.useMemo(
     () => ({
       send: (data) => sendInput(id, data),
+      sendBinary: (buf) => sendBinary(id, buf instanceof ArrayBuffer ? buf : buf.buffer || buf),
       // The awaitable twin of send: `const r = await canvas.request(data)`
       // resolves with the return value of the panel's matching @on_request
       // handler (rejects if it raises or times out). For ask-Python-and-use-the-

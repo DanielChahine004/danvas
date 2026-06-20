@@ -37,7 +37,7 @@ class Custom(_EventRouter, BaseComponent):
     _AUTO_W_MAX = 680
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
-                 label=None, w=None, h=None, event_key="event"):
+                 label=None, w=None, h=None, event_key="event", permissions=None):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -65,6 +65,13 @@ class Custom(_EventRouter, BaseComponent):
         self._html = html or ""
         self._css = css or ""
         self._js = js or ""
+        # Semicolon-separated Permissions Policy string for the iframe's `allow`
+        # attribute. A list is accepted for convenience: ["camera", "microphone"]
+        # → "camera; microphone". Controls access to device APIs (getUserMedia etc.)
+        # which browsers block in sandboxed iframes without an explicit grant.
+        if isinstance(permissions, (list, tuple)):
+            permissions = "; ".join(permissions)
+        self._permissions = permissions or ""
         # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
         # with React via _EventRouter; override event_key if your HTML tags
         # messages with a different field.
@@ -85,9 +92,43 @@ class Custom(_EventRouter, BaseComponent):
             "send:function(data){"
             f"parent.postMessage({{__pycanvas:{cid},data:data}},'*');"
             "},"
+            # sendBinary transfers the ArrayBuffer zero-copy to the parent window,
+            # which re-encodes it into the binary WebSocket frame and sends it to
+            # Python. The buffer is detached after transfer (standard ArrayBuffer
+            # transfer semantics), so callers should not reuse it.
+            "sendBinary:function(buf){"
+            "var ab=buf instanceof ArrayBuffer?buf:(buf.buffer||buf);"
+            f"parent.postMessage({{__pycanvas_binary:{cid},data:ab}},'*',[ab]);"
+            "},"
             "onPush:function(fn){window.addEventListener('message',function(e){"
             "if(e.data&&e.data.__pycanvas!==undefined){fn(e.data.__pycanvas);}"
-            "});}"
+            "});},"
+            # requestCamera / releaseCamera: getUserMedia cannot run inside a
+            # sandboxed iframe (null origin blocks the permission grant even with
+            # allow="camera"). These methods ask the parent page to open the
+            # camera and relay JPEG frames via push_binary — each frame arrives in
+            # canvas.onPush as an ArrayBuffer, same as panel.push_binary() from
+            # Python. opts: { width, height, fps, quality } (all optional).
+            "requestCamera:function(opts){"
+            f"parent.postMessage({{__pycanvas_camera:{cid},action:'start',opts:opts||{{}}}},'*');"
+            "},"
+            "releaseCamera:function(){"
+            f"parent.postMessage({{__pycanvas_camera:{cid},action:'stop'}},'*');"
+            "},"
+            # requestMicrophone / releaseMicrophone: same sandbox constraint as
+            # camera — getUserMedia({audio}) is blocked in a null-origin iframe.
+            # The parent captures mic audio, converts to int16 PCM, and relays
+            # each chunk the same way: sendBinary up to Python (@on_binary) and
+            # liveHandlers down to canvas.onPush as an ArrayBuffer. A JSON
+            # {event:'mic_start', sampleRate, channels} is sent first so Python
+            # knows the stream parameters before audio data arrives.
+            # opts: { bufferSize } (optional, default 4096 samples ≈ 85–93ms).
+            "requestMicrophone:function(opts){"
+            f"parent.postMessage({{__pycanvas_mic:{cid},action:'start',opts:opts||{{}}}},'*');"
+            "},"
+            "releaseMicrophone:function(){"
+            f"parent.postMessage({{__pycanvas_mic:{cid},action:'stop'}},'*');"
+            "}"
             "};"
             # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
             # *browser's* page zoom (tldraw can't preventDefault an event in a
@@ -225,6 +266,7 @@ class Custom(_EventRouter, BaseComponent):
     def register_props(self):
         props = dict(self._props)  # label, w, h
         props["html"] = self._wrap(self._document())
+        props["permissions"] = self._permissions
         return props
 
     def update(self, html=None, css=None, js=None):

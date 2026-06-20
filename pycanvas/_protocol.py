@@ -39,6 +39,7 @@ BINARY_FRAME_CODES = {
     "AUDIO": 2,   # little-endian int16 PCM samples (interleaved)
     "CUSTOM": 3,  # opaque user bytes -> Custom.push_binary -> canvas.onPush
     "REACT": 4,   # opaque user bytes -> React.push_binary -> canvas.onFrame
+    "INPUT": 5,   # browser -> Python raw bytes (canvas.sendBinary -> @on_binary)
 }
 
 # -- lock / chrome flag wire keys -------------------------------------------
@@ -64,7 +65,7 @@ FLAG_WIRE_KEYS = {
 # the ``bridge.js`` inbound switch (outbound) and ``Bridge._on_message``
 # (inbound). Outbound = server -> browser; inbound = browser -> server.
 MESSAGE_TYPES_OUT = (
-    "register", "arrow", "update", "order", "remove",
+    "register", "arrow", "shape", "shape_update", "update", "order", "remove",
     "get_snapshot", "load_snapshot", "draw", "presence",
     "cursor", "cursor_gone", "view", "welcome", "chat",
     "response", "complete_result", "shared",

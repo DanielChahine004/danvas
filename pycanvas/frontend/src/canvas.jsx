@@ -275,10 +275,13 @@ export class HtmlShapeUtil extends PcShapeUtil {
     // Prose panels (Markdown) set this so CustomView blends the iframe into the
     // canvas theme instead of showing it as a white notebook document.
     themed: T.boolean,
+    // Semicolon-separated Permissions Policy features for the iframe
+    // (e.g. "camera; microphone"). Empty string = no extra permissions.
+    permissions: T.string,
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'custom', html: '', themed: false }
+    return { w: 380, h: 320, label: 'custom', html: '', themed: false, permissions: '' }
   }
 
   component(shape) {
@@ -343,6 +346,7 @@ function CustomView({ shape }) {
       // allow-popups-to-escape-sandbox lets a link (target=_blank) open as a
       // normal browser tab instead of a sandboxed frame that many sites refuse.
       sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
+      allow={shape.props.permissions || undefined}
       style={{
         flex: 1,
         // An iframe's intrinsic height is 150px and a flex item defaults to
