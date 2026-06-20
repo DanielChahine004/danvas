@@ -12,7 +12,7 @@ import pycanvas
 
 def _res(host="127.0.0.1", tunnel=False, ui_inspector=None, cursors=None):
     return pycanvas.Canvas()._resolve_exposure(host, tunnel, ui_inspector,
-                                               cursors)
+                                               None, cursors)
 
 
 def test_private_local_bind_enables_telemetry_by_default():

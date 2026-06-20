@@ -72,7 +72,7 @@ MESSAGE_TYPES_OUT = (
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui",
-    "input", "layout", "draw", "request", "snapshot",
+    "input", "layout", "draw", "request", "snapshot", "panel_error",
 )
 
 
