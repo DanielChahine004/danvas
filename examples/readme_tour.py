@@ -115,6 +115,18 @@ def _():
     enabled_tg.update("on")
     comp_out.update("reset ↺")
 
+# --- Colour themes ---
+col.add(canvas.markdown("""## Colour themes
+Pass `color=(r,g,b)` or `color="#hex"` — dark and glow variants are derived
+automatically so hover, active and focus states all follow the theme.
+""", name="color_hdr"))
+
+with col.row(gap=GAP):
+    canvas.button("go_btn",   text="Launch",   color="#10b981", w=136)
+    canvas.toggle("mode_tg",  ["A", "B", "C"], color=(168, 85, 247), w=216)
+    canvas.slider("heat_sl",  min=0, max=100, default=35, color="#f59e0b", w=268)
+    canvas.text_field("tag_fld", placeholder="search…", color="#06b6d4", w=196)
+
 # --- The three data verbs ---
 col.add(canvas.markdown("""## The three data verbs
 | Verb | Means | Replayed on reconnect? | Panels |
