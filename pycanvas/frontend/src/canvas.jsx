@@ -3,6 +3,7 @@ import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue } from 'tldraw'
 import Plotly from 'plotly.js-basic-dist-min'
 import {
   sendInput,
+  sendPanelError,
   componentIdOf,
   registerLive,
   unregisterLive,
@@ -334,6 +335,16 @@ function CustomView({ shape }) {
     }
     registerLive(id, post)
     return () => unregisterLive(id)
+  }, [id])
+
+  useEffect(() => {
+    const onMessage = (e) => {
+      if (!e.data) return
+      const err = e.data.__pycanvas_error
+      if (err && err.id === id) sendPanelError(id, err.msg)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
   }, [id])
 
   return (

@@ -26,7 +26,7 @@
 import { transform as transformJsx } from 'sucrase'
 import React from 'react'
 import { useEditor } from 'tldraw'
-import { sendInput, sendBinary, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom } from './bridge'
+import { sendInput, sendBinary, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom, sendPanelError } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
 
@@ -146,6 +146,9 @@ class Boundary extends React.Component {
   }
   static getDerivedStateFromError(error) {
     return { error }
+  }
+  componentDidCatch(error) {
+    if (this.props.onError) this.props.onError(error)
   }
   componentDidUpdate(prev) {
     if (prev.resetKey !== this.props.resetKey && this.state.error) {
@@ -362,6 +365,11 @@ export default function ReactHost({ shape }) {
     }
   }, [compiled, libs])
 
+  // Report compile/bind errors back to Python so they appear in the terminal.
+  React.useEffect(() => {
+    if (bound.error) sendPanelError(id, bound.error.message || String(bound.error))
+  }, [id, bound.error])
+
   if (libsError) {
     return <ErrorBox error={new Error(`failed to load libraries: ${libsError.message || libsError}`)} />
   }
@@ -431,7 +439,7 @@ export default function ReactHost({ shape }) {
             separate string instead of an inline <style>. Scoped by the author's
             own selectors, exactly like an inline tag. */}
         {shape.props.css ? <style>{shape.props.css}</style> : null}
-        <Boundary resetKey={Comp}>
+        <Boundary resetKey={Comp} onError={(e) => sendPanelError(id, e.message || String(e))}>
           <Comp canvas={canvas} value={streamed} props={userProps} />
         </Boundary>
       </div>

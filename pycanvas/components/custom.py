@@ -130,7 +130,17 @@ class Custom(_EventRouter, BaseComponent):
             f"parent.postMessage({{__pycanvas_mic:{cid},action:'stop'}},'*');"
             "}"
             "};"
-            # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
+            # JS errors and unhandled promise rejections are reported back to
+        # Python via postMessage so they surface in the terminal.
+        "window.onerror=function(msg,src,line,col,err){"
+        f"parent.postMessage({{__pycanvas_error:{{id:{cid},"
+        "msg:msg+(src?' ('+src+':'+line+')':'')}},'*');"
+        "return false;};"
+        "window.addEventListener('unhandledrejection',function(e){"
+        "var r=e.reason;"
+        f"parent.postMessage({{__pycanvas_error:{{id:{cid},"
+        "msg:'Unhandled rejection: '+(r&&r.message||String(r))}},'*');});"
+        # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
             # *browser's* page zoom (tldraw can't preventDefault an event in a
             # sandboxed frame). Swallow it here and forward the delta + cursor to
             # the parent, which zooms the canvas at that point instead — so the

@@ -48,6 +48,7 @@ in scope as ``libs`` (e.g. ``const d3 = libs.d3``).
 """
 
 import json
+import sys
 import traceback
 import re
 
@@ -293,6 +294,16 @@ class React(_EventRouter, BaseComponent):
         top_rules = "\n".join(atrule_re.findall(css))
         scoped_css = atrule_re.sub("", css)
 
+        # Guard: styled imports detected but regex extracted nothing — usually
+        # means the template-literal delimiter was escaped (e.g. \` in Python).
+        if re.search(r"import\s+\S+\s+from\s+['\"]styled-components['\"]", source) and not styled:
+            print(
+                "[pycanvas] warning: styled-components import found but no "
+                "styled.tag`...` blocks extracted — check for escaped backticks "
+                r"(\` → `) in the source string.",
+                file=sys.stderr,
+            )
+
         if css.strip():
             inner = f"""<style>{{`
                         {top_rules}
@@ -304,7 +315,7 @@ class React(_EventRouter, BaseComponent):
         else:
             inner = f"<{original_name} {{...props}} />"
 
-        return f"""
+        result = f"""
         {clean}
 
         function Component({{ canvas, props, value }}) {{
@@ -315,6 +326,15 @@ class React(_EventRouter, BaseComponent):
             );
         }}
         """
+
+        if "function Component" not in result:
+            print(
+                "[pycanvas] warning: no 'function Component' found after normalising "
+                "source — the panel will show an error. Check the source defines a "
+                "component and has a matching 'export default'.",
+                file=sys.stderr,
+            )
+        return result
 
     # -- write (Python -> panel) ---------------------------------------------
     def update(self, *, roles=None, client_id=None, **props):

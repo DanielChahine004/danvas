@@ -1448,6 +1448,10 @@ export function sendInput(id, payload) {
   sendRaw({ type: 'input', id, payload })
 }
 
+export function sendPanelError(id, message) {
+  sendRaw({ type: 'panel_error', id, message: String(message) })
+}
+
 // Send a raw binary frame to Python: ``[BIN_INPUT][idLen][id bytes][payload]``.
 // Used by canvas.sendBinary() in Custom iframes and React panels.
 export function sendBinary(compId, buffer) {
