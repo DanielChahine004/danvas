@@ -70,7 +70,17 @@ function Component({ canvas, value, props }) {
           onFocus={() => setRaw(show)}
           onChange={(e) => setRaw(e.target.value)}
           onBlur={commit}
-          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.target.blur(); return; }
+            if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault();
+              const delta = e.key === "ArrowUp" ? st : -st;
+              const clamped = Math.max(lo, Math.min(hi, v + delta));
+              const snapped = Math.round((clamped - lo) / st) * st + lo;
+              const clean = Math.round(snapped * 1e10) / 1e10;
+              setV(clean); setRaw(null); canvas.send({ value: clean });
+            }
+          }} />
       </div>
     </>
   );
