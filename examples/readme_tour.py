@@ -645,33 +645,33 @@ const StyledWrapper = styled.div`
     letter-spacing: 1px;
   }
 
-  .matrix-column:nth-child(1)  { left: 0px;   animation-delay: -0.3s; animation-duration: 3s;   }
-  .matrix-column:nth-child(2)  { left: 25px;  animation-delay: -3.2s; animation-duration: 4s;   }
-  .matrix-column:nth-child(3)  { left: 50px;  animation-delay: -1.8s; animation-duration: 2.5s; }
-  .matrix-column:nth-child(4)  { left: 75px;  animation-delay: -2.9s; animation-duration: 3.5s; }
-  .matrix-column:nth-child(5)  { left: 100px; animation-delay: -1.5s; animation-duration: 3s;   }
-  .matrix-column:nth-child(6)  { left: 125px; animation-delay: -3.8s; animation-duration: 4.5s; }
-  .matrix-column:nth-child(7)  { left: 150px; animation-delay: -2.1s; animation-duration: 2.8s; }
-  .matrix-column:nth-child(8)  { left: 175px; animation-delay: -2.7s; animation-duration: 3.2s; }
-  .matrix-column:nth-child(9)  { left: 200px; animation-delay: -3.4s; animation-duration: 3.8s; }
-  .matrix-column:nth-child(10) { left: 225px; animation-delay: -0.5s; animation-duration: 2.7s; }
-  .matrix-column:nth-child(11) { left: 250px; animation-delay: -3.6s; animation-duration: 4.2s; }
-  .matrix-column:nth-child(12) { left: 275px; animation-delay: -2.3s; animation-duration: 3.1s; }
-  .matrix-column:nth-child(13) { left: 300px; animation-delay: -3.1s; animation-duration: 3.6s; }
-  .matrix-column:nth-child(14) { left: 325px; animation-delay: -2.6s; animation-duration: 2.9s; }
-  .matrix-column:nth-child(15) { left: 350px; animation-delay: -1.5s; animation-duration: 4.1s; }
-  .matrix-column:nth-child(16) { left: 375px; animation-delay: -2.8s; animation-duration: 3.3s; }
-  .matrix-column:nth-child(17) { left: 400px; animation-delay: -3.3s; animation-duration: 3.7s; }
-  .matrix-column:nth-child(18) { left: 425px; animation-delay: -2.2s; animation-duration: 2.6s; }
-  .matrix-column:nth-child(19) { left: 450px; animation-delay: -3.9s; animation-duration: 4.3s; }
-  .matrix-column:nth-child(20) { left: 475px; animation-delay: -1.0s; animation-duration: 3.4s; }
-  .matrix-column:nth-child(21) { left: 500px; animation-delay: -1.7s; animation-duration: 2.4s; }
-  .matrix-column:nth-child(22) { left: 525px; animation-delay: -3.5s; animation-duration: 3.9s; }
-  .matrix-column:nth-child(23) { left: 550px; animation-delay: -2s;   animation-duration: 3s;   }
-  .matrix-column:nth-child(24) { left: 575px; animation-delay: -4s;   animation-duration: 4.4s; }
-  .matrix-column:nth-child(25) { left: 600px; animation-delay: -0.6s; animation-duration: 2.3s; }
-  .matrix-column:nth-child(26) { left: 625px; animation-delay: -3s;   animation-duration: 3.5s; }
-  .matrix-column:nth-child(27) { left: 650px; animation-delay: -3.8s; animation-duration: 4s;   }
+  .matrix-column:nth-child(1)  { left: 0px;   animation-delay: -0.2s; animation-duration: 3s;   }
+  .matrix-column:nth-child(2)  { left: 25px;  animation-delay: -3.4s; animation-duration: 4s;   }
+  .matrix-column:nth-child(3)  { left: 50px;  animation-delay: -0.9s; animation-duration: 2.5s; }
+  .matrix-column:nth-child(4)  { left: 75px;  animation-delay: -2.6s; animation-duration: 3.5s; }
+  .matrix-column:nth-child(5)  { left: 100px; animation-delay: -0.6s; animation-duration: 3s;   }
+  .matrix-column:nth-child(6)  { left: 125px; animation-delay: -2.7s; animation-duration: 4.5s; }
+  .matrix-column:nth-child(7)  { left: 150px; animation-delay: -1.3s; animation-duration: 2.8s; }
+  .matrix-column:nth-child(8)  { left: 175px; animation-delay: -2.9s; animation-duration: 3.2s; }
+  .matrix-column:nth-child(9)  { left: 200px; animation-delay: -0.6s; animation-duration: 3.8s; }
+  .matrix-column:nth-child(10) { left: 225px; animation-delay: -1.8s; animation-duration: 2.7s; }
+  .matrix-column:nth-child(11) { left: 250px; animation-delay: -1.7s; animation-duration: 4.2s; }
+  .matrix-column:nth-child(12) { left: 275px; animation-delay: -2.5s; animation-duration: 3.1s; }
+  .matrix-column:nth-child(13) { left: 300px; animation-delay: -0.9s; animation-duration: 3.6s; }
+  .matrix-column:nth-child(14) { left: 325px; animation-delay: -2.0s; animation-duration: 2.9s; }
+  .matrix-column:nth-child(15) { left: 350px; animation-delay: -2.1s; animation-duration: 4.1s; }
+  .matrix-column:nth-child(16) { left: 375px; animation-delay: -3.1s; animation-duration: 3.3s; }
+  .matrix-column:nth-child(17) { left: 400px; animation-delay: -1.1s; animation-duration: 3.7s; }
+  .matrix-column:nth-child(18) { left: 425px; animation-delay: -2.1s; animation-duration: 2.6s; }
+  .matrix-column:nth-child(19) { left: 450px; animation-delay: -0.4s; animation-duration: 4.3s; }
+  .matrix-column:nth-child(20) { left: 475px; animation-delay: -1.9s; animation-duration: 3.4s; }
+  .matrix-column:nth-child(21) { left: 500px; animation-delay: -0.9s; animation-duration: 2.4s; }
+  .matrix-column:nth-child(22) { left: 525px; animation-delay: -3.4s; animation-duration: 3.9s; }
+  .matrix-column:nth-child(23) { left: 550px; animation-delay: -0.4s; animation-duration: 3s;   }
+  .matrix-column:nth-child(24) { left: 575px; animation-delay: -2.7s; animation-duration: 4.4s; }
+  .matrix-column:nth-child(25) { left: 600px; animation-delay: -1.0s; animation-duration: 2.3s; }
+  .matrix-column:nth-child(26) { left: 625px; animation-delay: -3.2s; animation-duration: 3.5s; }
+  .matrix-column:nth-child(27) { left: 650px; animation-delay: -0.7s; animation-duration: 4s;   }
   .matrix-column:nth-child(28) { left: 675px; animation-delay: -2.5s; animation-duration: 2.8s; }
   .matrix-column:nth-child(29) { left: 700px; animation-delay: -3.2s; animation-duration: 3.6s; }
   .matrix-column:nth-child(30) { left: 725px; animation-delay: -2.7s; animation-duration: 3.2s; }
