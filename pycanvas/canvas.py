@@ -669,6 +669,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # panel given neither an explicit position nor a relative anchor takes the
         # next slot (and the layout's default slot size, unless w/h were given).
         scoped_layout = None
+        _container_placed = None   # set when a Container (not _FlowLayout) did placement
         if self._layout_stack and x is None and y is None:
             flow = self._layout_stack[-1]
             fx, fy, fw, fh = flow._place(component, w, h, auto_h)
@@ -688,6 +689,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 # Scoped container: this placement is that audience's overlay, not
                 # the shared base — applied via set_layout once the panel is bound.
                 scoped_layout = (fx, fy, fw, fh, flow._roles, flow._client_id)
+            from ._layout import Container as _Container
+            if isinstance(flow, _Container):
+                _container_placed = flow
         if name is None:
             name = component.name
         if name is None:
@@ -802,6 +806,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                                  roles=sroles, client_id=scid)
         if self._serving:
             self._bridge.register_live(component)
+        # After live registration, broadcast the updated container tree so the
+        # frontend's auto-repack knows about the new member.  Done after
+        # register_live so the panel already exists in the frontend when the
+        # container_sync arrives.
+        if _container_placed is not None:
+            _container_placed._post_place()
         return component
 
     def _relative_position(self, below, above, right_of, left_of, gap,

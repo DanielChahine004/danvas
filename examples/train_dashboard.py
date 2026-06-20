@@ -67,7 +67,7 @@ canvas = pycanvas.Canvas()
 # --- controls: a left column of panels we drive the run with ----------------
 # `canvas.column(...)` auto-stacks whatever we insert, each keeping its natural
 # height, so we never hand-place a control.
-with canvas.column(w=320, gap=12, origin=(40, 40)):
+with canvas.column(x=40, y=40, w=320, gap=12):
     status = canvas.label("status", "ready — press start")
     start = canvas.button("start / pause", text="Start")
     reset = canvas.button("reset", text="Reset")
@@ -81,9 +81,9 @@ lr_plot = canvas.live_plot("lr_plot", label="learning rate", max_points=None, be
 weights = canvas.histogram("weights", bins=40, below=lr_plot, w=580, h=300)
 
 # --- run summary: hyperparameters, sample predictions, a text log -----------
-# Keep the column handle: its panels are h="auto", so when the predictions image
-# or the log grows the column can call summary.refit() to re-pack (see the loop).
-with canvas.column(w=460, gap=16, origin=(1060, 40)) as summary:
+# Keep the column handle so we can call summary.reflow() in the loop after
+# h="auto" panels grow, triggering a Python-side repack broadcast.
+with canvas.column(x=1060, y=40, w=460, gap=16) as summary:
     canvas.table(HPARAMS, name="hparams", h="auto")        # flat dict -> table
     log = canvas.markdown("### run log\n\n_waiting to start…_", name="run log", h="auto")
     preds = canvas.image(sample_grid(0), name="predictions", h="auto")
@@ -150,11 +150,7 @@ def train():
             preds.update(sample_grid(step))
             log_lines.append(f"- epoch **{epoch + 1}** — train {train_loss:.3f}, val {val_loss:.3f}")
             log.update("### run log\n\n" + "\n".join(log_lines[-12:]))
-            # The log/image are h="auto"; appending a line regrows the log and
-            # pushes the panel below it. One refit() per epoch re-packs the column
-            # — it settles in the browser once the new heights are measured, so the
-            # gaps stay clean without us tracking sizes by hand.
-            summary.refit()
+            summary.reflow()
 
         state["step"] += 1
         time.sleep(0.04)

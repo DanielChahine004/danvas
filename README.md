@@ -186,7 +186,9 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.drawings` | Snapshot dict of user-drawn ephemeral shapes |
 | | `canvas.on_draw(fn)` / `off_draw(fn)` | Stream draw events when users draw, move, or delete shapes |
 | | `canvas.remove_shape(shape_or_name)` | Remove a managed shape by object or name |
-| **Arrange** | `with canvas.grid(...) / column(...) / row(...):` | Auto-layout containers; panels inside take the next slot |
+| **Arrange** | `canvas.column(x, y, w, gap) / row(x, y, h, gap)` | Container — stack panels vertically/horizontally; nest with `.row()` / `.column()` |
+| | `canvas.streamlit(gap, padding)` | Full-viewport-width column with vertical-scroll navigation |
+| | `with canvas.grid(cols, slot, gap, x, y):` | Grid — panels fill slots left-to-right, wrapping by row |
 | | `canvas.reset_layout()` | Restore all panels to their Python-defined positions without moving the camera |
 | | `canvas.set_view(zoom=…, locked=…, ui=…, navigation=…, roles=, client_id=)` | Camera, chrome & navigation mode — scriptable and per-viewer |
 | **Reach panels** | `canvas[name]` / `canvas.<name>` | Fetch a panel (or arrow) by its name |
@@ -856,54 +858,51 @@ position. When an auto-height panel (`h="auto"`) settles its final height in the
 browser, every panel anchored `below=` it (and panels anchored below those)
 shift automatically to close or open the gap — no manual refit needed.
 
-**Auto-layout containers** — open a `with` block; panels inside without an
-explicit position drop into the next slot:
+**Auto-layout containers** — `column` stacks panels top-to-bottom; `row` places
+them side-by-side. Use `.add()` explicitly or open a `with` block to capture
+panels automatically. Containers nest — call `.row()` / `.column()` on a
+container to add a child container:
 
 ```python
-with canvas.grid(cols=2, slot=(560, 300), gap=24, origin=(40, 40)):
+layout = canvas.column(x=60, y=40, w=640, gap=20)
+layout.add(canvas.label("title", "My App"))
+
+with layout.row(gap=8):               # nested row inside the column
+    canvas.label("step", "Step: 0")
+    canvas.label("loss", "Loss: —")
+    canvas.button("start", text="Start")
+
+layout.add(canvas.markdown("…", h="auto"))   # grows; panels below auto-shift
+layout.add(canvas.label("status", "Ready"))
+```
+
+`grid` fills a fixed grid slot-by-slot:
+
+```python
+with canvas.grid(cols=2, slot=(560, 300), gap=24, x=40, y=40):
     canvas.live_plot("loss")
-    canvas.live_plot("accuracy")      # next column
-    canvas.image(fig)                 # wraps to next row
-
-with canvas.column(width=320, gap=12):    # stacks; each keeps its natural height
-    canvas.label("status", "ready")
-    canvas.button("start")
-    canvas.slider("lr", min=0, max=1, step=0.01)
+    canvas.live_plot("accuracy")
+    canvas.image(fig)
 ```
 
-`row(height=…)` is the horizontal twin of `column`. An explicit position or
-relative anchor still wins per panel.
+When an `h="auto"` panel grows, the container repacks automatically — siblings
+shift to close the gap without any manual call. `container.move(x, y)` repositions
+the whole tree live.
 
-Placement is one-shot, at insert. If a panel later grows — an `h="auto"` panel
-whose content expanded, a resized plot — keep the container handle and call
-`refit()` to re-pack the column/row at the panels' current sizes:
-
-```python
-with canvas.column(gap=16, origin=(1060, 40)) as summary:
-    log   = canvas.markdown(run_log(), h="auto")
-    preds = canvas.image(grid, h="auto")
-
-log.update(run_log())   # grew — the panel below would now overlap
-summary.refit()         # re-pack; restores the gaps
-```
-
-It's manual on purpose: a routinely-resizing panel doesn't make its neighbours
-jitter — they move only when you call `refit()`. The re-pack runs in the browser
-(where the real measured sizes live) and settles a resize you triggered in the
-same breath, so it's a no-op until a viewer is connected.
-
-Pass `roles=` (or `client_id=`) to a container and the whole block is laid out
-for just those viewers — each slot is written as that audience's layout *overlay*
-(via `set_layout(roles=…)`) instead of the shared base, so one role can have its
-own arrangement (precedence `shared < role < client`). Ideal for a role's
-*exclusive* panels; a panel shared across roles is created once, so give the other
-roles their layout with a second scoped block (over their own panels) or
-`set_layout(roles=…)` directly.
+**Streamlit mode** — `canvas.streamlit()` sets vertical-scroll navigation and
+returns a full-viewport-width column. Every child spans the browser window and
+the page scrolls vertically — no fixed `x`/`y`/`w` needed:
 
 ```python
-with canvas.column(roles="admin", gap=12, origin=(40, 40)):   # admins: a stack
-    canvas.react(STOCK, roles=["admin"])
-    canvas.react(ORDERS, roles=["admin"])
+page = canvas.streamlit(gap=20, padding=24)
+page.add(canvas.label("title", "Training Dashboard"))
+
+with page.row(gap=10):
+    canvas.button("start", text="Start")
+    canvas.slider("lr", min=0.001, max=0.05, default=0.01, step=0.001)
+
+page.add(canvas.markdown("…", h="auto"))
+page.add(canvas.label("status", "Ready"))
 ```
 
 **Auto-height** — `h="auto"` fits a panel's height to its rendered content

@@ -107,6 +107,10 @@ function resetFlow() {
   flowItems.clear()
   armedReflows.clear()
   if (relayoutTimer) { clearTimeout(relayoutTimer); relayoutTimer = null }
+  containers.clear()
+  panelToContainer.clear()
+  containerParent.clear()
+  if (_fillWObserver) { _fillWObserver.disconnect(); _fillWObserver = null }
 }
 
 // Explicit re-pack of a Python `canvas.column`/`row` (column.refit()). Unlike the
@@ -165,6 +169,143 @@ function settleArmedReflows(componentId) {
     if (now > entry.deadline) { armedReflows.delete(key); continue }
     if (entry.spec.ids.includes(componentId)) packFlow(entry.spec)
   }
+}
+
+// --- Container auto-repack ---------------------------------------------------
+// Persistent layout containers (canvas.column / row / container). When any
+// member's size changes (fitFromIframe / fitNative), the whole tree repacks
+// automatically so panels never overlap after h="auto" content settles.
+
+const containers = new Map()        // key -> container_sync spec
+const panelToContainer = new Map()  // panelId -> containerKey (direct parent)
+const containerParent = new Map()   // childContainerKey -> parentContainerKey
+let _fillWObserver = null           // ResizeObserver for fill_w viewport tracking
+
+function _hasFillW() {
+  for (const spec of containers.values()) if (spec.fill_w) return true
+  return false
+}
+
+// Repack all fill_w root containers (called on viewport resize).
+function _refreshFillW() {
+  const seen = new Set()
+  for (const [key, spec] of containers) {
+    if (!spec.fill_w) continue
+    const root = getRootContainerKey(key)
+    if (!seen.has(root)) { seen.add(root); repackContainer(root) }
+  }
+}
+
+function _setupFillWObserver() {
+  if (_fillWObserver || !editor || typeof ResizeObserver === 'undefined') return
+  const el = editor.getContainer()
+  if (!el) return
+  _fillWObserver = new ResizeObserver(_refreshFillW)
+  _fillWObserver.observe(el)
+}
+
+function syncContainer(spec) {
+  containers.set(spec.key, spec)
+  rebuildContainerIndices()
+  if (spec.fill_w) {
+    _setupFillWObserver()
+    // Immediately apply the viewport width to this container's panels.
+    if (editor) repackContainer(getRootContainerKey(spec.key))
+  }
+}
+
+function rebuildContainerIndices() {
+  panelToContainer.clear()
+  containerParent.clear()
+  for (const [key, spec] of containers) {
+    for (const m of spec.members || []) {
+      if (m.kind === 'panel') panelToContainer.set(m.id, key)
+      else if (m.kind === 'container') containerParent.set(m.key, key)
+    }
+  }
+}
+
+function getRootContainerKey(key) {
+  while (containerParent.has(key)) key = containerParent.get(key)
+  return key
+}
+
+// Recursive repack. Returns {w, h} for the parent container to use when
+// advancing its cursor past this child.
+function repackContainer(key, ox, oy) {
+  const spec = containers.get(key)
+  if (!spec || !editor) return { w: 0, h: 0 }
+  // fill_w: expand to the visible viewport width (in canvas units = CSS px ÷ zoom).
+  // In scroll_y mode zoom=1 and the camera is at x=0, so canvas px === screen px.
+  const specW = spec.fill_w
+    ? Math.floor(editor.getContainer().offsetWidth / editor.getZoomLevel())
+        - 2 * (spec.padding ?? 0)
+    : spec.w
+  const x0 = ox !== undefined ? ox : (spec.x0 ?? 0)
+  const y0 = oy !== undefined ? oy : (spec.y0 ?? 0)
+  let cx = x0, cy = y0
+  let crossSize = 0
+  const reports = []
+
+  for (const m of spec.members || []) {
+    const mx = spec.mode === 'row' ? cx : x0
+    const my = spec.mode === 'column' ? cy : y0
+    let mw = 0, mh = 0
+
+    if (m.kind === 'panel') {
+      const shapeId = createShapeId(m.id)
+      const shape = editor.getShape(shapeId)
+      if (!shape) continue  // removed since sync — skip, don't reserve space
+      mw = specW != null ? specW : shape.props.w
+      mh = spec.h != null ? spec.h : shape.props.h
+
+      const needsMove = Math.abs(shape.x - mx) >= 0.5 || Math.abs(shape.y - my) >= 0.5
+      const needsW = spec.mode === 'column' && specW != null && Math.abs(shape.props.w - specW) >= 0.5
+      const needsH = spec.mode === 'row'    && spec.h != null && Math.abs(shape.props.h - spec.h) >= 0.5
+
+      if (needsMove || needsW || needsH) {
+        const patch = { id: shapeId, type: shape.type }
+        if (needsMove) { patch.x = mx; patch.y = my }
+        if (needsW || needsH) patch.props = { ...(needsW ? { w: specW } : {}), ...(needsH ? { h: spec.h } : {}) }
+        applyRemote(() => editor.updateShape(patch))
+        const report = { type: 'layout', id: m.id }
+        if (needsMove) { report.x = mx; report.y = my }
+        if (needsW) report.w = specW
+        if (needsH) report.h = spec.h
+        reports.push(report)
+      }
+    } else if (m.kind === 'container') {
+      const size = repackContainer(m.key, mx, my)
+      mw = size.w
+      mh = size.h
+    }
+
+    if (spec.mode === 'column') {
+      cy += mh + spec.gap
+      crossSize = Math.max(crossSize, mw)
+    } else {
+      cx += mw + spec.gap
+      crossSize = Math.max(crossSize, mh)
+    }
+  }
+
+  for (const r of reports) sendRaw(r)
+
+  // Remove the trailing gap added after the last child to get the true extent.
+  const mainSize = spec.mode === 'column'
+    ? Math.max(0, cy - y0 - spec.gap)
+    : Math.max(0, cx - x0 - spec.gap)
+
+  return spec.mode === 'column'
+    ? { w: specW ?? crossSize, h: spec.h ?? mainSize }
+    : { w: specW ?? mainSize, h: spec.h ?? crossSize }
+}
+
+// Called when a panel's size settles. Finds the root container and repacks.
+function autoRepackForPanel(panelId) {
+  const key = panelToContainer.get(panelId)
+  if (!key) return
+  repackContainer(getRootContainerKey(key))
 }
 
 // component id <-> tldraw shape id helpers.
@@ -604,6 +745,8 @@ function handle(msg) {
     reorderComponent(msg.id, msg.op)
   } else if (msg.type === 'remove') {
     removeComponent(msg.id)
+  } else if (msg.type === 'container_sync') {
+    syncContainer(msg)            // Container: register/update for auto-repack
   } else if (msg.type === 'reflow') {
     reflowGroup(msg)              // column.refit(): manual re-pack of a flow group
   } else if (msg.type === 'get_snapshot') {
@@ -1726,7 +1869,8 @@ function fitFromIframe(sourceWin, fit) {
   sendRaw(report)
   // The panel's footprint changed — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
-  settleArmedReflows(fit.id) // and re-pack a column.refit() group waiting on it
+  settleArmedReflows(fit.id)    // re-pack a column.refit() group waiting on it
+  autoRepackForPanel(fit.id)    // re-pack any Container tree this panel is in
 }
 
 // Content-fit for native panels (the React `h="auto"` / `w="auto"` path). The
@@ -1763,7 +1907,8 @@ export function fitNative(componentId, hostEl, fit) {
   sendRaw(report)
   // The panel grew/shrank — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
-  settleArmedReflows(componentId) // and a column.refit() group waiting on it
+  settleArmedReflows(componentId)    // re-pack a column.refit() group waiting on it
+  autoRepackForPanel(componentId)    // re-pack any Container tree this panel is in
 }
 
 // Global helper available on the top-level page (non-iframe Custom usage).

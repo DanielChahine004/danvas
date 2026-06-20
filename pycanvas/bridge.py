@@ -188,6 +188,13 @@ class Bridge:
         # column's latest reflow supersedes its previous one. Replayed on connect
         # so auto-height panels stay correctly stacked for every joining client.
         self._reflows = {}  # container key -> reflow message
+        # Container tree registrations (from canvas.column/row/container).
+        # Keyed by container key; replayed on connect so the frontend's
+        # auto-repack is armed for every joining client.
+        self._containers = {}   # key -> container_sync message
+        # Maps component id -> Container object so _dispatch_layout can notify
+        # the owning container when a panel's height changes.
+        self._panel_in_container = {}  # comp_id -> Container
         # Optional callback fired (no args) whenever canvas state the user can
         # mutate from the browser changes -- a panel moved/resized (``layout``)
         # or a free-form drawing edited (``draw``). serve(persist=...) sets this
@@ -438,6 +445,16 @@ class Bridge:
         for tok in [t for t, c in self._uploads.items()
                     if getattr(c, "id", None) == component_id]:
             self._uploads.pop(tok, None)
+        # If the panel belonged to a Container, remove it and repack.
+        container = self._panel_in_container.pop(component_id, None)
+        if container is not None:
+            container._children = [
+                c for c in container._children
+                if not (hasattr(c, "id") and c.id == component_id)
+            ]
+            root = container._root()
+            if root._x is not None and root._y is not None:
+                root._sync()
         self.broadcast({"type": "remove", "id": component_id})
 
     def reorder_component(self, component_id, op):
@@ -524,6 +541,15 @@ class Bridge:
         so only the most-recent layout for each container is replayed.
         """
         self._reflows[msg["key"]] = msg
+
+    def store_container(self, msg):
+        """Persist a container_sync message so connecting clients receive it on join.
+
+        Keyed by container key so a later :meth:`~_layout.Container.reflow`
+        replaces the earlier registration with the updated member list and
+        positions.
+        """
+        self._containers[msg["key"]] = msg
 
     def set_loop(self, loop):
         self._loop = loop
@@ -697,6 +723,11 @@ class Bridge:
             # real browser-measured heights for every joining client.
             for reflow in self._reflows.values():
                 await self._send(ws, reflow)
+            # Replay container registrations so the frontend's auto-repack is
+            # armed for every joining client (child containers before parents,
+            # matching the order store_container receives them).
+            for container_msg in self._containers.values():
+                await self._send(ws, container_msg)
             # Replay current graveyard list so a freshly connected client sees
             # panels deleted before it joined.
             if self._graveyarded:
@@ -1216,6 +1247,17 @@ class Bridge:
                 if il is not None:
                     il["h"] = comp.h
             self._cascade_height(comp, dh)
+            # If the panel lives in a Container, repack the whole tree from the
+            # root so siblings (e.g. a status bar below a growing log) shift
+            # automatically.  This is a reliable Python-side fallback: the
+            # browser's autoRepackForPanel handles the same case, but the
+            # Python path guarantees correctness even on reconnect when the
+            # frontend's panelToContainer index hasn't been seeded yet.
+            container = self._panel_in_container.get(comp.id)
+            if container is not None:
+                root = container._root()
+                if root._x is not None and root._y is not None:
+                    root._sync()
         self._notify_mutation()
 
     def _cascade_height(self, comp, dh):

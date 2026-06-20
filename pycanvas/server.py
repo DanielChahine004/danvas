@@ -518,15 +518,32 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     return app
 
 
+def _make_server_socket(host, port):
+    """Pre-bind a TCP socket with SO_REUSEADDR and hand it to uvicorn.
+
+    uvicorn skips SO_REUSEADDR on Windows (its POSIX semantics — reuse a
+    TIME_WAIT port — are unsafe there), so after Ctrl+C the port stays busy
+    for up to two minutes.  Creating the socket ourselves and passing it via
+    ``sockets=`` bypasses uvicorn's socket creation and fixes the problem
+    on all platforms.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.set_inheritable(True)
+    return sock
+
+
 def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
         passwords=None, compress=False):
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning",
-                            **_ws_opts(compress))
+    sock = _make_server_socket(host, port)
+    config = uvicorn.Config(app, log_level="warning", **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
-    server.run()  # blocks until Ctrl+C / shutdown
+    server.run(sockets=[sock])  # blocks until Ctrl+C / shutdown
 
 
 def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
@@ -539,10 +556,11 @@ def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
     """
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning",
-                            **_ws_opts(compress))
+    sock = _make_server_socket(host, port)
+    config = uvicorn.Config(app, log_level="warning", **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]},
+                              daemon=True)
     thread.start()
     return server

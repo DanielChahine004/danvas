@@ -20,7 +20,7 @@ def test_column_stacks_by_natural_height():
     canvas = pycanvas.Canvas()
     # A label is 84 tall by default, a button 84, a slider 96 — the column keeps
     # each panel's own height and advances the cursor by it (not a uniform slot).
-    with canvas.column(width=320, gap=10, origin=(40, 40)):
+    with canvas.column(x=40, y=40, w=320, gap=10):
         a = canvas.label("a")              # default_h 84
         b = canvas.button("b")             # default_h 84
         c = canvas.slider("c")             # default_h 96
@@ -32,14 +32,14 @@ def test_column_stacks_by_natural_height():
 
 def test_column_width_none_keeps_each_panels_own_width():
     canvas = pycanvas.Canvas()
-    with canvas.column(gap=10, origin=(0, 0)):
+    with canvas.column(x=0, y=0, gap=10):
         a = canvas.label("a")              # default_w 240
     assert a.w == 240
 
 
 def test_row_flows_by_natural_width():
     canvas = pycanvas.Canvas()
-    with canvas.row(height=50, gap=10, origin=(0, 0)):
+    with canvas.row(x=0, y=0, h=50, gap=10):
         a = canvas.label("a")              # default_w 240
         b = canvas.label("b")
     assert [p.y for p in (a, b)] == [0, 0]
@@ -82,35 +82,6 @@ def test_layout_stack_unwinds_after_block():
     assert loose.x is None and loose.y is None
 
 
-def test_role_scoped_column_writes_overlay_not_base():
-    canvas = pycanvas.Canvas()
-    with canvas.column(roles="admin", gap=10, origin=(100, 100)):
-        a = canvas.label("a", w=200, h=50)
-        b = canvas.label("b", w=200, h=50)
-    reg = canvas._bridge.register_message
-    # admins replay the column positions...
-    ra, rb = reg(a, role="admin"), reg(b, role="admin")
-    assert (ra["x"], ra["y"]) == (100, 100)
-    assert (rb["x"], rb["y"]) == (100, 160)        # stacked: 50 + gap
-    # ...but the shared base is left unset, so other roles auto-cascade.
-    base = reg(a, role="other")
-    assert "x" not in base and "y" not in base
-    assert a.x is None and a.y is None             # no Python-side base position
-
-
-def test_role_scoped_row_is_isolated_per_role():
-    canvas = pycanvas.Canvas()
-    with canvas.row(roles="viewer", gap=10, origin=(0, 0)):
-        p = canvas.label("p", w=80, h=40)
-        q = canvas.label("q", w=80, h=40)
-    reg = canvas._bridge.register_message
-    rp, rq = reg(p, role="viewer"), reg(q, role="viewer")
-    assert (rp["x"], rp["y"]) == (0, 0)
-    assert (rq["x"], rq["y"]) == (90, 0)           # beside: 80 + gap
-    # A different role sees no position from this viewer-scoped row.
-    assert "x" not in reg(p, role="admin")
-
-
 def test_auto_height_panel_keeps_fitting_in_a_grid():
     canvas = pycanvas.Canvas()
     with canvas.grid(cols=2, slot=(300, 200), gap=10, origin=(0, 0)):
@@ -142,52 +113,54 @@ def test_label_default_auto_height_yields_to_grid_slot():
 
 
 def _capture_broadcast(canvas):
-    """Record every frame the bridge would broadcast (the wire is inert in tests,
-    so a shared column/row refit's reflow request only shows up here)."""
+    """Record every frame the bridge would broadcast."""
     sent = []
+    orig = canvas._bridge.broadcast
     canvas._bridge.broadcast = lambda msg, **kw: sent.append(msg)
     return sent
 
 
-def test_shared_column_refit_requests_a_browser_reflow():
-    # A shared column packs in the browser, where the panels' real measured sizes
-    # live — Python just sends the ordered group + origin/gap; the browser does
-    # the placement (and re-runs it once a pending content-fit settles).
+def test_column_reflow_broadcasts_container_sync():
     canvas = pycanvas.Canvas()
-    with canvas.column(width=200, gap=10, origin=(40, 40)) as col:
+    with canvas.column(x=40, y=40, w=200, gap=10) as col:
         a = canvas.label("a", h=50)
         b = canvas.label("b", h=50)
         c = canvas.label("c", h=50)
     sent = _capture_broadcast(canvas)
-    col.refit()
-    assert len(sent) == 1
-    m = sent[0]
-    assert m["type"] == "reflow" and m["kind"] == "column"
-    assert m["ids"] == [a.id, b.id, c.id]            # insertion order = pack order
+    col.reflow()
+    syncs = [m for m in sent if m.get("type") == "container_sync"]
+    assert len(syncs) == 1
+    m = syncs[0]
+    assert m["mode"] == "column"
+    assert [mem["id"] for mem in m["members"]] == [a.id, b.id, c.id]
     assert (m["x0"], m["y0"], m["gap"]) == (40, 40, 10)
 
 
-def test_shared_row_refit_requests_a_row_reflow():
+def test_row_reflow_broadcasts_container_sync():
     canvas = pycanvas.Canvas()
-    with canvas.row(height=50, gap=10, origin=(0, 0)) as r:
+    with canvas.row(x=0, y=0, h=50, gap=10) as r:
         a = canvas.label("a", w=80)
         b = canvas.label("b", w=80)
     sent = _capture_broadcast(canvas)
-    r.refit()
-    assert sent[0]["kind"] == "row"
-    assert sent[0]["ids"] == [a.id, b.id]
+    r.reflow()
+    syncs = [m for m in sent if m.get("type") == "container_sync"]
+    assert syncs[0]["mode"] == "row"
+    assert [mem["id"] for mem in syncs[0]["members"]] == [a.id, b.id]
 
 
-def test_shared_refit_excludes_panels_removed_since_insert():
+def test_reflow_after_container_remove_excludes_panel():
+    # col.remove() is the right way to drop a panel from a container.
+    # After removal the container_sync message no longer lists it.
     canvas = pycanvas.Canvas()
-    with canvas.column(gap=10, origin=(0, 0)) as col:
+    with canvas.column(x=0, y=0, gap=10) as col:
         a = canvas.label("a")
         b = canvas.label("b")
         c = canvas.label("c")
-    canvas.remove(b)
+    col.remove(b)
     sent = _capture_broadcast(canvas)
-    col.refit()
-    assert sent[0]["ids"] == [a.id, c.id]            # the gone panel drops out
+    col.reflow()
+    syncs = [m for m in sent if m.get("type") == "container_sync"]
+    assert [mem["id"] for mem in syncs[0]["members"]] == [a.id, c.id]
 
 
 def test_grid_refit_repacks_locally_by_slot():
@@ -205,17 +178,16 @@ def test_grid_refit_repacks_locally_by_slot():
     assert (c.x, c.y) == (0, 60)
 
 
-def test_role_scoped_column_refit_rewrites_the_overlay():
-    # A per-viewer-scoped column can't be expressed as a shared reflow, so it
-    # re-packs locally from the panels' base sizes, re-emitting the role overlay.
+def test_nested_container_places_children_correctly():
+    # A row nested inside a column: the row's children are placed relative to
+    # where the column cursor lands, not the column's own origin.
     canvas = pycanvas.Canvas()
-    with canvas.column(roles="admin", gap=10, origin=(100, 100)) as col:
-        a = canvas.label("a", w=200, h=50)
-        b = canvas.label("b", w=200, h=50)
-    a.set_layout(h=120)
-    col.refit()
-    reg = canvas._bridge.register_message
-    rb = reg(b, role="admin")
-    assert (rb["x"], rb["y"]) == (100, 100 + 120 + 10)   # admin overlay re-packed
-    # The shared base stays unset — refit kept the scoping.
-    assert b.y is None
+    col = canvas.column(x=0, y=0, gap=10)
+    col.add(canvas.label("top", h=40))        # top: y=0..40
+    row = col.row(gap=8)                       # row starts at y=50
+    row.add(canvas.label("r1", w=100, h=30))
+    row.add(canvas.label("r2", w=100, h=30))
+    r1 = canvas["r1"]
+    r2 = canvas["r2"]
+    assert (r1.x, r1.y) == (0, 50)
+    assert (r2.x, r2.y) == (108, 50)          # 100 + gap 8
