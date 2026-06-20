@@ -594,7 +594,7 @@ bridge handle:
 | `setView({x, y, zoom})` | pan/zoom the canvas (any subset of keys) |
 | `chat` | shared room: `send`, `setName`, `history`, `subscribe`, `identity` |
 
-- `push_binary(bytes)` → `onFrame` as a zero-copy `ArrayBuffer`.
+- `push_binary(bytes)` → `onFrame` as a zero-copy `ArrayBuffer`. Pass `queue="latest"` on the panel for video/sensor streams. React panels can receive binary from Python but cannot send binary back — use a `Custom` panel for browser → Python binary.
 - `scope=["d3"]` loads ESM libs from a CDN, exposed as the `libs` global.
   Friendly names (`d3`, `lodash`, `date-fns`, `framer-motion`, `lucide`) map to
   pinned React-externalised builds; anything else passes through to esm.sh.
@@ -651,18 +651,28 @@ def handle(msg):
   `panel.push(data)` streams without reloading (keeps focus/scroll/listeners).
 - `panel.push_binary(bytes)` streams raw bytes on a binary frame (no JSON/base64,
   same fast path as video); `canvas.onPush` receives an `ArrayBuffer`. Honours
-  `queue=`.
+  `queue=`; pass `queue="latest"` to drop stale frames under backpressure —
+  right for video feeds and high-rate sensor streams where only the newest
+  value matters.
 - **`canvas.sendBinary(buf)`** — the upward twin: transfers an `ArrayBuffer` from
   the iframe to Python with zero JSON/base64 overhead. Python receives the raw
-  bytes with `@panel.on_binary`:
+  bytes with `@panel.on_binary`. Mark the handler `threaded=True` if it does
+  any compute (decoding, ML inference) — binary handlers run on the shared
+  dispatch thread by default, so a slow one stalls all other panel events:
 
   ```python
-  @panel.on_binary
+  @panel.on_binary(threaded=True)
   def got(data: bytes, viewer):
       frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+      feed.update(frame)   # update() is thread-safe; no lock needed
   ```
 
-  Accepts `threaded=True` like every other handler.
+  > **Custom panels only.** `sendBinary` and `requestCamera`/`requestMicrophone`
+  > are only available inside a `Custom` (sandboxed-iframe) panel's JS, because
+  > they need direct socket access that the React subtree doesn't expose.
+  > React panels can *receive* binary from Python via `push_binary` → `onFrame`,
+  > but cannot send binary back up. Use a `Custom` panel when you need
+  > browser → Python binary.
 
 - **`canvas.requestCamera(opts)`** / **`canvas.releaseCamera()`** — capture
   the webcam from the **parent page** (browsers block `getUserMedia` inside a
