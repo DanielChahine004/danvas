@@ -888,7 +888,9 @@ with canvas.grid(cols=2, slot=(560, 300), gap=24, x=40, y=40):
 
 When an `h="auto"` panel grows, the container repacks automatically — siblings
 shift to close the gap without any manual call. `container.move(x, y)` repositions
-the whole tree live.
+the whole tree live. To insert a panel between existing ones, use
+`container.insert_before(ref, panel)` or `container.insert_after(ref, panel)`,
+where `ref` is any panel already in that container.
 
 **Streamlit mode** — `canvas.streamlit()` sets vertical-scroll navigation and
 returns a full-viewport-width column. Every child spans the browser window and
