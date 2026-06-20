@@ -505,6 +505,25 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
         bridge.deliver_upload(comp, info, viewer=identity)
         return {"ok": True, "name": info["name"], "size": info["size"]}
 
+    # Internal endpoint used by the hot-reload monitor for partial React source
+    # updates. Only accessible from loopback — the monitor is always local.
+    @app.post("/__hot_source__")
+    async def hot_source(request: Request):
+        if request.client.host not in ("127.0.0.1", "::1"):
+            return PlainTextResponse("forbidden", status_code=403)
+        body = await request.json()
+        name = body.get("name")
+        source = body.get("source")
+        comp = next(
+            (c for c in bridge._components.values()
+             if getattr(c, "name", None) == name and hasattr(c, "set_source")),
+            None,
+        )
+        if comp is None:
+            return {"ok": False, "error": f"no React component named {name!r}"}
+        comp.set_source(source)
+        return {"ok": True}
+
     # Any other WebSocket path would otherwise fall through to the StaticFiles
     # mount, which only handles HTTP and raises AssertionError. Reject cleanly.
     @app.websocket("/{path:path}")

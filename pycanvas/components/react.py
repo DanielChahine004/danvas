@@ -422,6 +422,7 @@ class React(_EventRouter, BaseComponent):
 
     def set_source(self, source):
         """Replace the component's JSX source and recompile it, live."""
+        source = self._normalise(source)
         self._source = source
         self._send_update({"source": source})
 
