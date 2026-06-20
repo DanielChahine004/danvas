@@ -94,6 +94,8 @@ class React(_EventRouter, BaseComponent):
             source = self.compose(jsx, css or "")
         elif css:
             self._css = css
+        if source is not None:
+            source = self._normalise(source)
         self._source = source or ""
         # Optional third-party libraries to make available to the component as
         # the ``libs`` global. Each name is loaded as ESM from a CDN in the
@@ -227,48 +229,80 @@ class React(_EventRouter, BaseComponent):
         """
 
     @staticmethod
-    def from_uiverse(raw_code):
-        """Convert a uiverse.io React snippet (styled-components) to panel source.
+    def _normalise(source):
+        """Normalise any pasted React snippet to the ``function Component`` form.
 
-        uiverse exports React widgets as a component wrapped in a
-        ``styled-components`` ``StyledWrapper``. styled-components needs an npm
-        build, which the in-browser Sucrase pipeline doesn't have — so this
-        rewrites the snippet into plain React + a ``<style>`` tag:
+        Passes through unchanged if the source has no ``import``/``export``
+        lines — i.e. it is already in the panel-ready format.  Otherwise:
 
-        * each ``const X = styled.tag`...``` definition is removed and its CSS
-          collected (the panel relies on native CSS nesting, supported by all
-          current browsers, since styled-components CSS is nested);
-        * ``<X>``/``</X>`` usages of those styled components become plain
-          ``<div className="pc-uiverse">`` wrappers carrying the collected CSS;
-        * imports / ``export default`` are stripped and the remaining component
-          is re-exported as the ``Component`` the panel expects.
+        * named React imports (useState, useEffect, …) are re-emitted as
+          ``const { … } = React;`` (the runtime exposes ``React`` globally but
+          not its named exports);
+        * ``styled-components`` definitions are converted to a scoped
+          ``<style>`` tag (styled-components requires a bundler; the in-browser
+          Sucrase pipeline does not have one);
+        * ``@keyframes`` / ``@font-face`` blocks are hoisted outside the CSS
+          scope wrapper (they are invalid when nested inside a selector);
+        * all ``import`` / ``export default`` lines are stripped;
+        * the component is renamed and wrapped as
+          ``function Component({ canvas, props, value })``.
 
-        Returns source ready for ``React(source=...)`` / ``canvas.react(...)``.
+        This is called automatically by ``__init__`` so any React snippet can
+        be passed directly to ``canvas.react(source=...)``.
         """
-        # Collect every styled-components definition: its name and its CSS.
+        if not re.search(r"^\s*(?:import|export)\b", source, re.MULTILINE):
+            return source  # already panel-ready, pass through
+
+        # styled-components: collect names and CSS before any stripping.
         styled_re = re.compile(r"const\s+(\w+)\s*=\s*styled\.\w+`([\s\S]*?)`;?")
-        styled = {m.group(1): m.group(2) for m in styled_re.finditer(raw_code)}
+        styled = {m.group(1): m.group(2) for m in styled_re.finditer(source)}
         css = "\n".join(styled.values())
 
-        # The exported name is the component to mount; fall back to the first
-        # non-styled `const Name =` definition.
-        export_match = re.search(r"export\s+default\s+(\w+)", raw_code)
-        if export_match:
-            original_name = export_match.group(1)
+        # Exported component name; fall back to first non-styled const.
+        export_m = re.search(r"export\s+default\s+(\w+)", source)
+        if export_m:
+            original_name = export_m.group(1)
         else:
-            names = [m.group(1)
-                     for m in re.finditer(r"const\s+(\w+)\s*=", raw_code)
+            names = [m.group(1) for m in re.finditer(r"const\s+(\w+)\s*=", source)
                      if m.group(1) not in styled]
-            original_name = names[0] if names else "UiverseComponent"
+            original_name = names[0] if names else "SnippetComponent"
 
-        clean = styled_re.sub("", raw_code)
+        # Rescue named React imports before stripping.
+        react_named = []
+        for line in source.splitlines():
+            m = re.match(r"\s*import\s+React\s*,\s*\{([^}]+)\}\s+from\s+['\"]react['\"]", line)
+            if not m:
+                m = re.match(r"\s*import\s+\{([^}]+)\}\s+from\s+['\"]react['\"]", line)
+            if m:
+                react_named = [h.strip() for h in m.group(1).split(",")]
+                break
+
+        clean = styled_re.sub("", source)
         clean = re.sub(r"^\s*import\b.*$", "", clean, flags=re.MULTILINE)
+        if react_named:
+            clean = f"const {{ {', '.join(react_named)} }} = React;\n" + clean
         clean = re.sub(r"^\s*export\s+default\b.*$", "", clean, flags=re.MULTILINE)
-        # Styled tags become plain divs; the class on the outer wrapper below
-        # scopes the collected CSS to this panel.
+
         for name in styled:
             clean = re.sub(rf"<{name}(\s|>)", r"<div\1", clean)
             clean = clean.replace(f"</{name}>", "</div>")
+
+        # @keyframes / @font-face cannot be nested inside a selector — hoist.
+        atrule_re = re.compile(
+            r'@(?:keyframes|font-face)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', re.DOTALL)
+        top_rules = "\n".join(atrule_re.findall(css))
+        scoped_css = atrule_re.sub("", css)
+
+        if css.strip():
+            inner = f"""<style>{{`
+                        {top_rules}
+                        .pc-uiverse {{ {scoped_css} }}
+                    `}}</style>
+                    <div className="pc-uiverse">
+                        <{original_name} {{...props}} />
+                    </div>"""
+        else:
+            inner = f"<{original_name} {{...props}} />"
 
         return f"""
         {clean}
@@ -276,12 +310,7 @@ class React(_EventRouter, BaseComponent):
         function Component({{ canvas, props, value }}) {{
             return (
                 <>
-                    <style>{{`
-                        .pc-uiverse {{ {css} }}
-                    `}}</style>
-                    <div className="pc-uiverse">
-                        <{original_name} {{...props}} />
-                    </div>
+                    {inner}
                 </>
             );
         }}

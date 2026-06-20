@@ -600,8 +600,9 @@ bridge handle:
 - `scope=["d3"]` loads ESM libs from a CDN, exposed as the `libs` global.
   Friendly names (`d3`, `lodash`, `date-fns`, `framer-motion`, `lucide`) map to
   pinned React-externalised builds; anything else passes through to esm.sh.
-- `React.from_uiverse(raw)` rewrites a `styled-components` snippet into plain
-  React + CSS the in-browser pipeline accepts.
+- `source=` accepts any React snippet pasted from the web — `import`/`export`
+  lines, `styled-components`, `@keyframes`, and React hooks are all normalised
+  automatically before reaching the browser.
 - React panels **auto-height by default** (fit their content); pass a numeric `h`
   to pin one. `w="auto"` opts into content-width too.
 
