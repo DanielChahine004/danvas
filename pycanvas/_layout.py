@@ -122,13 +122,7 @@ class Container:
             root._sync()
         return child
 
-    def insert(self, index, child):
-        """Insert a panel or nested container at position ``index``. Returns the child.
-
-        Like :meth:`add` but at an arbitrary position instead of the end.
-        Negative indices count from the back (same as :meth:`list.insert`).
-        Repacks and broadcasts immediately.
-        """
+    def _insert_at(self, index, child):
         if isinstance(child, Container):
             if child._parent is not None:
                 raise ValueError(
@@ -146,6 +140,22 @@ class Container:
         if root._x is not None and root._y is not None:
             root._sync()
         return child
+
+    def insert_before(self, ref, child):
+        """Insert ``child`` immediately before ``ref`` in this container. Returns ``child``.
+
+        ``ref`` must already be a direct member of this container.
+        Repacks and broadcasts immediately.
+        """
+        return self._insert_at(self._children.index(ref), child)
+
+    def insert_after(self, ref, child):
+        """Insert ``child`` immediately after ``ref`` in this container. Returns ``child``.
+
+        ``ref`` must already be a direct member of this container.
+        Repacks and broadcasts immediately.
+        """
+        return self._insert_at(self._children.index(ref) + 1, child)
 
     def remove(self, child):
         """Remove a child panel or container from this container. Returns ``self``."""
