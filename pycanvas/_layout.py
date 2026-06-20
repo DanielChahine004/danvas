@@ -122,6 +122,31 @@ class Container:
             root._sync()
         return child
 
+    def insert(self, index, child):
+        """Insert a panel or nested container at position ``index``. Returns the child.
+
+        Like :meth:`add` but at an arbitrary position instead of the end.
+        Negative indices count from the back (same as :meth:`list.insert`).
+        Repacks and broadcasts immediately.
+        """
+        if isinstance(child, Container):
+            if child._parent is not None:
+                raise ValueError(
+                    "this container already belongs to another container; "
+                    "remove it first before re-parenting")
+            child._parent = self
+        self._children.insert(index, child)
+        bridge = getattr(self._canvas, "_bridge", None)
+        if bridge is not None:
+            if isinstance(child, Container):
+                child._index_panels(bridge)
+            else:
+                bridge._panel_in_container[child.id] = self
+        root = self._root()
+        if root._x is not None and root._y is not None:
+            root._sync()
+        return child
+
     def remove(self, child):
         """Remove a child panel or container from this container. Returns ``self``."""
         try:

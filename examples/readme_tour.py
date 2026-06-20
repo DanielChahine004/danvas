@@ -197,6 +197,11 @@ col.add(canvas.label("fl_label",
                       "✦  No card border, no title bar — just content floating on the canvas.",
                       frame=False, grabbable=False))
 
+col.add(canvas.markdown("""## React panels
+`canvas.react(source=...)` compiles your JSX in-browser — no npm, inherits the canvas theme.
+`canvas.send({...})` posts up to Python; `panel.push(data)` sends down as the `value` prop.
+""", name="react_hdr"))
+
 # Uiverse radio-button widget converted from styled-components → plain React
 _radio_raw = """
 import React, { useState } from 'react';
@@ -819,12 +824,6 @@ export default Loader;
 col.add(canvas.react(source=_earth_raw, name="earth_loader",
                      label="Uiverse earth loader (frame=False)",
                      h=160, frame=False, grabbable=False))
-
-# --- React panels ---
-col.add(canvas.markdown("""## React panels
-`canvas.react(source=...)` compiles your JSX in-browser — no npm, inherits the canvas theme.
-`canvas.send({...})` posts up to Python; `panel.push(data)` sends down as the `value` prop.
-""", name="react_hdr"))
 
 _count = 0
 counter_panel = col.add(canvas.react(
