@@ -1846,20 +1846,30 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             # Spawn a *clean* monitor subprocess that never ran user code, so
             # user-launched daemon threads (camera, sensor, etc.) don't leak into
             # the monitor and double-grab resources alongside the worker.
-            # The original process exits immediately via os._exit so its daemon
-            # threads die with it; the monitor subprocess owns file-watching and
-            # worker restarts from here on.
+            # The original process stays alive blocking on the monitor so that
+            # it remains the terminal's foreground job — Ctrl+C then reaches it
+            # (and, via the shared console, the monitor and worker too) rather
+            # than being swallowed by the shell after os._exit would have returned
+            # the prompt with the server still running in the background.
             import secrets as _secrets, subprocess as _subprocess
             env = {**os.environ}
             env.setdefault("_PYCANVAS_RELOAD_SECRET", _secrets.token_urlsafe(32))
-            _subprocess.Popen(
+            _mon = _subprocess.Popen(
                 [sys.executable, "-m", "pycanvas._hotreload_monitor",
                  main_file, str(port),
                  str(int(bool(tunnel))),
                  str(tunnel_provider or "cloudflared")],
                 env=env,
             )
-            os._exit(0)
+            try:
+                _mon.wait()
+            except KeyboardInterrupt:
+                _mon.terminate()
+                try:
+                    _mon.wait(timeout=5)
+                except _subprocess.TimeoutExpired:
+                    _mon.kill()
+            sys.exit(0)
         if os.environ.get("_PYCANVAS_RELOAD_RESTART") == "1":
             # Already opened on first launch; a reload reuses the existing tab
             # (the frontend reconnects its websocket) instead of popping another.
