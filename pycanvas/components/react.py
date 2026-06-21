@@ -402,7 +402,7 @@ class React(_EventRouter, BaseComponent):
         th = _theme.derive(value) if value is not None else {}
         fc = _theme.accent_hex(value) if value is not None else None
         self._frame_color = fc
-        self.update(_th=th)
+        React.update(self, _th=th)
         self.set_layout(frame_color=fc)
 
     def push(self, data):
