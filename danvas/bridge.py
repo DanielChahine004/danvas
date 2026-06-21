@@ -708,22 +708,26 @@ class Bridge:
             for entry in self._chat_history:
                 await self._send(ws, entry)
             # Replay full state to the freshly connected client, filtered by role.
+            # Encode each frame once as text (using _send_text) rather than
+            # letting _send re-encode the same dict per viewer when multiple
+            # clients connect concurrently. Per-viewer overlays still rebuild
+            # the register message but encode it once for this viewer.
             for comp in self._components.values():
                 roles = getattr(comp, "_roles", [])
                 if roles and role not in roles:
                     continue  # this panel is not visible to this role
-                await self._send(ws, self.register_message(
-                    comp, role=role, client_id=viewer["id"]))
+                await self._send_text(ws, _dumps(self.register_message(
+                    comp, role=role, client_id=viewer["id"])))
                 state = comp.state_payload()
                 if state:
-                    await self._send(
-                        ws, {"type": "update", "id": comp.id, "payload": state}
+                    await self._send_text(
+                        ws, _dumps({"type": "update", "id": comp.id, "payload": state})
                     )
                 lock_for = getattr(comp, "_lock_for", [])
                 if lock_for and role in lock_for:
-                    await self._send(
-                        ws, {"type": "update", "id": comp.id,
-                             "payload": {"operable": False}}
+                    await self._send_text(
+                        ws, _dumps({"type": "update", "id": comp.id,
+                                    "payload": {"operable": False}})
                     )
             # Arrows bind to panels, so replay them after every panel exists.
             for arrow in self._arrows.values():
