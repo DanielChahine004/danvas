@@ -1,9 +1,9 @@
 """Component factory methods for :class:`~danvas.canvas.Canvas`
-(``canvas.slider`` / ``button`` / ``react`` / â€¦).
+(``canvas.slider`` / ``button`` / ``react`` / …).
 
 Split out of canvas.py: each is a thin wrapper that builds a component and hands
 it to ``Canvas.insert`` via ``_make``. Mixed into Canvas as :class:`_FactoryMixin`,
-so the methods run on the real Canvas instance â€” ``self.insert`` /
+so the methods run on the real Canvas instance — ``self.insert`` /
 ``self._auto_name`` / ``self._show_seq`` resolve there.
 """
 
@@ -102,7 +102,7 @@ class _FactoryMixin:
         """Insert a :class:`~danvas.Custom`. See :meth:`insert` for ``place``.
 
         ``html``/``css``/``js`` may be given as separate strings (e.g. pasted
-        from uiverse.io) â€” they are composed into one document under the hood.
+        from uiverse.io) — they are composed into one document under the hood.
         Size the panel with ``w``/``h`` in ``place``.
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
@@ -112,7 +112,7 @@ class _FactoryMixin:
                  **place: Unpack[Place]):
         """Insert a :class:`~danvas.Download` button. See :meth:`insert` for ``place``.
 
-        Clicking it downloads ``source`` â€” a file path or ``bytes`` â€” to the
+        Clicking it downloads ``source`` — a file path or ``bytes`` — to the
         viewer's machine. For content generated fresh on each click, omit
         ``source`` and register a provider with ``@download.provide``.
         ``filename`` sets the saved name (otherwise a path's basename, or the
@@ -131,7 +131,7 @@ class _FactoryMixin:
         (``file.data``); pass ``dest=`` a directory to stream each upload to disk
         instead (``file.path``), which keeps memory flat for large files.
         ``accept`` filters the picker (e.g. ``".csv"``), ``multiple=True`` allows
-        several at once, and ``max_size`` (bytes) rejects oversized uploads â€” set
+        several at once, and ``max_size`` (bytes) rejects oversized uploads — set
         it on any public/tunneled canvas.
         """
         return self._make(Upload, name, text=text, label=label, dest=dest,
@@ -151,20 +151,20 @@ class _FactoryMixin:
 
     def react(self, source=None, path=None, jsx=None, css=None, css_path=None,
               name="react", label=None, props=None, scope=None, **place: Unpack[Place]):
-        """Insert a :class:`~danvas.React` panel â€” the workhorse for custom UI.
+        """Insert a :class:`~danvas.React` panel — the workhorse for custom UI.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
         file with ``path=``); alternatively pass just ``jsx`` markup plus optional
         ``css`` and the Component wrapper is added under the hood. ``css`` also
         works with ``source=`` (it rides as a ``<style>`` the host renders), so a
-        full component can keep its styles in a separate string â€” or load it from a
+        full component can keep its styles in a separate string — or load it from a
         file with ``css_path=`` (the ``css`` twin of ``path=``), so a panel keeps
         both halves in sibling files. Use :meth:`React.from_uiverse` to convert a
         uiverse.io styled-components snippet. ``props`` is the initial props dict; ``scope`` is third-party
         library names (e.g. ``["d3"]``) loaded as ESM and exposed as ``libs``.
 
         Placement, visibility (``roles`` / ``lock_for``), the lock/chrome flags,
-        and ``queue`` all flow through ``**place`` â€” see :meth:`insert` (and the
+        and ``queue`` all flow through ``**place`` — see :meth:`insert` (and the
         :class:`Place` keys your editor now autocompletes).
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
@@ -204,8 +204,8 @@ class _FactoryMixin:
         """Auto-render any value as the best-fitting panel and insert it.
 
         Picks the component the way a notebook decides how to render an output
-        (DataFrame â†’ table, figure/array â†’ image, Plotly â†’ plot, rich
-        ``_repr_*`` â†’ its HTML, dict/list â†’ JSON, string â†’ label/markdown, else a
+        (DataFrame → table, figure/array → image, Plotly → plot, rich
+        ``_repr_*`` → its HTML, dict/list → JSON, string → label/markdown, else a
         repr label) via :func:`danvas.panel_for`. With no ``name`` a unique one
         is generated; re-using a ``name`` replaces that panel in place. Returns
         the inserted component. See :meth:`insert` for ``place``.
@@ -233,12 +233,12 @@ class _FactoryMixin:
         Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,
         ``smoothing``, ``w``, ``h``, ``label``) and :meth:`insert` placement
         options both go in ``kw``; they don't overlap. ``traces`` only fixes the
-        legend order â€” pushing an unseen key adds a trace on the fly.
+        legend order — pushing an unseen key adds a trace on the fly.
         """
         return self._make(LivePlot, name=name, **kw)
 
     def histogram(self, name="histogram", **kw):
-        """Insert a :class:`~danvas.Histogram` â€” a distribution-over-time panel.
+        """Insert a :class:`~danvas.Histogram` — a distribution-over-time panel.
 
         Constructor kwargs (``bins``, ``mode``, ``value_range``, ``max_steps``,
         ``label``, ``w``, ``h``) and :meth:`insert` placement options both go in
@@ -258,4 +258,3 @@ class _FactoryMixin:
         """Insert an :class:`~danvas.Inspector`. See :meth:`insert` for ``place``."""
         return self._make(Inspector, name=name, refresh=refresh, source=source,
                           namespace=namespace, label=label, **place)
-

@@ -1,13 +1,13 @@
 """Chat: a shared message panel for everyone viewing the canvas.
 
-Unlike the data-driven panels, chat flows *between viewers* â€” the server stamps
+Unlike the data-driven panels, chat flows *between viewers* — the server stamps
 each line with the sender's identity (see :class:`~danvas.bridge.Bridge`) and
 relays it to every browser. This component is just a window onto that shared
 room, so multiple Chat panels (or panels on a merged view) all show the same
 conversation. Viewers edit their own display name right in the panel.
 
 Rendered as a native React panel (mounted by ReactHost): the JSX subscribes to
-the canvas-wide chat channel via ``canvas.chat`` â€” distinct from the per-panel
+the canvas-wide chat channel via ``canvas.chat`` — distinct from the per-panel
 ``canvas.send`` controls use, because the room (identity, history, relay) is
 shared by every viewer, not state of this one panel. The Python side
 (:meth:`post` / :meth:`on_message`) talks to the bridge's chat room directly and
@@ -26,7 +26,7 @@ from .react import React
 # Port of the former native ChatShapeUtil view, driven by ``canvas.chat`` instead
 # of importing the bridge directly. Theme colours come from the canvas ``--pc-*``
 # variables (the panel mounts natively, so they resolve). Written as a plain
-# string so its JSX braces survive â€” nothing is substituted.
+# string so its JSX braces survive — nothing is substituted.
 _CHAT_SOURCE = r"""
 function Component({ canvas }) {
   const chat = canvas.chat;
@@ -84,7 +84,7 @@ function Component({ canvas }) {
       <div ref={listRef} style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {messages.length === 0 ? (
           <div style={{ fontSize: 12, color: "var(--pc-faint2)", fontStyle: "italic", padding: 4 }}>
-            no messages yet â€” say hello
+            no messages yet — say hello
           </div>
         ) : (
           messages.map((m) => (
@@ -108,7 +108,7 @@ function Component({ canvas }) {
           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
           maxLength={24}
           style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
-          title="your display name â€” edit and press Enter" />
+          title="your display name — edit and press Enter" />
       </div>
 
       <div style={{ display: "flex", gap: 6 }}>
@@ -116,7 +116,7 @@ function Component({ canvas }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-          placeholder="messageâ€¦"
+          placeholder="message…"
           style={{ ...fieldStyle, flex: 1, minWidth: 0 }} />
         <button onClick={send} style={{
           padding: "5px 12px", border: "none", borderRadius: 6, fontSize: 13,

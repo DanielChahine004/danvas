@@ -3,35 +3,35 @@
 The native counterpart to :class:`Custom`. Where ``Custom`` renders arbitrary
 HTML in a *sandboxed iframe* (isolated, no theme or bridge access), ``React``
 takes JSX *source* and mounts it as an ordinary React subtree **inside the
-panel** â€” so it inherits the canvas theme, dark mode, and selection chrome, and
+panel** — so it inherits the canvas theme, dark mode, and selection chrome, and
 talks to Python directly with no postMessage hop. The JSX is compiled in the
 browser at runtime (Sucrase, lazily loaded), so users author components from
 Python with no ``npm`` build.
 
 The component must be named ``Component`` and receives three props:
 
-  * ``canvas`` â€” the bridge handle (see below);
-  * ``value``  â€” the latest :meth:`push` data: Python â†’ panel, no reload;
-  * ``props``  â€” the dict from :meth:`update` / the ``props=`` arg: Python â†’ panel,
+  * ``canvas`` — the bridge handle (see below);
+  * ``value``  — the latest :meth:`push` data: Python → panel, no reload;
+  * ``props``  — the dict from :meth:`update` / the ``props=`` arg: Python → panel,
     replayed on reconnect.
 
 The ``canvas`` handle exposes:
 
-  * ``send(data)`` â€” panel â†’ Python, routed to your ``@on`` / ``on_message`` handlers;
-  * ``request(data)`` â€” the **awaitable** twin of ``send``: returns a Promise that
+  * ``send(data)`` — panel → Python, routed to your ``@on`` / ``on_message`` handlers;
+  * ``request(data)`` — the **awaitable** twin of ``send``: returns a Promise that
     resolves with the return value of the matching :meth:`on_request` handler
-    (``const r = await canvas.request({event:'â€¦', â€¦})``);
-  * ``onFrame(cb)`` â€” subscribe (in a ``useEffect``) to the :meth:`push` /
+    (``const r = await canvas.request({event:'…', …})``);
+  * ``onFrame(cb)`` — subscribe (in a ``useEffect``) to the :meth:`push` /
     :meth:`push_binary` stream without re-rendering; ``cb`` gets each value (an
     ``ArrayBuffer`` for binary). Use this *or* the ``value`` prop, not both;
-  * ``viewport(cb)`` â€” ``cb`` is called now and on every camera move with the live
-    ``{ x, y, zoom }`` of the canvas centre (the numbers ``serve(view=â€¦)`` takes);
-  * ``setView({ x, y, zoom })`` â€” the write-twin of ``viewport``: pan/zoom the canvas
+  * ``viewport(cb)`` — ``cb`` is called now and on every camera move with the live
+    ``{ x, y, zoom }`` of the canvas centre (the numbers ``serve(view=…)`` takes);
+  * ``setView({ x, y, zoom })`` — the write-twin of ``viewport``: pan/zoom the canvas
     to centre a point (any subset of the keys; omitted axes stay put);
-  * ``chat`` â€” the canvas-wide shared room: ``send(text)``, ``setName(name)``,
+  * ``chat`` — the canvas-wide shared room: ``send(text)``, ``setName(name)``,
     ``history()``, ``subscribe(cb)`` (returns an unsubscribe), ``identity(cb)``.
 
-``React`` (with hooks) is in scope as ``React``; libraries named in ``scope=[â€¦]`` are
+``React`` (with hooks) is in scope as ``React``; libraries named in ``scope=[…]`` are
 in scope as ``libs`` (e.g. ``const d3 = libs.d3``).
 
     counter = canvas.react('''
@@ -75,7 +75,7 @@ class React(_EventRouter, BaseComponent):
                 source = f.read()
         # Two ways in: ``source`` is a complete component (must define
         # ``function Component``); ``jsx`` is just the markup expression, which
-        # â€” with optional ``css`` â€” is composed into a Component under the hood.
+        # — with optional ``css`` — is composed into a Component under the hood.
         if source is not None and jsx is not None:
             raise ValueError("pass either source= (a full Component) or jsx= "
                              "(markup to be wrapped), not both")
@@ -88,7 +88,7 @@ class React(_EventRouter, BaseComponent):
                 css = f.read()
         # CSS handling: with jsx= the styles are composed into the wrapper; with
         # source= they ride as a `css` prop that ReactHost renders into a <style>
-        # ahead of the component â€” so a full component can keep its styles in a
+        # ahead of the component — so a full component can keep its styles in a
         # separate Python string instead of an inline <style>/`.replace()` hack.
         # Scope rules are the author's own selectors, exactly as an inline tag.
         self._css = ""
@@ -126,8 +126,8 @@ class React(_EventRouter, BaseComponent):
         # Unlike ``_routes`` exactly one handler answers, so it's not a list.
         self._request_routes = {}
         # Auto-height is the default: a React panel fits its rendered content
-        # unless the caller pins a numeric height (``h is None`` â†’ auto-fit; a
-        # number â†’ fixed). Width stays fixed by default (opt in with w="auto").
+        # unless the caller pins a numeric height (``h is None`` → auto-fit; a
+        # number → fixed). Width stays fixed by default (opt in with w="auto").
         # Unlike Custom (which measures inside its iframe), a native React panel is
         # measured by ReactHost, which reports the content size back to resize the
         # shape; the flags ride along in register_props as ``autoH``/``autoW``.
@@ -235,10 +235,10 @@ class React(_EventRouter, BaseComponent):
         """Normalise any pasted React snippet to the ``function Component`` form.
 
         Passes through unchanged if the source has no ``import``/``export``
-        lines â€” i.e. it is already in the panel-ready format.  Otherwise:
+        lines — i.e. it is already in the panel-ready format.  Otherwise:
 
-        * named React imports (useState, useEffect, â€¦) are re-emitted as
-          ``const { â€¦ } = React;`` (the runtime exposes ``React`` globally but
+        * named React imports (useState, useEffect, …) are re-emitted as
+          ``const { … } = React;`` (the runtime exposes ``React`` globally but
           not its named exports);
         * ``styled-components`` definitions are converted to a scoped
           ``<style>`` tag (styled-components requires a bundler; the in-browser
@@ -289,19 +289,19 @@ class React(_EventRouter, BaseComponent):
             clean = re.sub(rf"<{name}(\s|>)", r"<div\1", clean)
             clean = clean.replace(f"</{name}>", "</div>")
 
-        # @keyframes / @font-face cannot be nested inside a selector â€” hoist.
+        # @keyframes / @font-face cannot be nested inside a selector — hoist.
         atrule_re = re.compile(
             r'@(?:keyframes|font-face)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', re.DOTALL)
         top_rules = "\n".join(atrule_re.findall(css))
         scoped_css = atrule_re.sub("", css)
 
-        # Guard: styled imports detected but regex extracted nothing â€” usually
+        # Guard: styled imports detected but regex extracted nothing — usually
         # means the template-literal delimiter was escaped (e.g. \` in Python).
         if re.search(r"import\s+\S+\s+from\s+['\"]styled-components['\"]", source) and not styled:
             print(
                 "[danvas] warning: styled-components import found but no "
-                "styled.tag`...` blocks extracted â€” check for escaped backticks "
-                r"(\` â†’ `) in the source string.",
+                "styled.tag`...` blocks extracted — check for escaped backticks "
+                r"(\` → `) in the source string.",
                 file=sys.stderr,
             )
 
@@ -332,7 +332,7 @@ class React(_EventRouter, BaseComponent):
         if "function Component" not in result:
             print(
                 "[danvas] warning: no 'function Component' found after normalising "
-                "source â€” the panel will show an error. Check the source defines a "
+                "source — the panel will show an error. Check the source defines a "
                 "component and has a matching 'export default'.",
                 file=sys.stderr,
             )
@@ -350,9 +350,9 @@ class React(_EventRouter, BaseComponent):
         in ``serve(passwords=)``) and/or ``client_id=`` (an id from
         ``canvas.viewers``): the props are stored as a per-viewer *overlay* on the
         shared state (precedence shared < role < client) and pushed to just those
-        viewers â€” and, unlike a one-shot :meth:`push`, they **persist and replay**
+        viewers — and, unlike a one-shot :meth:`push`, they **persist and replay**
         when such a viewer reconnects. So each viewer can be shown their own slice
-        â€” a per-team budget, a personalised greeting â€” with no client-side
+        — a per-team budget, a personalised greeting — with no client-side
         filtering of a global blob::
 
             panel.update(rows=catalogue)                 # everyone (shared)
@@ -382,7 +382,7 @@ class React(_EventRouter, BaseComponent):
     def update_for(self, *, role=None, client_id=None, **props):
         """Deprecated alias for :meth:`update` with ``roles=`` / ``client_id=``.
 
-        Kept for back-compat â€” prefer ``update(roles=..., client_id=..., ...)``.
+        Kept for back-compat — prefer ``update(roles=..., client_id=..., ...)``.
         Note the semantics now **persist** (the scoped props replay on reconnect),
         where the original ``update_for`` was a one-shot push that reverted to the
         shared props on reconnect. With neither ``role`` nor ``client_id`` it's a
@@ -415,7 +415,7 @@ class React(_EventRouter, BaseComponent):
         Like :meth:`Custom.push`, this bypasses shape props (no churn / reconnect
         replay) and suits high-rate updates. The component sees it as ``value``
         by default; for high-rate or binary streams it can instead subscribe via
-        ``canvas.onFrame(cb)`` (in a ``useEffect``) and paint each frame itself â€”
+        ``canvas.onFrame(cb)`` (in a ``useEffect``) and paint each frame itself —
         that path skips the React re-render the ``value`` prop would trigger.
         """
         self._send_update({"post": data})
@@ -425,11 +425,11 @@ class React(_EventRouter, BaseComponent):
 
         The high-throughput counterpart to :meth:`push`: instead of JSON-encoding
         the payload, ``data`` (``bytes``/``bytearray``/``memoryview``) rides a
-        binary frame â€” no JSON serialize, no base64 â€” the same fast path
+        binary frame — no JSON serialize, no base64 — the same fast path
         ``VideoFeed``/``AudioFeed``/``Custom.push_binary`` use. It arrives at a
         ``canvas.onFrame`` subscriber as a zero-copy ``ArrayBuffer`` (so use
         ``onFrame``, not the ``value`` prop, to receive it), ready to wrap in a
-        typed array â€” e.g. ``new Float32Array(buf)``.
+        typed array — e.g. ``new Float32Array(buf)``.
 
         Use it for frame- or array-grade telemetry (packed sensor buffers, a
         custom codec) where per-sample JSON cost would dominate. Honours the
@@ -451,14 +451,14 @@ class React(_EventRouter, BaseComponent):
 
     def watch(self, path=None, css_path=None, interval=0.5):
         """Dev convenience: live-reload the panel's source (and optionally CSS)
-        from disk whenever the file changes â€” edit the ``.jsx``, save, and the
+        from disk whenever the file changes — edit the ``.jsx``, save, and the
         panel recompiles with no server restart.
 
         ``path`` defaults to the file the panel was built from (``path=`` on the
         constructor); pass ``css_path`` to also hot-reload a ``css=`` stylesheet.
         A daemon thread polls the files' modification time every ``interval``
         seconds and calls :meth:`set_source` / :meth:`set_css` on change. Returns
-        a ``stop()`` callable. Meant for development â€” poll-based and best paired
+        a ``stop()`` callable. Meant for development — poll-based and best paired
         with ``serve(block=True)`` so the process stays alive::
 
             panel = canvas.react(path="panel.jsx")
@@ -480,7 +480,7 @@ class React(_EventRouter, BaseComponent):
         targets = [(p, apply) for p, apply in
                    ((src_path, self.set_source), (css_path, self.set_css)) if p]
         # Snapshot the on-disk state now (synchronously), so a change made right
-        # after watch() returns is detected â€” and the current contents, already
+        # after watch() returns is detected — and the current contents, already
         # loaded, aren't re-pushed on the first poll.
         seen = {}
         for p, _ in targets:
@@ -517,14 +517,14 @@ class React(_EventRouter, BaseComponent):
         Returns a list of human-readable problems (empty when it looks OK):
 
         * an empty source, or one that never declares ``Component``
-          (``function Component(...)`` / ``const Component = â€¦``);
-        * unbalanced ``()`` / ``[]`` / ``{}`` â€” the usual fallout of a bad edit.
+          (``function Component(...)`` / ``const Component = …``);
+        * unbalanced ``()`` / ``[]`` / ``{}`` — the usual fallout of a bad edit.
 
         Contents of strings and ``//`` / ``/* */`` comments are skipped, so braces
         inside text or a CSS template literal don't trip it. It's a fast
         structural check, **not** a full compile: source that passes here can
         still fail in the browser (a bad hook call, an undefined variable), and
-        valid-but-unusual syntax could be flagged â€” so treat it as a lint, e.g.
+        valid-but-unusual syntax could be flagged — so treat it as a lint, e.g.
         ``assert not panel.validate()`` in a test. Returns ``[]`` for a panel
         built from ``jsx=`` whose wrapper this class generated.
         """
@@ -533,8 +533,8 @@ class React(_EventRouter, BaseComponent):
             return ["empty source"]
         problems = []
         if not re.search(r"\b(function\s+Component\b|Component\s*=)", src):
-            problems.append("no `Component` defined â€” the source must declare "
-                            "`function Component(...)` (or `const Component = â€¦`)")
+            problems.append("no `Component` defined — the source must declare "
+                            "`function Component(...)` (or `const Component = …`)")
         problems += self._delimiter_problems(src)
         return problems
 
@@ -542,7 +542,7 @@ class React(_EventRouter, BaseComponent):
     def _delimiter_problems(src):
         """Balanced-delimiter scan that skips JS strings and comments, so braces
         in text/CSS don't cause false positives. Heuristic (a template literal's
-        ``${â€¦}`` is treated as opaque), but catches the common unbalanced edit."""
+        ``${…}`` is treated as opaque), but catches the common unbalanced edit."""
         close_to_open = {")": "(", "]": "[", "}": "{"}
         stack = []
         i, n = 0, len(src)
@@ -589,7 +589,7 @@ class React(_EventRouter, BaseComponent):
 
         Where :meth:`on` is fire-and-forget, this is request/response: the handler
         receives the request ``data`` and its **return value** is sent back to
-        resolve the panel's Promise â€” for ask-Python-and-use-the-answer flows
+        resolve the panel's Promise — for ask-Python-and-use-the-answer flows
         (validate a field, fetch a row, compute server-side). Routed by
         ``data[event_key]`` like :meth:`on` (``@panel.on_request("validate")``);
         ``@panel.on_request()`` is the catch-all. Exactly one handler answers (the
@@ -611,7 +611,7 @@ class React(_EventRouter, BaseComponent):
     def _handle_request(self, data, viewer=None):
         """Resolve a ``canvas.request`` payload to a reply value (bridge entry).
 
-        Returns the matching handler's value; raises if none is registered â€” the
+        Returns the matching handler's value; raises if none is registered — the
         bridge turns the return into a ``response`` (resolving the panel's Promise)
         and an exception into an error ``response`` (rejecting it). A handler that
         declares a second parameter (``def fn(req, viewer)``) is given the

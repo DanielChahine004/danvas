@@ -47,11 +47,11 @@ def _parse_source(spec):
 
     Accepts:
 
-    - a bare port â€” ``8001`` / ``"8001"`` / ``":8001"`` (localhost) â€” or a
+    - a bare port — ``8001`` / ``"8001"`` / ``":8001"`` (localhost) — or a
       ``"host:port"``: connected over ``ws://`` on the same/another LAN, as before.
-    - a full URL â€” ``"https://x.loca.lt"`` / ``"wss://host/ws"`` â€” so a canvas
+    - a full URL — ``"https://x.loca.lt"`` / ``"wss://host/ws"`` — so a canvas
       exposed through a tunnel (see :meth:`danvas.Canvas.serve` ``tunnel=True``)
-      can be merged from anywhere. ``http``â†’``ws`` and ``https``â†’``wss``, and the
+      can be merged from anywhere. ``http``→``ws`` and ``https``→``wss``, and the
       ``/ws`` endpoint path is appended when missing.
     """
     if isinstance(spec, int):
@@ -273,7 +273,7 @@ class MergeBridge(Bridge):
         self._last_seen[ws] = time.monotonic()
         kind = msg.get("type")
         # Presence/chat are mediated by the merge host itself, not routed to a
-        # source â€” viewers on the merged view see each other and can chat.
+        # source — viewers on the merged view see each other and can chat.
         if kind == "heartbeat":
             return
         if kind == "set_name":
@@ -344,7 +344,7 @@ class Merge:
         Pass ``tunnel=True`` to expose the merged view on the public internet
         through a tunnel (``tunnel_provider`` selects the backend, default
         ``"cloudflared"``), so collaborators on any network can open the printed
-        ``https://â€¦`` URL. The merge host runs no component code itself, so this
+        ``https://…`` URL. The merge host runs no component code itself, so this
         adds no remote-execution surface beyond the per-source ``Repl`` gate
         (``allow_remote_exec``). The tunnel is closed when the host stops.
         """

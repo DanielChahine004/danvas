@@ -8,7 +8,7 @@ back-to-back through the Web Audio API so they play as a continuous stream::
     feed.update(chunk)   # call repeatedly with PCM samples
 
 Like a webcam, this is a one-way server->browser push, so it pairs naturally
-with a :class:`VideoFeed` (the two are independent streams â€” there is no tight
+with a :class:`VideoFeed` (the two are independent streams — there is no tight
 A/V sync). Browsers won't start audio until the user clicks the panel's enable
 button, per the browser autoplay policy.
 """
@@ -45,7 +45,7 @@ class AudioFeed(BaseComponent):
         if not pcm:
             return
         # Rides a binary WebSocket frame (no base64, no JSON) straight to the Web
-        # Audio scheduler â€” like VideoFeed. Bypasses tldraw shape props so
+        # Audio scheduler — like VideoFeed. Bypasses tldraw shape props so
         # high-rate chunks never touch undo history.
         self._send_binary(BINARY_AUDIO, pcm)
 
@@ -55,13 +55,13 @@ class AudioFeed(BaseComponent):
         if isinstance(chunk, (bytes, bytearray, memoryview)):
             return bytes(chunk)
         # NumPy is only needed for the array path, so it's imported lazily here
-        # (and lives in the ``[audio]`` extra) â€” a canvas of sliders/plots that
+        # (and lives in the ``[audio]`` extra) — a canvas of sliders/plots that
         # never streams audio doesn't pay for the ~60 MB dependency. Callers
         # already passing raw int16 ``bytes`` skip this branch entirely. The
         # import goes through importlib so PyInstaller's static analysis can't
         # see it and drag numpy (plus its MKL stack) into a baked app that never
         # streams array audio; bake() bundles numpy itself when an AudioFeed is
-        # on the canvas (see danvas/bake.py).
+        # on the canvas (see pycanvas/bake.py).
         import importlib
 
         np = importlib.import_module("numpy")

@@ -2,7 +2,7 @@
 
 Used by :meth:`danvas.Canvas.bake` and the ``python -m danvas.bake`` CLI.
 The build bundles the entry script, the danvas backend, and the pre-built
-frontend (``danvas/frontend/dist``) into one app that runs the canvas in a
+frontend (``pycanvas/frontend/dist``) into one app that runs the canvas in a
 native window with nothing else installed on the target machine.
 
 The argument list is assembled by the pure :func:`_build_args` helper so it can
@@ -16,7 +16,7 @@ import re
 import sys
 
 # Where the frontend is embedded inside the executable. Deliberately NOT under
-# `danvas/` â€” a data dir by that name would shadow the real package as a
+# `pycanvas/` — a data dir by that name would shadow the real package as a
 # namespace dir and break `import danvas`. server._dist_dir() reads it back
 # from here (`sys._MEIPASS/pcframe/dist`) when frozen.
 _FRONTEND_DEST = "pcframe/dist"
@@ -27,7 +27,7 @@ def _frontend_dist():
 
 
 # Heavy optional dependencies that specific components import only at runtime,
-# and dynamically (via importlib) so PyInstaller's analysis can't see them â€” see
+# and dynamically (via importlib) so PyInstaller's analysis can't see them — see
 # the imports in components/audio.py, video.py and image.py. We bundle them back
 # only when the canvas actually uses the component, so a slider-only app doesn't
 # pay for numpy/OpenCV/Pillow (numpy alone is ~60 MB). Keyed by component *class*
@@ -49,8 +49,8 @@ def _packages_for_components(component_types):
     return needs
 
 
-# Optional dependencies a *baked* app never needs â€” it's a standalone, local
-# desktop app â€” but which, left in, drag enormous unrelated trees into the build:
+# Optional dependencies a *baked* app never needs — it's a standalone, local
+# desktop app — but which, left in, drag enormous unrelated trees into the build:
 #   * pycloudflared (the [tunnel] extra's binary downloader) imports tqdm.auto,
 #     which statically pulls tqdm's notebook/gui/pandas integrations and so
 #     cascades into ipywidgets -> IPython, matplotlib, and pandas -> scipy ->
@@ -74,11 +74,11 @@ _DEFAULT_EXCLUDES = (
 # Component-only optional deps: their sole realistic use in a canvas app is via
 # the component that needs them (Pillow for Image, OpenCV for VideoFeed). When no
 # such component is on the canvas we exclude them, so a transitive/typing import
-# can't drag them â€” and their own heavy deps â€” in. Pillow is the worst offender:
+# can't drag them — and their own heavy deps — in. Pillow is the worst offender:
 # pygments' image formatter (reached via Markdown -> codehilite -> pygments) and
 # others import it, and PIL._typing then imports numpy.typing, pulling all of
-# numpy (~30 MB). numpy itself is deliberately NOT auto-excluded â€” scripts
-# commonly import it directly â€” but with Pillow gone its transitive path is cut.
+# numpy (~30 MB). numpy itself is deliberately NOT auto-excluded — scripts
+# commonly import it directly — but with Pillow gone its transitive path is cut.
 _EXCLUDABLE_COMPONENT_PACKAGES = ("PIL", "cv2")
 
 
@@ -97,7 +97,7 @@ def _conda_mkl_binaries():
     """``--add-binary`` specs for a conda NumPy's MKL DLLs (empty off conda).
 
     A pip/venv NumPy bundles OpenBLAS inside ``numpy.libs``, which PyInstaller's
-    hook already collects â€” nothing to do. Conda's MKL build keeps its DLLs in
+    hook already collects — nothing to do. Conda's MKL build keeps its DLLs in
     the environment's ``Library/bin`` instead, so we locate and embed them.
     """
     libbin = os.path.join(sys.prefix, "Library", "bin")
@@ -127,8 +127,8 @@ def _failure_hint(exc):
         )
     lines += [
         "Common causes:",
-        "  - the frontend isn't built: cd danvas/frontend && npm run build",
-        "  - a broken/optional dependency crashes on import during analysis â€” "
+        "  - the frontend isn't built: cd pycanvas/frontend && npm run build",
+        "  - a broken/optional dependency crashes on import during analysis — "
         "exclude it with bake(exclude=[...])",
         "  - missing PyInstaller/pywebview: pip install 'danvas[desktop]'",
         f"Original error: {msg[:400]}",
@@ -147,7 +147,7 @@ def _build_args(entry, name, dist_src, pkg_root, *, icon=None, onefile=True,
     ``pkg_root`` is the directory containing the ``danvas`` package, added to
     the search path so an editable (``pip install -e .``) install is found.
     """
-    sep = os.pathsep  # ';' on Windows, ':' elsewhere â€” PyInstaller's add-data sep
+    sep = os.pathsep  # ';' on Windows, ':' elsewhere — PyInstaller's add-data sep
     args = [
         entry,
         "--name", name,
@@ -202,14 +202,14 @@ def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
     """Build ``entry`` into a standalone executable, returning its path.
 
     PyInstaller bundles only the packages your script actually imports (not the
-    whole environment) plus what its hooks add â€” so you normally specify nothing.
+    whole environment) plus what its hooks add — so you normally specify nothing.
     ``include`` force-adds packages the static analysis can't see (dynamic or
     plugin imports); ``exclude`` skips modules, useful when a broken/unused
     optional dependency would otherwise crash the build.
 
     ``components`` is the set of component type names the canvas uses; their
     heavy optional dependencies (numpy for AudioFeed, OpenCV for VideoFeed) are
-    imported dynamically and so invisible to PyInstaller â€” we bundle them back
+    imported dynamically and so invisible to PyInstaller — we bundle them back
     only when the matching component is present, keeping a slider-only app from
     dragging in numpy/OpenCV. Requesting numpy (an AudioFeed, or ``numpy`` in
     ``include``) also auto-detects and bundles the MKL DLLs a conda NumPy needs.
@@ -244,19 +244,19 @@ def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
     dist_src = _frontend_dist()
     if not os.path.isdir(dist_src):
         raise RuntimeError(
-            f"the frontend is not built ({dist_src} is missing) â€” build it with "
-            "`cd danvas/frontend && npm install && npm run build`"
+            f"the frontend is not built ({dist_src} is missing) — build it with "
+            "`cd pycanvas/frontend && npm install && npm run build`"
         )
 
     try:
         import PyInstaller.__main__ as pyi
     except ImportError as exc:
         raise RuntimeError(
-            "building a desktop app requires PyInstaller â€” install the desktop "
+            "building a desktop app requires PyInstaller — install the desktop "
             "extra: pip install 'danvas[desktop]'"
         ) from exc
 
-    pkg_root = os.path.dirname(os.path.dirname(__file__))  # contains danvas/
+    pkg_root = os.path.dirname(os.path.dirname(__file__))  # contains pycanvas/
     # The conda MKL DLLs are only relevant when numpy itself is bundled.
     binaries = _conda_mkl_binaries() if collect_numpy else []
     args = _build_args(

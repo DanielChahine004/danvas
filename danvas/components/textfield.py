@@ -1,7 +1,7 @@
 """TextField: a text-entry input, rendered as a native React panel.
 
 Single-line (default) or multiline (``multiline=True``). Callbacks receive the
-committed value â€” on Enter-key or focus-loss for single-line, on focus-loss for
+committed value — on Enter-key or focus-loss for single-line, on focus-loss for
 multiline. ``update(value)`` pushes new text to the browser live.
 """
 

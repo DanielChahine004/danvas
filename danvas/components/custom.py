@@ -1,7 +1,7 @@
 """Custom: an arbitrary-HTML panel rendered in a sandboxed iframe.
 
 The HTML may be passed directly or loaded from a file, and ``css``/``js`` may be
-supplied as separate strings â€” they are composed into a single document under
+supplied as separate strings — they are composed into a single document under
 the hood (a ``<style>`` block, your markup, then a ``<script>`` block), so a
 snippet copied from a site like uiverse.io drops in without hand-assembling a
 page::
@@ -67,7 +67,7 @@ class Custom(_EventRouter, BaseComponent):
         self._js = js or ""
         # Semicolon-separated Permissions Policy string for the iframe's `allow`
         # attribute. A list is accepted for convenience: ["camera", "microphone"]
-        # â†’ "camera; microphone". Controls access to device APIs (getUserMedia etc.)
+        # → "camera; microphone". Controls access to device APIs (getUserMedia etc.)
         # which browsers block in sandboxed iframes without an explicit grant.
         if isinstance(permissions, (list, tuple)):
             permissions = "; ".join(permissions)
@@ -106,7 +106,7 @@ class Custom(_EventRouter, BaseComponent):
             # requestCamera / releaseCamera: getUserMedia cannot run inside a
             # sandboxed iframe (null origin blocks the permission grant even with
             # allow="camera"). These methods ask the parent page to open the
-            # camera and relay JPEG frames via push_binary â€” each frame arrives in
+            # camera and relay JPEG frames via push_binary — each frame arrives in
             # canvas.onPush as an ArrayBuffer, same as panel.push_binary() from
             # Python. opts: { width, height, fps, quality } (all optional).
             "requestCamera:function(opts){"
@@ -116,13 +116,13 @@ class Custom(_EventRouter, BaseComponent):
             f"parent.postMessage({{__danvas_camera:{cid},action:'stop'}},'*');"
             "},"
             # requestMicrophone / releaseMicrophone: same sandbox constraint as
-            # camera â€” getUserMedia({audio}) is blocked in a null-origin iframe.
+            # camera — getUserMedia({audio}) is blocked in a null-origin iframe.
             # The parent captures mic audio, converts to int16 PCM, and relays
             # each chunk the same way: sendBinary up to Python (@on_binary) and
             # liveHandlers down to canvas.onPush as an ArrayBuffer. A JSON
             # {event:'mic_start', sampleRate, channels} is sent first so Python
             # knows the stream parameters before audio data arrives.
-            # opts: { bufferSize } (optional, default 4096 samples â‰ˆ 85â€“93ms).
+            # opts: { bufferSize } (optional, default 4096 samples ≈ 85–93ms).
             "requestMicrophone:function(opts){"
             f"parent.postMessage({{__danvas_mic:{cid},action:'start',opts:opts||{{}}}},'*');"
             "},"
@@ -143,7 +143,7 @@ class Custom(_EventRouter, BaseComponent):
         # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
             # *browser's* page zoom (tldraw can't preventDefault an event in a
             # sandboxed frame). Swallow it here and forward the delta + cursor to
-            # the parent, which zooms the canvas at that point instead â€” so the
+            # the parent, which zooms the canvas at that point instead — so the
             # gesture matches scrolling over the bare canvas. Capture phase so we
             # win over any content (e.g. Plotly) wheel handler; plain wheel (no
             # modifier) is left alone so panels can still scroll their content.
@@ -164,8 +164,8 @@ class Custom(_EventRouter, BaseComponent):
         document's natural height and a ResizeObserver re-fits on every reflow,
         so narrowing the panel grows the height to match. Width (when on) is a
         one-shot at load: the body is briefly shrink-wrapped to its content's
-        ``max-content`` width â€” measured independently of the current frame
-        width â€” reported once, then restored so the body fills the frame again
+        ``max-content`` width — measured independently of the current frame
+        width — reported once, then restored so the body fills the frame again
         and content can still reflow on a later manual resize. The parent
         applies both (see ``fitFromIframe``).
         """
@@ -187,15 +187,15 @@ class Custom(_EventRouter, BaseComponent):
             )
         if self._auto_w:
             # max-content ignores the available (frame) width, so the body's
-            # scrollWidth under it is the content's true preferred width â€” the
-            # SVG/figure's intrinsic width, the widest JSON line â€” regardless of
+            # scrollWidth under it is the content's true preferred width — the
+            # SVG/figure's intrinsic width, the widest JSON line — regardless of
             # how wide the panel currently is. Restore the inline width right
             # after so the body goes back to filling the frame (block default),
             # leaving the panel freely resizable and its content able to reflow.
             #
             # Clamp to a sane panel range: the raw preferred width can collapse
-            # to a sliver â€” a list of short numbers is one token per line, a
-            # small inline SVG can report next to nothing â€” narrower than even
+            # to a sliver — a list of short numbers is one token per line, a
+            # small inline SVG can report next to nothing — narrower than even
             # the panel's own header label. MIN keeps it readable (and the label
             # legible); MAX stops a wide widget sprawling across the canvas.
             parts.append(
@@ -218,7 +218,7 @@ class Custom(_EventRouter, BaseComponent):
                 # Expose an auto-height hook on <body> so content whose layout is
                 # normally pinned to the panel height (a full-height flex column
                 # with an inner scroll area, e.g. Table) can switch to sizing
-                # *from* its content instead â€” otherwise the measured height
+                # *from* its content instead — otherwise the measured height
                 # depends on the panel height and the fit loop oscillates.
                 "if(document.body)document.body.classList.add('pc-auto-h');"
             )
@@ -297,7 +297,7 @@ class Custom(_EventRouter, BaseComponent):
         """Enable content-fit height live (``comp.h = "auto"``).
 
         Flips the panel into auto-height and re-sends the document so the iframe
-        starts measuring its content and reporting the height back â€” the same
+        starts measuring its content and reporting the height back — the same
         machinery as passing ``h="auto"`` at insert, but available any time. A
         no-op if already auto. (To go back to a fixed height, assign a number:
         ``comp.h = 240``.)
@@ -306,7 +306,7 @@ class Custom(_EventRouter, BaseComponent):
             return
         self._auto_h = True
         # Re-wrap with the fit script so the running iframe begins reporting its
-        # height. Safe before serving â€” _send_update is a no-op with no bridge,
+        # height. Safe before serving — _send_update is a no-op with no bridge,
         # and register_props picks up the flag on first render.
         self._send_update({"html": self._wrap(self._document())})
 
@@ -341,10 +341,10 @@ class Custom(_EventRouter, BaseComponent):
     def push(self, data):
         """Stream live data into the panel's iframe *without* reloading it.
 
-        In the iframe, receive it with ``canvas.onPush(fn)`` â€” ``fn`` is called
+        In the iframe, receive it with ``canvas.onPush(fn)`` — ``fn`` is called
         with ``data`` (any JSON-serializable value) for each push. Unlike
-        :meth:`update`, this keeps the iframe â€” and its focus, listeners, and
-        scroll position â€” intact, so it suits high-rate streaming (e.g. video
+        :meth:`update`, this keeps the iframe — and its focus, listeners, and
+        scroll position — intact, so it suits high-rate streaming (e.g. video
         frames) and live two-way panels.
         """
         self._send_update({"post": data})
@@ -354,7 +354,7 @@ class Custom(_EventRouter, BaseComponent):
 
         The high-throughput counterpart to :meth:`push`: instead of JSON-encoding
         the payload, ``data`` (``bytes``/``bytearray``/``memoryview``) rides a
-        binary frame â€” no JSON serialize, no base64 â€” the same fast path
+        binary frame — no JSON serialize, no base64 — the same fast path
         ``VideoFeed``/``AudioFeed`` use. In the iframe the *same*
         ``canvas.onPush(fn)`` receives it, but as an ``ArrayBuffer`` rather than a
         decoded value, so disambiguate the two streams with

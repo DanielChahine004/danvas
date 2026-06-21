@@ -1,12 +1,12 @@
 """Single source of truth for the Python <-> browser wire protocol.
 
-The backend (this package) and the frontend (``danvas/frontend/src/*.js``)
+The backend (this package) and the frontend (``pycanvas/frontend/src/*.js``)
 speak a small, hand-maintained protocol over one WebSocket: numeric codes for
 binary media frames, string ``type`` tags for JSON frames, and the lock/chrome
 flag *wire* keys. Today those constants are restated independently on each side
 (``BINARY_*`` in :mod:`danvas.bridge`, ``BIN_*`` in ``bridge.js``; the flag
 wire keys in :mod:`danvas._flags` vs the destructured params in
-``bridge.js``), so a change to one side silently desyncs the other â€” the exact
+``bridge.js``), so a change to one side silently desyncs the other — the exact
 "protocol drift" failure mode that has no loud symptom (a wrong binary code just
 routes a frame to the wrong handler; a wrong wire key just corrupts a panel's
 lock meta).
@@ -16,11 +16,11 @@ codegen):
 
 1.  Everything is declared here, once.
 2.  ``scripts/gen_protocol.py`` renders it to
-    ``danvas/frontend/src/protocol.generated.js`` so the JS imports the same
+    ``pycanvas/frontend/src/protocol.generated.js`` so the JS imports the same
     values instead of re-typing them.
 3.  :mod:`danvas.bridge` and :mod:`danvas._flags` import the codes/keys from
     here (rather than restating them), and ``tests/test_protocol_sync.py`` fails
-    if either side â€” or the committed generated JS â€” drifts from this file.
+    if either side — or the committed generated JS — drifts from this file.
 
 Until the integration step lands, the two sides still hold their own copies;
 ``test_protocol_sync`` asserts they equal what is declared here, which both
@@ -47,7 +47,7 @@ BINARY_FRAME_CODES = {
 # deliberately distinct from the wire key (e.g. ``draggable`` -> ``movable``);
 # the frontend's ``lockMeta``/``registerComponent`` read these wire names. Keep
 # in step with :data:`danvas._flags.LAYOUT_FLAGS` (whose ``.wire`` is the same
-# value) â€” the integration step makes ``_flags`` import this rather than restate
+# value) — the integration step makes ``_flags`` import this rather than restate
 # it. Order matches LAYOUT_FLAGS insertion order.
 FLAG_WIRE_KEYS = {
     "locked": "locked",
@@ -77,7 +77,7 @@ MESSAGE_TYPES_IN = (
 
 
 def as_dict():
-    """The whole protocol as one plain dict â€” what the JS generator renders."""
+    """The whole protocol as one plain dict — what the JS generator renders."""
     return {
         "binary_frame_codes": dict(BINARY_FRAME_CODES),
         "flag_wire_keys": dict(FLAG_WIRE_KEYS),

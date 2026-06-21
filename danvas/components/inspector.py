@@ -4,7 +4,7 @@ One spatial "variable explorer" with a source dropdown in its header to switch
 between two views live:
 
 - ``"components"`` (the default) lists every panel on the canvas with its name,
-  label (its displayed caption â€” same as the name unless one was set
+  label (its displayed caption — same as the name unless one was set
   separately), type, current value and geometry. Reads state danvas already
   tracks, so
   building the table is cheap and safe on the event-loop thread (no kernel).
@@ -23,8 +23,8 @@ object's fields and attributes in a detail view.
 
 Rendered as a native React panel (mounted by ReactHost): the table, drill-down
 detail, search/filter and source dropdown are a React component authored here in
-JSX. State is the per-panel channel â€” Python pushes ``rows``/``cols``/``detail``/
-``source`` as props and the panel sends ``{action: â€¦}`` back â€” so unlike Chat it
+JSX. State is the per-panel channel — Python pushes ``rows``/``cols``/``detail``/
+``source`` as props and the panel sends ``{action: …}`` back — so unlike Chat it
 needs no shared-room API, only ``canvas.viewport`` for the live view readout.
 """
 
@@ -44,12 +44,12 @@ _SYSTEM_COLS    = ["name", "type", "value"]
 # The React component: a port of the former native InspectorView/DetailView,
 # driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
 # live framing readout) instead of the tldraw editor. Authored as a plain string
-# so its JSX braces survive â€” nothing is substituted. Reads the table/detail data
+# so its JSX braces survive — nothing is substituted. Reads the table/detail data
 # Python pushes as ``props.rows``/``props.cols``/``props.detail``/``props.source``
 # (each a JSON string, matching the former shape props).
 _INSPECTOR_SOURCE = r"""
 function ViewReadout({ canvas }) {
-  // The current viewport (canvas centre + zoom) â€” the x/y/zoom serve(view=...)
+  // The current viewport (canvas centre + zoom) — the x/y/zoom serve(view=...)
   // and set_view() take. canvas.viewport calls back live as the camera moves.
   const [v, setV] = React.useState(null);
   React.useEffect(() => (canvas.viewport ? canvas.viewport(setV) : undefined), []);
@@ -61,7 +61,7 @@ function ViewReadout({ canvas }) {
         color: "var(--pc-muted)", userSelect: "text", WebkitUserSelect: "text",
         cursor: "text",
       }}
-      title="current viewport â€” pass these to serve(view=...) or canvas.set_view() to fix this view"
+      title="current viewport — pass these to serve(view=...) or canvas.set_view() to fix this view"
     >
       view: x={v.x} y={v.y} zoom={v.zoom.toFixed(2)}
     </div>
@@ -88,7 +88,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
   return (
     <>
       <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-        <button style={{ ...controlStyle, cursor: "pointer" }} onClick={onBack}>â† back</button>
+        <button style={{ ...controlStyle, cursor: "pointer" }} onClick={onBack}>← back</button>
         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {selected}
@@ -98,7 +98,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
       </div>
       {detail && !detail.missing && allFields.length > 0 && (
         <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <input placeholder="search fieldâ€¦" value={query}
+          <input placeholder="search field…" value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{ ...controlStyle, flex: 1, minWidth: 0 }} />
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>
@@ -108,7 +108,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
       )}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {!detail ? (
-          <div style={{ fontSize: 12, color: "var(--pc-faint2)", padding: 6 }}>loadingâ€¦</div>
+          <div style={{ fontSize: 12, color: "var(--pc-faint2)", padding: 6 }}>loading…</div>
         ) : detail.missing ? (
           <div style={{ fontSize: 12, color: "var(--pc-faint2)", padding: 6 }}>no longer available</div>
         ) : (
@@ -133,7 +133,7 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                 {fields.length === 0 ? (
                   <tr>
                     <td colSpan={3} style={{ padding: 6, color: "var(--pc-faint2)", fontStyle: "italic" }}>
-                      {filtered ? "no matching fields" : "no fields â€” see repr above"}
+                      {filtered ? "no matching fields" : "no fields — see repr above"}
                     </td>
                   </tr>
                 ) : (
@@ -221,7 +221,7 @@ function Component({ canvas, props }) {
           <option value="globals">globals</option>
           <option value="system">system</option>
         </select>
-        <input placeholder="search nameâ€¦" value={query}
+        <input placeholder="search name…" value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{ ...controlStyle, flex: 1, minWidth: 0 }} />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>
@@ -276,14 +276,14 @@ def _short(value, limit=80):
             text = f"({len(value)}) {text}"
         except Exception:
             pass
-    return text if len(text) <= limit else text[: limit - 1] + "â€¦"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _object_fields(obj):
     """(name, value) pairs describing an object for the drill-down detail view.
 
     Containers expose their items; everything else exposes its component/arrow
-    ``_props`` (the meaningful config: label, min, max, â€¦) followed by its
+    ``_props`` (the meaningful config: label, min, max, …) followed by its
     public, non-callable attributes. Private/dunder names and methods are
     skipped to keep the view readable.
     """
@@ -322,7 +322,7 @@ def _object_fields(obj):
         fields.append((k, v))
         seen.add(k)
     # Fallback for objects whose state is all private (e.g. the Canvas, which
-    # keeps everything under `_components`/`_named`/â€¦): surface the instance
+    # keeps everything under `_components`/`_named`/…): surface the instance
     # __dict__ so the row still drills into something useful. Skip dunders and
     # bound methods; keep single-underscore internals.
     if not fields:
@@ -464,7 +464,7 @@ class Inspector(React):
         # itself -- so the table is a complete picture of the canvas.
         for i, c in enumerate(self._canvas._components):
             name = name_of.get(id(c), "")
-            # A stable click key even for unnamed panels (Repl-2, Inspector-3â€¦).
+            # A stable click key even for unnamed panels (Repl-2, Inspector-3…).
             key = name or f"{c.component}-{i}"
             self._row_targets[key] = c
             rows.append({
@@ -496,7 +496,7 @@ class Inspector(React):
                 "label": a.text or "",
                 "type": "Arrow",
                 "value": _short(f"{a.text or '?'}: "
-                                f"{a.start._props.get('label') or a.start.id} â†’ "
+                                f"{a.start._props.get('label') or a.start.id} → "
                                 f"{a.end._props.get('label') or a.end.id}"),
                 "x": "",
                 "y": "",
@@ -585,7 +585,7 @@ class Inspector(React):
                              "value": (f"{gpu_name}  {util.gpu}% util  "
                                        f"{gpu_data['mem_used_gb']}/{gpu_data['mem_total_gb']} GB vram")})
         except Exception:
-            pass  # pynvml not installed or no NVIDIA GPU â€” silently omit
+            pass  # pynvml not installed or no NVIDIA GPU — silently omit
 
         # --- Active threads --------------------------------------------------
         pc_markers = {"danvas", "asyncio", "danvas", "_ticker", "_tick_loop",

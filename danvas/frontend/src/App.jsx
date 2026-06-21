@@ -19,7 +19,7 @@ export default function App() {
       <PresenceBadge />
       <CursorLayer />
       {/* Sign-out is an auth escape hatch, not app chrome, so it shows whenever
-          the canvas is password-protected â€” even under a `ui: false` kiosk view â€”
+          the canvas is password-protected — even under a `ui: false` kiosk view —
           so any viewer can switch accounts. */}
       <SignOutButton />
       {/* The Inspector and Graveyard buttons are part of the app's UI chrome, so
@@ -50,7 +50,7 @@ export default function App() {
           // Camera controls: mouse-wheel zooms, trackpad two-finger scroll pans,
           // trackpad pinch zooms, right-click-drag pans.
           // tldraw's default wheelBehavior:'pan' already handles trackpad scroll
-          // (pan) and ctrlKey+wheel / pinch (zoom) natively â€” we leave that alone
+          // (pan) and ctrlKey+wheel / pinch (zoom) natively — we leave that alone
           // and only intercept physical mouse wheel events to zoom instead of pan.
           const cleanupPan = enableRightDragPan(editor)
           const cleanupScroll = enableSmartScroll(editor)
@@ -217,15 +217,15 @@ function InspectorButton() {
         userSelect: 'none',
       }}
     >
-      <span style={{ fontSize: 14, lineHeight: 1 }}>ðŸ”</span>
-      {state.open ? 'Inspector âœ•' : 'Inspector'}
+      <span style={{ fontSize: 14, lineHeight: 1 }}>🔍</span>
+      {state.open ? 'Inspector ✕' : 'Inspector'}
     </button>
   )
 }
 
 // A floating sign-out button, shown only on a password-protected canvas
 // (welcome.auth). Clicking it navigates to /__logout__, where the server clears
-// the session cookie and the login page returns â€” so a viewer can re-log in as a
+// the session cookie and the login page returns — so a viewer can re-log in as a
 // different role. Sits bottom-right (clear of the presence badge top-center, the
 // Inspector button bottom-left, and tldraw's menus); rendered outside tldraw's
 // container, so it uses self-contained colours rather than the --pc-* theme vars.
@@ -260,15 +260,15 @@ function SignOutButton() {
         userSelect: 'none',
       }}
     >
-      <span style={{ fontSize: 14, lineHeight: 1 }}>ðŸ”“</span>
+      <span style={{ fontSize: 14, lineHeight: 1 }}>🔓</span>
       Sign out
     </button>
   )
 }
 
 // A floating toolbar button that opens a panel listing panels the user deleted
-// in tldraw. Panels are never destroyed in Python â€” their callbacks and state
-// stay live â€” so clicking Restore re-registers them on the canvas without
+// in tldraw. Panels are never destroyed in Python — their callbacks and state
+// stay live — so clicking Restore re-registers them on the canvas without
 // restarting the script. Only shown when the server permits it (local bind by
 // default; see Canvas.serve ui_graveyard=). Sits bottom-left, above the
 // Inspector button.
@@ -303,9 +303,9 @@ function GraveyardButton() {
           userSelect: 'none',
         }}
       >
-        <span style={{ fontSize: 14, lineHeight: 1 }}>ðŸ—‘ï¸</span>
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🗑️</span>
         Graveyard{count > 0 ? ` (${count})` : ''}
-        {state.open ? ' âœ•' : ''}
+        {state.open ? ' ✕' : ''}
       </button>
       {state.open && <GraveyardPanel items={state.items} />}
     </>
@@ -437,7 +437,7 @@ function enableRightDragPan(editor) {
     e.stopPropagation()
   }
   const onContextMenu = (e) => {
-    if (moved > 4) e.preventDefault() // a drag, not a click â€” swallow the menu
+    if (moved > 4) e.preventDefault() // a drag, not a click — swallow the menu
   }
 
   el.addEventListener('pointerdown', onDown, true)
@@ -455,15 +455,15 @@ function enableRightDragPan(editor) {
 }
 
 // Intercept physical mouse-wheel events and convert them to zoom.
-// Everything else â€” trackpad two-finger scroll (pan) and trackpad pinch-to-zoom
-// (ctrlKey+wheel) â€” is left to tldraw's default 'pan' mode which handles both
+// Everything else — trackpad two-finger scroll (pan) and trackpad pinch-to-zoom
+// (ctrlKey+wheel) — is left to tldraw's default 'pan' mode which handles both
 // natively and reliably. We only touch mouse wheel events.
 //
 // Mouse-wheel detection (most-reliable first):
-//   deltaMode !== 0       â†’ line/page mode = Firefox mouse wheel.
-//   wheelDeltaY % 120 ===0 â†’ Chrome/Safari/Edge: physical wheels always emit in
-//                            exact Â±120 multiples; trackpads never do.
-//   fallback              â†’ large vertical-only delta (Firefox pixel mode).
+//   deltaMode !== 0       → line/page mode = Firefox mouse wheel.
+//   wheelDeltaY % 120 ===0 → Chrome/Safari/Edge: physical wheels always emit in
+//                            exact ±120 multiples; trackpads never do.
+//   fallback              → large vertical-only delta (Firefox pixel mode).
 //
 // Zoom math: keeps the canvas point under the cursor fixed by adjusting cam.x/y
 // alongside cam.z, matching the formula used in enableRightDragPan.
@@ -481,9 +481,9 @@ function enableSmartScroll(editor) {
     // Identify physical mouse wheel events.
     let isMouse = false
     if (e.deltaMode !== 0) {
-      isMouse = true  // Firefox line/page mode â€” always a mouse wheel
+      isMouse = true  // Firefox line/page mode — always a mouse wheel
     } else if (typeof e.wheelDeltaY === 'number' && e.wheelDeltaY !== 0) {
-      isMouse = e.wheelDeltaY % 120 === 0  // Chrome/Safari/Edge Â±120-multiple test
+      isMouse = e.wheelDeltaY % 120 === 0  // Chrome/Safari/Edge ±120-multiple test
     } else {
       isMouse = Math.abs(e.deltaY) >= 40 && e.deltaX === 0  // Firefox pixel fallback
     }

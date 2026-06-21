@@ -2,7 +2,7 @@
 
 Unlike ``Plot`` (which reloads a Plotly iframe per update), ``LivePlot`` keeps a
 rolling buffer of samples and pushes just the data arrays; the frontend applies
-them with ``Plotly.react`` on a chart that stays mounted â€” smooth at high rates.
+them with ``Plotly.react`` on a chart that stays mounted — smooth at high rates.
 
     plot = canvas.insert(danvas.LivePlot("servos", traces=["s1", "s2"]))
     plot.push({"s1": 90, "s2": 45})   # call repeatedly from your loop
@@ -91,7 +91,7 @@ class LivePlot(BaseComponent):
         A key not seen before starts a new trace on the fly. ``x`` defaults to an
         auto-incrementing sample index (pass it to use a real step/epoch number).
 
-        **Batch form** â€” pass a list/array per trace to add several points in one
+        **Batch form** — pass a list/array per trace to add several points in one
         call, instead of a loop of single pushes::
 
             plot.push({"loss": [0.5, 0.4, 0.3]}, x=[10, 11, 12])
@@ -104,15 +104,15 @@ class LivePlot(BaseComponent):
         step (the server-side coalescing is only the safety ceiling for when you
         don't).
 
-        On the wire this streams just the new point(s) as an ``extend`` delta â€”
+        On the wire this streams just the new point(s) as an ``extend`` delta —
         the frontend appends them with ``Plotly.extendTraces`` rather than
-        re-diffing the whole figure â€” so a long run stays O(new points) per push
+        re-diffing the whole figure — so a long run stays O(new points) per push
         instead of re-sending the entire rolling buffer every time. The full
         buffer is still kept server-side and replayed in one shot to any
         (re)connecting client (:meth:`state_payload`). Two cases fall back to a
         full ``plot`` frame because a delta can't express them: a brand-new trace
         (the figure gains a curve) and the ``"latest"`` queue policy (which drops
-        stale pending frames, so it needs whole-snapshot replace semantics â€” an
+        stale pending frames, so it needs whole-snapshot replace semantics — an
         append delta would lose the dropped points; the default ``"fifo"`` delivers
         every point in order, where the delta is both safe and the whole point).
         """
@@ -161,7 +161,7 @@ class LivePlot(BaseComponent):
     @staticmethod
     def _is_seq(v):
         """True for a batched value (a list/tuple/1-D array of points), not a
-        scalar â€” so ``push`` can tell ``{"a": [1, 2]}`` from ``{"a": 1}``."""
+        scalar — so ``push`` can tell ``{"a": [1, 2]}`` from ``{"a": 1}``."""
         return isinstance(v, (list, tuple)) or (
             hasattr(v, "__len__") and not isinstance(v, (str, bytes, dict)))
 
@@ -171,7 +171,7 @@ class LivePlot(BaseComponent):
         The default ``"fifo"`` *coalesces* under load (see
         ``Bridge.broadcast_conflated`` ``coalesce=``): when the producer outruns
         the client's redraw rate, pending points fold into a single catch-up
-        frame instead of queuing â€” so the curve stays complete *and* the UI stays
+        frame instead of queuing — so the curve stays complete *and* the UI stays
         live, rather than lagging further behind every push. ``"latest"`` keeps
         the older drop-stale behaviour (only the newest whole-figure snapshot
         survives), for a gauge-style plot where intermediate frames don't matter.
@@ -187,12 +187,12 @@ class LivePlot(BaseComponent):
         index(es) to grow and the new x/y for each.
 
         ``xs`` is the x-coords of the new batch (one point or many). For each
-        trace the last ``keep`` appended points are the survivors â€” a batch larger
+        trace the last ``keep`` appended points are the survivors — a batch larger
         than the rolling ``max_points`` keeps only its tail, matching the deque.
         Mirrors the trace order :meth:`_payload` builds so the frontend's indices
         line up: without smoothing, logical trace *i* is Plotly trace *i*; with
         smoothing each is two Plotly traces (faint raw at ``2i``, bold smoothed at
-        ``2i+1``), so each point extends both â€” the raw with its value, the
+        ``2i+1``), so each point extends both — the raw with its value, the
         smoothed with the EMA tail over the current window (recomputed like
         ``_payload`` so a streaming client and a reconnecting one agree). ``max``
         lets the frontend cap each trace to the same rolling window.
@@ -220,7 +220,7 @@ class LivePlot(BaseComponent):
     # natural verb is ``push`` (append one sample), but accept ``update`` too so
     # the API reads consistently across components.
     def update(self, sample, x=None):
-        """Alias for :meth:`push` â€” append one sample per trace."""
+        """Alias for :meth:`push` — append one sample per trace."""
         return self.push(sample, x)
 
     @property
@@ -251,7 +251,7 @@ class LivePlot(BaseComponent):
             xs = list(self._x[name])
             ys = list(self._y[name])
             if self._smoothing > 0:
-                # Faint raw line + bold smoothed line, sharing a palette colour â€”
+                # Faint raw line + bold smoothed line, sharing a palette colour —
                 # the TensorBoard scalar look. Both built server-side, so the
                 # frontend stays a dumb Plotly.react sink (no rebuild needed).
                 color = _PALETTE[i % len(_PALETTE)]

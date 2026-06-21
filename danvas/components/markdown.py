@@ -1,15 +1,15 @@
 """Markdown: render Markdown text as a native (React) canvas panel.
 
 Markdown is converted to HTML in Python (using the ``markdown`` or
-``markdown-it-py`` package if either is installed â€” richer output: tables,
-fenced code, etc. â€” otherwise a small built-in converter covering headings,
+``markdown-it-py`` package if either is installed — richer output: tables,
+fenced code, etc. — otherwise a small built-in converter covering headings,
 bold/italic, inline code, fenced code, links, lists and paragraphs). The HTML is
 then mounted as a **native React subtree** rather than inside a sandboxed iframe.
 
 Why native rather than an iframe: an iframe gets *rasterised* and then scaled
 when the canvas is zoomed, so dense text looks blurry/pixelated at anything but
-100%. A native node re-renders sharp at every zoom level, and â€” being in the
-app's own document â€” the prose follows the canvas theme directly through the
+100%. A native node re-renders sharp at every zoom level, and — being in the
+app's own document — the prose follows the canvas theme directly through the
 ``--pc-*`` CSS variables (no iframe ``color-scheme`` shim needed).
 
 The converted HTML is injected with ``dangerouslySetInnerHTML``, which does not

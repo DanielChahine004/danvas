@@ -2,7 +2,7 @@
 
 The mirror image of :class:`~danvas.Download`. The browser holds a file the
 *viewer* picked; getting its bytes to Python travels over **plain HTTP** (a POST
-to ``/__upload__/<token>``), not the WebSocket â€” so a large file streams up with
+to ``/__upload__/<token>``), not the WebSocket — so a large file streams up with
 no base64 bloat and none of the socket's frame/queue limits. The route sits
 behind the same auth gate as the rest of the canvas.
 
@@ -13,8 +13,8 @@ hands the result to Python on the input-dispatch thread, firing
 
 Two ways to receive the bytes, symmetric with Download:
 
-  * **in memory** (default) â€” the callback's file carries ``.data`` (``bytes``);
-  * **streamed to disk** â€” pass ``dest="some/dir"`` and each upload is written
+  * **in memory** (default) — the callback's file carries ``.data`` (``bytes``);
+  * **streamed to disk** — pass ``dest="some/dir"`` and each upload is written
     there (filename sandboxed inside ``dest``), the callback's file carries
     ``.path`` instead. Right for large files: constant server memory.
 
@@ -41,9 +41,9 @@ class UploadedFile:
 
     ``data`` holds the raw ``bytes`` for an in-memory upload (``dest`` unset);
     ``path`` holds the saved location when the panel streamed it to disk. Exactly
-    one of the two is set â€” use :meth:`read` to get the bytes either way, or
+    one of the two is set — use :meth:`read` to get the bytes either way, or
     :meth:`save` to write them somewhere. ``content_type`` is the browser-reported
-    MIME type (advisory â€” don't trust it for security decisions).
+    MIME type (advisory — don't trust it for security decisions).
     """
 
     def __init__(self, name, size, content_type=None, data=None, path=None):
@@ -182,7 +182,7 @@ class Upload(React):
     server memory flat for large files. ``accept`` filters the file picker (e.g.
     ``".csv"`` or ``"image/*"``); ``multiple=True`` allows selecting several at
     once (each fires the handler separately). ``max_size`` (bytes) rejects
-    oversized uploads â€” set it on any public/tunneled canvas. ``.value`` reads
+    oversized uploads — set it on any public/tunneled canvas. ``.value`` reads
     the most recently uploaded file.
     """
 
@@ -219,7 +219,7 @@ class Upload(React):
             {"role": "manager", "id": "a1b2c3d4", "name": "Fox", "color": "#ef4444"}
 
         ``role`` is the server-trusted access level (``None`` when no passwords are
-        set) â€” gate permissions on this. ``id``/``name``/``color`` come from the
+        set) — gate permissions on this. ``id``/``name``/``color`` come from the
         live viewer roster (present when the uploader is connected) and are good
         for attribution/labelling, not authorization. See
         :meth:`~danvas.bridge.Bridge.resolve_viewer`.

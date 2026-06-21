@@ -2,7 +2,7 @@
 
 Accepts a file path, http(s)/data URL, raw image bytes, a Matplotlib figure or
 axes, a PIL image, or a NumPy array. (For a *stream* of frames use VideoFeed.)
-Everything is duck-typed, so none of NumPy/PIL/Matplotlib is a hard dependency â€”
+Everything is duck-typed, so none of NumPy/PIL/Matplotlib is a hard dependency —
 each is only needed if you actually pass that kind of object.
 """
 
@@ -13,7 +13,7 @@ import sys
 from .react import React
 
 # Native React panel (not an iframe) so a vector/SVG or high-resolution image
-# stays sharp when the canvas is zoomed â€” an iframe is rasterised then scaled.
+# stays sharp when the canvas is zoomed — an iframe is rasterised then scaled.
 # Scoped under `.pc-img`; the image is centred and never upscaled past natural
 # size (``max-*:100%``), with ``object-fit`` deciding contain vs cover.
 _IMG_CSS = """
@@ -49,10 +49,10 @@ class Image(React):
                          props={"src": _to_data_uri(src), "fit": fit})
 
     def update(self, src):
-        """Replace the image, live (the ``src`` prop swaps â€” no shape reload).
+        """Replace the image, live (the ``src`` prop swaps — no shape reload).
 
         A Matplotlib figure is auto-released from pyplot's registry after
-        rendering, so calling this in a loop with fresh figures doesn't leak â€”
+        rendering, so calling this in a loop with fresh figures doesn't leak —
         no manual ``plt.close()`` needed.
         """
         super().update(src=_to_data_uri(src))
@@ -76,7 +76,7 @@ def _to_data_uri(src):
         buf = io.BytesIO()
         src.savefig(buf, format="png", bbox_inches="tight")
         # Release the figure from pyplot's global registry, which would
-        # otherwise keep every figure alive â€” a leak when update(fig) runs in a
+        # otherwise keep every figure alive — a leak when update(fig) runs in a
         # loop. The figure object itself stays usable (savefig still works).
         plt = sys.modules.get("matplotlib.pyplot")
         if plt is not None:
@@ -102,7 +102,7 @@ def _to_data_uri(src):
             # Via importlib so PyInstaller's analysis doesn't follow it and pull
             # Pillow (and, through PIL._typing, numpy) into a baked app that
             # never renders an array image; bake() bundles Pillow when an Image
-            # component is on the canvas (see danvas/bake.py).
+            # component is on the canvas (see pycanvas/bake.py).
             import importlib
 
             _PILImage = importlib.import_module("PIL.Image")

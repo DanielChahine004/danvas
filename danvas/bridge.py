@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover - exercised only without orjson installe
 
 
 # Tokens that mark a mobile/tablet browser in the User-Agent string. Used only
-# to classify a viewer as "mobile" vs "desktop" for layout adaptation â€” it's a
+# to classify a viewer as "mobile" vs "desktop" for layout adaptation — it's a
 # best-effort, client-reported, spoofable signal (and iPadOS reports a desktop
 # UA), so it's presentation-only, never an authorization input.
 _MOBILE_UA_RE = re.compile(
@@ -85,7 +85,7 @@ def _diag(msg):
     behaviour there is unchanged.
     """
     stream = sys.__stdout__
-    if stream is None:  # e.g. pythonw / detached stdout â€” nothing to write to
+    if stream is None:  # e.g. pythonw / detached stdout — nothing to write to
         return
     try:
         stream.write(msg + "\n")
@@ -112,7 +112,7 @@ _REAP_INTERVAL = 10.0
 # base64 decode or JSON parse. Control messages (register/update/layout/chat/...)
 # stay JSON: they're low-rate and self-describing, so binary would cost
 # readability for no real throughput. The codes are sourced from the canonical
-# danvas/_protocol.py (the same definition the frontend's protocol.generated.js
+# pycanvas/_protocol.py (the same definition the frontend's protocol.generated.js
 # is rendered from), so the two sides can't drift.
 BINARY_VIDEO = BINARY_FRAME_CODES["VIDEO"]   # JPEG-encoded frame bytes
 BINARY_AUDIO = BINARY_FRAME_CODES["AUDIO"]   # little-endian int16 PCM (interleaved)
@@ -139,7 +139,7 @@ class Bridge:
         self._shapes = {}   # id -> BaseShape (geo/text/note/draw/line/frame/highlight)
         # Identity of this server *run*. Component ids are minted fresh every
         # run, so a browser whose socket reconnects to a new run (re-running the
-        # script, a crash, a hot reload) still shows the previous run's panels â€”
+        # script, a crash, a hot reload) still shows the previous run's panels —
         # stacked exactly on top of the new ones, dead to input. The run id rides
         # the welcome frame; the frontend clears every managed shape when it sees
         # the id change, so a stale page heals itself on reconnect.
@@ -160,7 +160,7 @@ class Bridge:
         # the canvas to that viewer (e.g. a mobile layout via set_layout(
         # client_id=...)) without blocking the connect path.
         self._connect_taps = []
-        # Observers of viewer disconnections (canvas.on_disconnect) â€” the
+        # Observers of viewer disconnections (canvas.on_disconnect) — the
         # symmetric twin of _connect_taps, fired once per leave with the
         # departed viewer's last-known dict.
         self._disconnect_taps = []
@@ -169,9 +169,9 @@ class Bridge:
         self._draw_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
-        self._any_connected = threading.Event()  # set while â‰¥1 client is connected
+        self._any_connected = threading.Event()  # set while ≥1 client is connected
         # One asyncio.Lock per live connection. The websockets legacy protocol
-        # forbids concurrent writes (its drain() has no internal lock â€” two
+        # forbids concurrent writes (its drain() has no internal lock — two
         # coroutines draining a flow-control-paused socket trip an assertion), so
         # every send to a given socket is serialized through its lock. Without
         # this, a high-rate feed (e.g. 30fps video) overlaps sends and crashes.
@@ -184,7 +184,7 @@ class Bridge:
         # diffs; we accumulate the canonical set here, fan it out to the other
         # browsers, and replay it to anyone who connects later.
         self._drawings = {}  # record id -> tldraw record
-        # Reflow requests from col/row.refit() â€” keyed by container id so each
+        # Reflow requests from col/row.refit() — keyed by container id so each
         # column's latest reflow supersedes its previous one. Replayed on connect
         # so auto-height panels stay correctly stacked for every joining client.
         self._reflows = {}  # container key -> reflow message
@@ -237,8 +237,8 @@ class Bridge:
         # on only for a private local bind) since it's viewer telemetry.
         self._cursors = False
         # True when this process is a hot-reload restart (serve sets it). It rides
-        # the welcome frame so a reconnecting browser â€” whose page never reloaded,
-        # only its socket â€” drops the previous run's panels before this run's are
+        # the welcome frame so a reconnecting browser — whose page never reloaded,
+        # only its socket — drops the previous run's panels before this run's are
         # replayed. Without it, panels (which get fresh ids each run) pile up: the
         # old shapes linger beside the new ones. See serve(hot_reload=True).
         self._reload = False
@@ -303,7 +303,7 @@ class Bridge:
         Python); ``msg`` is the frame's dict (binary media frames arrive as a
         ``{"type": "binary", ...}`` summary). Taps observe; they must not block
         (they run inline on the sending/receiving path). A tap may safely drive
-        components â€” frames a tap itself causes are not re-tapped.
+        components — frames a tap itself causes are not re-tapped.
         """
         self._frame_taps.append(fn)
         return fn
@@ -317,7 +317,7 @@ class Bridge:
 
         ``viewer`` is a snapshot dict with ``id``/``name``/``color`` and the new
         ``cursor`` (``{"x", "y"}`` in canvas coords). Runs off the event loop on
-        the input-dispatch thread, but it is high-rate â€” keep it cheap.
+        the input-dispatch thread, but it is high-rate — keep it cheap.
         """
         self._cursor_taps.append(fn)
         return fn
@@ -404,11 +404,11 @@ class Bridge:
             pass
 
     def _on_binary_input(self, ws, data):
-        """Route an inbound binary frame (browser â†’ Python) to the right component.
+        """Route an inbound binary frame (browser → Python) to the right component.
 
-        Frame layout: ``[type][idLen][id bytes][payload]`` â€” the same envelope as
+        Frame layout: ``[type][idLen][id bytes][payload]`` — the same envelope as
         outbound frames. Currently only ``BINARY_INPUT`` (type 5) is valid here;
-        other codes are silently ignored (they are serverâ†’browser-only directions).
+        other codes are silently ignored (they are server→browser-only directions).
         """
         if len(data) < 2:
             return
@@ -622,7 +622,7 @@ class Bridge:
         the full replay via ``handle_connection``; this covers live clients.
 
         ``only_roles`` (a set/list of role names) further narrows the push to
-        viewers in those roles â€” used by :meth:`BaseComponent.add_role` so newly
+        viewers in those roles — used by :meth:`BaseComponent.add_role` so newly
         allowed roles get the panel without re-registering it to viewers who
         already had it.
         """
@@ -632,7 +632,7 @@ class Bridge:
         if self._loop is None:
             return
         # Build the register frame once when the panel has no per-viewer overlays
-        # (the common case) â€” only re-derive per viewer when there's a role/client
+        # (the common case) — only re-derive per viewer when there's a role/client
         # override to merge, so a fan-out to N viewers isn't N identical builds.
         shared_reg = (None if component._has_viewer_overlays()
                       else self.register_message(component))
@@ -756,7 +756,7 @@ class Bridge:
                   f"{len(self._arrows)} arrows, {len(self._shapes)} shapes)")
 
             # Fire on_connect observers off the loop (a snapshot, like cursor
-            # taps) once the client has its initial state â€” so a handler that
+            # taps) once the client has its initial state — so a handler that
             # adapts the layout (set_layout(client_id=...)) lands as a live
             # update on top of what was just replayed.
             if self._connect_taps:
@@ -789,7 +789,7 @@ class Bridge:
             gone = self._viewers.pop(ws, None)
             # Viewer ids are minted fresh per connection and never reused, so a
             # per-client view override for a departed viewer can never apply
-            # again â€” drop it so the map doesn't grow unbounded.
+            # again — drop it so the map doesn't grow unbounded.
             if gone is not None:
                 self._view_per_client.pop(gone["id"], None)
                 # Tell peers to drop this viewer's rendered cursor.
@@ -814,7 +814,7 @@ class Bridge:
         These three fields are client-reported either way (only ``role`` is
         trusted), so honouring them changes no trust boundary. ``device`` is the
         connection's classified device (``"mobile"``/``"desktop"``) for layout
-        adaptation â€” also client-reported (from the User-Agent), so attribution
+        adaptation — also client-reported (from the User-Agent), so attribution
         only, never authorization.
         """
         rid = (requested or {}).get("id")
@@ -992,16 +992,16 @@ class Bridge:
         """Build the uploader identity dict for an upload handler.
 
         Returns the same shape as the viewer dict handed to in-canvas handlers
-        (``id``/``name``/``color``/``cursor``/``role`` â€” every key always
+        (``id``/``name``/``color``/``cursor``/``role`` — every key always
         present), so handler code can read it uniformly. ``role`` is the
-        server-trusted access level from the HTTP auth session â€” always
+        server-trusted access level from the HTTP auth session — always
         meaningful (``None`` when no passwords are set) and safe to gate on. The
         rest are attribution-only: an upload arrives over HTTP carrying the
         browser's self-reported roster id, so when it matches a *currently
         connected* viewer that viewer's live ``id``/``name``/``color``/``cursor``
         are merged in; a stale or forged id (or an uploader who already
         disconnected) simply leaves them ``None``. Because name/colour are read
-        from the server roster â€” never the client â€” the only thing a client can
+        from the server roster — never the client — the only thing a client can
         claim is the id of a viewer who is actually online. Don't trust
         ``id``/``name``/``color`` for authorization; use ``role``.
         """
@@ -1023,7 +1023,7 @@ class Bridge:
 
         Browsers send a periodic heartbeat; one that stops (a hard-closed or
         network-dropped tab) is closed here so the viewer count and roster don't
-        stay inflated â€” the WS keepalive ping is disabled (see server.py), so
+        stay inflated — the WS keepalive ping is disabled (see server.py), so
         without this a dead socket lingers until the next failed send.
         """
         while True:
@@ -1055,7 +1055,7 @@ class Bridge:
             msg = _loads(raw)
         except (ValueError, TypeError):
             return
-        # Any inbound frame proves the socket is alive â€” refresh its deadline.
+        # Any inbound frame proves the socket is alive — refresh its deadline.
         self._last_seen[ws] = time.monotonic()
         kind = msg.get("type")
         if kind == "heartbeat":
@@ -1143,7 +1143,7 @@ class Bridge:
             # canonical record set and relay it to the *other* browsers so every
             # open view converges. Exclude the sender (``exclude=ws``): it already
             # applied the edit locally, and echoing the diff back is harmful while
-            # a record is being actively edited â€” a text shape mid-typing sends a
+            # a record is being actively edited — a text shape mid-typing sends a
             # diff per keystroke, and over network latency the echo of an earlier
             # keystroke arrives after newer ones and `applyDiff` reverts them (the
             # cursor jumps / characters vanish). Instant on localhost, so it only
@@ -1152,7 +1152,7 @@ class Bridge:
             self._apply_draw(diff)
             self.broadcast({"type": "draw", "diff": diff}, exclude=ws)
         elif kind == "request":
-            # A panel's ``canvas.request(data)`` â€” the awaitable twin of input.
+            # A panel's ``canvas.request(data)`` — the awaitable twin of input.
             # Answer it off the loop (a slow handler can't stall rendering) and
             # reply correlated by reqId.
             comp = self._components.get(msg.get("id"))
@@ -1192,7 +1192,7 @@ class Bridge:
         """Answer a panel's ``canvas.request`` (off the loop) and reply by reqId.
 
         Runs the component's request handler on the dispatch thread, then
-        broadcasts a ``response`` correlated by ``reqId`` â€” the requesting tab
+        broadcasts a ``response`` correlated by ``reqId`` — the requesting tab
         resolves its Promise; other tabs (which don't hold that reqId) ignore it.
         The requester's viewer identity is passed through so an ``on_request``
         handler that declares a second parameter learns who asked. A panel with no
@@ -1234,7 +1234,7 @@ class Bridge:
 
         ``exclude=ws`` keeps the mover from receiving its own geometry back: it
         already applied the gesture locally, so echoing it is redundant traffic
-        and â€” the same hazard that bit free-form draw sync â€” a latent stale-
+        and — the same hazard that bit free-form draw sync — a latent stale-
         overwrite were these ever sent mid-gesture (they're debounced to settle
         today, so it isn't a live bug, but excluding the sender is the right shape).
         """
@@ -1242,7 +1242,7 @@ class Bridge:
         # Auto-flow messages (auto=True) are browser-side masonry placements.
         # If Python already has an explicit position for this component (set via
         # set_layout / deferred relative placement), the auto position must not
-        # overwrite it â€” Python's relative layout wins. Strip x/y from the msg
+        # overwrite it — Python's relative layout wins. Strip x/y from the msg
         # before _apply_remote_layout so only size updates propagate.
         effective_msg = msg
         if msg.get("auto") and comp.x is not None:
@@ -1343,7 +1343,7 @@ class Bridge:
 
     async def _send_bytes(self, ws, data):
         """Send one binary frame, serialized against any other send (text or
-        binary) to this socket â€” the websockets drain forbids overlapping
+        binary) to this socket — the websockets drain forbids overlapping
         writes, so binary media must share the same per-connection lock."""
         if ws not in self._connections:
             return
@@ -1355,7 +1355,7 @@ class Bridge:
 
     # -- outbound (thread-safe) ----------------------------------------------
     def _emit(self, targets, msg):
-        """Schedule ``msg`` to each websocket in ``targets`` â€” the shared tail of
+        """Schedule ``msg`` to each websocket in ``targets`` — the shared tail of
         :meth:`broadcast` / :meth:`send_to_role` / :meth:`send_to_client`.
 
         The frame is JSON-encoded *once* here and the same text handed to every
@@ -1363,7 +1363,7 @@ class Bridge:
         one per socket. It is also scheduled onto the loop with a *single*
         cross-thread hop (:meth:`_fanout_text`), not one per socket: the
         thread-safe handoff (``run_coroutine_threadsafe``) is far costlier than an
-        in-loop task, and it was the real ceiling on fan-out â€” total sends/sec
+        in-loop task, and it was the real ceiling on fan-out — total sends/sec
         stayed flat (~13k) however many viewers connected. A no-op before the loop
         exists (replay carries the state on connect); each send is wrapped in
         :meth:`_safe_send_text` so a dead socket is dropped rather than raising.
@@ -1384,7 +1384,7 @@ class Bridge:
         """Deliver one already-encoded frame to every target, concurrently.
 
         Spawns the per-socket sends as cheap in-loop tasks (via ``gather``) so a
-        slow/backpressured socket can't hold up a fast one â€” the same per-socket
+        slow/backpressured socket can't hold up a fast one — the same per-socket
         independence the old one-task-per-socket scheduling had, but reached with
         a single cross-thread hop instead of N. Exceptions are swallowed per
         socket inside :meth:`_safe_send_text`; ``return_exceptions`` is belt-and-
@@ -1428,7 +1428,7 @@ class Bridge:
 
         Mirrors :meth:`broadcast` but for ``bytes`` (high-rate media). A client
         that hasn't mounted the target panel yet simply has no handler for the
-        frame and drops it â€” the next frame lands once it's ready.
+        frame and drops it — the next frame lands once it's ready.
         """
         if self._loop is None:
             return
@@ -1439,7 +1439,7 @@ class Bridge:
                 self._fanout_bytes(targets, data), self._loop)
 
     async def _fanout_bytes(self, targets, data):
-        """:meth:`_fanout_text` for a binary frame â€” one cross-thread hop, then
+        """:meth:`_fanout_text` for a binary frame — one cross-thread hop, then
         concurrent per-socket sends."""
         if len(targets) == 1:
             await self._safe_send_binary(targets[0], data)
@@ -1516,7 +1516,7 @@ class Bridge:
         A full ``plot`` snapshot supersedes whatever is pending (it is the whole
         current figure, e.g. after a new trace / clear / smoothing change). An
         ``plot_extend`` delta is *appended*: folded onto a pending snapshot's
-        arrays, or concatenated onto a pending delta â€” so the single pending
+        arrays, or concatenated onto a pending delta — so the single pending
         frame always represents every sample since the last send, in order.
         """
         new_payload = new_msg.get("payload") or {}
@@ -1587,7 +1587,7 @@ class Bridge:
         LivePlot stream frames (:meth:`_merge_live`): instead of dropping the
         stale pending frame, the new points are folded into it, so a client that
         falls behind a fast producer gets one catch-up frame carrying every point
-        it missed â€” no backlog (the frame rate self-throttles to what the client
+        it missed — no backlog (the frame rate self-throttles to what the client
         can render) and no loss (every sample is delivered, in order). This is
         what lets a 75 push/s stream stay live without queuing 75 redraws/s at a
         client that can only paint a handful.
@@ -1708,7 +1708,7 @@ class Bridge:
         """Ask a connected browser for the user's free-form drawings.
 
         Returns tldraw "content" (shapes/bindings/assets) for everything on the
-        canvas *except* the danvas panels and connector arrows â€” those are
+        canvas *except* the danvas panels and connector arrows — those are
         recreated from Python code, not persisted. The browser is the source of
         truth for free-form drawings, so this round-trips over the socket and
         blocks the calling thread until a reply arrives (or ``timeout`` elapses).

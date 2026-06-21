@@ -1,6 +1,6 @@
 """The file-watching monitor behind ``Canvas.serve(hot_reload=True)``.
 
-Split out of :mod:`danvas.canvas` because it touches none of the canvas state â€”
+Split out of :mod:`danvas.canvas` because it touches none of the canvas state —
 it only watches files and respawns the worker subprocess. The worker process runs
 the real server; this side just restarts it on edits.
 """
@@ -40,7 +40,7 @@ def _react_source_diff(old_text, new_text):
     old_struct = ast.dump(_ZeroStr().visit(copy.deepcopy(old_tree)))
     new_struct = ast.dump(_ZeroStr().visit(copy.deepcopy(new_tree)))
     if old_struct != new_struct:
-        return None  # structural change â†’ full restart
+        return None  # structural change → full restart
 
     # Collect top-level bare-name string assignments.
     def _str_assigns(tree):
@@ -61,7 +61,7 @@ def _react_source_diff(old_text, new_text):
     if not changed_vars:
         return {}  # only whitespace/comments changed
 
-    # Build var_name â†’ component_name mapping from canvas.react(source=VAR, name="X") calls.
+    # Build var_name → component_name mapping from canvas.react(source=VAR, name="X") calls.
     def _source_map(tree):
         mapping = {}
         for node in ast.walk(tree):
@@ -85,7 +85,7 @@ def _react_source_diff(old_text, new_text):
     for var in changed_vars:
         comp_name = var_to_comp.get(var)
         if comp_name is None:
-            return None  # changed string is not a React source â†’ full restart
+            return None  # changed string is not a React source → full restart
         updates[comp_name] = new_strs[var]
 
     return updates
@@ -138,7 +138,7 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
 
     When ``tunnel`` is set, the public tunnel is opened *here*, in the monitor,
     rather than in each worker: the monitor outlives every restart, so one tunnel
-    to ``port`` stays up across reloads â€” the public URL never changes and the
+    to ``port`` stays up across reloads — the public URL never changes and the
     provider (e.g. cloudflared) is started only once, instead of a fresh tunnel
     per edit (which churns quick-tunnel rate limits). Workers bind ``port``
     behind it; during the brief restart gap visitors see a momentary 502 until
@@ -252,7 +252,7 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
                 print("danvas hot reload: the app exited with an error; "
                       "waiting for the next save...")
                 last = wait_for_edit(last)
-                prev_snap = last  # same as last â†’ only_main_changed=False â†’ full restart
+                prev_snap = last  # same as last → only_main_changed=False → full restart
 
             # Debounce: wait until the watched files stop changing (formatter /
             # editor may write the file several times in quick succession after a
@@ -282,7 +282,7 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
                 if updates is not None:
                     old_script_text = new_script_text
                     if not updates:
-                        # Only whitespace / comments changed â€” no restart needed.
+                        # Only whitespace / comments changed — no restart needed.
                         continue
                     if _apply_partial_hot_update(port, updates):
                         continue

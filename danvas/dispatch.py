@@ -7,8 +7,8 @@ objects (DataFrames, figures, anything with ``_repr_html_`` / ``_repr_png_``)
 render richly; plain structures and scalars fall back to a table, JSON tree, or
 label.
 
-Unlike the notebook formatter it does **not** require IPython â€” it calls the
-``_repr_*`` hooks directly â€” so ``Canvas.show`` works in plain scripts too. When
+Unlike the notebook formatter it does **not** require IPython — it calls the
+``_repr_*`` hooks directly — so ``Canvas.show`` works in plain scripts too. When
 an IPython ``display_formatter`` *is* available (the cell-capture passes one), it
 is used first so notebook-registered formatters are honoured.
 """
@@ -29,8 +29,8 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
     """Build (but don't insert) the panel that best renders ``value``.
 
     Detection order, most specific first, so scripts and notebooks agree:
-    existing component â†’ Plotly â†’ image-like (Matplotlib/PIL/array) â†’ tabular
-    (DataFrame/Series) â†’ rich ``_repr_*`` â†’ dict/list (JSON) â†’ bytes â†’ string â†’
+    existing component → Plotly → image-like (Matplotlib/PIL/array) → tabular
+    (DataFrame/Series) → rich ``_repr_*`` → dict/list (JSON) → bytes → string →
     scalar. ``formatter`` is an optional IPython ``display_formatter`` used ahead
     of the ``_repr_*`` hooks. ``w``/``h`` override the chosen component's default
     size (each component carries its own sensible default).
@@ -43,7 +43,7 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
     as that image.
     """
     if isinstance(value, BaseComponent):
-        return value  # already a panel â€” show it as-is
+        return value  # already a panel — show it as-is
 
     # A pathlib.Path (or any os.PathLike) is handled as a filesystem-path string.
     if isinstance(value, os.PathLike):
@@ -70,12 +70,12 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
             "<pre style='margin:0;white-space:pre-wrap;font-size:12px'>"
             f"{_escape(_as_json(value))}</pre>"
         )
-        # A JSON tree is a finite block â€” fit the panel to it instead of a tall
+        # A JSON tree is a finite block — fit the panel to it instead of a tall
         # mostly-empty default.
         return _mark_auto(Custom(html=document(body), name=name, label=label,
                                  w=w, h=h))
 
-    # Raw bytes that look like an image (PNG/JPEG/GIF/â€¦) render as the image;
+    # Raw bytes that look like an image (PNG/JPEG/GIF/…) render as the image;
     # anything else falls through to a repr label.
     if isinstance(value, (bytes, bytearray, memoryview)) and _is_image_bytes(value):
         return _image_panel(bytes(value), name, label, w, h)
@@ -109,7 +109,7 @@ def _string_panel(s, name, label, w, h, formatter):
     if _is_image_url(s):
         return _image_panel(s, name, label, w, h)
 
-    # A bare web URL becomes a clickable link rather than dead text â€” one line,
+    # A bare web URL becomes a clickable link rather than dead text — one line,
     # so fit the panel height to it.
     if "\n" not in s and len(s) <= 2048 and s.startswith(("http://", "https://")):
         return _mark_auto(Markdown(f"[{s}]({s})", name=name, label=label,
@@ -214,8 +214,8 @@ def _looks_like_html(s):
 
 
 # Markers strong enough to call a string Markdown. Single ``*`` italics and bare
-# ``_`` are deliberately excluded â€” too common in ordinary text (and code) to be
-# reliable signals â€” so plain prose isn't misread as Markdown.
+# ``_`` are deliberately excluded — too common in ordinary text (and code) to be
+# reliable signals — so plain prose isn't misread as Markdown.
 _MD_RE = re.compile(
     r"^\s{0,3}#{1,6}\s"          # ATX heading
     r"|\*\*.+?\*\*"             # **bold**
@@ -262,7 +262,7 @@ def _is_image_like(obj):
     if mod.startswith("PIL"):
         return hasattr(obj, "save") and hasattr(obj, "mode")
     if mod.startswith("numpy") and hasattr(obj, "shape"):
-        # 2-D (grayscale) or HÃ—WÃ—{3,4} (RGB/RGBA) arrays read as images;
+        # 2-D (grayscale) or H×W×{3,4} (RGB/RGBA) arrays read as images;
         # anything else is data, handled as a table/structure.
         shape = obj.shape
         return len(shape) == 2 or (len(shape) == 3 and shape[2] in (3, 4))
@@ -343,7 +343,7 @@ def _dunder_bundle(value):
 # into a big fixed box: content-bounded panels (JSON, rich repr, HTML, the URL
 # link) get auto-height; tables get a height computed from their row count and
 # capped; images size to their natural dimensions. Explicit canvas.table(...) /
-# canvas.custom(...) are untouched â€” only the inferred sizes here change.
+# canvas.custom(...) are untouched — only the inferred sizes here change.
 
 # Card/table furniture, calibrated from the rendered panel (toolbar ~35, header
 # row ~43 with the per-column profile line, the always-shown distribution row
@@ -358,7 +358,7 @@ def _mark_auto(component):
 
     ``insert`` treats a component carrying ``_auto_h=True`` as default
     auto-height: it fits the content but still yields to a grid/column slot.
-    Custom (iframe) panels â€” the rich-repr / SVG / HTML / JSON outputs â€” also
+    Custom (iframe) panels — the rich-repr / SVG / HTML / JSON outputs — also
     get ``_auto_w=True``, so ``show()`` sizes their *width* to the content's
     natural width (a one-shot fit at load), the way their height already fits.
     The React display panels (Markdown/Image/Table) measure differently and are
@@ -413,8 +413,8 @@ def _image_panel_size(w, h, max_w=560, max_h=440, min_w=160):
 def _image_dims(src):
     """Best-effort natural ``(width, height)`` of an image source, or ``None``.
 
-    Covers the sources :class:`~danvas.Image` accepts â€” PIL, NumPy, Matplotlib,
-    raw bytes, a file path, and data URIs â€” by reading the object's own size or
+    Covers the sources :class:`~danvas.Image` accepts — PIL, NumPy, Matplotlib,
+    raw bytes, a file path, and data URIs — by reading the object's own size or
     sniffing the image header. Remote URLs return ``None`` (no fetch)."""
     try:
         # PIL image: .size + .mode.
@@ -516,4 +516,4 @@ def _escape(text):
 
 def _short(value, limit=2000):
     text = repr(value)
-    return text if len(text) <= limit else text[:limit] + " â€¦"
+    return text if len(text) <= limit else text[:limit] + " …"

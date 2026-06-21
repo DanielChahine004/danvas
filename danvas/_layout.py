@@ -1,4 +1,4 @@
-"""Auto-layout containers â€” ``canvas.grid`` / ``column`` / ``row`` and the flow
+"""Auto-layout containers — ``canvas.grid`` / ``column`` / ``row`` and the flow
 placer behind them.
 
 Split out of :mod:`danvas.canvas`: this is pure placement logic with no
@@ -10,8 +10,8 @@ mixed into :class:`~danvas.canvas.Canvas` via :class:`_LayoutMixin`.
 class Container:
     """A persistent, nestable layout container.
 
-    Created by :meth:`Canvas.column` / :meth:`Canvas.row`.  Children â€” panels
-    or other containers â€” are added in order via :meth:`add`.  The container
+    Created by :meth:`Canvas.column` / :meth:`Canvas.row`.  Children — panels
+    or other containers — are added in order via :meth:`add`.  The container
     computes each child's position from the running cursor and broadcasts a
     ``container_sync`` message to the frontend, which auto-repacks the whole
     tree whenever any member's size changes (e.g. an ``h="auto"`` panel
@@ -189,7 +189,7 @@ class Container:
         return self
 
     def refit(self):
-        """Alias for :meth:`reflow` â€” kept for backwards compatibility."""
+        """Alias for :meth:`reflow` — kept for backwards compatibility."""
         return self.reflow()
 
     def move(self, x, y):
@@ -237,7 +237,7 @@ class Container:
         Called by :meth:`~danvas.canvas.Canvas.insert` when this container is
         active.  Appends the component to ``_children`` and computes its position
         by summing the sizes of already-placed siblings.  Does *not* call
-        ``set_layout`` or broadcast â€” ``insert`` handles that after
+        ``set_layout`` or broadcast — ``insert`` handles that after
         ``register_live``.
         """
         # Apply cross-axis sizing from the container if not caller-specified.
@@ -364,7 +364,7 @@ class Container:
 
 
 class _FlowLayout:
-    """Auto-placer for ``canvas.grid`` â€” uniform fixed-slot grid layout.
+    """Auto-placer for ``canvas.grid`` — uniform fixed-slot grid layout.
 
     :meth:`Canvas.column` and :meth:`Canvas.row` now return a
     :class:`Container` instead.  This class is kept for ``grid``, which has
@@ -524,8 +524,8 @@ class _LayoutMixin:
         spanning the full browser viewport width.
 
         Sets the camera to ``scroll_y`` mode (vertical scroll only, zoom locked
-        at 1Ã—) and returns a root :class:`Container` in column mode whose width
-        tracks the browser window dynamically â€” so every panel added to it is
+        at 1×) and returns a root :class:`Container` in column mode whose width
+        tracks the browser window dynamically — so every panel added to it is
         automatically as wide as the viewport regardless of screen size.
 
         The returned container works exactly like :meth:`column`: use
@@ -534,7 +534,7 @@ class _LayoutMixin:
 
             page = canvas.streamlit(gap=24, padding=20)
             page.add(canvas.label("title", "My App", h=48))
-            page.add(canvas.markdown("â€¦bodyâ€¦", h="auto"))
+            page.add(canvas.markdown("…body…", h="auto"))
 
             with canvas.streamlit(gap=16) as page:
                 canvas.label("title", "My App", h=48)
@@ -555,8 +555,8 @@ class _LayoutMixin:
         """Auto-arrange panels added inside a ``with`` block into a grid.
 
         Inside the block, any panel inserted without an explicit ``x``/``y`` (or a
-        ``below=``/``right_of=`` anchor) drops into the next cell â€” left to right,
-        top to bottom, ``cols`` per row â€” taking the slot size unless you pass
+        ``below=``/``right_of=`` anchor) drops into the next cell — left to right,
+        top to bottom, ``cols`` per row — taking the slot size unless you pass
         ``w``/``h``::
 
             with canvas.grid(cols=2, slot=(560, 300)):

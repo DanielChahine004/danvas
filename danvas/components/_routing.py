@@ -59,7 +59,7 @@ class _EventRouter:
         callable before the handler runs (``fields={"qty": int, "price": float}``),
         so the handler receives real numbers instead of strings off the wire. A
         value that can't be coerced drops that message (the handler isn't called)
-        and logs why â€” so a malformed field from the browser can't crash the
+        and logs why — so a malformed field from the browser can't crash the
         handler with a ``ValueError``. Fields absent from the payload are left
         untouched (default them in the handler), and non-dict payloads bypass
         coercion::

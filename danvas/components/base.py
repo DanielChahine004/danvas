@@ -39,7 +39,7 @@ def _mark_dedicated(fn, queue_mode="fifo"):
     persistent per-handler thread rather than a freshly spawned one per call.
     The kernel is created lazily on first dispatch and lives for the app's
     lifetime. ``queue_mode`` sets the backpressure policy on that thread's
-    own queue (``"fifo"`` or ``"latest"`` â€” see :class:`DedicatedKernel`).
+    own queue (``"fifo"`` or ``"latest"`` — see :class:`DedicatedKernel`).
     """
     if queue_mode not in _HANDLER_QUEUES:
         raise ValueError(
@@ -138,7 +138,7 @@ class BaseComponent:
         # ``locked`` (full lock, top-level tldraw isLocked); ``draggable`` /
         # ``resizable`` / ``operable`` / ``grabbable`` (interaction-preserving
         # locks carried in the shape's tldraw ``meta``); ``frame`` (the card
-        # chrome). See danvas/_flags.py for the per-flag semantics, the wire
+        # chrome). See pycanvas/_flags.py for the per-flag semantics, the wire
         # keys, and the property docstrings generated at the bottom of this file.
         for _flag in LAYOUT_FLAGS.values():
             setattr(self, _flag.attr, _flag.default)
@@ -205,7 +205,7 @@ class BaseComponent:
 
         Appends to the role allowlist; roles already present are ignored. A
         viewer currently connected under a newly added role is sent the panel
-        immediately, and later connections get it via the normal replay â€” so a
+        immediately, and later connections get it via the normal replay — so a
         panel can be revealed to a role created after the server started (e.g. a
         team whose password the admin just set). Returns ``self``.
         """
@@ -222,7 +222,7 @@ class BaseComponent:
         under a removed role to drop the panel. Roles not present are ignored.
         Note that emptying the allowlist entirely means "visible to all roles",
         so removing the last role *shows* the panel to everyone rather than
-        hiding it â€” keep at least one role (or re-add ``roles=``) to stay
+        hiding it — keep at least one role (or re-add ``roles=``) to stay
         restricted. Returns ``self``.
         """
         removed = [r for r in roles if r in self._roles]
@@ -304,14 +304,14 @@ class BaseComponent:
     def _set_auto_h(self):
         """Turn on content-fit height (``h="auto"``).
 
-        Overridden by :class:`~danvas.Custom` (and its subclasses â€” markdown,
-        table, image, â€¦), the only panels whose content is measurable in the
+        Overridden by :class:`~danvas.Custom` (and its subclasses — markdown,
+        table, image, …), the only panels whose content is measurable in the
         browser. The base panel has a fixed height it can't fit, so this warns
         and leaves the height as-is rather than failing or silently breaking.
         """
         warnings.warn(
             f"h='auto' is only supported on Custom-based panels (custom, "
-            f"markdown, table, image, â€¦); {type(self).__name__} keeps its "
+            f"markdown, table, image, …); {type(self).__name__} keeps its "
             f"current height", stacklevel=3,
         )
 
@@ -341,8 +341,8 @@ class BaseComponent:
 
     # The lock/chrome flag properties (``locked``, ``draggable``, ``resizable``,
     # ``operable``, ``grabbable``, ``frame``) are generated from LAYOUT_FLAGS at
-    # the bottom of this module â€” one read-back property + a setter that routes
-    # through set_layout for each. See danvas/_flags.py.
+    # the bottom of this module — one read-back property + a setter that routes
+    # through set_layout for each. See pycanvas/_flags.py.
 
     # -- registration / initial sync ----------------------------------------
     def register_props(self):
@@ -436,7 +436,7 @@ class BaseComponent:
     def pin(self):
         """Pin in place and fix size, but keep controls interactive, live.
 
-        Shorthand for ``set_layout(draggable=False, resizable=False)`` â€” unlike
+        Shorthand for ``set_layout(draggable=False, resizable=False)`` — unlike
         :meth:`lock`, sliders and buttons on the panel still work.
         """
         self.set_layout(draggable=False, resizable=False)
@@ -465,7 +465,7 @@ class BaseComponent:
         """Raise this panel one step up the stack, live.
 
         A single overlap-aware nudge (tldraw semantics); not persisted across a
-        reload â€” use :meth:`to_front` for a durable change.
+        reload — use :meth:`to_front` for a durable change.
         """
         self._send_order("forward")
 
@@ -473,7 +473,7 @@ class BaseComponent:
         """Lower this panel one step down the stack, live.
 
         A single overlap-aware nudge (tldraw semantics); not persisted across a
-        reload â€” use :meth:`to_back` for a durable change.
+        reload — use :meth:`to_back` for a durable change.
         """
         self._send_order("backward")
 
@@ -500,7 +500,7 @@ class BaseComponent:
         Scope it to specific viewers with ``roles=`` and/or ``client_id=`` (just
         like :meth:`React.update`): the change is stored as a per-viewer layout
         *overlay* on the shared geometry (precedence shared < role < client) and
-        pushed to just those viewers â€” it persists and replays on reconnect, so a
+        pushed to just those viewers — it persists and replays on reconnect, so a
         role can have its own placement/size. Omit both to set the shared layout
         for everyone. A user dragging/resizing a panel writes back to whichever
         layer their layout currently comes from (their client/role overlay if any,
@@ -602,8 +602,8 @@ class BaseComponent:
     def _apply_remote_layout(self, msg, viewer=None):
         """Update stored geometry from a user drag/resize in the browser.
 
-        Writes back to the layer this viewer's layout currently comes from â€” their
-        per-client overlay, else their per-role overlay, else the shared base â€” so
+        Writes back to the layer this viewer's layout currently comes from — their
+        per-client overlay, else their per-role overlay, else the shared base — so
         a hand-arranged layout sticks, and in a role-based canvas a drag rearranges
         only the dragger's role rather than everyone's. Does not broadcast (the
         change already happened in that browser). ``rotation`` arrives in radians
@@ -637,17 +637,17 @@ class BaseComponent:
     def on_change(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a callback fired on input from the browser.
 
-        **Default** â€” runs on a shared dispatch thread. Fast handlers (state
+        **Default** — runs on a shared dispatch thread. Fast handlers (state
         updates, canvas calls) belong here; a slow one delays the handlers
         queued behind it.
 
-        **``threaded=True``** â€” spawns a new daemon thread *per call*. Keeps
+        **``threaded=True``** — spawns a new daemon thread *per call*. Keeps
         the shared dispatch thread free for other handlers. Right for
         occasional slow work (an HTTP call, a ``time.sleep``). The handler
         may run concurrently with itself if calls arrive faster than it
         finishes, so guard any shared state you write.
 
-        **``dedicated=True``** â€” launches one persistent daemon thread for
+        **``dedicated=True``** — launches one persistent daemon thread for
         *this handler only*, started on its first invocation. All calls are
         routed to that thread's own queue, so the handler is always serialised
         (no concurrent self-calls) and the shared dispatch thread is never
@@ -660,8 +660,8 @@ class BaseComponent:
 
         ``queue`` controls backpressure on the dedicated thread's queue:
 
-        - ``"fifo"`` (default) â€” every call is queued and run in order.
-        - ``"latest"`` â€” only the most recent *pending* call is kept; the
+        - ``"fifo"`` (default) — every call is queued and run in order.
+        - ``"latest"`` — only the most recent *pending* call is kept; the
           thread runs to completion first, then picks up only the latest one,
           dropping any that piled up in between.
 
@@ -684,7 +684,7 @@ class BaseComponent:
         """Whether ``fn`` has room for a trailing ``viewer`` beyond ``n_call_args``.
 
         True when the callable declares more explicit positional parameters than
-        the fixed args we pass â€” the signal that a handler opted in to receiving
+        the fixed args we pass — the signal that a handler opted in to receiving
         the viewer dict. Unintrospectable callables (some builtins/C funcs) report
         False, so they're called without it. Shared by the fire-and-forget
         callback path and the single-answer request path so both detect arity the
@@ -704,19 +704,19 @@ class BaseComponent:
         """Call each callback, appending viewer as a final arg when its signature accepts it.
 
         Detects whether the callback has more explicit positional parameters
-        than ``call_args`` supplies â€” if so, passes ``viewer`` (a dict with
+        than ``call_args`` supplies — if so, passes ``viewer`` (a dict with
         ``id``, ``name``, ``color``, ``role``) as the extra argument. Backwards
         compatible: existing one-arg handlers are never changed.
 
         Three dispatch paths, chosen by marker attributes set at registration:
 
-        - ``_pc_dedicated`` â€” routes to a per-handler :class:`DedicatedKernel`
+        - ``_pc_dedicated`` — routes to a per-handler :class:`DedicatedKernel`
           (created lazily here on first dispatch, keyed by ``id(cb)``). The
           kernel's own queue serialises calls to this handler without blocking
           the shared dispatch thread.
-        - ``_pc_threaded`` â€” spawns a fresh daemon thread per call via
+        - ``_pc_threaded`` — spawns a fresh daemon thread per call via
           :func:`spawn`. Keeps the dispatch thread free; may run concurrently.
-        - *(default)* â€” called inline on the shared dispatch thread; FIFO and
+        - *(default)* — called inline on the shared dispatch thread; FIFO and
           blocking (a slow handler stalls the queue behind it).
         """
         for cb in callbacks:
@@ -765,6 +765,6 @@ def _flag_property(name, flag):
 
 # Attach the flag properties declared in _flags.py onto BaseComponent. Defining
 # them here (rather than by hand) keeps the wire key, default, and docstring in
-# one table â€” adding a flag is a single entry there.
+# one table — adding a flag is a single entry there.
 for _name, _flag in LAYOUT_FLAGS.items():
     setattr(BaseComponent, _name, _flag_property(_name, _flag))

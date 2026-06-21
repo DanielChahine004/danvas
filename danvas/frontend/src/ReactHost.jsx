@@ -1,8 +1,8 @@
 // Runtime host for user-authored React components (the `React` Python panel).
 //
 // This is the native counterpart to the sandboxed-iframe Custom panel: the user
-// ships JSX *source* from Python, and here â€” in the main page, with full theme
-// and bridge access â€” we transform the JSX with Sucrase and mount the result as
+// ships JSX *source* from Python, and here — in the main page, with full theme
+// and bridge access — we transform the JSX with Sucrase and mount the result as
 // an ordinary React subtree inside the panel's Card. Sucrase is a tiny, fast
 // JSX transform (~tens of KB, vs ~3 MB for a full compiler): it assumes a modern
 // browser and only rewrites JSX, which is all danvas needs. The module is still
@@ -19,7 +19,7 @@
 //             live canvas-centre x/y/zoom (powers the Inspector) and setView(v)
 //             pans/zooms the canvas to a { x, y, zoom } (the write-twin)
 //   value   - the latest push()ed data  : Python -> panel, no prop churn / reload
-//             (skipped while an onFrame subscriber is active â€” pick one channel)
+//             (skipped while an onFrame subscriber is active — pick one channel)
 //   props   - the dict from update()/props=  : Python -> panel, replayed on reconnect
 // React (with hooks) is in scope as `React`; any libraries requested via Python
 // `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
@@ -30,7 +30,7 @@ import { sendInput, sendBinary, requestData, registerLive, unregisterLive, regis
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
 
-// Compile a source string into a *factory* â€” `(React, libs) => Component` â€”
+// Compile a source string into a *factory* — `(React, libs) => Component` —
 // memoised by source so a re-render (or many panels sharing one source) runs the
 // JSX transform only once. The factory is invoked per-render with the live
 // `React` and the loaded `libs` bundle (see useLibs); binding is cheap, so
@@ -66,7 +66,7 @@ function compile(source) {
 // --- optional third-party libraries (Python `scope=[...]`) ------------------
 // A panel can ask for libraries by name; we fetch them as ESM from a CDN on
 // demand and hand them to the component as the `libs` global. Nothing is
-// bundled â€” the cost (a network fetch) is paid only by panels that opt in â€” so
+// bundled — the cost (a network fetch) is paid only by panels that opt in — so
 // the common case (no scope) loads nothing and behaves exactly as before.
 //
 // Friendly names map to pinned, React-externalised URLs so React-dependent libs
@@ -199,7 +199,7 @@ export default function ReactHost({ shape }) {
   React.useEffect(() => subscribeShared(setSharedV), [])
 
   // Imperative push subscribers (canvas.onFrame). A component that paints a
-  // high-rate stream itself â€” to a <canvas>/<img>, with zero-copy binary â€”
+  // high-rate stream itself — to a <canvas>/<img>, with zero-copy binary —
   // registers here instead of reading the `value` prop, so each frame skips a
   // React re-render of the whole component.
   const framesRef = React.useRef(new Set())
@@ -209,7 +209,7 @@ export default function ReactHost({ shape }) {
       // When the component drives its own painting via onFrame, deliver straight
       // to those callbacks and skip setStreamed entirely (no re-render). The two
       // are mutually exclusive: read `value` for declarative/low-rate updates, or
-      // subscribe onFrame for high-rate streams â€” not both.
+      // subscribe onFrame for high-rate streams — not both.
       if (framesRef.current.size) {
         for (const cb of framesRef.current) cb(data)
       } else {
@@ -234,7 +234,7 @@ export default function ReactHost({ shape }) {
       // The awaitable twin of send: `const r = await canvas.request(data)`
       // resolves with the return value of the panel's matching @on_request
       // handler (rejects if it raises or times out). For ask-Python-and-use-the-
-      // answer flows â€” validate a field, fetch a row, compute server-side.
+      // answer flows — validate a field, fetch a row, compute server-side.
       request: (data) => requestData(id, data),
       // Subscribe to every push() without re-rendering; returns an unsubscribe.
       // The payload is whatever Python pushed (an ArrayBuffer for binary, handed
@@ -245,7 +245,7 @@ export default function ReactHost({ shape }) {
       },
       // The shared chat room (server-stamped identity + cross-viewer relay), the
       // one thing that isn't per-component state. Unlike send/onFrame this isn't
-      // routed to this panel's @on handlers â€” it's the canvas-wide channel every
+      // routed to this panel's @on handlers — it's the canvas-wide channel every
       // viewer shares, exposed so a React panel (the Chat component) can be a
       // window onto it. `subscribe`/`identity` return an unsubscribe; `send` is
       // stamped with the viewer's identity by the server, not this component's id.
@@ -256,7 +256,7 @@ export default function ReactHost({ shape }) {
         subscribe: (cb) => subscribeChat(cb),
         identity: (cb) => subscribeIdentity(cb),
       },
-      // Live viewport readout (the canvas point at screen centre + zoom) â€” the
+      // Live viewport readout (the canvas point at screen centre + zoom) — the
       // x/y/zoom that serve(view=...) / set_view() take. Calls `cb` once now and
       // again on every camera change; returns an unsubscribe. Lets a React panel
       // (the Inspector) surface the framing without tldraw editor access.
@@ -266,7 +266,7 @@ export default function ReactHost({ shape }) {
           return { x: Math.round(c.x), y: Math.round(c.y), zoom: editor.getZoomLevel() }
         }
         // session-scope changes (selection, hover, pointer) fire this listener
-        // too, not just camera moves â€” and `read()` is a fresh object each time,
+        // too, not just camera moves — and `read()` is a fresh object each time,
         // so calling cb unconditionally would re-render the panel on every click
         // or hover. Emit only when x/y/zoom actually change.
         let last = null
@@ -282,7 +282,7 @@ export default function ReactHost({ shape }) {
       // The write-twin of `viewport`: pan/zoom the canvas to centre a point at a
       // zoom. Takes the same { x, y, zoom } shape (any subset; omitted axes keep
       // the current camera), so `canvas.setView(canvas.viewport-reading)` round-
-      // trips. Lets a panel drive the canvas â€” a minimap, "jump to" buttons.
+      // trips. Lets a panel drive the canvas — a minimap, "jump to" buttons.
       setView: (v) => applyCameraFrom(v || {}),
     }),
     [id, editor]
@@ -317,7 +317,7 @@ export default function ReactHost({ shape }) {
   // content sits in its own box (sized to content) so we can measure it; the host
   // fills the card body so its offset* gives the chrome overhead (see fitNative).
   // For width-fit the content box is laid out at `max-content` (see below), so
-  // scrollWidth is the content's *natural* width, independent of the card width â€”
+  // scrollWidth is the content's *natural* width, independent of the card width —
   // which keeps the fit from oscillating as the panel resizes to match it.
   const autoH = !!shape.props.autoH
   const autoW = !!shape.props.autoW
@@ -345,7 +345,7 @@ export default function ReactHost({ shape }) {
   }, [autoH, autoW, id, shape.props.source, shape.props.data, libsReady])
 
   // Prepend the shared component sources (canvas.define) so they're defined in
-  // the same scope as the panel's Component and usable by bare name â€” e.g.
+  // the same scope as the panel's Component and usable by bare name — e.g.
   // `<StatusPill/>`. Recomputed when the shared set changes (sharedV). compile()
   // is memoised by the full source string, so each distinct panel still compiles
   // once and a shared change makes a fresh entry.
@@ -360,7 +360,7 @@ export default function ReactHost({ shape }) {
   // Compile (memoised by source), then bind the factory with React + the loaded
   // libs. Binding runs the user's module-level code and can throw (or omit
   // `Component`), so it's guarded; it re-binds when libs arrive. All hooks above
-  // run unconditionally â€” only the render result branches below.
+  // run unconditionally — only the render result branches below.
   const compiled = compile(fullSource)
   const bound = React.useMemo(() => {
     if (compiled.error) return { error: compiled.error }
@@ -395,7 +395,7 @@ export default function ReactHost({ shape }) {
           fontSize: 13,
         }}
       >
-        loading librariesâ€¦
+        loading libraries…
       </div>
     )
   }
@@ -410,11 +410,11 @@ export default function ReactHost({ shape }) {
     // component; without this tldraw treats a press as a move/resize of the
     // panel and the component never sees the click. The Card header (the label)
     // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
-    // wants the opposite â€” let the pointer fall through to the canvas entirely.
+    // wants the opposite — let the pointer fall through to the canvas entirely.
     //
     // We also stop touch events here: tldraw's canvas onTouchStart/onTouchEnd
     // call preventDefault() on every touch (to own pinch/pan), which suppresses
-    // the browser's synthesized `click` for buttons inside the panel â€” so on a
+    // the browser's synthesized `click` for buttons inside the panel — so on a
     // phone a tap on a panel button does nothing until the shape is selected.
     // Keeping the touch events from bubbling to tldraw lets the click fire on the
     // first tap (and lets the panel scroll natively). Pointer events still drive

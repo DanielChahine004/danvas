@@ -12,7 +12,7 @@ the same table drives:
 
 So adding a new flag is a single edit here rather than a change threaded through
 seven places. ``wire`` is the key sent to the browser; it is deliberately kept
-distinct from the Python name (e.g. ``draggable`` â†’ ``movable``) and **must not**
+distinct from the Python name (e.g. ``draggable`` → ``movable``) and **must not**
 change without updating the frontend's ``lockMeta`` handling. ``default`` is both
 the initial value and the "don't bother sending it" baseline in the register
 message.
@@ -27,7 +27,7 @@ Flag = namedtuple("Flag", "wire attr default doc")
 
 # Python name -> Flag(wire key, backing attribute, default, property docstring).
 # Insertion order is the canonical order used wherever the flags are iterated.
-# The ``wire`` keys come from the canonical danvas/_protocol.py (the same
+# The ``wire`` keys come from the canonical pycanvas/_protocol.py (the same
 # definition the frontend's protocol.generated.js is rendered from) so the
 # browser-facing names can't drift; this module owns the backing attr / default /
 # docstring.
@@ -53,23 +53,23 @@ LAYOUT_FLAGS = {
     "grabbable": Flag(
         FLAG_WIRE_KEYS["grabbable"], "_grabbable", True,
         "Whether the user can grab/select this panel at all.\n\n"
-        "        Content-heavy panels (Custom, React, WebView, plotsâ€¦) normally "
+        "        Content-heavy panels (Custom, React, WebView, plots…) normally "
         "need a\n        first click to select the panel before their content "
         "becomes\n        interactive. Set to ``False`` to drop that cover "
         "*and* make the panel\n        invisible to selection: the content is "
         "live (hover and clicks work)\n        from the start, and no click, "
-        "marquee, or select-all ever highlights\n        or selects the panel â€” "
+        "marquee, or select-all ever highlights\n        or selects the panel — "
         "only the widget itself reacts. The trade-off is\n        that the user "
         "can't move or resize it; do that from Python (or flip\n        "
         "``grabbable`` back on).\n        "),
     "frame": Flag(
         FLAG_WIRE_KEYS["frame"], "_frame", True,
         "Whether the panel draws its rectangular card chrome.\n\n"
-        "        Set to ``False`` to strip the card entirely â€” background, "
+        "        Set to ``False`` to strip the card entirely — background, "
         "border,\n        shadow, padding, label header, and the "
-        "hover/selection highlight\n        rectangle â€” so the component's "
+        "hover/selection highlight\n        rectangle — so the component's "
         "content appears to float directly on\n        the canvas. The panel "
-        "still occupies its wÃ—h box and can be moved or\n        resized as "
+        "still occupies its w×h box and can be moved or\n        resized as "
         "usual (marquee select still works). Pair with\n        "
         "``grabbable=False`` if clicks on the content should never select it.\n"
         "        "),

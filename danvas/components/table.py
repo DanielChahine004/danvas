@@ -3,21 +3,21 @@
 Accepts a pandas DataFrame/Series, a list of dicts, a list of rows
 (lists/tuples), or a dict of columns. pandas is duck-typed, so it isn't a hard
 dependency. The panel is a **native React subtree** (not a sandboxed iframe), so
-it re-renders sharp at every zoom level â€” an iframe is rasterised and then scaled
+it re-renders sharp at every zoom level — an iframe is rasterised and then scaled
 when the canvas zooms, which blurs dense text. It is interactive in the browser:
 
-- **column profile** under each header â€” the inferred dtype (``int``, ``float``,
+- **column profile** under each header — the inferred dtype (``int``, ``float``,
   ``bool``, ``str``, ``mixed``) and a red ``n% null`` badge when values are
   missing; hover the header for fuller stats (unique count, min/max/mean/median);
-- **click a header** to sort by that column (cycles ascending â†’ descending â†’
+- **click a header** to sort by that column (cycles ascending → descending →
   original order); numeric columns sort numerically, everything else by text;
 - **filter box** hides rows that don't contain the typed text (across the whole
   dataset, not just the visible page);
 - **pagination** for large tables: rows are shown ``PAGE_SIZE`` at a time with
   prev/next arrows and a typable page field (its up/down spinners step a page).
   Sorting and filtering apply to *all* rows, including those on other pages;
-- **per-column distributions** under each header â€” a histogram for numeric
-  columns, a top-values bar chart for categorical ones â€” always shown. Numeric
+- **per-column distributions** under each header — a histogram for numeric
+  columns, a top-values bar chart for categorical ones — always shown. Numeric
   charts caption their min, mean, and max; hovering a bar shows its count and the
   share of the column it represents. **Click a bar** to filter the table to that
   bin (numeric) or category (text); a chip in the toolbar shows the active filter
@@ -37,7 +37,7 @@ from .react import React
 # The full dataset is shipped to the panel and the browser renders one
 # PAGE_SIZE-row page into the DOM at a time (a 600k-row table is far too much
 # DOM to render at once). Sorting and filtering run over the whole dataset in
-# React â€” not just the rendered page â€” so they cover unseen rows; pagination
+# React — not just the rendered page — so they cover unseen rows; pagination
 # controls page through the result.
 PAGE_SIZE = 2000
 
@@ -427,7 +427,7 @@ def _is_seq(v):
 def _normalize(data):
     """Coerce any supported input to ``(columns, rows)`` with string headers.
 
-    ``columns`` is always a list of header labels (synthesized as ``0, 1, â€¦`` for
+    ``columns`` is always a list of header labels (synthesized as ``0, 1, …`` for
     headerless row lists); ``rows`` is a list of value lists.
     """
     # pandas Series -> one-column frame (Series has to_frame but no columns).
@@ -447,13 +447,13 @@ def _normalize(data):
         return cols, rows
     if isinstance(data, dict):
         values = list(data.values())
-        # Dict of columns: {col: [values...]} â€” every value is a (non-string)
+        # Dict of columns: {col: [values...]} — every value is a (non-string)
         # sequence, so the keys are headers and the sequences are the columns.
         if values and all(_is_seq(v) for v in values):
             cols = [str(c) for c in data.keys()]
             rows = [list(r) for r in zip(*[list(data[c]) for c in data])]
             return cols, rows
-        # Otherwise a flat mapping (e.g. hyperparameters {"lr": 3e-4, ...}) â€”
+        # Otherwise a flat mapping (e.g. hyperparameters {"lr": 3e-4, ...}) —
         # render it as a two-column key/value table, which reads far better than
         # a one-row wide table.
         return ["key", "value"], [[str(k), v] for k, v in data.items()]
@@ -536,7 +536,7 @@ def _column_profile(values, numeric):
 
     ``meta`` carries the inferred dtype plus a missing-value badge (a small HTML
     fragment, rendered into the header); ``tip`` adds unique counts and (for
-    numeric columns) min/max/mean/median. Never raises â€” a single odd column
+    numeric columns) min/max/mean/median. Never raises — a single odd column
     shouldn't break the header.
     """
     try:
@@ -550,7 +550,7 @@ def _column_profile(values, numeric):
         tip = [f"{dtype}", f"{unique:,} unique", f"{len(present):,} / {total:,} filled"]
         if missing:
             pct = missing / total * 100 if total else 0
-            meta += f' Â· <span class="pc-th-null">{_pct(pct)}% null</span>'
+            meta += f' · <span class="pc-th-null">{_pct(pct)}% null</span>'
             tip.append(f"{missing:,} null")
 
         if numeric:
@@ -568,7 +568,7 @@ def _column_profile(values, numeric):
                           else (srt[n // 2 - 1] + srt[n // 2]) / 2)
                 tip.append(f"min {srt[0]:g}  max {srt[-1]:g}")
                 tip.append(f"mean {mean:g}  median {median:g}")
-        return {"meta": meta, "tip": "  Â·  ".join(tip)}
+        return {"meta": meta, "tip": "  ·  ".join(tip)}
     except Exception:
         return {"meta": "", "tip": ""}
 
@@ -642,11 +642,11 @@ def _numeric_hist(values, bins=12):
         bhi = lo + span * (i + 1) / bins
         c = counts[i]
         bars.append({"h": c / mx, "lo": f"{blo:g}", "hi": f"{bhi:g}",
-                     "title": f"{blo:g} â€“ {bhi:g}: {c} ({_pct(c / total * 100)}%)"})
-    # Caption: min (left), mean (centre), max (right) â€” the histogram's x-axis
+                     "title": f"{blo:g} – {bhi:g}: {c} ({_pct(c / total * 100)}%)"})
+    # Caption: min (left), mean (centre), max (right) — the histogram's x-axis
     # ends are the min/max, with the mean called out between them.
     return {"num": True, "bars": bars,
-            "cap": [f"{lo:g}", f"Î¼ {mean:g}", f"{hi:g}"]}
+            "cap": [f"{lo:g}", f"μ {mean:g}", f"{hi:g}"]}
 
 
 def _category_bars(values, top=8):

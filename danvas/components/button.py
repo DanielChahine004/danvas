@@ -27,7 +27,7 @@ _BUTTON_CSS = """
 .pc-button:active{transform:translateY(1px)}
 """
 
-# Each click is a bare ``canvas.send({})`` â€” Python counts them and fires the
+# Each click is a bare ``canvas.send({})`` — Python counts them and fires the
 # registered handlers. ``props.text`` is the face (replayed on reconnect).
 _BUTTON_SOURCE = """
 function Component({ canvas, props }) {
@@ -47,7 +47,7 @@ function Component({ canvas, props }) {
 class Button(React):
     """A clickable button that fires its handlers each time it's pressed.
 
-    Unlike :class:`~danvas.Toggle`, it holds no selectable value â€” it's a
+    Unlike :class:`~danvas.Toggle`, it holds no selectable value — it's a
     one-shot action. ``value`` reads the running click count.
     """
 
@@ -65,7 +65,7 @@ class Button(React):
         self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, text):
-        """Change the button's face text, live (e.g. Start â‡„ Pause).
+        """Change the button's face text, live (e.g. Start ⇄ Pause).
 
         Stored on the panel (as a prop) so a reconnecting client replays the
         current face.

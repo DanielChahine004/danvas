@@ -1,7 +1,7 @@
 """Auto-capture: mirror every notebook cell's output onto the canvas.
 
 Registers an IPython ``post_run_cell`` hook so each cell that ends in an
-expression produces (or refreshes) its own panel on the canvas â€” no manual
+expression produces (or refreshes) its own panel on the canvas — no manual
 wrapping or :meth:`Canvas.insert` per cell. The cell's output value is turned
 into a panel by reusing Jupyter's own rich-display machinery
 (``DisplayFormatter``), so DataFrames, matplotlib figures, Plotly figures, and
@@ -18,7 +18,7 @@ Re-running a cell swaps its panel in place (keyed on the notebook's stable
 cell id) rather than stacking a duplicate. Cells that end in a statement
 (an assignment, a ``print``, a loop) produce no output value and are skipped.
 
-A cell may override its own panel with a ``# danvas:`` directive line â€” to
+A cell may override its own panel with a ``# danvas:`` directive line — to
 pin a position/size, lock it, rename it, or opt out entirely::
 
     # danvas: x=40 y=80 w=600 h=400 draggable=false
@@ -59,7 +59,7 @@ class CellCapture:
         self.origin = origin
         self.include_source = include_source
         # auto=True mirrors every expression cell (except `# danvas: skip`);
-        # auto=False is opt-in â€” a cell appears only if it carries a
+        # auto=False is opt-in — a cell appears only if it carries a
         # `# danvas:` directive (e.g. a bare `show`, or any placement option).
         self.auto = auto
         # Default lock/interaction state stamped on every panel's first
@@ -100,7 +100,7 @@ class CellCapture:
     # -- the hook ------------------------------------------------------------
     def _on_cell(self, result):
         """Fired by IPython after every cell. Turns its output into a panel."""
-        # Never let a rendering hiccup surface as a cell error â€” the user's code
+        # Never let a rendering hiccup surface as a cell error — the user's code
         # already ran; this is a best-effort mirror.
         try:
             if not self._is_user_cell(result):
@@ -139,8 +139,8 @@ class CellCapture:
         IDE tooling (VS Code's variable viewer / Data Wrangler, completion
         probes, etc.) runs introspection code through the same kernel, firing
         ``post_run_cell`` just like a real cell. Those are flagged
-        ``store_history=False`` (and usually ``silent=True``) â€” they don't get an
-        ``In[n]``/``Out[n]`` slot â€” whereas a cell the user actually executed is
+        ``store_history=False`` (and usually ``silent=True``) — they don't get an
+        ``In[n]``/``Out[n]`` slot — whereas a cell the user actually executed is
         recorded in history. Mirror only the latter so probe outputs (e.g. the
         ``__DW_SCOPE__[...]`` panels) don't litter the canvas.
         """
@@ -158,7 +158,7 @@ class CellCapture:
         Precedence, per field: an explicit ``# danvas:`` directive wins; else
         the panel's current live geometry is reused (so a re-run keeps where the
         user dragged/resized/locked it); else, on a panel's first appearance, the
-        capture-level defaults â€” the auto-grid slot, the default size
+        capture-level defaults — the auto-grid slot, the default size
         (``slot_w``/``slot_h``), and the default lock/interaction flags. A
         directive that fully pins position (``x`` and ``y``) doesn't consume a
         grid slot, so auto-placed cells don't leave a gap for it.
@@ -173,7 +173,7 @@ class CellCapture:
                          draggable=prev.draggable, resizable=prev.resizable,
                          operable=prev.operable)
             # Pin height only for a fixed-height panel (incl. one the user
-            # resized â€” that turns auto-height off). A content-sized/auto-height
+            # resized — that turns auto-height off). A content-sized/auto-height
             # panel is left to re-fit, so its height tracks the new output.
             if not getattr(prev, "_auto_h", False):
                 place["h"] = prev.h
@@ -181,8 +181,8 @@ class CellCapture:
             # First appearance: uniform grid column width + lock/interaction
             # state, and the next grid slot unless the directive pins position.
             # Height is left to the panel itself (content-sized by panel_for, or
-            # auto-fitting) â€” slot_h is only the grid's row pitch, not a forced
-            # height â€” so a small value doesn't swim in a tall box.
+            # auto-fitting) — slot_h is only the grid's row pitch, not a forced
+            # height — so a small value doesn't swim in a tall box.
             place.update(w=self.slot_w, **self._lock_defaults)
             if not pins_position:
                 x, y = self._place(result)
@@ -230,8 +230,8 @@ class CellCapture:
         ``None`` keeps the default.
 
         Width is fixed to ``slot_w`` for tidy grid columns; height is left to the
-        dispatcher (``h=None``) so it sizes to content â€” row-sized tables,
-        natural-fit reprs/JSON, short scalars â€” instead of a fixed slot box.
+        dispatcher (``h=None``) so it sizes to content — row-sized tables,
+        natural-fit reprs/JSON, short scalars — instead of a fixed slot box.
         """
         from .dispatch import panel_for
 
@@ -251,7 +251,7 @@ class CellCapture:
             stripped = line.strip()
             if not stripped or _DIRECTIVE_RE.match(line):
                 continue
-            return stripped[:60] + ("â€¦" if len(stripped) > 60 else "")
+            return stripped[:60] + ("…" if len(stripped) > 60 else "")
         return None
 
 
@@ -288,7 +288,7 @@ def _parse_directive(raw_cell):
 
     Returns a dict of recognised options (``{}`` when there's no directive). The
     bare tokens ``skip`` and ``show`` map to ``{"skip": True}`` / ``{"show":
-    True}`` â€” ``skip`` leaves the cell off the canvas, ``show`` opts a cell in
+    True}`` — ``skip`` leaves the cell off the canvas, ``show`` opts a cell in
     under ``capture_cells(auto=False)``. Recognised keys: ``x y w h rotation``
     (numbers), ``locked draggable resizable operable`` (true/false), and
     ``name``/``label`` (strings). Pairs are space- or comma-separated, e.g.::
@@ -345,7 +345,7 @@ def autopanel(canvas, cols=3, slot_w=520, slot_h=420, gap=40, origin=(0, 0),
     ``auto=True`` (default) mirrors every expression cell, except those tagged
     ``# danvas: skip``. ``auto=False`` flips to opt-in: nothing is mirrored
     unless a cell carries a ``# danvas:`` directive (a bare ``show`` to use the
-    default grid, or any placement option like ``x=â€¦ y=â€¦``).
+    default grid, or any placement option like ``x=… y=…``).
 
     ``draggable``/``resizable``/``locked``/``operable`` set the default
     lock state stamped on every panel (e.g. ``draggable=False, resizable=False``

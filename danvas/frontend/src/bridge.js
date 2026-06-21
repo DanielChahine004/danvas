@@ -9,7 +9,7 @@ let ws = null
 
 // Auto-place panels that arrive without an explicit x/y. We flow them
 // left-to-right, top-to-bottom and pack by each panel's *real* size (+ a gap),
-// so they never overlap â€” unlike a fixed-step grid, which collided whenever a
+// so they never overlap — unlike a fixed-step grid, which collided whenever a
 // panel was wider/taller than the step (plots, video, custom panels all are).
 // Uniform panels still read as a tidy grid; mixed sizes pack like masonry.
 const FLOW_GAP = 24
@@ -38,7 +38,7 @@ function nextPosition(w, h) {
 // Shape ids (insertion order) of panels placed by the flow and not since moved
 // or resized by the user. nextPosition() gives each a sane spot the instant it
 // registers; relayoutFlow() then re-packs the whole set once the content-fit
-// sizes have settled (see scheduleRelayout) â€” the registration-time size is the
+// sizes have settled (see scheduleRelayout) — the registration-time size is the
 // panel's *default*, before auto-width/height shrink it, so the first pass alone
 // would leave big gaps. A user gesture drops the panel from the set (see
 // setupGeometrySync), pinning it where they put it.
@@ -117,9 +117,9 @@ function resetFlow() {
 // masonry flow above this is *manual*: it never re-packs on its own, so a panel
 // that routinely changes height doesn't make its neighbours jitter. A refit packs
 // the group at the panels' current sizes right now, then arms a short one-shot so
-// the next content-fit a member reports re-packs once more â€” catching the resize
+// the next content-fit a member reports re-packs once more — catching the resize
 // the refit() was called for (e.g. a log line just added in Python, whose taller
-// height hasn't been measured here yet when the reflow message arrives) â€” then
+// height hasn't been measured here yet when the reflow message arrives) — then
 // disarms. Keyed by the Python container's id so repeated refits just re-arm.
 const armedReflows = new Map() // key -> { spec, deadline }
 const REFLOW_ARM_MS = 800
@@ -137,7 +137,7 @@ function packFlow(spec) {
     for (const cid of spec.ids) {
       const shapeId = createShapeId(cid)
       const shape = editor.getShape(shapeId)
-      if (!shape) continue // removed since insert â€” skip, don't reserve space
+      if (!shape) continue // removed since insert — skip, don't reserve space
       const x = spec.kind === 'row' ? cx : spec.x0
       const y = spec.kind === 'row' ? spec.y0 : cy
       if (Math.abs(shape.x - x) >= 0.5 || Math.abs(shape.y - y) >= 0.5) {
@@ -153,9 +153,9 @@ function packFlow(spec) {
 
 function reflowGroup(msg) {
   const spec = { ids: msg.ids || [], kind: msg.kind, x0: msg.x0, y0: msg.y0, gap: msg.gap }
-  packFlow(spec) // settle the already-known sizes immediatelyâ€¦
+  packFlow(spec) // settle the already-known sizes immediately…
   if (spec.ids.length) {
-    // â€¦and once more on the imminent fit of whichever member just changed.
+    // …and once more on the imminent fit of whichever member just changed.
     armedReflows.set(msg.key, { spec, deadline: Date.now() + REFLOW_ARM_MS })
   }
 }
@@ -235,7 +235,7 @@ function getRootContainerKey(key) {
 function repackContainer(key, ox, oy) {
   const spec = containers.get(key)
   if (!spec || !editor) return { w: 0, h: 0 }
-  // fill_w: expand to the visible viewport width (in canvas units = CSS px Ã· zoom).
+  // fill_w: expand to the visible viewport width (in canvas units = CSS px ÷ zoom).
   // In scroll_y mode zoom=1 and the camera is at x=0, so canvas px === screen px.
   const specW = spec.fill_w
     ? Math.floor(editor.getContainer().offsetWidth / editor.getZoomLevel())
@@ -255,7 +255,7 @@ function repackContainer(key, ox, oy) {
     if (m.kind === 'panel') {
       const shapeId = createShapeId(m.id)
       const shape = editor.getShape(shapeId)
-      if (!shape) continue  // removed since sync â€” skip, don't reserve space
+      if (!shape) continue  // removed since sync — skip, don't reserve space
       mw = specW != null ? specW : shape.props.w
       mh = spec.h != null ? spec.h : shape.props.h
 
@@ -335,9 +335,9 @@ export function setEditor(e) {
 // handler below only reacts to "user" changes, so this keeps our own updates
 // (move/resize/register/load) from echoing straight back to Python.
 //
-// tldraw's high-level mutators (createShape/updateShape/deleteShapes/â€¦) all
+// tldraw's high-level mutators (createShape/updateShape/deleteShapes/…) all
 // no-op while the instance is read-only. But a read-only view is meant to stop
-// the *viewer* drawing, not the host's Python-driven panels â€” without this lift,
+// the *viewer* drawing, not the host's Python-driven panels — without this lift,
 // `view={read_only:True}` (or set_view(read_only=True, roles=...)) would silently
 // drop every register/update and the canvas would render empty. So drop the flag
 // for the duration of our own remote batch, then restore it; the toggle is plain
@@ -358,7 +358,7 @@ function sendRaw(msg) {
 }
 
 // --- cursor reporting: stream this viewer's pointer to Python ----------------
-// Off until the server enables it (welcome.cursors â€” gated to a private bind by
+// Off until the server enables it (welcome.cursors — gated to a private bind by
 // default). When on, report the pointer in *page* coords (zoom/pan-independent,
 // so Python's canvas.viewers[i].cursor lines up with panel x/y). Throttled to one
 // send per animation frame and dead-banded to skip sub-pixel jitter, so a moving
@@ -428,7 +428,7 @@ let flushTimer = null
 
 // tldraw shape ids (`shape:<id>`) of every danvas-managed panel and connector
 // arrow. These are recreated from Python code, so they're excluded from the
-// free-form drawing sync below â€” only the user's own shapes are relayed.
+// free-form drawing sync below — only the user's own shapes are relayed.
 const managedIds = new Set()
 
 function setupGeometrySync(ed) {
@@ -456,14 +456,14 @@ function setupGeometrySync(ed) {
 }
 
 // Make `selectable=False` (meta.noGrab) mean what it says: the panel can never
-// be hovered or selected by the user â€” not by body click, edge click, or
-// marquee â€” so no highlight or selection box ever outlines it. Without this,
+// be hovered or selected by the user — not by body click, edge click, or
+// marquee — so no highlight or selection box ever outlines it. Without this,
 // tldraw hit-tests the shape's geometry directly (pointer events that miss the
 // panel's interactive content land on the canvas underneath), so an "empty"
 // region of a frameless panel would still hover-highlight and click-select.
 // Implemented as a page-state filter rather than per-event handlers so every
 // selection path (click, marquee, select-all) is covered. Python updates aren't
-// affected â€” they never go through the editor's selection state.
+// affected — they never go through the editor's selection state.
 function setupSelectionFilter(ed) {
   ed.sideEffects.registerBeforeChangeHandler('instance_page_state', (prev, next) => {
     const noGrab = (id) => {
@@ -513,7 +513,7 @@ const DRAW_TYPES = new Set(['shape', 'binding', 'asset'])
 function isManaged(record) {
   if (record.typeName === 'shape') {
     // Panels match by type; danvas arrows are plain `arrow` shapes, so they
-    // only match by id â€” hence the managedIds set rather than a type check.
+    // only match by id — hence the managedIds set rather than a type check.
     return managedIds.has(record.id) || (PANEL_TYPES && PANEL_TYPES.has(record.type))
   }
   if (record.typeName === 'binding') {
@@ -591,7 +591,7 @@ let heartbeatTimer = null
 let lastRunId = null
 
 // Per-tab viewer identity. Stored in sessionStorage (per-tab, not shared like
-// localStorage â€” two tabs stay two viewers) and re-sent on every reconnect, so a
+// localStorage — two tabs stay two viewers) and re-sent on every reconnect, so a
 // background tab whose socket keeps flapping keeps one stable identity/name
 // instead of churning a fresh animal name each time. Survives page reloads within
 // the tab; a brand-new tab starts fresh.
@@ -604,7 +604,7 @@ function persistIdentity(v) {
     if (v && v.id) {
       sessionStorage.setItem(VIEWER_KEY, JSON.stringify({ id: v.id, name: v.name, color: v.color }))
     }
-  } catch { /* private mode / disabled storage â€” fall back to per-connection ids */ }
+  } catch { /* private mode / disabled storage — fall back to per-connection ids */ }
 }
 
 function connect() {
@@ -645,7 +645,7 @@ function connect() {
   }
 
   ws.onclose = () => {
-    // Server gone or restarting â€” retry so a reloaded backend reconnects.
+    // Server gone or restarting — retry so a reloaded backend reconnects.
     ws = null
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer)
@@ -665,7 +665,7 @@ function connect() {
 
 // Binary-frame type codes (BIN_VIDEO/AUDIO/CUSTOM/REACT) are imported at the top
 // from ./protocol.generated.js, which is rendered from the server's canonical
-// danvas/_protocol.py â€” so the two sides can't drift.
+// pycanvas/_protocol.py — so the two sides can't drift.
 const frameDecoder = new TextDecoder()
 
 // --- shared React assets (Python canvas.define / canvas.style) ---------------
@@ -704,7 +704,7 @@ function applyShared(msg) {
   for (const cb of sharedListeners) cb(sharedVersion)
 }
 
-// Decode a binary frame â€” `[type][idLen][id bytes][payload]` â€” and route its
+// Decode a binary frame — `[type][idLen][id bytes][payload]` — and route its
 // raw payload (an ArrayBuffer) to the matching component's live handler, the
 // same channel LivePlot/Custom use. Dropped if the panel isn't mounted. Video
 // (JPEG) and audio (int16 PCM) share this path; the handler interprets the bytes.
@@ -750,7 +750,7 @@ function handle(msg) {
   } else if (msg.type === 'reflow') {
     reflowGroup(msg)              // column.refit(): manual re-pack of a flow group
   } else if (msg.type === 'get_snapshot') {
-    // Python is asking for the user's free-form drawings only â€” danvas panels
+    // Python is asking for the user's free-form drawings only — danvas panels
     // and connector arrows are recreated from code, not persisted.
     sendRaw({ type: 'snapshot', reqId: msg.reqId, data: userContent(msg.panelIds || []) })
   } else if (msg.type === 'load_snapshot') {
@@ -762,13 +762,13 @@ function handle(msg) {
     setPresence(msg.count || 0)
     setRoster(msg.viewers || [])
   } else if (msg.type === 'cursor') {
-    setPeerCursor(msg)            // a peer moved â€” render their cursor
+    setPeerCursor(msg)            // a peer moved — render their cursor
   } else if (msg.type === 'cursor_gone') {
-    removePeerCursor(msg.id)      // a peer left â€” drop their cursor
+    removePeerCursor(msg.id)      // a peer left — drop their cursor
   } else if (msg.type === 'view') {
     applyLiveView(msg.view || {})
   } else if (msg.type === 'welcome') {
-    // The socket reconnected without the page reloading â€” if the backend is a
+    // The socket reconnected without the page reloading — if the backend is a
     // *different run* (re-run script, crash + restart, hot reload), the previous
     // run's panels are still on the canvas. Panel ids change every run, so the
     // new ones would appear *alongside* (stacked on top of) the stale, dead
@@ -834,7 +834,7 @@ function resolveCompletion(reqId, completions) {
 // --- request/response RPC (canvas.request from a React panel) ----------------
 // The awaitable twin of sendInput: a panel asks Python a question and gets the
 // matching @on_request handler's return value back. Generalises the completions
-// round-trip and component-routes it â€” { type:'request', id, reqId, data } gets a
+// round-trip and component-routes it — { type:'request', id, reqId, data } gets a
 // { type:'response', reqId, result|error } back, correlated by reqId. reqId is
 // namespaced by a per-tab nonce so a broadcast response never resolves another
 // tab's pending request. The Promise rejects on a handler error or timeout.
@@ -1005,7 +1005,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, opacity,
   // next viewer/reconnect instead of being re-flowed. Without this, a panel that
   // was placed by the masonry flow stays x=None in Python; once *other* panels
   // get a concrete position (a user move, or an auto-height fit), they skip the
-  // flow on reconnect while this one re-flows from the origin â€” and they collide.
+  // flow on reconnect while this one re-flows from the origin — and they collide.
   // Pinning every auto-placed panel the same way keeps positions stable for all.
   if (autoPlaced) {
     sendRaw({ type: 'layout', id, x: px, y: py, auto: true })
@@ -1059,8 +1059,8 @@ function toRichText(s) {
 }
 
 // Normalise Python-supplied props before handing them to tldraw.createShape.
-// â€¢ text -> richText conversion for all text-bearing shape types.
-// â€¢ geo/line/draw/highlight/note/frame are all expected here; arrow is handled
+// • text -> richText conversion for all text-bearing shape types.
+// • geo/line/draw/highlight/note/frame are all expected here; arrow is handled
 //   separately by createArrow.
 function normaliseManagedProps(shapeType, props) {
   const p = { ...props }
@@ -1103,7 +1103,7 @@ function setupScrollWheelPan(mode) {
     const scale = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? 400 : 1
 
     if (mode === 'scroll_y') {
-      // Vertical scroll â†’ vertical pan.  Horizontal delta is discarded;
+      // Vertical scroll → vertical pan.  Horizontal delta is discarded;
       // the x:'fixed' constraint would block it anyway.
       editor.setCamera({ x: camera.x, y: camera.y - e.deltaY * scale, z: camera.z })
     } else {
@@ -1143,8 +1143,8 @@ function applyCameraMode(mode, zoom = 1) {
     zoomSteps: [zoom],  // lock to the requested zoom; wheel handler prevents gesture zoom
   })
   setupScrollWheelPan(mode)
-  // scheduleInitialFit fires 180 ms after the last shape registers â€” after
-  // this applyCameraMode call â€” and would re-centre + re-fit the content,
+  // scheduleInitialFit fires 180 ms after the last shape registers — after
+  // this applyCameraMode call — and would re-centre + re-fit the content,
   // overriding the position we set.  Cancelling the timer and marking the
   // fit as done prevents that; we own the camera from here on.
   if (initialFitTimer) { clearTimeout(initialFitTimer); initialFitTimer = null }
@@ -1201,7 +1201,7 @@ function updateComponent(id, payload) {
 
   // LivePlot streaming delta: append the new point(s) rather than re-sending the
   // whole figure (see LivePlot.push). We keep the buffered full figure current
-  // too â€” independent of whether the node is mounted â€” so a panel that unmounts
+  // too — independent of whether the node is mounted — so a panel that unmounts
   // and later remounts (tldraw viewport culling) re-renders with every point,
   // not just those since the last full frame. The mounted node is grown with
   // Plotly.extendTraces via the handler.
@@ -1244,7 +1244,7 @@ function updateComponent(id, payload) {
     return
   }
 
-  // AudioFeed chunks no longer travel here â€” they ride a binary frame straight
+  // AudioFeed chunks no longer travel here — they ride a binary frame straight
   // to the Web Audio scheduler (see handleBinary / AudioView).
 
   const shapeId = createShapeId(id)
@@ -1320,7 +1320,7 @@ export function unregisterStyle(id) {
 // which would break panel isolation. Instead the panel requests camera access
 // via postMessage; the parent runs getUserMedia and relays each JPEG frame
 // both to Python (as BIN_INPUT, same path as canvas.sendBinary) and back into
-// the iframe (via liveHandlers, same path as push_binary â†’ canvas.onPush).
+// the iframe (via liveHandlers, same path as push_binary → canvas.onPush).
 // One shared MediaStream is reused across all panels requesting camera access.
 
 let _camStream = null   // shared MediaStream (one getUserMedia for all panels)
@@ -1363,7 +1363,7 @@ async function startCameraCapture(compId, opts) {
     cap.height = height
     const ctx = cap.getContext('2d')
 
-    // rAF loop: runs at display rate (â‰¤60 fps) and skips a tick when the
+    // rAF loop: runs at display rate (≤60 fps) and skips a tick when the
     // previous blob encode hasn't finished, so frames never pile up.
     const entry = { rafId: null, lastCapture: 0, pending: false }
     _camPanels.set(compId, entry)
@@ -1384,13 +1384,13 @@ async function startCameraCapture(compId, opts) {
           if (!_camPanels.has(compId)) return
           sendBinary(compId, buf) // up to Python as BIN_INPUT (copies buf internally)
           const handler = liveHandlers.get(compId)
-          if (handler) handler(buf) // down into the iframe â€” transfers buf, so call last
+          if (handler) handler(buf) // down into the iframe — transfers buf, so call last
         })
       }, 'image/jpeg', quality)
     }
     entry.rafId = requestAnimationFrame(capture)
   } catch (err) {
-    console.warn('[danvas] camera unavailable for panel', compId, 'â€”', err.message)
+    console.warn('[danvas] camera unavailable for panel', compId, '—', err.message)
   }
 }
 
@@ -1409,11 +1409,11 @@ function stopCameraCapture(compId) {
 // --- parent-side microphone capture (Custom panels' canvas.requestMicrophone) -
 // getUserMedia({audio}) is blocked inside sandboxed iframes for the same null-
 // origin reason as camera. The parent captures mic audio via ScriptProcessorNode
-// (fires on the main thread â€” no cross-thread postMessage hop needed), converts
+// (fires on the main thread — no cross-thread postMessage hop needed), converts
 // float32 to int16 PCM, and relays each chunk to Python (BIN_INPUT) and into
-// the iframe (liveHandlers â†’ canvas.onPush). A JSON mic_start event is sent
+// the iframe (liveHandlers → canvas.onPush). A JSON mic_start event is sent
 // first so Python knows sampleRate / channels before audio data arrives.
-// Each panel gets its own AudioContext + MediaStream (no shared stream here â€”
+// Each panel gets its own AudioContext + MediaStream (no shared stream here —
 // multiple mic panels are uncommon, and sharing an AudioContext across panels
 // with different buffer sizes would complicate the graph).
 
@@ -1421,7 +1421,7 @@ const _micPanels = new Map() // compId -> { stream, ctx, source, processor, sile
 
 async function startMicCapture(compId, opts) {
   if (_micPanels.has(compId)) return
-  // bufferSize must be a power of 2: 256 â€¦ 16384. 4096 â‰ˆ 85â€“93 ms per chunk.
+  // bufferSize must be a power of 2: 256 … 16384. 4096 ≈ 85–93 ms per chunk.
   const bufferSize = 4096
 
   try {
@@ -1438,7 +1438,7 @@ async function startMicCapture(compId, opts) {
     processor.onaudioprocess = (e) => {
       if (!_micPanels.has(compId)) return
       const float32 = e.inputBuffer.getChannelData(0)
-      // Convert float32 [-1, 1] â†’ int16 (half the wire size; same format
+      // Convert float32 [-1, 1] → int16 (half the wire size; same format
       // AudioFeed uses on the downward path).
       const int16 = new Int16Array(float32.length)
       for (let i = 0; i < float32.length; i++) {
@@ -1446,7 +1446,7 @@ async function startMicCapture(compId, opts) {
       }
       sendBinary(compId, int16.buffer) // up to Python as BIN_INPUT (copies internally)
       const handler = liveHandlers.get(compId)
-      if (handler) handler(int16.buffer) // down into iframe â€” transfers buf, call last
+      if (handler) handler(int16.buffer) // down into iframe — transfers buf, call last
     }
 
     // ScriptProcessorNode must be connected to destination to fire; a zero-gain
@@ -1459,7 +1459,7 @@ async function startMicCapture(compId, opts) {
 
     _micPanels.set(compId, { stream, ctx, source, processor, silencer })
   } catch (err) {
-    console.warn('[danvas] microphone unavailable for panel', compId, 'â€”', err.message)
+    console.warn('[danvas] microphone unavailable for panel', compId, '—', err.message)
   }
 }
 
@@ -1580,7 +1580,7 @@ export function sendRestore(id) {
 // Whether this canvas is password-protected (welcome.auth). When true the app
 // shows a sign-out button that navigates to /__logout__ (the server clears the
 // session cookie and the password page returns). Shown regardless of a `ui:false`
-// kiosk view â€” signing out is an auth escape hatch, not app chrome â€” so even a
+// kiosk view — signing out is an auth escape hatch, not app chrome — so even a
 // chrome-free viewer can switch accounts.
 let authEnabled = false
 const authListeners = new Set()
@@ -1634,7 +1634,7 @@ function setViewConfig(view) {
 
 // A live `view` change from Python (Canvas.set_view): merge the delta over the
 // current config, notify, re-apply options, and move the camera *only* if the
-// delta carried x/y/zoom â€” so toggling, say, `ui` or `grid` live never disturbs
+// delta carried x/y/zoom — so toggling, say, `ui` or `grid` live never disturbs
 // where the viewer is looking.
 function applyLiveView(delta) {
   viewConfig = { ...(viewConfig || {}), ...delta }
@@ -1684,7 +1684,7 @@ function applyViewOptions() {
 
 // --- initial auto-fit --------------------------------------------------------
 // When no explicit camera (x/y/zoom) is configured, frame every panel this
-// viewer can see, centred, on first load â€” so the canvas never opens on empty
+// viewer can see, centred, on first load — so the canvas never opens on empty
 // space (e.g. because tldraw restored a panned camera from this browser's
 // localStorage, or because the panels live far from the origin). Runs once per
 // page load and only over the shapes actually present, which already reflects
@@ -1699,7 +1699,7 @@ let initialFitTimer = null
 function scheduleInitialFit() {
   if (initialFitDone || !editor) return
   const v = viewConfig
-  // An explicit camera wins â€” respect serve(view={x/y/zoom}) / set_view.
+  // An explicit camera wins — respect serve(view={x/y/zoom}) / set_view.
   if (v && (typeof v.x === 'number' || typeof v.y === 'number' ||
             typeof v.zoom === 'number')) return
   clearTimeout(initialFitTimer)
@@ -1723,7 +1723,7 @@ function fitCameraToBounds(bounds) {
   const fitW = Math.max(1, vsb.w - pad * 2)
   const fitH = Math.max(1, vsb.h - pad * 2)
   // Zoom out to fit when the panels overflow the viewport, but never zoom *in*
-  // past 100% â€” a single small panel should sit centred at its natural size, not
+  // past 100% — a single small panel should sit centred at its natural size, not
   // blown up to fill the screen. Configured min/max zoom still bound the result.
   let z = Math.min(fitW / bounds.w, fitH / bounds.h, 1)
   const v = viewConfig || {}
@@ -1867,7 +1867,7 @@ function zoomFromIframe(sourceWin, w) {
 
 // Auto-height (`h="auto"` on Custom/Markdown panels): the iframe measures its
 // own document and posts the content height; resize the shape to fit and report
-// the new geometry to Python â€” same read-back path as a user resize, so
+// the new geometry to Python — same read-back path as a user resize, so
 // `comp.h` stays in sync. The card chrome around the iframe (header, padding)
 // is measured via offsetHeight, which is in layout px (CSS transforms don't
 // affect it), i.e. already in shape units.
@@ -1896,15 +1896,15 @@ function fitFromIframe(sourceWin, fit) {
     const w = Math.max(40, Math.ceil(fit.w + overhead))
     if (Math.abs(w - shape.props.w) >= 3) { props.w = w; report.w = w } // else settled
   }
-  if (!props.h && !props.w) return // both settled â€” don't ping-pong
+  if (!props.h && !props.w) return // both settled — don't ping-pong
   applyRemote(() =>
     editor.updateShape({ id: shapeId, type: shape.type, props })
   )
   // Report only the size: a fit never moves the panel, and echoing x/y would
-  // pin an auto-arranged panel (x=None in Python) to a number â€” which then makes
+  // pin an auto-arranged panel (x=None in Python) to a number — which then makes
   // it skip the placement flow on the next viewer and collide with others.
   sendRaw(report)
-  // The panel's footprint changed â€” re-pack the auto-flow around its real size.
+  // The panel's footprint changed — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
   settleArmedReflows(fit.id)    // re-pack a column.refit() group waiting on it
   autoRepackForPanel(fit.id)    // re-pack any Container tree this panel is in
@@ -1915,7 +1915,7 @@ function fitFromIframe(sourceWin, fit) {
 // postMessage, here the panel is a native React subtree, so ReactHost measures
 // its content directly and calls this with `fit = { h?, w? }` and the host
 // element that fills the card's body. Overhead (card header/padding) is
-// `shape.<axis> - hostEl.offset<Axis>`, in layout px â€” the same read-back path
+// `shape.<axis> - hostEl.offset<Axis>`, in layout px — the same read-back path
 // as a user resize, keeping `comp.w`/`comp.h` in sync. Each axis is applied
 // independently; pass only the axis the panel is fitting.
 export function fitNative(componentId, hostEl, fit) {
@@ -1935,14 +1935,14 @@ export function fitNative(componentId, hostEl, fit) {
     const w = Math.max(40, Math.ceil(fit.w + overhead))
     if (Math.abs(w - shape.props.w) >= 3) { props.w = w; report.w = w } // else settled
   }
-  if (props.h === undefined && props.w === undefined) return // both settled â€” don't ping-pong
+  if (props.h === undefined && props.w === undefined) return // both settled — don't ping-pong
   applyRemote(() =>
     editor.updateShape({ id: shapeId, type: shape.type, props })
   )
-  // Size only â€” see fitFromIframe: echoing x/y would pin an auto-arranged panel
+  // Size only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
   // and break the placement flow for the next viewer.
   sendRaw(report)
-  // The panel grew/shrank â€” re-pack the auto-flow around its real size.
+  // The panel grew/shrank — re-pack the auto-flow around its real size.
   if (flowItems.has(shapeId)) scheduleRelayout()
   settleArmedReflows(componentId)    // re-pack a column.refit() group waiting on it
   autoRepackForPanel(componentId)    // re-pack any Container tree this panel is in

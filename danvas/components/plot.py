@@ -14,11 +14,11 @@ _EMPTY = (
 
 # Keep the chart filling the panel on resize. Plotly's ``responsive: true`` only
 # listens to the iframe *window*'s resize, which doesn't reliably fire when the
-# tldraw panel (and thus the iframe element) is resized â€” so a taller panel left
+# tldraw panel (and thus the iframe element) is resized — so a taller panel left
 # the chart stuck at its load-time pixel height with empty space below. A
 # ResizeObserver on the graph div catches every box change and re-fits the plot,
 # the in-iframe analog of the native LivePlot path's observer. (Resizing the plot
-# reflows the SVG inside the div, not the div's own 100%Ã—100% box, so no loop.)
+# reflows the SVG inside the div, not the div's own 100%×100% box, so no loop.)
 _RESIZE_SCRIPT = (
     "<script>(function(){"
     "var raf=null;"
@@ -51,7 +51,7 @@ class Plot(Custom):
         """Lead the iframe document with a doctype so it renders in standards
         mode. Plotly's ``full_html`` omits the doctype and ``Custom._wrap`` then
         prepends the canvas helper script, so without this the document is
-        quirks-mode â€” where percentage heights and box-sizing differ, leaving the
+        quirks-mode — where percentage heights and box-sizing differ, leaving the
         chart sized oddly (a slight zoom/clip, most visible on a small or mobile
         panel). Inherited by :class:`~danvas.Histogram`."""
         return "<!DOCTYPE html>\n" + super()._wrap(html)
@@ -74,7 +74,7 @@ class Plot(Custom):
             # around the graph div: without giving *it* a height the graph div's
             # ``height:100%`` resolves against an auto-height parent and collapses
             # to Plotly's fixed default (~450px), so the chart never fills (or
-            # tracks) the panel. Carrying the full-height chain htmlâ†’bodyâ†’wrapperâ†’
+            # tracks) the panel. Carrying the full-height chain html→body→wrapper→
             # graph div is what lets the chart size to the iframe.
             return html.replace(
                 "</head>",

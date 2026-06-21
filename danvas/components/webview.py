@@ -1,13 +1,13 @@
 """WebView: panel an external website/URL in an embedded iframe.
 
 Now a native React panel (mounted by ReactHost) whose body is a single
-``<iframe>`` pointed at a real URL â€” so interactive embeds that need access to
+``<iframe>`` pointed at a real URL — so interactive embeds that need access to
 their own origin (YouTube's player, maps, most web apps) actually run instead of
 rendering a blank/black frame.
 
 Embedding still only works for sites that permit being framed. Pages that send
 ``X-Frame-Options: DENY`` or a CSP ``frame-ancestors`` directive (Google,
-Twitter/X, GitHub, most banks) refuse to load â€” that's a browser security rule,
+Twitter/X, GitHub, most banks) refuse to load — that's a browser security rule,
 not a danvas limitation. For YouTube, ``watch?v=``/``youtu.be`` links are
 rewritten to their embeddable ``/embed/`` form automatically.
 """

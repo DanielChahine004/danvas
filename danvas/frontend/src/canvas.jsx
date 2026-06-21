@@ -82,7 +82,7 @@ function frameLabelColor(fc, isDark) {
 // the shape's exact w/h (not 100% of an ancestor) so it tracks resizing
 // continuously and lines up with tldraw's selection box. A frameless panel
 // (meta.noFrame, Python `frame=False`) keeps the same flex box but drops every
-// visible piece of chrome â€” background, border, shadow, padding â€” so its
+// visible piece of chrome — background, border, shadow, padding — so its
 // content appears to sit directly on the canvas.
 function cardStyle(shape, isDark = false) {
   const noFrame = !!shape.meta?.noFrame
@@ -110,8 +110,8 @@ function cardStyle(shape, isDark = false) {
 
 // Card chrome shared by every panel. When the shape is fully locked (isLocked)
 // or input-locked (meta.lockInput), it lays a transparent overlay over the
-// content. The overlay sits on top with pointerEvents:'all', so it â€” not the
-// inner controls â€” receives the pointer, making the contents inert (tldraw's
+// content. The overlay sits on top with pointerEvents:'all', so it — not the
+// inner controls — receives the pointer, making the contents inert (tldraw's
 // isLocked only blocks its own gestures; pointer events still reach inner HTML,
 // which sets pointerEvents:'all', so without this a locked slider would keep
 // firing value changes).
@@ -119,17 +119,17 @@ function cardStyle(shape, isDark = false) {
 // The two locks differ in what they do with that pointer, keeping *content
 // interactivity* separate from *move/resize/select permission*:
 //   - isLocked (full lock): the overlay swallows the event (stopPropagation) so
-//     nothing reaches tldraw â€” no interaction at all.
+//     nothing reaches tldraw — no interaction at all.
 //   - meta.lockInput only: the overlay lets the event bubble to tldraw, so the
 //     panel can still be selected/moved/resized exactly as its movable /
-//     resizable / locked permissions allow â€” only the inner controls are inert.
+//     resizable / locked permissions allow — only the inner controls are inert.
 //     The shape stays unlocked, so Python value updates still render and a
 //     slider thumb keeps tracking them while the user can't drag it.
 // Pinned panels (movable/resizable false) stay fully interactive: no overlay.
 //
 // ``grab``: panels whose *whole body* is interactive (iframes, plots, chat,
 // repl, inspector, react) would otherwise swallow every click into their content
-// â€” so tldraw never sees it and the panel can't be selected or dragged by its
+// — so tldraw never sees it and the panel can't be selected or dragged by its
 // body, only its thin header. Where panels overlap, that makes the top one hard
 // to grab and the click seems to fall through to the panel underneath. For those
 // panels, while the panel is *unselected* we lay a transparent cover over it: the
@@ -147,7 +147,7 @@ function cardStyle(shape, isDark = false) {
 // A small grip that gives a guaranteed drag/select point for a body-interactive
 // panel (React) without covering its body. It carries no pointer handler and
 // never stopPropagation, so a press/drag bubbles to tldraw, which selects and
-// (on drag) moves the topmost panel â€” exactly like the `grab` cover, but
+// (on drag) moves the topmost panel — exactly like the `grab` cover, but
 // confined to its own corner so the rest of the body stays live (hover, cursor,
 // controls work from the first pointer-over). Hidden until the panel is hovered
 // (see .pc-drag-handle in theme.css). Sits in the top-right so it clears the
@@ -156,7 +156,7 @@ function DragHandle() {
   return (
     <div
       className="pc-drag-handle"
-      title="drag to move Â· click to select"
+      title="drag to move · click to select"
       style={{
         position: 'absolute',
         top: 4,
@@ -190,7 +190,7 @@ function DragHandle() {
 // ``handle``: like ``grab`` but instead of a full-body cover lay only a small
 // hover-revealed grip (DragHandle). Use it for body-interactive native panels
 // whose content should stay live from the first pointer-over (no click-to-arm
-// cover) â€” currently the React host. The cover and the handle are mutually
+// cover) — currently the React host. The cover and the handle are mutually
 // exclusive; pick one per panel.
 function Card({ shape, children, grab = false, ghostable = false, handle = false }) {
   const editor = useEditor()
@@ -201,7 +201,7 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
   // A panel that can neither be selected (noGrab) nor operated (lockInput, from
   // operable=False) is purely decorative: it should be click-through so the
   // pointer reaches whatever sits underneath it on the canvas. A full lock
-  // (isLocked) is excluded â€” that deliberately swallows the event instead. Only
+  // (isLocked) is excluded — that deliberately swallows the event instead. Only
   // `ghostable` panels qualify: those whose content we also make pointer-inert
   // (the Custom iframe). For everything else the input overlay must keep
   // catching the pointer, or operable=False would stop blocking its controls.
@@ -228,7 +228,7 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
       {grab && !noGrab && !selected && !blockInput && (
         <div
           // No handler / no stopPropagation: the event bubbles to tldraw, which
-          // selects + (on drag) moves the topmost panel â€” fixing overlap grabs.
+          // selects + (on drag) moves the topmost panel — fixing overlap grabs.
           style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'grab' }}
         />
       )}
@@ -286,7 +286,7 @@ class PcShapeUtil extends BaseBoxShapeUtil {
   // (meta.noFrame) so nothing draws a rectangle around their bare content, and
   // for non-grabbable panels (meta.noGrab, Python grabable=False): those can't
   // be hovered or selected by the user, so the light-blue edge highlight should
-  // never appear on them. Returning null here is the definitive guard â€” it's the
+  // never appear on them. Returning null here is the definitive guard — it's the
   // only thing that paints the outline, regardless of any stray hover/select
   // state. (The bridge's page-state filter still keeps them out of selection.)
   indicator(shape) {
@@ -372,7 +372,7 @@ export class HtmlShapeUtil extends PcShapeUtil {
 // arrive here and are forwarded into the iframe via postMessage (as a `message`
 // event whose `data.__danvas` is the payload), so live data can stream in
 // *without* replacing srcDoc and reloading the frame. That keeps the iframe's
-// focus and listeners intact â€” essential for streaming + interactive panels.
+// focus and listeners intact — essential for streaming + interactive panels.
 function CustomView({ shape }) {
   const ref = useRef(null)
   const id = componentIdOf(shape.id)
@@ -393,7 +393,7 @@ function CustomView({ shape }) {
       if (!el || !el.contentWindow) return
       // A binary push (push_binary) arrives as an ArrayBuffer; transfer it into
       // the iframe (zero-copy) rather than structured-cloning the whole buffer
-      // on every frame â€” the win that keeps binary Custom panels close to the
+      // on every frame — the win that keeps binary Custom panels close to the
       // native VideoFeed path. handleBinary slices a fresh buffer per frame and
       // nothing reads it after this single handler, so detaching it is safe. A
       // JSON push() is a plain value with nothing transferable.
@@ -430,7 +430,7 @@ function CustomView({ shape }) {
         flex: 1,
         // An iframe's intrinsic height is 150px and a flex item defaults to
         // min-height:auto, so without this the frame refuses to shrink below
-        // 150px in a shorter panel â€” it overflows and the card clips its bottom
+        // 150px in a shorter panel — it overflows and the card clips its bottom
         // (e.g. a centered image looks top-padded). minHeight:0 lets flex:1 fit
         // the frame to the card body.
         minHeight: 0,
@@ -446,7 +446,7 @@ function CustomView({ shape }) {
         pointerEvents: ghost ? 'none' : 'all',
       }}
       // Keep tldraw from hijacking drags/zoom meant for the iframe content. A
-      // ghost panel wants the opposite â€” let the pointer fall through entirely.
+      // ghost panel wants the opposite — let the pointer fall through entirely.
       onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
     />
   )
@@ -498,7 +498,7 @@ export class ReactShapeUtil extends PcShapeUtil {
                 fontSize: 13,
               }}
             >
-              compilingâ€¦
+              compiling…
             </div>
           }
         >
@@ -524,7 +524,7 @@ function LivePlotView({ shape }) {
     // per message saturates the main thread, which then can't drain the socket,
     // so *everything* on it (labels, slider echo) backs up behind plot redraws.
     // Instead we just stash incoming points (cheap, so messages keep draining)
-    // and flush at most once per frame, coalescing whatever arrived in between â€”
+    // and flush at most once per frame, coalescing whatever arrived in between —
     // the render rate self-limits to what the device can actually do.
     let pendingFull = null // newest full figure (supersedes pending points)
     let pendingExt = null // accumulated extend delta {indices, x, y, max}
@@ -564,7 +564,7 @@ function LivePlotView({ shape }) {
         pendingFull = null
         pendingExt = null // the full figure already carries everything
         // Hand Plotly its own array copies so a later extendTraces mutating the
-        // node can't alias â€” and double-append to â€” the bridge's buffer.
+        // node can't alias — and double-append to — the bridge's buffer.
         Plotly.react(
           node,
           (p.data || []).map((t) => ({
@@ -618,7 +618,7 @@ function LivePlotView({ shape }) {
 
     // Keep Plotly synced to its container in *all* cases. Plotly's own
     // responsive: only watches the window, so a container that resizes from a
-    // layout/fit/zoom-independent reflow â€” common on mobile â€” would otherwise
+    // layout/fit/zoom-independent reflow — common on mobile — would otherwise
     // leave the chart drawn at a stale size and looking scaled wrong. A
     // ResizeObserver (debounced to one frame) catches every container size
     // change, including the initial settle and Python-driven resizes.
@@ -684,7 +684,7 @@ function decodeChunk(ctx, data, sampleRate, channels) {
   let n = data.byteLength
   n -= n % 2 // int16 samples are 2 bytes; ignore a stray trailing byte
   // `data` is a fresh ArrayBuffer sliced at offset 0 (see handleBinary), so it's
-  // 2-byte aligned and can back an Int16Array directly â€” no copy, no base64.
+  // 2-byte aligned and can back an Int16Array directly — no copy, no base64.
   const pcm = new Int16Array(data, 0, n / 2)
   const frames = Math.floor(pcm.length / channels)
   if (frames === 0) return null
@@ -759,7 +759,7 @@ function AudioView({ shape }) {
       try {
         await ctx.resume()
       } catch {
-        // ignore â€” resume can reject if no gesture, but this is one
+        // ignore — resume can reject if no gesture, but this is one
       }
       nextRef.current = ctx.currentTime + 0.12
       setOn(true)
@@ -790,10 +790,10 @@ function AudioView({ shape }) {
           pointerEvents: 'all',
         }}
       >
-        {on ? 'ðŸ”Š Audio on' : 'ðŸ”ˆ Enable audio'}
+        {on ? '🔊 Audio on' : '🔈 Enable audio'}
       </button>
       <div style={{ fontSize: 12, color: 'var(--pc-muted)' }}>
-        {sampleRate} Hz Â· {channels === 1 ? 'mono' : `${channels} ch`}
+        {sampleRate} Hz · {channels === 1 ? 'mono' : `${channels} ch`}
       </div>
     </div>
   )
@@ -869,7 +869,7 @@ export class ReplShapeUtil extends PcShapeUtil {
                 borderRadius: 4,
               }}
             >
-              loading editorâ€¦
+              loading editor…
             </div>
           }
         >
@@ -898,7 +898,7 @@ export class ReplShapeUtil extends PcShapeUtil {
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => run()}
         >
-          Run (âŒ˜/Ctrl+Enter)
+          Run (⌘/Ctrl+Enter)
         </button>
         {(output || result) && (
           <pre

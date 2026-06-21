@@ -2,7 +2,7 @@
 
 Rendered as a native React panel (mounted by ReactHost): each frame rides a
 *binary* WebSocket frame (no base64, no JSON, no shape-prop churn) and the panel
-paints it with ``canvas.onFrame`` â€” wrapping each ``ArrayBuffer`` in a Blob ->
+paints it with ``canvas.onFrame`` — wrapping each ``ArrayBuffer`` in a Blob ->
 object URL -> ``<img>`` and revoking the previous URL once the next frame paints,
 so the stream can't leak memory and never triggers a React re-render. The Python
 side (OpenCV JPEG encoding, or pre-encoded bytes) is unchanged.
@@ -14,7 +14,7 @@ from ..bridge import BINARY_VIDEO
 # The panel: subscribe to the binary push stream and paint each JPEG frame to an
 # <img>. ``onFrame`` delivers each frame as a zero-copy ArrayBuffer (no React
 # re-render); we revoke the prior frame's object URL once the next one paints.
-# Authored as a plain string so its JSX braces survive â€” nothing is substituted.
+# Authored as a plain string so its JSX braces survive — nothing is substituted.
 _VIDEO_SOURCE = r"""
 function Component({ canvas }) {
   const imgRef = React.useRef(null);
@@ -68,7 +68,7 @@ class VideoFeed(React):
 
         With ``encode=True`` (default) ``frame`` is an OpenCV BGR array, encoded
         to JPEG here. With ``encode=False`` ``frame`` must already be **JPEG
-        bytes** â€” e.g. produced by a hardware encoder (NVJPG/GStreamer) â€” and is
+        bytes** — e.g. produced by a hardware encoder (NVJPG/GStreamer) — and is
         sent as-is, skipping ``cv2.imencode`` entirely. Either way the bytes ride
         a binary frame (no base64, no JSON), painted by the panel's ``onFrame``.
         """

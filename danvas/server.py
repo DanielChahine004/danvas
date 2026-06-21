@@ -35,7 +35,7 @@ def _dist_dir():
     """Locate the built frontend, both in-source and inside a baked executable.
 
     A PyInstaller build bundles the frontend under ``pcframe/dist`` in the
-    extraction dir (``sys._MEIPASS``) â€” deliberately *not* under ``danvas/``,
+    extraction dir (``sys._MEIPASS``) — deliberately *not* under ``pycanvas/``,
     which would shadow the real package as a namespace dir and break
     ``import danvas``. In a normal install it lives next to this module.
     """
@@ -69,7 +69,7 @@ def _ws_opts(compress):
 
 
 def _lan_ip():
-    """Best-effort LAN IP of this machine â€” the address other devices dial.
+    """Best-effort LAN IP of this machine — the address other devices dial.
 
     Opens a UDP socket toward a public address to discover which local interface
     routes outward, then reads that interface's IP. No packets are actually sent,
@@ -91,7 +91,7 @@ def _announce(host, port):
 
     A ``127.0.0.1`` / ``localhost`` bind is local-only, so just the local URL is
     shown. Any other bind (``0.0.0.0``, ``""``, a specific IP) is reachable from
-    the network, so the machine's LAN URL is printed too â€” that's the address to
+    the network, so the machine's LAN URL is printed too — that's the address to
     open on a phone/another computer on the same Wi-Fi.
     """
     local = f"http://127.0.0.1:{port}"
@@ -139,7 +139,7 @@ class _FrontendStatic(StaticFiles):
         exists and the client advertised that encoding.
 
         Only ever swaps a straight ``200`` file response, and never for a Range
-        request (a partial read over the *encoded* bytes is a needless footgun) â€”
+        request (a partial read over the *encoded* bytes is a needless footgun) —
         every other case (304, redirect, missing file) falls through untouched.
         The compressed file's own size/etag are used (a distinct representation),
         the original ``Content-Type`` and any ``Cache-Control`` are carried over,
@@ -252,11 +252,11 @@ def _login_page(error=False, message=None):
     """The minimal password prompt shown before an unauthenticated view loads.
 
     ``message`` is an optional host-provided note (``serve(login_message=...)``)
-    shown above the field â€” e.g. which password each kind of viewer should enter.
+    shown above the field — e.g. which password each kind of viewer should enter.
     It is HTML-escaped (newlines preserved) so it renders as plain text, never
     markup.
     """
-    err = ("<p class='err'>Wrong password â€” try again.</p>" if error else "")
+    err = ("<p class='err'>Wrong password — try again.</p>" if error else "")
     note = (f"<p class='note'>{html.escape(str(message))}</p>" if message else "")
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -303,7 +303,7 @@ def _session_secret():
 
     Under hot reload the watcher process exports one fixed key to every worker
     (``_danvas_RELOAD_SECRET``) so a viewer's cookie keeps validating across
-    restarts â€” the websocket just reconnects and replays, no re-login on each
+    restarts — the websocket just reconnects and replays, no re-login on each
     edit. Without it (a plain run) the key is per-process, so a real restart
     re-prompts exactly as before.
     """
@@ -315,7 +315,7 @@ def _sign_session(role, secret):
     """A stateless, tamper-proof session token that encodes ``role``.
 
     The role travels in the (signed) cookie itself instead of a server-side map,
-    so no shared session store is needed â€” any process holding ``secret`` can
+    so no shared session store is needed — any process holding ``secret`` can
     verify it. ``role`` is ``None`` for single-password mode.
     """
     payload = _b64(json.dumps({"r": role}).encode("utf-8"))
@@ -348,7 +348,7 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     ``passwords`` is a ``{role: password}`` dict that enables role-based access:
     the role a visitor authenticates with is stored in their session and passed
     to the bridge so per-role panel filtering and viewer callbacks work.
-    ``password`` (a single string) keeps backward compatibility â€” all viewers
+    ``password`` (a single string) keeps backward compatibility — all viewers
     get ``role=None``. If both are given, ``passwords`` takes precedence.
     """
     @asynccontextmanager
@@ -377,12 +377,12 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     auth_required = role_map is not None or single_pw is not None
 
     # Optional host note shown on the login page (serve(login_message=...)). Read
-    # off the bridge â€” serve stores it there â€” so it rides along without threading
+    # off the bridge — serve stores it there — so it rides along without threading
     # an extra arg through run()/run_background()/the _serve_* helpers.
     login_message = getattr(bridge, "_login_message", None)
 
     # Sessions are stateless: the role rides in a signed cookie (see
-    # _sign_session), so there's no in-memory token map to lose on a restart â€”
+    # _sign_session), so there's no in-memory token map to lose on a restart —
     # which is what lets hot reload reconnect a viewer without re-login.
     secret = _session_secret()
 
@@ -427,7 +427,7 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
             # Clear the session cookie and bounce back to the login page. The
             # cookie is httponly (JS can't delete it), so sign-out has to
             # round-trip the server; the next request then fails the gate and
-            # the viewer sees the password prompt â€” free to log in as another
+            # the viewer sees the password prompt — free to log in as another
             # role. Reachable only by an already-authed viewer (the gate lets
             # them through); an unauthed hit just gets the login page anyway.
             resp = RedirectResponse(url="/", status_code=303)
@@ -506,7 +506,7 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
         return {"ok": True, "name": info["name"], "size": info["size"]}
 
     # Internal endpoint used by the hot-reload monitor for partial React source
-    # updates. Only accessible from loopback â€” the monitor is always local.
+    # updates. Only accessible from loopback — the monitor is always local.
     @app.post("/__hot_source__")
     async def hot_source(request: Request):
         if request.client.host not in ("127.0.0.1", "::1"):
@@ -540,8 +540,8 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
 def _make_server_socket(host, port):
     """Pre-bind a TCP socket with SO_REUSEADDR and hand it to uvicorn.
 
-    uvicorn skips SO_REUSEADDR on Windows (its POSIX semantics â€” reuse a
-    TIME_WAIT port â€” are unsafe there), so after Ctrl+C the port stays busy
+    uvicorn skips SO_REUSEADDR on Windows (its POSIX semantics — reuse a
+    TIME_WAIT port — are unsafe there), so after Ctrl+C the port stays busy
     for up to two minutes.  Creating the socket ourselves and passing it via
     ``sockets=`` bypasses uvicorn's socket creation and fixes the problem
     on all platforms.

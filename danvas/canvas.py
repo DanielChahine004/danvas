@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     # `Unpack[Place]` types every factory's **place kwargs (PEP 692) for editor
     # autocomplete. Annotations are lazy strings (the __future__ import above), so
-    # this import never runs at import time â€” no runtime dependency added.
+    # this import never runs at import time — no runtime dependency added.
     from typing_extensions import Unpack
 
 from . import server
@@ -46,7 +46,7 @@ _ReloadHandoff = namedtuple("_ReloadHandoff", "should_return open_browser")
 class Place(TypedDict, total=False):
     """Placement, visibility, and backpressure options that every factory accepts
     via ``**place`` (the same set :meth:`Canvas.insert` documents). Typed only so
-    editors autocomplete the keyword arguments â€” kept in step with ``_INSERT_KEYS``.
+    editors autocomplete the keyword arguments — kept in step with ``_INSERT_KEYS``.
     """
     x: float
     y: float
@@ -169,7 +169,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def background(self, fn, *args, **kwargs):
         """Register ``fn`` to run as a daemon thread when the canvas serves.
 
-        Use this for the producer loops that feed panels â€” a camera capture, a
+        Use this for the producer loops that feed panels — a camera capture, a
         sensor poll, a telemetry stream. ``serve()`` starts each registered
         callable on its own daemon thread just before it begins serving, so the
         threads stop with the process and never outlive it::
@@ -189,8 +189,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         Crucially, the thread is started only in the process that actually
         serves. Under ``serve(hot_reload=True)`` the original process becomes a
         file-watching *monitor* that respawns a worker subprocess on every edit;
-        if a camera (or any single-owner resource) were opened at import time â€”
-        the usual ``threading.Thread(...).start()`` at module scope â€” the monitor
+        if a camera (or any single-owner resource) were opened at import time —
+        the usual ``threading.Thread(...).start()`` at module scope — the monitor
         would hold it and the real worker could never acquire it. Registering the
         loop here defers it to the serving process, so hot reload works.
 
@@ -205,7 +205,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Called from serve() in the serving process only (not the hot-reload
         monitor). Uses the same ``spawn`` primitive as the ``threaded=True``
-        input handlers â€” a daemon thread that lives as long as the worker runs
+        input handlers — a daemon thread that lives as long as the worker runs
         (a producer loop runs for the app's lifetime), so neither blocks
         interpreter shutdown / a reload's teardown, and a crash is logged.
         """
@@ -238,7 +238,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Each entry has ``id`` (an opaque per-connection identifier), ``name``
         (the viewer's editable display name), ``color`` (their roster colour),
-        and ``cursor`` â€” their last-known pointer position in canvas/page
+        and ``cursor`` — their last-known pointer position in canvas/page
         coords as ``{"x", "y"}``, or ``None`` until they move it. ``cursor`` is
         only populated when cursor reporting is on (``serve(cursors=True)``;
         default on for a private local bind), and reads the *latest* position,
@@ -253,7 +253,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             for v in canvas.viewers:
                 canvas.set_view(x=0, y=0, client_id=v["id"])
 
-        The list reflects whoever is connected *right now* â€” a viewer who
+        The list reflects whoever is connected *right now* — a viewer who
         disconnects drops out of it, and there is no history of past viewers.
         """
         return list(self._bridge._viewers.values())
@@ -261,8 +261,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def on_frame(self, fn):
         """Observe every WebSocket frame: ``fn(direction, msg)``. Decorator-friendly.
 
-        The supported way to watch the wire â€” no monkeypatching needed.
-        ``direction`` is ``"out"`` (Python â†’ browser) or ``"in"`` (browser â†’
+        The supported way to watch the wire — no monkeypatching needed.
+        ``direction`` is ``"out"`` (Python → browser) or ``"in"`` (browser →
         Python); ``msg`` is the frame dict (``register``/``update``/``remove``
         going out, ``input``/``layout``/``chat``/``draw`` coming in; binary media
         frames arrive as a ``{"type": "binary", "id", "media", "bytes"}``
@@ -274,7 +274,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 print(direction, msg["type"], msg.get("id"))
 
         Taps run inline on the send/receive path, so keep them fast. A tap may
-        safely drive components (e.g. mirror frames into a panel) â€” frames the
+        safely drive components (e.g. mirror frames into a panel) — frames the
         tap itself causes are not re-tapped. Remove with :meth:`off_frame`.
         For plain console logging, ``serve(debug=True)`` installs one for you.
         """
@@ -288,7 +288,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Stream viewer cursor moves: ``fn(viewer)``. Decorator-friendly.
 
         Fires whenever a viewer moves their pointer, with a snapshot dict of that
-        viewer â€” ``id``/``name``/``color`` plus ``cursor`` (``{"x", "y"}`` in
+        viewer — ``id``/``name``/``color`` plus ``cursor`` (``{"x", "y"}`` in
         canvas coords). Requires cursor reporting to be on (``serve(cursors=True)``;
         default on for a private local bind)::
 
@@ -297,7 +297,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 print(v["name"], "at", v["cursor"])
 
         It's a high-rate stream (throttled + dead-banded client-side, but still
-        many per second per viewer), so keep the handler cheap â€” for steady
+        many per second per viewer), so keep the handler cheap — for steady
         sampling, polling ``canvas.viewers[i]["cursor"]`` from a loop is often
         simpler. Remove with :meth:`off_cursor`.
         """
@@ -310,8 +310,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def on_connect(self, fn):
         """Run ``fn(viewer)`` once each time a viewer connects. Decorator-friendly.
 
-        ``viewer`` is the same dict handed to every handler â€”
-        ``id``/``name``/``color``/``cursor``/``device``/``role`` â€” so a single
+        ``viewer`` is the same dict handed to every handler —
+        ``id``/``name``/``color``/``cursor``/``device``/``role`` — so a single
         hook lets you tailor the canvas to *who* (or *what*) just joined. The
         common case is adapting the layout to a phone, reusing the per-viewer
         ``client_id=`` scoping that :meth:`~danvas.components.base.BaseComponent.set_layout`
@@ -324,10 +324,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                         panel.set_layout(client_id=viewer["id"],
                                          x=0, y=i * 220, w=360)
 
-        The same pattern targets any viewer attribute (``role``, ``name``, â€¦),
+        The same pattern targets any viewer attribute (``role``, ``name``, …),
         so you don't need a separate scoping axis per attribute. It fires after
         the viewer's initial state has been sent, so a ``set_layout``/``update``
-        here arrives as a live tweak on top â€” run on the dispatch thread (off the
+        here arrives as a live tweak on top — run on the dispatch thread (off the
         event loop), so it's safe to drive components from it. ``device`` is a
         best-effort, spoofable User-Agent classification, so use it for
         presentation, never authorization (gate those on ``role``). Remove with
@@ -344,7 +344,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         The symmetric twin of :meth:`on_connect`: ``viewer`` is the departed
         viewer's last-known dict (``id``/``name``/.../``role``). Use it to free
-        whatever you set up for that viewer â€” release a per-viewer resource, log
+        whatever you set up for that viewer — release a per-viewer resource, log
         how long they stayed, drop them from your own bookkeeping::
 
             sessions = {}
@@ -358,7 +358,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 if started: print(v["name"], "stayed", time.time() - started, "s")
 
         It fires after the viewer is already off the roster, so don't try to
-        message them from here â€” it's for cleanup. Runs on the dispatch thread
+        message them from here — it's for cleanup. Runs on the dispatch thread
         (off the event loop). Remove with :meth:`off_disconnect`.
         """
         return self._bridge.add_disconnect_tap(fn)
@@ -373,7 +373,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         These are the shapes created with :meth:`geo`, :meth:`text`,
         :meth:`note`, :meth:`draw`, :meth:`line`, :meth:`frame`, and
-        :meth:`highlight` â€” not the panels (:attr:`components`) and not the
+        :meth:`highlight` — not the panels (:attr:`components`) and not the
         user's free-form drawings (:attr:`drawings`).
         """
         return list(self._shapes)
@@ -382,10 +382,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def drawings(self):
         """Live snapshot of user-drawn (ephemeral) shapes as a dict.
 
-        Keys are tldraw shape ids (``'shape:â€¦'`` strings).  Values are
+        Keys are tldraw shape ids (``'shape:…'`` strings).  Values are
         :class:`~danvas.shapes.DrawingShape` objects with ``update()`` and
         ``remove()`` methods that broadcast tldraw draw diffs to every browser.
-        The snapshot is fresh on each access â€” it reflects the current server
+        The snapshot is fresh on each access — it reflects the current server
         shadow store, which is kept in step with every browser's drawing state::
 
             for sid, s in canvas.drawings.items():
@@ -402,11 +402,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         ``fn(event)`` receives a dict with three keys:
 
-        - ``added``   â€” list of :class:`~danvas.shapes.DrawingShape` for
+        - ``added``   — list of :class:`~danvas.shapes.DrawingShape` for
           shapes just created by a user
-        - ``updated`` â€” list of :class:`~danvas.shapes.DrawingShape` for
+        - ``updated`` — list of :class:`~danvas.shapes.DrawingShape` for
           shapes just modified (each reflects the new state)
-        - ``removed`` â€” list of tldraw shape id strings for deleted shapes
+        - ``removed`` — list of tldraw shape id strings for deleted shapes
 
         Fires off the event loop on the dispatch thread, so it is safe to call
         ``shape.update()``, drive panels, or read ``canvas.drawings`` from
@@ -443,7 +443,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Mirror subsequent notebook cell outputs onto this canvas.
 
         Registers an IPython ``post_run_cell`` hook so each cell ending in an
-        expression gets (or refreshes) its own panel, auto-arranged in a grid â€”
+        expression gets (or refreshes) its own panel, auto-arranged in a grid —
         no manual :meth:`insert` per cell. Cells ending in a statement
         (assignment, ``print``, loop) produce no value and are skipped. Re-running
         a cell swaps its panel in place. Best paired with ``serve(block=False)``
@@ -453,7 +453,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         Per cell, a ``# danvas:`` directive line overrides placement (or opts
         out with ``skip``). Pass ``auto=False`` to invert the default: mirror
         *nothing* unless a cell carries such a directive (e.g. a bare
-        ``# danvas: show``) â€” an explicit allowlist instead of a blocklist.
+        ``# danvas: show``) — an explicit allowlist instead of a blocklist.
 
         ``draggable``/``resizable``/``locked``/``operable`` set the default lock
         state for every panel (e.g. ``draggable=False`` to pin them all); a
@@ -509,8 +509,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
         let the frontend auto-cascade. ``w``/``h`` set its size in pixels;
         omit them to use the component's default size. ``width``/``height`` are
-        accepted as aliases for ``w``/``h`` (matching the ``column(width=â€¦)`` /
-        ``row(height=â€¦)`` spelling) â€” pass one spelling or the other, not both.
+        accepted as aliases for ``w``/``h`` (matching the ``column(width=…)`` /
+        ``row(height=…)`` spelling) — pass one spelling or the other, not both.
 
         Instead of absolute coordinates, place the panel relative to one
         already on the canvas: ``below=`` / ``above=`` / ``right_of=`` /
@@ -518,44 +518,44 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``gap`` pixels away from it, aligned with its edge. An explicit ``x`` or
         ``y`` overrides the corresponding derived coordinate. The anchor must
         already have a position (placed with ``x``/``y``, relatively, or moved
-        by a user â€” auto-cascaded panels have no Python-side position until a
+        by a user — auto-cascaded panels have no Python-side position until a
         browser reports one).
 
         ``queue`` sets the component's send-queue policy under backpressure:
         ``"fifo"`` (deliver everything, in order) or ``"latest"`` (drop stale
-        pending updates â€” right for high-rate feeds like a figure redrawn on
+        pending updates — right for high-rate feeds like a figure redrawn on
         every slider tick). ``None`` keeps the component's own default. Also a
         settable property: ``comp.queue = "latest"``.
 
         Five independent lock controls:
 
-        - ``locked=True`` fully locks the panel â€” no move, resize, or
+        - ``locked=True`` fully locks the panel — no move, resize, or
           interaction (toggle later with ``component.lock()`` / ``unlock()``).
         - ``draggable=False`` stops the user dragging the panel but keeps its
           controls interactive (toggle with ``component.draggable``).
         - ``resizable=False`` stops the user resizing it, controls still work
           (toggle with ``component.resizable``).
         - ``operable=False`` (content-heavy panels: Custom/React/WebView/
-          plotsâ€¦) makes the controls inert to the user while Python
-          ``update()`` calls still render live â€” use this to lock interactive
+          plots…) makes the controls inert to the user while Python
+          ``update()`` calls still render live — use this to lock interactive
           controls while driving them programmatically. The panel stays movable
           (toggle with ``component.operable``).
         - ``grabbable=False`` (content-heavy panels) removes the click-to-select
-          cover â€” the panel's content is hoverable and clickable immediately â€”
+          cover — the panel's content is hoverable and clickable immediately —
           and makes the panel invisible to selection entirely: no click,
           marquee, or select-all ever highlights it. Move/resize it from
           Python only (toggle with ``component.grabbable``).
-        - ``frame=False`` strips the panel's card chrome â€” background, border,
+        - ``frame=False`` strips the panel's card chrome — background, border,
           shadow, padding, label header, and the hover/selection highlight
-          rectangle â€” so the component's content appears to sit directly on
+          rectangle — so the component's content appears to sit directly on
           the canvas (toggle with ``component.frame``). Pair with
           ``grabbable=False`` if clicking the content should never select it.
 
         Use ``draggable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
-        regardless of these â€” they only gate user gestures.
+        regardless of these — they only gate user gestures.
 
-        ``name`` is the component's unique identity â€” the handle that exposes it
+        ``name`` is the component's unique identity — the handle that exposes it
         as ``canvas.<name>`` / ``canvas["<name>"]`` and the key that makes a later
         insert under the same name replace this one (so re-running a cell swaps
         the panel rather than stacking a duplicate). It normally comes from the
@@ -585,7 +585,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 "really intend remote code execution on a trusted network."
             )
         # ``width``/``height`` alias ``w``/``h`` so the panel spelling matches the
-        # container one (``column(width=â€¦)``). Fold them in before any sizing
+        # container one (``column(width=…)``). Fold them in before any sizing
         # logic runs; passing both spellings of an axis is a mistake.
         if width is not None:
             if w is not None:
@@ -595,14 +595,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             if h is not None:
                 raise TypeError("pass either h= or height=, not both")
             h = height
-        # ``h="auto"`` (Custom-based panels: markdown, custom, table, imageâ€¦)
+        # ``h="auto"`` (Custom-based panels: markdown, custom, table, image…)
         # fits the panel height to its rendered content: flag the component (its
         # iframe then reports content height; the frontend resizes to fit) and
         # fall back to the default height until the first measurement lands.
         # Auto-height fits the panel to its rendered content (the frontend
         # measures and resizes; comp.h syncs back). Two ways to get it: the caller
         # asks with h="auto", or the component defaults to it (e.g. Label, whose
-        # content is always short). They differ around layout containers â€” an
+        # content is always short). They differ around layout containers — an
         # explicit h="auto" overrides a grid slot / row height, a *default* one
         # yields to it (so grids stay uniform). An explicit numeric h pins either.
         if h == "auto":
@@ -612,7 +612,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             else:
                 warnings.warn(
                     "h='auto' is only supported on Custom-based panels "
-                    "(custom, markdown, table, image, â€¦); using the default "
+                    "(custom, markdown, table, image, …); using the default "
                     "height", stacklevel=2,
                 )
         else:
@@ -653,7 +653,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # inserted without coordinates (joins the masonry flow) and a one-shot
         # on_layout fires on the first unpositioned anchor to apply the relative
         # placement once the browser reports its position. This lets panels be
-        # declared in natural order â€” anchor first, relative panel second â€” even
+        # declared in natural order — anchor first, relative panel second — even
         # when neither has an explicit x/y.
         if below is not None or above is not None or right_of is not None \
                 or left_of is not None:
@@ -736,7 +736,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 x, y, w, h = fx, fy, fw, fh   # shared base (the usual case)
             else:
                 # Scoped container: this placement is that audience's overlay, not
-                # the shared base â€” applied via set_layout once the panel is bound.
+                # the shared base — applied via set_layout once the panel is bound.
                 scoped_layout = (fx, fy, fw, fh, flow._roles, flow._client_id)
             from ._layout import Container as _Container
             if isinstance(flow, _Container):
@@ -749,7 +749,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 component.component)
         # A component name doubles as the ``canvas.<name>`` attribute handle, so a
         # name that shadows a real Canvas method/property (``save``, ``slider``,
-        # ``components``â€¦) would be silently unreachable that way (``__getattr__``
+        # ``components``…) would be silently unreachable that way (``__getattr__``
         # only fires when normal lookup fails). Warn, since the handle still works
         # through ``canvas["<name>"]``. ``hasattr`` on the class reads the
         # descriptor without invoking any property getter.
@@ -907,7 +907,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def _auto_name(self, kind):
         """Return a unique fallback handle (e.g. ``slider1``) for an unnamed item.
 
-        Used when nothing supplies a name â€” so every component and arrow still
+        Used when nothing supplies a name — so every component and arrow still
         gets a distinct ``canvas[...]`` handle. ``kind`` is the type string
         (``component.component`` for panels, ``"arrow"`` for connectors).
         """
@@ -918,8 +918,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return f"{base}{i}"
 
     # -- component factories --------------------------------------------------
-    # canvas.slider / button / react / markdown / show / â€¦ live in _FactoryMixin
-    # (danvas/_factories.py); _make() and _INSERT_KEYS moved there too.
+    # canvas.slider / button / react / markdown / show / … live in _FactoryMixin
+    # (pycanvas/_factories.py); _make() and _INSERT_KEYS moved there too.
 
     # -- tldraw shape factories -----------------------------------------------
 
@@ -982,7 +982,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def geo(self, x=0, y=0, w=200, h=150, geo="rectangle", name=None,
             right_of=None, left_of=None, below=None, above=None, gap=16,
             **props):
-        """Place a geo shape (rectangle, ellipse, cloud, star, â€¦) on the canvas.
+        """Place a geo shape (rectangle, ellipse, cloud, star, …) on the canvas.
 
         ``geo`` selects the sub-type; ``w``/``h`` set dimensions.  Style
         kwargs: ``color``, ``fill``, ``dash``, ``size``, ``font``, ``align``.
@@ -1169,7 +1169,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         For single-viewer canvases this fully undoes all hand-drags. For role/client-
         scoped layouts the shared base is restored; per-viewer overlays (set via
-        ``set_layout(roles=â€¦)`` or ``set_layout(client_id=â€¦)``) are left untouched.
+        ``set_layout(roles=…)`` or ``set_layout(client_id=…)``) are left untouched.
         """
         for comp in list(self._bridge._components.values()):
             il = getattr(comp, "_initial_layout", None)
@@ -1193,7 +1193,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Register a shared React component usable by name in every ``react()`` panel.
 
         Pass JSX ``source`` (or a file ``path=``) that declares a component named
-        ``name`` â€” e.g. ``define("StatusPill", "function StatusPill({kind, children}) "
+        ``name`` — e.g. ``define("StatusPill", "function StatusPill({kind, children}) "
         "{ return <span className={'pill '+kind}>{children}</span> }")``. It is
         delivered to the browser once and made available in every React panel's
         scope, so any panel can render ``<StatusPill kind="ok">In stock</StatusPill>``
@@ -1222,7 +1222,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def style(self, css):
         """Add a global stylesheet shared by every native (React) panel.
 
-        The ``css`` is injected once into the page ``<head>`` â€” unlike a panel's
+        The ``css`` is injected once into the page ``<head>`` — unlike a panel's
         own ``css=`` (rendered inside that one panel), this is shared by all of
         them, so the styles for components registered with :meth:`define` live in
         one place instead of being copied into every panel. Selectors are
@@ -1247,7 +1247,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Both arguments are components previously passed to :meth:`insert`. The
         arrow binds to each panel in tldraw, so it follows them as they move or
-        resize. ``name`` is the arrow's unique identity â€” the ``canvas.<name>`` /
+        resize. ``name`` is the arrow's unique identity — the ``canvas.<name>`` /
         ``canvas["<name>"]`` handle and the eviction key, so re-connecting under
         the same ``name`` destroys the previous arrow rather than stacking a
         duplicate (mirroring how re-inserting a panel supersedes the old one).
@@ -1264,7 +1264,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             raise ValueError("both panels must be inserted before connecting them")
         if name is None:
             # Derive identity from the endpoints so an unnamed arrow between the
-            # same two panels reuses the handle â€” re-connecting them destroys the
+            # same two panels reuses the handle — re-connecting them destroys the
             # previous arrow instead of stacking a duplicate, no naming required.
             name = f"{start.name}->{end.name}"
         arrow_id = uuid.uuid4().hex
@@ -1320,10 +1320,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Two things are written together:
 
-        - ``layout`` â€” every panel's geometry and lock state (read from Python,
+        - ``layout`` — every panel's geometry and lock state (read from Python,
           which tracks the user's live drags/resizes). Panels are code, so only
           their *placement* is saved, never their behaviour.
-        - ``drawings`` â€” the free-form shapes/text/arrows the user added in the
+        - ``drawings`` — the free-form shapes/text/arrows the user added in the
           UI, which have no Python counterpart. Captured from a connected
           browser (the source of truth), so an open page is needed for these;
           with no browser open the formation is still saved on its own.
@@ -1352,7 +1352,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         try:
             drawings = self._bridge.request_snapshot(timeout=timeout)
         except RuntimeError:
-            drawings = None  # no browser connected â€” save the formation only
+            drawings = None  # no browser connected — save the formation only
         if drawings is not None:
             data["drawings"] = drawings
         with open(path, "w", encoding="utf-8") as f:
@@ -1421,7 +1421,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             comp = by_id.get(item.get("id")) or by_name.get(item.get("name"))
             if comp is None:
                 warnings.warn(
-                    f"load: panel {item.get('name')!r} not found on canvas â€” "
+                    f"load: panel {item.get('name')!r} not found on canvas — "
                     "recreate it before calling load()",
                     stacklevel=3,
                 )
@@ -1548,7 +1548,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def wait_for_client(self, timeout=10.0):
         """Block until at least one browser is connected, or ``timeout`` elapses.
 
-        Useful before :meth:`load`, which pushes to connected clients â€” give the
+        Useful before :meth:`load`, which pushes to connected clients — give the
         freshly opened page a moment to connect first. Returns ``True`` if a
         client connected.
         """
@@ -1630,7 +1630,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
-        shutdown â€” the usual end-of-script call. With ``block=False`` it starts
+        shutdown — the usual end-of-script call. With ``block=False`` it starts
         the server in the background and returns ``self`` immediately, so further
         ``insert`` calls push panels onto the live canvas (intended for
         interactive sessions, e.g. Jupyter). In background mode, ``wait`` blocks
@@ -1641,11 +1641,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``block=False`` you are responsible for keeping the process alive. That
         is automatic in a notebook/REPL (the kernel lives on), but a plain script
         that ends right after ``serve(block=False)`` will exit and tear the
-        server down â€” call :meth:`wait` to park the main thread there instead.
+        server down — call :meth:`wait` to park the main thread there instead.
 
         ``hot_reload=True`` watches the ``.py`` files alongside the running
-        script and restarts the whole process whenever one changes, so edits â€”
-        a different ``default=``, a moved panel, ``ui=False`` â€” take effect on
+        script and restarts the whole process whenever one changes, so edits —
+        a different ``default=``, a moved panel, ``ui=False`` — take effect on
         save. The browser tab reconnects to the restarted server on its own (no
         new tab opens). Only available with ``block=True`` (a script entry
         point); ``block=False`` with ``hot_reload=True`` raises an error, and
@@ -1653,7 +1653,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         raises too. With ``tunnel=True`` the tunnel is opened once by the
         long-lived watcher process (not the restarting worker), so the public URL
         stays the same across reloads and the provider isn't re-created on every
-        save â€” visitors just see a momentary blip during each restart.
+        save — visitors just see a momentary blip during each restart.
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
@@ -1662,8 +1662,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         unauthenticated remote code execution).
 
         Pass ``tunnel=True`` to also expose the canvas on the public internet
-        through a tunnel, so anyone â€” not just devices on your LAN â€” can open the
-        printed ``https://â€¦`` URL. ``tunnel_provider`` selects the backend
+        through a tunnel, so anyone — not just devices on your LAN — can open the
+        printed ``https://…`` URL. ``tunnel_provider`` selects the backend
         (``"cloudflared"`` by default, needs no signup and no visitor
         interstitial; ``"localtunnel"`` is also supported). A tunnel exposes the
         loopback bind to the whole internet, so it is gated for ``Repl`` exactly
@@ -1680,22 +1680,22 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         ``cursors`` enables viewer pointer reporting: each browser streams its
         cursor position (throttled, in canvas coords) so Python can read it as
-        ``canvas.viewers[i]["cursor"]``. It's viewer telemetry â€” the host sees
-        every viewer's pointer â€” so it's gated like ``ui_inspector``: default on
+        ``canvas.viewers[i]["cursor"]``. It's viewer telemetry — the host sees
+        every viewer's pointer — so it's gated like ``ui_inspector``: default on
         only for a private local bind, ``cursors=True``/``False`` to override.
 
         ``password`` gates access to the whole canvas: when set, a visitor is
         shown a small password page first and the WebSocket is refused until they
         pass it, so a shared LAN or tunneled URL isn't open to anyone who finds
         it. The check is per-browser-session (a cookie), so each viewer enters it
-        once. It is independent of ``allow_remote_exec`` â€” a password controls who
+        once. It is independent of ``allow_remote_exec`` — a password controls who
         may connect, not whether a Repl may run, so a public Repl still needs the
         explicit opt-in even behind a password. A password-protected canvas also
         shows a built-in **Sign out** button (clears the session, returns the
         password page) so a viewer can switch accounts.
 
         ``login_message`` adds a host note to that password page (above the
-        field) â€” handy with ``passwords=`` to tell viewers which password to use,
+        field) — handy with ``passwords=`` to tell viewers which password to use,
         e.g. ``login_message='Spectators enter "view"; teams enter your team
         password.'`` It is shown as plain text (HTML-escaped, newlines kept).
 
@@ -1703,19 +1703,19 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         the same canvas can be a free creative workspace or a fixed UI. Pass a
         dict with any of these keys (all optional):
 
-        * ``x`` / ``y`` / ``zoom`` â€” initial camera: centre the view on canvas
+        * ``x`` / ``y`` / ``zoom`` — initial camera: centre the view on canvas
           point ``(x, y)`` at ``zoom`` (1.0 = 100%). Any subset works; this is
           applied once on first load so a viewer who pans away isn't snapped back.
-        * ``locked`` â€” ``True`` freezes pan and zoom entirely (a fixed kiosk view).
-        * ``min_zoom`` / ``max_zoom`` â€” clamp how far the viewer can zoom.
-        * ``ui`` â€” ``False`` hides tldraw's toolbars/menus for a chrome-free
+        * ``locked`` — ``True`` freezes pan and zoom entirely (a fixed kiosk view).
+        * ``min_zoom`` / ``max_zoom`` — clamp how far the viewer can zoom.
+        * ``ui`` — ``False`` hides tldraw's toolbars/menus for a chrome-free
           surface (defaults to shown).
-        * ``grid`` â€” ``True`` shows the background grid.
-        * ``read_only`` â€” ``True`` puts tldraw in read-only mode (no drawing).
+        * ``grid`` — ``True`` shows the background grid.
+        * ``read_only`` — ``True`` puts tldraw in read-only mode (no drawing).
 
         ``desktop`` selects a native app window (via pywebview) instead of the
         system browser. It defaults to ``None`` = auto: on inside a baked
-        executable (``sys.frozen``), off otherwise â€” so the same script opens a
+        executable (``sys.frozen``), off otherwise — so the same script opens a
         browser in development and a contained window when run as the packaged
         ``.exe``. Force it either way with ``desktop=True``/``False``.
         ``window_title``/``window_size`` set that window's caption and pixel
@@ -1724,7 +1724,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         and falls back to the browser. See :meth:`bake` to build the executable.
 
         ``persist`` keeps the canvas across runs by saving it to a local JSON
-        file and reloading it on startup â€” the automatic twin of :meth:`save` /
+        file and reloading it on startup — the automatic twin of :meth:`save` /
         :meth:`load`. ``persist=True`` uses a default path next to your script
         (``<script>.canvas.json``); pass a string to choose the file. When the
         file exists it is loaded once the panels your script created exist, so
@@ -1732,13 +1732,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         free-form drawings reappear; the file is then rewritten (debounced)
         whenever a viewer moves/resizes a panel or edits a drawing, and once more
         on a clean shutdown (``Ctrl+C`` / :meth:`stop`). Panels are code, so only
-        their *placement* is persisted, never their existence or behaviour â€”
+        their *placement* is persisted, never their existence or behaviour —
         delete a panel from your script and its stale saved position is simply
         ignored. Leave it ``False`` (the default) to run entirely fresh from the
         script every time, reading and writing nothing.
 
-        ``debug=True`` logs every WebSocket frame to the console â€” what Python
-        sends (``->``) and what each browser sends back (``<-``) â€” so "the panel
+        ``debug=True`` logs every WebSocket frame to the console — what Python
+        sends (``->``) and what each browser sends back (``<-``) — so "the panel
         isn't updating" turns into evidence: either the frame is on the wire or
         it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
         ("viewer connected / disconnected") are always printed, debug or not.
@@ -1761,7 +1761,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         if handoff.open_browser is not None:
             open_browser = handoff.open_browser
         # Under hot reload the persistent monitor process owns the tunnel, so this
-        # worker must not open its own â€” but it's still publicly reachable
+        # worker must not open its own — but it's still publicly reachable
         # *through* that tunnel, so every public-exposure decision stays keyed on
         # `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
         own_tunnel = tunnel and os.environ.get("_danvas_RELOAD_WORKER") != "1"
@@ -1782,7 +1782,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._bridge._cursors = exposure.cursors
         # When a password is set, advertise it so the frontend offers a built-in
         # sign-out button (clears the session cookie via /__logout__, then the
-        # login page reappears â€” letting a viewer switch accounts). No auth â†’ no
+        # login page reappears — letting a viewer switch accounts). No auth → no
         # button, nothing to sign out of.
         self._bridge._auth = bool(password or passwords)
         # Optional note rendered on the password page (e.g. which password each
@@ -1790,7 +1790,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._bridge._login_message = login_message
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
-        # â€” Windows consoles often run cp1252, which can't print "â–¼"/"â–²".
+        # — Windows consoles often run cp1252, which can't print "▼"/"▲".
         if debug:
             self._bridge.add_frame_tap(self._debug_frame)
         # Merge serve's view onto any config already set via set_view() rather
@@ -1894,7 +1894,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             # user-launched daemon threads (camera, sensor, etc.) don't leak into
             # the monitor and double-grab resources alongside the worker.
             # The original process stays alive blocking on the monitor so that
-            # it remains the terminal's foreground job â€” Ctrl+C then reaches it
+            # it remains the terminal's foreground job — Ctrl+C then reaches it
             # (and, via the shared console, the monitor and worker too) rather
             # than being swallowed by the shell after os._exit would have returned
             # the prompt with the server still running in the background.
@@ -1963,7 +1963,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
         Falls back to a normal blocking browser serve if pywebview is missing, so
-        a build without the desktop extra still runs â€” just in the browser.
+        a build without the desktop extra still runs — just in the browser.
         """
         try:
             import webview
@@ -2007,8 +2007,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Package this canvas's script into a standalone desktop app.
 
         Run normally (``python your_script.py``), ``bake`` builds a single
-        self-contained executable from that script with PyInstaller â€” bundling
-        Python, the danvas backend, and the pre-built frontend â€” and returns
+        self-contained executable from that script with PyInstaller — bundling
+        Python, the danvas backend, and the pre-built frontend — and returns
         the path to it. The built app needs nothing installed: launching it runs
         your script and shows the canvas in a native window (pywebview), serving
         on ``127.0.0.1`` exactly as in development.
@@ -2027,15 +2027,15 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         package (defaults to the running one). Only the packages your script
         imports are bundled (not the whole environment); ``include`` force-adds
         ones the analysis can't see (dynamic/plugin imports), and ``exclude``
-        skips modules â€” use it when a broken or unused optional dependency would
+        skips modules — use it when a broken or unused optional dependency would
         otherwise crash the build (e.g. ``exclude=["torch"]``).
 
         Heavy optional dependencies are bundled only when this canvas uses the
-        component that needs them â€” numpy for an AudioFeed, OpenCV for a
-        VideoFeed â€” so a slider-only app doesn't drag them in. When numpy is
+        component that needs them — numpy for an AudioFeed, OpenCV for a
+        VideoFeed — so a slider-only app doesn't drag them in. When numpy is
         bundled on a conda environment, the MKL DLLs it needs are detected and
         bundled automatically too (a pip/venv NumPy needs nothing). The public
-        tunnel (``pycloudflared``) and IPython are excluded by default â€” a
+        tunnel (``pycloudflared``) and IPython are excluded by default — a
         standalone local app needs neither, and either one pulls in a large
         unrelated dependency tree; pass them in ``include`` if you really need
         them. Building requires the
@@ -2044,7 +2044,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``python -m danvas.bake your_script.py``.
         """
         if getattr(sys, "frozen", False):
-            # Inside the built executable: don't rebuild â€” run the app in a
+            # Inside the built executable: don't rebuild — run the app in a
             # native window. Same code path the .exe takes on every launch.
             return self.serve(port=port, desktop=True, window_title=name,
                               window_size=window_size)
@@ -2061,7 +2061,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # The script has already run by the time bake() is called, so sys.modules
         # reflects exactly what it imported. If it pulled in a heavy optional dep
         # bake otherwise treats as component-only (numpy/Pillow/OpenCV), bundle it
-        # â€” and keep bake's default media-dep exclusions from dropping it. numpy in
+        # — and keep bake's default media-dep exclusions from dropping it. numpy in
         # particular needs its conda MKL DLLs, which only ride along when it's
         # collected (see build_app), so this is what makes a script that imports
         # numpy directly produce a working exe.
@@ -2076,7 +2076,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             include=include,
             # Tell the build which heavy optional deps to bundle, based on the
             # components this canvas actually uses (numpy for AudioFeed, OpenCV
-            # for VideoFeed, Pillow for Image) â€” a slider-only app stays lean.
+            # for VideoFeed, Pillow for Image) — a slider-only app stays lean.
             # Keyed by class name (several components share the "Custom" type).
             components={type(c).__name__ for c in self._components},
         )
@@ -2098,13 +2098,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         The change is scoped by which of ``client_id``/``roles`` you pass:
 
-        * neither â€” broadcasts to all viewers and becomes the global default that
+        * neither — broadcasts to all viewers and becomes the global default that
           later viewers inherit on connect.
         * ``roles`` (a role name or list of names, matching ``serve(passwords=)``)
-          â€” applies to viewers logged in under those roles, now and on every
+          — applies to viewers logged in under those roles, now and on every
           future connect, so e.g. admins keep the toolbar and drawing while
           ``"user"`` viewers get a chrome-free, read-only canvas.
-        * ``client_id`` (a viewer's unique id from the roster) â€” affects only
+        * ``client_id`` (a viewer's unique id from the roster) — affects only
           that one viewer.
 
         Precedence on connect is global < per-role < per-client, so a more

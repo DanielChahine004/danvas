@@ -7,7 +7,7 @@ through any HTTPS tunnel with **no client changes**. This module shells out to a
 tunnel binary, scrapes the public URL it announces, and hands it back.
 
 ``cloudflared`` (the default) needs no signup, shows visitors no interstitial,
-and speaks WebSockets â€” the smoothest "just open the link" experience.
+and speaks WebSockets — the smoothest "just open the link" experience.
 ``localtunnel`` (``lt`` / ``npx localtunnel``) is also supported but needs Node
 and shows first-time visitors an IP-password reminder page.
 
@@ -57,7 +57,7 @@ def _resolve_binary(spec):
     """Locate a provider's executable, falling back past a stale PATH.
 
     In order: ``shutil.which`` (the normal case); the installer's default
-    locations â€” covering a shell open since before a Windows install updated the
+    locations — covering a shell open since before a Windows install updated the
     machine PATH; then an optional ``acquire`` hook (e.g. ``pycloudflared`` from
     the ``danvas[tunnel]`` extra, which downloads the binary on demand).
     Returns the full path, or ``None`` if nothing resolves.
@@ -145,7 +145,7 @@ def open_tunnel(port, provider="cloudflared", timeout=30):
     if binary is None:
         raise RuntimeError(
             f"tunnel provider {provider!r} needs one of {spec['binaries']} on "
-            f"PATH â€” {spec['install']}. If you just installed it, open a new "
+            f"PATH — {spec['install']}. If you just installed it, open a new "
             f"terminal so PATH refreshes."
         )
     proc = subprocess.Popen(
@@ -180,7 +180,7 @@ def open_tunnel(port, provider="cloudflared", timeout=30):
                 f"public URL"
             )
         raise RuntimeError(
-            f"{provider} exited before announcing a URL â€” check it is installed "
+            f"{provider} exited before announcing a URL — check it is installed "
             f"and working ({spec['install']})"
         )
     return Tunnel(proc, found["url"], provider)
