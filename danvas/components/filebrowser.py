@@ -23,6 +23,7 @@ import fnmatch
 import os
 import traceback
 
+from . import _theme
 from .react import React
 
 
@@ -108,8 +109,10 @@ class FileBrowser(React):
     default_h = 420
 
     def __init__(self, root=".", name="files", label=None, w=None, h=None,
-                 pattern=None, show_hidden=False):
-        super().__init__(source=_FB_SOURCE, name=name, label=label, w=w, h=h)
+                 pattern=None, show_hidden=False, color=None):
+        super().__init__(source=_FB_SOURCE, name=name, label=label, w=w, h=h,
+                         props={"_th": _theme.derive(color) if color is not None else {}})
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         # Resolve the sandbox root once; every later path is checked against it.
         self._root = os.path.realpath(root)
         self._cwd = self._root

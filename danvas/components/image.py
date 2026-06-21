@@ -10,6 +10,7 @@ import base64
 import io
 import sys
 
+from . import _theme
 from .react import React
 
 # Native React panel (not an iframe) so a vector/SVG or high-resolution image
@@ -41,12 +42,14 @@ class Image(React):
     default_h = 320
 
     def __init__(self, src, name="image", label=None, w=None, h=None,
-                 fit="contain"):
+                 fit="contain", color=None):
         # ``fit`` is the CSS object-fit: "contain" (default, whole image) or
         # "cover" (fill, cropping overflow).
         self._fit = fit
         super().__init__(source=_IMG_SOURCE, name=name, label=label, w=w, h=h,
-                         props={"src": _to_data_uri(src), "fit": fit})
+                         props={"src": _to_data_uri(src), "fit": fit,
+                                "_th": _theme.derive(color) if color is not None else {}})
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, src):
         """Replace the image, live (the ``src`` prop swaps — no shape reload).

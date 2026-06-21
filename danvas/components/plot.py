@@ -4,6 +4,7 @@
 raw HTML string, then displays it in the same sandboxed iframe Custom uses.
 """
 
+from . import _theme
 from .custom import Custom
 
 _EMPTY = (
@@ -40,8 +41,9 @@ class Plot(Custom):
     default_w = 560
     default_h = 420
 
-    def __init__(self, name="plot", label=None, w=None, h=None):
+    def __init__(self, name="plot", label=None, w=None, h=None, color=None):
         super().__init__(html=_EMPTY, name=name, label=label, w=w, h=h)
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, figure):
         """Display a Plotly figure or an HTML string."""

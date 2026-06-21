@@ -13,6 +13,7 @@ A/V sync). Browsers won't start audio until the user clicks the panel's enable
 button, per the browser autoplay policy.
 """
 
+from . import _theme
 from .base import BaseComponent
 from ..bridge import BINARY_AUDIO
 
@@ -22,11 +23,12 @@ class AudioFeed(BaseComponent):
     default_w = 260
     default_h = 120
 
-    def __init__(self, name, sample_rate=16000, channels=1, label=None):
+    def __init__(self, name, sample_rate=16000, channels=1, label=None, color=None):
         # sampleRate/channels travel as register props so the frontend knows how
         # to interpret (and play back) the raw int16 PCM bytes it receives.
         super().__init__(name=name, label=label,
                          sampleRate=int(sample_rate), channels=int(channels))
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         self._channels = int(channels)
 
     def update(self, chunk):

@@ -15,6 +15,7 @@ faint raw one.
 
 from collections import deque
 
+from . import _theme
 from .base import BaseComponent
 
 _DEFAULT_LAYOUT = {
@@ -63,11 +64,13 @@ class LivePlot(BaseComponent):
         w=None,
         h=None,
         label=None,
+        color=None,
     ):
         if not 0 <= smoothing < 1:
             raise ValueError(f"smoothing must be in [0, 1), got {smoothing!r}")
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, **size)
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}

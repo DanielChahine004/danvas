@@ -228,19 +228,19 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.color` |
 | `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
 | `Label` | output | escaped text/number; `.update(text)`; `h="auto"`; live: `.color` |
-| `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
-| `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
-| `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe) |
-| `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=` |
+| `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded; live: `.color` |
+| `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback; live: `.color` |
+| `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe); live: `.color` |
+| `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=`; live: `.smoothing`, `.color` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
 | `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)`; `canvas.sendBinary(buf)` (browser→Python raw bytes); `canvas.requestCamera(opts)`/`canvas.requestMicrophone(opts)` (parent-page device capture → `@on_binary`) |
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
-| `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=` |
-| `Table` | bidirectional | DataFrame/Series/records/dict → sortable, filterable, paginated; toolbar buttons toggle a `#` index column, a `cols ▾` column-visibility checklist, and a `sel` row-selection column; `@on_select` fires with the list of selected 0-based row indices; `.selected`, `.update(data)` |
+| `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=`; live: `.color` |
+| `Table` | bidirectional | DataFrame/Series/records/dict → sortable, filterable, paginated; toolbar buttons toggle a `#` index column, a `cols ▾` column-visibility checklist, and a `sel` row-selection column; `@on_select` fires with the list of selected 0-based row indices; `.selected`, `.update(data)`; live: `.color` |
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
-| `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
-| `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
+| `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message`; live: `.color` |
+| `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=`; live: `.color` |
 | `Download` | input | a button that sends a host file/`bytes` to the viewer; `source=` (path or bytes) or `@provide`, `filename=` |
 | `Upload` | input | a button / drop-zone that receives a viewer's file into Python; `@on_upload`, `.value`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |
@@ -422,7 +422,7 @@ status.color = (100, 100, 255)   # live; (r, g, b) tuple or "#rrggbb" hex
 status.color = None              # reset to default theme
 ```
 
-`color=` works at construction and as a live setter on `Label`, `Slider`, `Toggle`, `Button`, `TextField`, and any `react(...)` panel.
+`color=` works at construction and as a live setter on every component: `Label`, `Slider`, `Toggle`, `Button`, `TextField`, `Table`, `Chat`, `Image`, `VideoFeed`, `AudioFeed`, `Plot`, `LivePlot`, `FileBrowser`, and any `react(...)` / `custom(...)` panel.
 
 **Component-specific live setters:**
 

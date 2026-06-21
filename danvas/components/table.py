@@ -31,6 +31,7 @@ re-renders with fresh data.
 
 from collections import Counter
 
+from . import _theme
 from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
@@ -369,10 +370,13 @@ class Table(React):
     default_w = 520
     default_h = 360
 
-    def __init__(self, data, name="table", label=None, w=None, h=None):
+    def __init__(self, data, name="table", label=None, w=None, h=None, color=None):
         cols, rows = _normalize(data)
+        props = _table_props(cols, rows)
+        props["_th"] = _theme.derive(color) if color is not None else {}
         super().__init__(source=_TABLE_SOURCE, name=name, label=label, w=w, h=h,
-                         props=_table_props(cols, rows))
+                         props=props)
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         self._selected = []
         self._select_callbacks = []
 

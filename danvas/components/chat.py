@@ -20,6 +20,7 @@ is unchanged by where the panel renders.
         print(entry["name"], ":", entry["text"])
 """
 
+from . import _theme
 from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
@@ -134,8 +135,10 @@ class Chat(React):
     default_w = 320
     default_h = 400
 
-    def __init__(self, name="chat", label=None):
-        super().__init__(source=_CHAT_SOURCE, name=name, label=label)
+    def __init__(self, name="chat", label=None, color=None):
+        super().__init__(source=_CHAT_SOURCE, name=name, label=label,
+                         props={"_th": _theme.derive(color) if color is not None else {}})
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         # Chat observers registered (possibly) before the bridge is attached;
         # they're handed to the bridge as sinks at bind time.
         self._chat_callbacks = []

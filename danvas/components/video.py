@@ -8,6 +8,7 @@ so the stream can't leak memory and never triggers a React re-render. The Python
 side (OpenCV JPEG encoding, or pre-encoded bytes) is unchanged.
 """
 
+from . import _theme
 from .react import React
 from ..bridge import BINARY_VIDEO
 
@@ -55,11 +56,13 @@ class VideoFeed(React):
     default_w = 340
     default_h = 280
 
-    def __init__(self, name, quality=70, label=None, encode=True, queue="latest"):
+    def __init__(self, name, quality=70, label=None, encode=True, queue="latest",
+                 color=None):
         # Live video defaults to the ``latest`` queue policy: if a viewer falls
         # behind, stale frames are dropped so latency stays bounded rather than
         # piling up. Pass ``queue="fifo"`` to instead deliver every frame.
         super().__init__(source=_VIDEO_SOURCE, name=name, label=label, queue=queue)
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         self._quality = int(quality)
         self._encode = bool(encode)
 

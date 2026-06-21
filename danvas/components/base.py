@@ -9,6 +9,7 @@ import warnings
 
 from .._flags import LAYOUT_FLAGS
 from ..kernel import DedicatedKernel, spawn
+from . import _theme
 
 
 def _mark_threaded(fn):
@@ -531,6 +532,17 @@ class BaseComponent:
             self._client_layout.setdefault(client_id, {}).update(fields)
             self._send_update_to(payload, client_id=client_id)
         return self
+
+    @property
+    def color(self):
+        """The accent color of this panel's canvas frame (hex string, or None)."""
+        return getattr(self, "_frame_color", None)
+
+    @color.setter
+    def color(self, value):
+        fc = _theme.accent_hex(value) if value is not None else None
+        self._frame_color = fc
+        self.set_layout(frame_color=fc)
 
     def _layout_payload(self, fields):
         """Normalised layout ``fields`` -> the wire ``update`` payload (rotation
