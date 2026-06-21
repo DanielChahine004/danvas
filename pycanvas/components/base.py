@@ -475,7 +475,8 @@ class BaseComponent:
     def set_layout(self, x=None, y=None, w=None, h=None, rotation=None,
                    opacity=None,
                    locked=None, draggable=None, resizable=None, operable=None,
-                   grabbable=None, frame=None, *, roles=None, client_id=None):
+                   grabbable=None, frame=None, frame_color=None, *,
+                   roles=None, client_id=None):
         """Update position, size, rotation and/or lock state in one live message.
 
         Any argument left as ``None`` is unchanged. ``x``/``y`` are the canvas
@@ -500,7 +501,8 @@ class BaseComponent:
                          ("rotation", rotation), ("opacity", opacity),
                          ("locked", locked), ("draggable", draggable),
                          ("resizable", resizable), ("operable", operable),
-                         ("grabbable", grabbable), ("frame", frame)):
+                         ("grabbable", grabbable), ("frame", frame),
+                         ("frameColor", frame_color)):
             if val is not None:
                 fields[key] = val
         if not fields:
@@ -534,6 +536,8 @@ class BaseComponent:
         for name in LAYOUT_FLAGS:
             if name in fields:
                 payload[LAYOUT_FLAGS[name].wire] = bool(fields[name])
+        if "frameColor" in fields:
+            payload["frameColor"] = fields["frameColor"]
         return payload
 
     def _store_base_layout(self, fields):
