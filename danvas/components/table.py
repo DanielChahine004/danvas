@@ -375,7 +375,7 @@ class Table(React):
         props["_th"] = _theme.derive(color) if color is not None else {}
         super().__init__(source=_TABLE_SOURCE, name=name, label=label, w=w, h=h,
                          props=props)
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         self._selected = []
         self._select_callbacks = []
 

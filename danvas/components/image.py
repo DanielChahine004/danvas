@@ -49,7 +49,7 @@ class Image(React):
         super().__init__(source=_IMG_SOURCE, name=name, label=label, w=w, h=h,
                          props={"src": _to_data_uri(src), "fit": fit,
                                 "_th": _theme.derive(color) if color is not None else {}})
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
 
     def update(self, src):
         """Replace the image, live (the ``src`` prop swaps — no shape reload).

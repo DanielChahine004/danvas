@@ -108,7 +108,7 @@ class Slider(React):
                                 "on_release": on_release,
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
 
     @property
     def min(self):

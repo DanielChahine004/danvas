@@ -112,7 +112,7 @@ class FileBrowser(React):
                  pattern=None, show_hidden=False, color=None):
         super().__init__(source=_FB_SOURCE, name=name, label=label, w=w, h=h,
                          props={"_th": _theme.derive(color) if color is not None else {}})
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         # Resolve the sandbox root once; every later path is checked against it.
         self._root = os.path.realpath(root)
         self._cwd = self._root

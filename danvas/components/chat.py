@@ -137,7 +137,7 @@ class Chat(React):
     def __init__(self, name="chat", label=None, color=None):
         super().__init__(source=_CHAT_SOURCE, name=name, label=label,
                          props={"_th": _theme.derive(color) if color is not None else {}})
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         # Chat observers registered (possibly) before the bridge is attached;
         # they're handed to the bridge as sinks at bind time.
         self._chat_callbacks = []

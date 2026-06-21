@@ -71,7 +71,7 @@ class Markdown(React):
         super().__init__(source=_MD_SOURCE, name=name, label=label, w=w, h=h,
                          props={"html": _md_to_html(text or ""),
                                 "_th": _theme.derive(color) if color is not None else {}})
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
 
     @property
     def html(self):

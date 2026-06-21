@@ -63,7 +63,7 @@ class VideoFeed(React):
         # behind, stale frames are dropped so latency stays bounded rather than
         # piling up. Pass ``queue="fifo"`` to instead deliver every frame.
         super().__init__(source=_VIDEO_SOURCE, name=name, label=label, queue=queue)
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         self._quality = int(quality)
         self._encode = bool(encode)
 

@@ -61,7 +61,16 @@ class Button(React):
                          props={"text": caption,
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = 0  # number of clicks seen
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
+
+    @property
+    def text(self):
+        """The button's face label; settable live."""
+        return self._data.get("text", "")
+
+    @text.setter
+    def text(self, value):
+        self.update(value)
 
     def update(self, text):
         """Change the button's face text, live (e.g. Start ⇄ Pause).

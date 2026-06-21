@@ -48,7 +48,7 @@ class Label(React):
                          props={"text": _str(value),
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = value
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         # A label holds a short line or number, so default to fitting the panel
         # to its content (no tall, mostly-empty box) unless the caller pinned an
         # explicit height. ``insert`` honours this flag for layout/placement too.

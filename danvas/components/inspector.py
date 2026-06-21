@@ -359,7 +359,7 @@ class Inspector(React):
         super().__init__(source=_INSPECTOR_SOURCE, name=name, label=label,
                          props={"rows": "[]", "cols": json.dumps(cols),
                                 "detail": "", "source": source})
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         self._view = source
         self._canvas = None  # injected by Canvas.insert
         self._namespace = namespace  # injected by Canvas.insert if left None

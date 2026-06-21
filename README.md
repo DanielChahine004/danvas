@@ -225,8 +225,8 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 |---|---|---|
 | `Slider` | bidirectional | `.value`, `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True` (report only on let-go); live: `.min`, `.max`, `.step`, `.color` |
 | `Toggle` | bidirectional | `.value`, `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
-| `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.color` |
-| `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
+| `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.text`, `.color` |
+| `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=`; live: `.placeholder`, `.multiline`, `.color` |
 | `Label` | output | escaped text/number; `.update(text)`; `h="auto"`; live: `.color` |
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded; live: `.color` |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback; live: `.color` |

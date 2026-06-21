@@ -562,6 +562,16 @@ class BaseComponent:
         self._frame_color = fc
         self.set_layout(frame_color=fc)
 
+    def _init_color(self, color):
+        """Store the accent color supplied at construction.
+
+        Called from each component's ``__init__`` instead of repeating the
+        ``_theme.accent_hex`` expression inline.  The bridge reads
+        ``_frame_color`` at registration time to tint the panel's canvas frame;
+        live changes go through the :attr:`color` setter.
+        """
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
+
     def _layout_payload(self, fields):
         """Normalised layout ``fields`` -> the wire ``update`` payload (rotation
         to radians for tldraw, flag names to their wire keys)."""

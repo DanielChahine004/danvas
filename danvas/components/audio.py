@@ -29,7 +29,7 @@ class AudioFeed(BaseComponent):
         # to interpret (and play back) the raw int16 PCM bytes it receives.
         super().__init__(name=name, label=label,
                          sampleRate=int(sample_rate), channels=int(channels))
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         self._channels = int(channels)
 
     def update(self, chunk):

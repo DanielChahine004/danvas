@@ -6,7 +6,6 @@ multiline. ``update(value)`` pushes new text to the browser live.
 """
 
 from . import _theme
-from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 _FIELD_CSS = """
@@ -81,7 +80,7 @@ class TextField(React):
                                 "multiline": bool(multiline),
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
 
     @property
     def placeholder(self):
@@ -90,6 +89,15 @@ class TextField(React):
     @placeholder.setter
     def placeholder(self, value):
         super().update(placeholder=value)
+
+    @property
+    def multiline(self):
+        """Whether the field is a multiline textarea; settable live."""
+        return bool(self._data.get("multiline", False))
+
+    @multiline.setter
+    def multiline(self, value):
+        super().update(multiline=bool(value))
 
     def update(self, value):
         """Push a new text value to the field in the browser, live.
@@ -113,16 +121,8 @@ class TextField(React):
         for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
         ``threaded`` and ``dedicated`` are mutually exclusive.
         """
-        if threaded and dedicated:
-            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            if dedicated:
-                self._callbacks.append(_mark_dedicated(f, queue))
-            elif threaded:
-                self._callbacks.append(_mark_threaded(f))
-            else:
-                self._callbacks.append(f)
-            return f
+            return self._register_callback(self._callbacks, f, threaded, dedicated, queue)
         return register(fn) if fn is not None else register
 
     def _handle_input(self, payload, viewer=None):

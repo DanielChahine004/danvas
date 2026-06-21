@@ -70,7 +70,7 @@ class LivePlot(BaseComponent):
             raise ValueError(f"smoothing must be in [0, 1), got {smoothing!r}")
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, **size)
-        self._frame_color = _theme.accent_hex(color) if color is not None else None
+        self._init_color(color)
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}
