@@ -157,6 +157,16 @@ class BaseComponent:
 
     # -- read ----------------------------------------------------------------
     @property
+    def label(self):
+        """The card title shown on the panel header."""
+        return self._props.get("label")
+
+    @label.setter
+    def label(self, value):
+        self._props["label"] = value
+        self._send_update({"label": value})
+
+    @property
     def value(self):
         with self._lock:
             return self._value

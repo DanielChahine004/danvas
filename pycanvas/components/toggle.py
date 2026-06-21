@@ -64,6 +64,17 @@ class Toggle(React):
         self._value = default
         self._frame_color = _theme.accent_hex(color) if color is not None else None
 
+    @property
+    def options(self):
+        return list(self._data.get("options", []))
+
+    @options.setter
+    def options(self, value):
+        opts = list(value)
+        if not opts:
+            raise ValueError("Toggle requires at least one option")
+        super().update(options=opts)
+
     def update(self, value):
         """Push a new selected option to the browser, live (and persist it)."""
         with self._lock:

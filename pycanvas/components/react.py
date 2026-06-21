@@ -53,6 +53,7 @@ import traceback
 import re
 
 from ..bridge import BINARY_REACT
+from . import _theme
 from .base import BaseComponent
 from ._routing import _EventRouter
 
@@ -390,6 +391,19 @@ class React(_EventRouter, BaseComponent):
         if role is None and client_id is None:
             return self
         return self.update(roles=role, client_id=client_id, **props)
+
+    @property
+    def color(self):
+        """The accent color of this panel (hex string, or None if unset)."""
+        return getattr(self, "_frame_color", None)
+
+    @color.setter
+    def color(self, value):
+        th = _theme.derive(value) if value is not None else {}
+        fc = _theme.accent_hex(value) if value is not None else None
+        self._frame_color = fc
+        self.update(_th=th)
+        self.set_layout(frame_color=fc)
 
     def push(self, data):
         """Stream ``data`` to the component without a re-mount.

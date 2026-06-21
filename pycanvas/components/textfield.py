@@ -83,6 +83,14 @@ class TextField(React):
         self._value = default
         self._frame_color = _theme.accent_hex(color) if color is not None else None
 
+    @property
+    def placeholder(self):
+        return self._data.get("placeholder", "")
+
+    @placeholder.setter
+    def placeholder(self, value):
+        super().update(placeholder=value)
+
     def update(self, value):
         """Push a new text value to the field in the browser, live.
 

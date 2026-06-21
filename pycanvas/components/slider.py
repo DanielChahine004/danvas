@@ -110,6 +110,30 @@ class Slider(React):
         self._value = default
         self._frame_color = _theme.accent_hex(color) if color is not None else None
 
+    @property
+    def min(self):
+        return self._data.get("min")
+
+    @min.setter
+    def min(self, value):
+        super().update(min=value)
+
+    @property
+    def max(self):
+        return self._data.get("max")
+
+    @max.setter
+    def max(self, value):
+        super().update(max=value)
+
+    @property
+    def step(self):
+        return self._data.get("step")
+
+    @step.setter
+    def step(self, value):
+        super().update(step=value)
+
     def update(self, value):
         """Push a new value to the slider in the browser, live.
 

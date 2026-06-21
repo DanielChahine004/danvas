@@ -55,18 +55,6 @@ class Label(React):
         if h is None:
             self._auto_h = True
 
-    @property
-    def color(self):
-        return self._frame_color
-
-    @color.setter
-    def color(self, value):
-        th = _theme.derive(value) if value is not None else {}
-        fc = _theme.accent_hex(value) if value is not None else None
-        self._frame_color = fc
-        super().update(_th=th)
-        self.set_layout(frame_color=fc)
-
     def update(self, value):
         """Push a new string/number to display (live, without re-rendering the
         shape). The value streams in over the push channel; the baked prop is kept
