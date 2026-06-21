@@ -10,7 +10,7 @@ side (OpenCV JPEG encoding, or pre-encoded bytes) is unchanged.
 
 from . import _theme
 from .react import React
-from ..bridge import BINARY_VIDEO
+from ..bridge import BINARY_VIDEO  # noqa: F401 – re-exported for bake.py discovery
 
 # The panel: subscribe to the binary push stream and paint each JPEG frame to an
 # <img>. ``onFrame`` delivers each frame as a zero-copy ArrayBuffer (no React
@@ -55,6 +55,7 @@ function Component({ canvas }) {
 class VideoFeed(React):
     default_w = 340
     default_h = 280
+    BINARY_TYPE = BINARY_VIDEO
 
     def __init__(self, name, quality=70, label=None, encode=True, queue="latest",
                  color=None):
@@ -107,4 +108,4 @@ class VideoFeed(React):
                 data = bytes(frame)  # e.g. a numpy uint8 buffer of JPEG bytes
         if not data:
             return
-        self._send_binary(BINARY_VIDEO, data)
+        self.push_binary(data)

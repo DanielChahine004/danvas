@@ -395,6 +395,24 @@ class BaseComponent:
             for r in ([role] if isinstance(role, str) else role):
                 self._bridge.send_to_role(r, msg)
 
+    # Subclasses that stream binary frames (VideoFeed, AudioFeed, Custom, React)
+    # set this to their BINARY_* constant so push_binary can use it without
+    # each subclass reimplementing the one-liner.
+    BINARY_TYPE = None
+
+    def push_binary(self, data):
+        """Stream raw bytes to the browser on a binary WebSocket frame.
+
+        ``data`` may be ``bytes``, ``bytearray``, or ``memoryview``. Honours the
+        panel's ``queue`` policy: ``"latest"`` drops stale pending frames for a
+        slow viewer; ``"fifo"`` delivers every frame in order.
+
+        Subclasses set :attr:`BINARY_TYPE` to the appropriate
+        ``BINARY_VIDEO`` / ``BINARY_AUDIO`` / ``BINARY_CUSTOM`` /
+        ``BINARY_REACT`` constant from :mod:`danvas.bridge`.
+        """
+        self._send_binary(self.BINARY_TYPE, bytes(data))
+
     def _send_binary(self, type_code, payload):
         """Push raw bytes to the browser as a binary frame, keyed by this id.
 

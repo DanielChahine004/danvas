@@ -60,6 +60,7 @@ from ._routing import _EventRouter
 
 class React(_EventRouter, BaseComponent):
     component = "React"
+    BINARY_TYPE = BINARY_REACT
 
     default_w = 380
     default_h = 320
@@ -419,24 +420,6 @@ class React(_EventRouter, BaseComponent):
         that path skips the React re-render the ``value`` prop would trigger.
         """
         self._send_update({"post": data})
-
-    def push_binary(self, data):
-        """Stream raw bytes to the component on a **binary** WebSocket frame.
-
-        The high-throughput counterpart to :meth:`push`: instead of JSON-encoding
-        the payload, ``data`` (``bytes``/``bytearray``/``memoryview``) rides a
-        binary frame — no JSON serialize, no base64 — the same fast path
-        ``VideoFeed``/``AudioFeed``/``Custom.push_binary`` use. It arrives at a
-        ``canvas.onFrame`` subscriber as a zero-copy ``ArrayBuffer`` (so use
-        ``onFrame``, not the ``value`` prop, to receive it), ready to wrap in a
-        typed array — e.g. ``new Float32Array(buf)``.
-
-        Use it for frame- or array-grade telemetry (packed sensor buffers, a
-        custom codec) where per-sample JSON cost would dominate. Honours the
-        panel's ``queue`` policy, so ``queue="latest"`` drops stale buffers for a
-        slow viewer just as it does for video.
-        """
-        self._send_binary(BINARY_REACT, bytes(data))
 
     def set_source(self, source):
         """Replace the component's JSX source and recompile it, live."""

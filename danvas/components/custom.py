@@ -30,6 +30,7 @@ class Custom(_EventRouter, BaseComponent):
     component = "Custom"
     default_w = 380
     default_h = 320
+    BINARY_TYPE = BINARY_CUSTOM
     # Bounds for ``w="auto"`` content-fit width (content box, px): a panel may
     # shrink to be snug around its content but not collapse to a sliver, nor
     # sprawl wider than a readable column. See ``_fit_script``.
@@ -348,24 +349,6 @@ class Custom(_EventRouter, BaseComponent):
         frames) and live two-way panels.
         """
         self._send_update({"post": data})
-
-    def push_binary(self, data):
-        """Stream raw bytes into the iframe on a **binary** WebSocket frame.
-
-        The high-throughput counterpart to :meth:`push`: instead of JSON-encoding
-        the payload, ``data`` (``bytes``/``bytearray``/``memoryview``) rides a
-        binary frame — no JSON serialize, no base64 — the same fast path
-        ``VideoFeed``/``AudioFeed`` use. In the iframe the *same*
-        ``canvas.onPush(fn)`` receives it, but as an ``ArrayBuffer`` rather than a
-        decoded value, so disambiguate the two streams with
-        ``fn = d => d instanceof ArrayBuffer ? handleBytes(d) : handleJson(d)``.
-
-        Use it for frame- or array-grade telemetry (a custom video codec, packed
-        sensor buffers) where per-sample JSON/base64 cost would dominate. Honours
-        the panel's ``queue`` policy, so ``queue="latest"`` drops stale buffers for
-        a slow viewer just as it does for video.
-        """
-        self._send_binary(BINARY_CUSTOM, bytes(data))
 
     # -- input routing (browser -> Python) -----------------------------------
     # on() / on_message() / _handle_input() come from _EventRouter, shared with

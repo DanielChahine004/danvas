@@ -15,13 +15,14 @@ button, per the browser autoplay policy.
 
 from . import _theme
 from .base import BaseComponent
-from ..bridge import BINARY_AUDIO
+from ..bridge import BINARY_AUDIO  # noqa: F401 – re-exported for bake.py discovery
 
 
 class AudioFeed(BaseComponent):
     component = "AudioFeed"
     default_w = 260
     default_h = 120
+    BINARY_TYPE = BINARY_AUDIO
 
     def __init__(self, name, sample_rate=16000, channels=1, label=None, color=None):
         # sampleRate/channels travel as register props so the frontend knows how
@@ -49,7 +50,7 @@ class AudioFeed(BaseComponent):
         # Rides a binary WebSocket frame (no base64, no JSON) straight to the Web
         # Audio scheduler — like VideoFeed. Bypasses tldraw shape props so
         # high-rate chunks never touch undo history.
-        self._send_binary(BINARY_AUDIO, pcm)
+        self.push_binary(pcm)
 
     @staticmethod
     def _to_int16_bytes(chunk):
