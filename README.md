@@ -554,6 +554,12 @@ The mental model: default → shared conveyor belt; `threaded` → fork a new wo
 meaningful with `dedicated=True`. These flags work on all handler decorators:
 `on_change`, `on_click`, `on_select`, `on_message`, `on(event)`, `on_binary`.
 
+> **Two different `queue=` parameters** — the name appears in two places with different scopes:
+> - **`@handler(dedicated=True, queue=...)`** — controls backpressure *on that handler's own call queue*: should pending calls pile up (`"fifo"`) or be collapsed to the latest (`"latest"`) while the handler is busy?
+> - **`canvas.insert(panel, queue=...)`** — controls backpressure *on the panel's outbound update stream*: when Python pushes updates faster than the browser can render them, should the bridge queue every frame (`"fifo"`) or drop stale ones (`"latest"`)?
+>
+> Handler `queue=` is about Python-side dispatch. Panel `queue=` is about browser-side delivery. The same values mean the same policy in both places — just applied to different queues.
+
 **When the thread starts** is the whole distinction from
 [`canvas.background`](#background-workers): both `threaded=True` and
 `dedicated=True` only kick in when the bridge dispatches an event (calling the
