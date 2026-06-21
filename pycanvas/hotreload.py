@@ -254,6 +254,18 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
                 last = wait_for_edit(last)
                 prev_snap = last  # same as last → only_main_changed=False → full restart
 
+            # Debounce: wait until the watched files stop changing (formatter /
+            # editor may write the file several times in quick succession after a
+            # save). Re-sample until two consecutive snapshots agree.
+            settle_snap = last
+            while True:
+                time.sleep(0.25)
+                s = snapshot()
+                if s == settle_snap:
+                    break
+                settle_snap = s
+                last = s
+
             new_script_text = _read_main()
             print("PyCanvas hot reload: change detected, checking...")
 
