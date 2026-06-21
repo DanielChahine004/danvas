@@ -26,7 +26,7 @@
 import { transform as transformJsx } from 'sucrase'
 import React from 'react'
 import { useEditor } from 'tldraw'
-import { sendInput, sendBinary, requestData, registerLive, unregisterLive, componentIdOf, fitNative, applyCameraFrom, sendPanelError } from './bridge'
+import { sendInput, sendBinary, requestData, registerLive, unregisterLive, registerStyle, unregisterStyle, componentIdOf, fitNative, applyCameraFrom, sendPanelError } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
 
@@ -190,6 +190,8 @@ export default function ReactHost({ shape }) {
   const editor = useEditor()
   // Latest value streamed via push() (Custom's `post` live channel, reused).
   const [streamed, setStreamed] = React.useState(undefined)
+  // Latest theme dict streamed via the color setter's post_style channel.
+  const [liveStyle, setLiveStyle] = React.useState(null)
 
   // Shared components registered from Python (canvas.define). Re-render when the
   // shared set changes so a live define() re-prepends and recompiles the panel.
@@ -216,6 +218,11 @@ export default function ReactHost({ shape }) {
     }
     registerLive(id, onPush)
     return () => unregisterLive(id)
+  }, [id])
+
+  React.useEffect(() => {
+    registerStyle(id, setLiveStyle)
+    return () => unregisterStyle(id)
   }, [id])
 
   // Stable bridge handle so the user component can post back to Python and
@@ -289,6 +296,9 @@ export default function ReactHost({ shape }) {
   } catch {
     userProps = {}
   }
+  // Live style overrides from the post_style channel (color setter). Merged last
+  // so the React-state path wins over the tldraw-store value.
+  if (liveStyle !== null) userProps = { ...userProps, _th: liveStyle }
 
   // Optional libraries the panel asked for (Python `scope=[...]`), loaded as ESM
   // from a CDN and handed to the component as the `libs` global. Empty by

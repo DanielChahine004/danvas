@@ -920,6 +920,8 @@ function clearManaged() {
   for (const compId of [..._micPanels.keys()]) stopMicCapture(compId)
   liveHandlers.clear()
   liveBuffer.clear()
+  styleHandlers.clear()
+  styleBuffer.clear()
   setUiInspectorOpen(false)
   setGraveyardItems([])
   // Rewind the auto-placement flow so panels without an explicit x/y land in
@@ -936,6 +938,8 @@ function removeComponent(id) {
   // Drop any live-data wiring (LivePlot) so its buffer doesn't leak.
   liveHandlers.delete(id)
   liveBuffer.delete(id)
+  styleHandlers.delete(id)
+  styleBuffer.delete(id)
   const shapeId = createShapeId(id)
   managedIds.delete(shapeId)
   if (editor.getShape(shapeId)) applyRemote(() => editor.deleteShape(shapeId))
@@ -1220,6 +1224,17 @@ function updateComponent(id, payload) {
     return
   }
 
+  // Live theme/style update (React.color setter): bypasses the tldraw store so
+  // the CSS custom-property change reaches React state immediately, the same fast
+  // path as post. Buffered so a panel that mounts after the push still gets the
+  // latest style.
+  if (payload && payload.post_style !== undefined) {
+    styleBuffer.set(id, payload.post_style)
+    const handler = styleHandlers.get(id)
+    if (handler) handler(payload.post_style)
+    return
+  }
+
   // Custom panels: `push()` data is forwarded straight into the iframe (see
   // CustomView) instead of touching shape props, so streaming doesn't reload the
   // frame. Dropped if the panel isn't mounted yet (the next push will land).
@@ -1285,6 +1300,19 @@ export function registerLive(id, handler) {
 
 export function unregisterLive(id) {
   liveHandlers.delete(id)
+}
+
+// --- live-style side channel (used by React panels' .color setter) -----------
+const styleHandlers = new Map() // componentId -> (th) => void
+const styleBuffer = new Map()   // componentId -> last _th payload
+
+export function registerStyle(id, handler) {
+  styleHandlers.set(id, handler)
+  if (styleBuffer.has(id)) handler(styleBuffer.get(id))
+}
+
+export function unregisterStyle(id) {
+  styleHandlers.delete(id)
 }
 
 // --- parent-side camera capture (Custom panels' canvas.requestCamera) --------

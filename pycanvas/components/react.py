@@ -402,6 +402,10 @@ class React(_EventRouter, BaseComponent):
         th = _theme.derive(value) if value is not None else {}
         fc = _theme.accent_hex(value) if value is not None else None
         self._frame_color = fc
+        # post_style: fast React-state path (same as push/post) so the theme dict
+        # updates immediately without relying on tldraw store reconciliation.
+        self._send_update({"post_style": th})
+        # Also update _data so reconnecting clients get the right _th from the store.
         React.update(self, _th=th)
         self.set_layout(frame_color=fc)
 
