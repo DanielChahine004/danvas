@@ -634,29 +634,38 @@ class Bridge:
         # Build the register frame once when the panel has no per-viewer overlays
         # (the common case) — only re-derive per viewer when there's a role/client
         # override to merge, so a fan-out to N viewers isn't N identical builds.
-        shared_reg = (None if component._has_viewer_overlays()
-                      else self.register_message(component))
+        has_overlays = component._has_viewer_overlays()
+        shared_reg_text = (None if has_overlays
+                           else _dumps(self.register_message(component)))
+        # Pre-encode shared messages once (state and lock are viewer-independent).
+        state_text = (_dumps({"type": "update", "id": component.id, "payload": state})
+                      if state else None)
+        locked_text = (_dumps({"type": "update", "id": component.id,
+                                "payload": {"operable": False}})
+                       if lock_for else None)
+        # Collect the eligible (ws, reg_text) pairs — reg may differ per viewer
+        # when overlays are present, but is otherwise the same encoded string.
+        eligible = []
+        locked_sockets = []
         for ws, viewer in list(self._viewers.items()):
             role = viewer.get("role")
             if roles and role not in roles:
                 continue
             if only_roles is not None and role not in only_roles:
                 continue
-            reg = shared_reg if shared_reg is not None else self.register_message(
-                component, role=role, client_id=viewer.get("id"))
-            asyncio.run_coroutine_threadsafe(self._safe_send(ws, reg), self._loop)
-            if state:
-                asyncio.run_coroutine_threadsafe(
-                    self._safe_send(ws, {"type": "update", "id": component.id,
-                                         "payload": state}),
-                    self._loop,
-                )
-            if lock_for and role in lock_for:
-                asyncio.run_coroutine_threadsafe(
-                    self._safe_send(ws, {"type": "update", "id": component.id,
-                                         "payload": {"operable": False}}),
-                    self._loop,
-                )
+            reg_text = shared_reg_text if shared_reg_text is not None else _dumps(
+                self.register_message(component, role=role, client_id=viewer.get("id")))
+            eligible.append((ws, reg_text))
+            if locked_text and role in lock_for:
+                locked_sockets.append(ws)
+        if not eligible:
+            return
+        # All sends are batched into one coroutine — a single cross-thread hop
+        # instead of N×3, with per-socket sends run concurrently via gather.
+        asyncio.run_coroutine_threadsafe(
+            self._register_live_fanout(eligible, state_text, locked_sockets, locked_text),
+            self._loop,
+        )
 
     # -- connection lifecycle (runs in the event loop) -----------------------
     async def handle_connection(self, ws, role=None):
@@ -1384,6 +1393,23 @@ class Bridge:
         text = _dumps(msg)
         asyncio.run_coroutine_threadsafe(
             self._fanout_text(targets, text), self._loop)
+
+    async def _register_live_fanout(self, eligible, state_text, locked_sockets, locked_text):
+        """Deliver register + optional state/lock frames for a register_live batch.
+
+        All sends run concurrently as gather tasks so one backpressured socket
+        can't stall others. Called via a single run_coroutine_threadsafe so
+        N viewers × 3 messages cost one cross-thread hop instead of N×3.
+        ``eligible`` is a list of ``(ws, reg_text)`` pairs; ``state_text`` and
+        ``locked_text`` are pre-encoded and viewer-independent.
+        """
+        coros = [self._safe_send_text(ws, reg_text) for ws, reg_text in eligible]
+        if state_text:
+            coros += [self._safe_send_text(ws, state_text) for ws, _ in eligible]
+        if locked_text:
+            coros += [self._safe_send_text(ws, locked_text) for ws in locked_sockets]
+        if coros:
+            await asyncio.gather(*coros, return_exceptions=True)
 
     async def _fanout_text(self, targets, text):
         """Deliver one already-encoded frame to every target, concurrently.
