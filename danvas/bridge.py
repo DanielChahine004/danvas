@@ -1525,10 +1525,19 @@ class Bridge:
         frame always represents every sample since the last send, in order.
         """
         new_payload = new_msg.get("payload") or {}
-        if existing is None or "plot" in new_payload:
-            # Nothing pending, or a snapshot that replaces all of it: keep a
-            # private deep copy so later in-place merges never touch the
-            # component's own buffer or an already-sent frame.
+        if existing is None:
+            if "plot" in new_payload:
+                # Nothing pending yet and a full snapshot is arriving: snapshots
+                # are never mutated in place (only extend deltas are), so skip
+                # the copy on first store.
+                return {**new_msg, "payload": new_payload}
+            # plot_extend with nothing pending: copy so that a later
+            # _coalesce_extend doesn't mutate the caller's nested arrays.
+            return {**new_msg, "payload": copy.deepcopy(new_payload)}
+        if "plot" in new_payload:
+            # A full snapshot supersedes the pending frame; deep-copy so that
+            # later _append_extend_to_snapshot calls don't alias the
+            # component's own buffer or an already-queued frame.
             return {**new_msg, "payload": copy.deepcopy(new_payload)}
         ext = new_payload.get("plot_extend")
         if ext is None:
