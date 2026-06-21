@@ -558,7 +558,16 @@ def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
         passwords=None, compress=False):
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
-    sock = _make_server_socket(host, port)
+    try:
+        sock = _make_server_socket(host, port)
+    except OSError:
+        print(
+            f"\n\033[31m[pycanvas] Port {port} is already in use.\033[0m\n"
+            f"  Another pycanvas server (or something else) is already listening on {host}:{port}.\n"
+            f"  Kill it first, or pass a different port:  canvas.serve(port=8001)\n",
+            flush=True,
+        )
+        raise SystemExit(1)
     config = uvicorn.Config(app, log_level="warning", **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
@@ -575,7 +584,16 @@ def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
     """
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
-    sock = _make_server_socket(host, port)
+    try:
+        sock = _make_server_socket(host, port)
+    except OSError:
+        print(
+            f"\n\033[31m[pycanvas] Port {port} is already in use.\033[0m\n"
+            f"  Another pycanvas server (or something else) is already listening on {host}:{port}.\n"
+            f"  Kill it first, or pass a different port:  canvas.serve(port=8001)\n",
+            flush=True,
+        )
+        raise SystemExit(1)
     config = uvicorn.Config(app, log_level="warning", **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
