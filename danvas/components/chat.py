@@ -21,7 +21,6 @@ is unchanged by where the panel renders.
 """
 
 from . import _theme
-from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # Port of the former native ChatShapeUtil view, driven by ``canvas.chat`` instead
@@ -166,16 +165,9 @@ class Chat(React):
         for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
         ``threaded`` and ``dedicated`` are mutually exclusive.
         """
-        if threaded and dedicated:
-            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            if dedicated:
-                sink = _mark_dedicated(f, queue)
-            elif threaded:
-                sink = _mark_threaded(f)
-            else:
-                sink = f
-            self._chat_callbacks.append(sink)
+            self._register_callback(self._chat_callbacks, f, threaded, dedicated, queue)
+            sink = self._chat_callbacks[-1]
             if self._bridge is not None:
                 self._bridge.add_chat_sink(sink)
             return f

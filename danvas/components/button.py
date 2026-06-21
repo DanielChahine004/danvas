@@ -10,7 +10,6 @@ called with no arguments. ``value`` reads the running click count.
 import traceback
 
 from . import _theme
-from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # Scoped under `.pc-button`; when a color theme is set via --pc-accent the button
@@ -79,16 +78,8 @@ class Button(React):
         for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
         ``threaded`` and ``dedicated`` are mutually exclusive.
         """
-        if threaded and dedicated:
-            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            if dedicated:
-                self._callbacks.append(_mark_dedicated(f, queue))
-            elif threaded:
-                self._callbacks.append(_mark_threaded(f))
-            else:
-                self._callbacks.append(f)
-            return f
+            return self._register_callback(self._callbacks, f, threaded, dedicated, queue)
         return register(fn) if fn is not None else register
 
     def _handle_input(self, _payload, viewer=None):

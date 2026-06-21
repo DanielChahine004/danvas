@@ -646,6 +646,23 @@ class BaseComponent:
         self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
 
     # -- input (browser -> Python) -------------------------------------------
+    def _register_callback(self, store, fn, threaded, dedicated, queue):
+        """Append *fn* to *store* with the requested dispatch mode.
+
+        Shared by every on_* decorator (on_click, on_select, on_message, …) so
+        the threaded/dedicated/queue branching lives in exactly one place.
+        Returns the original *fn* (unwrapped) so decorators can chain cleanly.
+        """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
+        if dedicated:
+            store.append(_mark_dedicated(fn, queue))
+        elif threaded:
+            store.append(_mark_threaded(fn))
+        else:
+            store.append(fn)
+        return fn
+
     def on_change(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a callback fired on input from the browser.
 
@@ -679,16 +696,8 @@ class BaseComponent:
 
         ``threaded`` and ``dedicated`` are mutually exclusive.
         """
-        if threaded and dedicated:
-            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            if dedicated:
-                self._callbacks.append(_mark_dedicated(f, queue))
-            elif threaded:
-                self._callbacks.append(_mark_threaded(f))
-            else:
-                self._callbacks.append(f)
-            return f
+            return self._register_callback(self._callbacks, f, threaded, dedicated, queue)
         return register(fn) if fn is not None else register
 
     @staticmethod

@@ -32,7 +32,6 @@ re-renders with fresh data.
 from collections import Counter
 
 from . import _theme
-from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # The full dataset is shipped to the panel and the browser renders one
@@ -396,16 +395,8 @@ class Table(React):
         for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
         ``threaded`` and ``dedicated`` are mutually exclusive.
         """
-        if threaded and dedicated:
-            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            if dedicated:
-                self._select_callbacks.append(_mark_dedicated(f, queue))
-            elif threaded:
-                self._select_callbacks.append(_mark_threaded(f))
-            else:
-                self._select_callbacks.append(f)
-            return f
+            return self._register_callback(self._select_callbacks, f, threaded, dedicated, queue)
         return register(fn) if fn is not None else register
 
     def _handle_input(self, payload, viewer=None):
