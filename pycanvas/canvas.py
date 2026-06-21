@@ -647,24 +647,73 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # Relative placement: derive x/y from an anchor panel's live geometry.
         # Resolved before the swap-in-place logic below, so an explicit relative
         # placement wins over an evicted panel's old position.
+        #
+        # If any anchor has no position yet (it was auto-cascaded and the browser
+        # hasn't reported back), we defer rather than raise: the component is
+        # inserted without coordinates (joins the masonry flow) and a one-shot
+        # on_layout fires on the first unpositioned anchor to apply the relative
+        # placement once the browser reports its position. This lets panels be
+        # declared in natural order — anchor first, relative panel second — even
+        # when neither has an explicit x/y.
         if below is not None or above is not None or right_of is not None \
                 or left_of is not None:
             new_w = w if w is not None else component.w
             new_h = h if h is not None else component.h
-            rx, ry = self._relative_position(
-                below, above, right_of, left_of, gap, new_w, new_h)
-            if x is None:
-                x = rx
-            if y is None:
-                y = ry
-            if below is not None:
-                _anchor = self._named.get(below) if isinstance(below, str) else below
-                if _anchor is not None:
-                    _anchor._below_deps.append((component, gap))
-            if right_of is not None:
-                _anchor = self._named.get(right_of) if isinstance(right_of, str) else right_of
-                if _anchor is not None:
-                    _anchor._right_of_deps.append((component, gap))
+            # Identify any anchor that still lacks a position.
+            def _resolve_anchor(ref):
+                return self._named.get(ref) if isinstance(ref, str) else ref
+            _b = _resolve_anchor(below)
+            _a = _resolve_anchor(above)
+            _r = _resolve_anchor(right_of)
+            _l = _resolve_anchor(left_of)
+            _unpositioned = [
+                c for c in (_b, _a, _r, _l)
+                if c is not None and (c.x is None or c.y is None)
+            ]
+            if _unpositioned:
+                # Defer: register a one-shot on_layout on the first unpositioned
+                # anchor. When it (or any other anchor) gets a position from the
+                # browser, try to apply the placement. _done guards against repeat
+                # fires (the handler stays registered but becomes a no-op).
+                _done = [False]
+                _x_explicit, _y_explicit = x, y
+                # Capture all the locals we need explicitly so the closure
+                # is self-contained beyond insert()'s stack frame.
+                _canvas, _comp_ref = self, component
+                _below_c, _above_c = below, above
+                _right_of_c, _left_of_c = right_of, left_of
+                _gap_c, _nw_c, _nh_c = gap, new_w, new_h
+                def _deferred(_layout_comp):
+                    # Single-arg so _accepts_viewer doesn't pass viewer as a
+                    # second positional arg and corrupt the closure captures.
+                    if _done[0]:
+                        return
+                    try:
+                        rx, ry = _canvas._relative_position(
+                            _below_c, _above_c, _right_of_c, _left_of_c,
+                            _gap_c, _nw_c, _nh_c)
+                    except ValueError:
+                        return   # another anchor still unpositioned; wait
+                    _done[0] = True
+                    _comp_ref.set_layout(
+                        x=_x_explicit if _x_explicit is not None else rx,
+                        y=_y_explicit if _y_explicit is not None else ry,
+                    )
+                _unpositioned[0].on_layout(_deferred)
+            else:
+                # All anchors already have positions: resolve immediately.
+                rx, ry = self._relative_position(
+                    below, above, right_of, left_of, gap, new_w, new_h)
+                if x is None:
+                    x = rx
+                if y is None:
+                    y = ry
+            # Register cascade deps regardless of whether placement was deferred
+            # so height changes propagate correctly once positions are known.
+            if _b is not None:
+                _b._below_deps.append((component, gap))
+            if _r is not None:
+                _r._right_of_deps.append((component, gap))
         # Auto-layout: inside a `with canvas.grid(...)`/`column`/`row` block, a
         # panel given neither an explicit position nor a relative anchor takes the
         # next slot (and the layout's default slot size, unless w/h were given).
@@ -833,9 +882,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 raise ValueError(f"{kind}={ref!r} is not a component on this canvas")
             if comp.x is None or comp.y is None:
                 raise ValueError(
-                    f"can't place {kind} {comp.name!r}: it has no position yet "
-                    "(give it x/y, place it relatively, or wait for the browser "
-                    "to report where auto-cascade put it)"
+                    f"can't place {kind} {comp.name!r}: it has no position yet"
                 )
             return comp
         below, above = resolve(below, "below"), resolve(above, "above")

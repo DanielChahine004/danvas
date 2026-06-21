@@ -5,11 +5,11 @@ import pycanvas
 canvas = pycanvas.Canvas()
 
 # Factory shorthand: canvas.<component>(...) builds and inserts in one call.
-servo = canvas.slider("servo_1", min=0, max=180, default=90)
-status = canvas.label("status", value="idle")
+servo = canvas.slider("servo_1", min=0, max=180, default=90, queue='latest')
+status = canvas.label("status", value="idle", below=servo)
 
 
-@servo.on_change
+@servo.on_change(dedicated=True, queue='latest')
 def on_servo(value):
     print("servo_1 =", value)
     status.update(f"servo at {value}")

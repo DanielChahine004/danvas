@@ -57,11 +57,20 @@ def test_anchor_by_name_and_explicit_coordinate_wins():
     assert (b.x, b.y) == (999, 100 + 50 + 16)
 
 
-def test_unplaced_anchor_raises():
+def test_unplaced_anchor_defers():
+    # An anchor without a position no longer raises; the relative placement is
+    # deferred and applied once the anchor's position is reported by the browser.
     canvas = pycanvas.Canvas()
     a = canvas.label("a")               # auto-cascade: no Python-side position
-    with pytest.raises(ValueError, match="no position"):
-        canvas.label("b", below=a)
+    b = canvas.label("b", below=a)      # used to raise; now defers silently
+    assert b.x is None and b.y is None  # no position yet — deferred
+    # Simulate the browser reporting a's position (the on_layout path).
+    a._apply_remote_layout({"x": 80, "y": 80, "w": 240, "h": 32})
+    assert b.x == 80 and b.y == 80 + 32 + 16   # deferred placement applied
+
+
+def test_unknown_anchor_still_raises():
+    canvas = pycanvas.Canvas()
     with pytest.raises(ValueError, match="not a component"):
         canvas.label("c", below="ghost")
 
