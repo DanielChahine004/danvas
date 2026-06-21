@@ -1239,7 +1239,15 @@ class Bridge:
         today, so it isn't a live bug, but excluding the sender is the right shape).
         """
         old_h = comp.h
-        comp._apply_remote_layout(msg, self._viewers.get(ws, {}))
+        # Auto-flow messages (auto=True) are browser-side masonry placements.
+        # If Python already has an explicit position for this component (set via
+        # set_layout / deferred relative placement), the auto position must not
+        # overwrite it — Python's relative layout wins. Strip x/y from the msg
+        # before _apply_remote_layout so only size updates propagate.
+        effective_msg = msg
+        if msg.get("auto") and comp.x is not None:
+            effective_msg = {k: v for k, v in msg.items() if k not in ("x", "y", "auto")}
+        comp._apply_remote_layout(effective_msg, self._viewers.get(ws, {}))
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
                 if msg.get(k) is not None}
         if geom:

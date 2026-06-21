@@ -90,7 +90,7 @@ function relayoutFlow() {
       moves.push({ id: componentIdOf(it.id), x: p.x, y: p.y })
     }
   })
-  for (const m of moves) sendRaw({ type: 'layout', ...m })
+  for (const m of moves) sendRaw({ type: 'layout', auto: true, ...m })
 }
 
 // Debounced: a burst of content fits lands over a short window after load, so
@@ -1004,7 +1004,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, opacity,
   // flow on reconnect while this one re-flows from the origin — and they collide.
   // Pinning every auto-placed panel the same way keeps positions stable for all.
   if (autoPlaced) {
-    sendRaw({ type: 'layout', id, x: px, y: py })
+    sendRaw({ type: 'layout', id, x: px, y: py, auto: true })
     // Track it for the masonry re-pack once its content-fit size settles.
     flowItems.add(shapeId)
     scheduleRelayout()
@@ -1249,6 +1249,9 @@ function updateComponent(id, payload) {
       typeof frame === 'boolean' || typeof frameColor === 'string') {
     patch.meta = lockMeta(shape.meta, movable, resizable, interactive, selectable, frame, frameColor)
   }
+  // If Python explicitly sets a position, pin the panel out of the masonry
+  // flow so relayoutFlow() doesn't move it back on the next repack.
+  if (typeof x === 'number' && typeof y === 'number') flowItems.delete(shapeId)
   applyRemote(() => editor.updateShape(patch))
 }
 
