@@ -153,13 +153,14 @@ feed  = canvas.video("camera")
 plot  = canvas.live_plot("servos", traces=["s1", "s2"])
 ```
 
-**Argument convention:** panels you *read from* take `name` first (`slider`,
-`toggle`, `button`, `label`, `video`, `audio`, `chat`, `live_plot`, `plot`,
-`repl`, `inspector`); panels that *render content* take the content first
-(`image(src)`, `table(data)`, `markdown(text)`, `custom(html)`, `react(source)`,
-`webview(url)`, `show(value)`) with `name=` optional. `name` is the unique
-`canvas.<name>` handle; `label=` sets a different on-screen caption. Every
-factory also forwards `insert`'s placement, lock, and `queue` options:
+**Argument convention:** panels that *render content* take the content first
+(`image(src)`, `table(data)`, `markdown(text)`, `toggle(options)`,
+`custom(html)`, `react(source)`, `webview(url)`, `show(value)`); all other
+panels put `name=` first — but `name` is optional on every factory, defaulting
+to the component type (e.g. `canvas.slider()` gets the name `"slider"`). `name`
+is the Python identity key for the panel; `label=` sets a different on-screen
+caption. Every factory also forwards `insert`'s placement, lock, and `queue`
+options:
 
 ```python
 servo = canvas.slider("servo", min=0, max=180, default=90, label="Servo 1", x=80, y=80)
