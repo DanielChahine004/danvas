@@ -108,6 +108,7 @@ class Slider(React):
                                 "on_release": on_release,
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, value):
         """Push a new value to the slider in the browser, live.

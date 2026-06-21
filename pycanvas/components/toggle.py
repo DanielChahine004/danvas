@@ -13,8 +13,8 @@ _TOGGLE_CSS = """
 .pc-toggle{box-sizing:border-box;width:100%;height:100%;padding:10px 12px;
  display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .pc-toggle button{flex:1;min-width:0;padding:7px 10px;cursor:pointer;
- font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3);
- background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
+ font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-off-text,#333333);
+ background:var(--pc-off-bg,#eeeeee);border:1px solid var(--pc-border,#30363d);
  border-radius:7px;transition:background .12s}
 .pc-toggle button.sel{background:var(--pc-accent,#3b82f6);border-color:transparent;
  color:var(--pc-accent-text,#fff)}
@@ -62,6 +62,7 @@ class Toggle(React):
                          props={"options": options, "value": default,
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, value):
         """Push a new selected option to the browser, live (and persist it)."""

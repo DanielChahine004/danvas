@@ -18,14 +18,76 @@ const MonacoRepl = lazy(() => import('./MonacoRepl'))
 // code-split and only loaded the first time a React panel appears.
 const ReactHost = lazy(() => import('./ReactHost'))
 
+// Derive tinted frame CSS variables from an accent hex color so the card
+// background, border, and shadow follow the component's color theme.
+// isDark mirrors tldraw's dark-mode toggle so light-canvas panels get pale
+// tints instead of the dark ones used on a dark canvas.
+function deriveFrameVars(fc, isDark) {
+  const r = parseInt(fc.slice(1, 3), 16)
+  const g = parseInt(fc.slice(3, 5), 16)
+  const b = parseInt(fc.slice(5, 7), 16)
+  const rn = r / 255, gn = g / 255, bn = b / 255
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn), d = max - min
+  let h = 0
+  if (d > 0) {
+    if (max === rn) h = ((gn - bn) / d) % 6
+    else if (max === gn) h = (bn - rn) / d + 2
+    else h = (rn - gn) / d + 4
+    h = h * 60
+    if (h < 0) h += 360
+  }
+  const l = (max + min) / 2
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))
+  function hsl(h, s, l) {
+    const a = s * Math.min(l, 1 - l)
+    const k = (n) => { const kv = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(kv - 3, 9 - kv, 1)) }
+    return `rgb(${Math.round(k(0) * 255)},${Math.round(k(8) * 255)},${Math.round(k(4) * 255)})`
+  }
+  return isDark ? {
+    '--pc-bg':     hsl(h, Math.min(s, 0.60), 0.15),
+    '--pc-border': hsl(h, Math.min(s, 0.70), 0.27),
+    '--pc-shadow': `rgba(${r},${g},${b},0.25)`,
+  } : {
+    '--pc-bg':     hsl(h, Math.min(s, 0.40), 0.94),
+    '--pc-border': hsl(h, Math.min(s, 0.50), 0.78),
+    '--pc-shadow': `rgba(${r},${g},${b},0.10)`,
+  }
+}
+
+// Return a readable label color for fc on a light or dark card background.
+function frameLabelColor(fc, isDark) {
+  if (isDark) return fc  // accent is typically vivid enough on dark
+  // Darken the accent so it reads on a pale tinted background.
+  const r = parseInt(fc.slice(1, 3), 16)
+  const g = parseInt(fc.slice(3, 5), 16)
+  const b = parseInt(fc.slice(5, 7), 16)
+  const rn = r / 255, gn = g / 255, bn = b / 255
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn), d = max - min
+  let h = 0
+  if (d > 0) {
+    if (max === rn) h = ((gn - bn) / d) % 6
+    else if (max === gn) h = (bn - rn) / d + 2
+    else h = (rn - gn) / d + 4
+    h = h * 60
+    if (h < 0) h += 360
+  }
+  const l = (max + min) / 2
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))
+  const a = s * Math.min(0.38, 1 - 0.38)
+  const k = (n) => { const kv = (n + h / 30) % 12; return 0.38 - a * Math.max(-1, Math.min(kv - 3, 9 - kv, 1)) }
+  return `rgb(${Math.round(k(0) * 255)},${Math.round(k(8) * 255)},${Math.round(k(4) * 255)})`
+}
+
 // Shared card styling for all PyCanvas component shapes. The card is pinned to
 // the shape's exact w/h (not 100% of an ancestor) so it tracks resizing
 // continuously and lines up with tldraw's selection box. A frameless panel
 // (meta.noFrame, Python `frame=False`) keeps the same flex box but drops every
 // visible piece of chrome — background, border, shadow, padding — so its
 // content appears to sit directly on the canvas.
-function cardStyle(shape) {
+function cardStyle(shape, isDark = false) {
   const noFrame = !!shape.meta?.noFrame
+  const fc = shape.meta?.frameColor
+  const frameVars = (!noFrame && fc) ? deriveFrameVars(fc, isDark) : {}
   return {
     display: 'flex',
     flexDirection: 'column',
@@ -42,6 +104,7 @@ function cardStyle(shape) {
     overflow: 'hidden',
     // Anchors the lock overlay (see Card) to the card's own box.
     position: 'relative',
+    ...frameVars,
   }
 }
 
@@ -131,6 +194,7 @@ function DragHandle() {
 // exclusive; pick one per panel.
 function Card({ shape, children, grab = false, ghostable = false, handle = false }) {
   const editor = useEditor()
+  const isDark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
   const noGrab = !!shape.meta?.noGrab
@@ -154,7 +218,7 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
     // in a panel stacked below. The event is not stopped, so it still bubbles to
     // tldraw for correct shape selection. Ghost panels opt out (they are purely
     // decorative and intentionally click-through).
-    <HTMLContainer className="pc-card" style={ghost ? cardStyle(shape) : { ...cardStyle(shape), pointerEvents: 'all' }}>
+    <HTMLContainer className="pc-card" style={ghost ? cardStyle(shape, isDark) : { ...cardStyle(shape, isDark), pointerEvents: 'all' }}>
       {children}
       {/* A persistent grip (stays up while selected, unlike the grab cover) so a
           body-interactive panel always has a drag/select point even when its
@@ -196,8 +260,12 @@ const labelStyle = {
 // frameless panel (meta.noFrame) hides it along with the rest of the card.
 // It has no pointerEvents, so on grab-style panels dragging it moves the panel.
 function CardLabel({ shape }) {
+  const editor = useEditor()
+  const isDark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
   if (shape.meta?.noFrame) return null
-  return <div style={labelStyle}>{shape.props.label}</div>
+  const fc = shape.meta?.frameColor
+  const style = fc ? { ...labelStyle, color: frameLabelColor(fc, isDark) } : labelStyle
+  return <div style={style}>{shape.props.label}</div>
 }
 
 // Shared base for every PyCanvas panel. It reads two per-shape flags from the

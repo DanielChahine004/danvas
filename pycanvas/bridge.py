@@ -587,6 +587,9 @@ class Bridge:
             value = getattr(component, flag.attr, flag.default)
             if value != flag.default:
                 msg[flag.wire] = value
+        fc = getattr(component, "_frame_color", None)
+        if fc is not None:
+            msg["frameColor"] = fc
         # Per-viewer layout overlay (set_layout(roles=) / a drag written to the
         # viewer's own layer): merge it on top of the base geometry. x/y/rotation
         # and the lock flags are top-level register fields; w/h are shape props.

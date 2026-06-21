@@ -81,6 +81,7 @@ class TextField(React):
                                 "multiline": bool(multiline),
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._value = default
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     def update(self, value):
         """Push a new text value to the field in the browser, live.

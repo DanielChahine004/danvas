@@ -66,3 +66,9 @@ def derive(color):
         "--pc-accent-t":    f"rgba({r},{g},{b},.35)",
         "--pc-accent-text": txt,
     }
+
+
+def accent_hex(color):
+    """Return just the ``'#rrggbb'`` accent hex for *color* (for frame theming)."""
+    r, g, b = _parse(color)
+    return _hex(r, g, b)
