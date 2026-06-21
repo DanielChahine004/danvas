@@ -223,11 +223,11 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 
 | Component | Direction | API |
 |---|---|---|
-| `Slider` | bidirectional | `.value`, `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True` (report only on let-go) |
-| `Toggle` | bidirectional | `.value`, `@on_change`, `.update(opt)`; `options=[...]` |
-| `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)` |
-| `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=` |
-| `Label` | output | escaped text/number; `.update(text)`; `h="auto"` |
+| `Slider` | bidirectional | `.value`, `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True` (report only on let-go); live: `.min`, `.max`, `.step`, `.color` |
+| `Toggle` | bidirectional | `.value`, `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
+| `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.color` |
+| `TextField` | bidirectional | single-line or `multiline=True` textarea; `@on_change` fires on Enter / blur; `.value`, `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
+| `Label` | output | escaped text/number; `.update(text)`; `h="auto"`; live: `.color` |
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe) |
@@ -409,8 +409,27 @@ panel.set_layout(x=, y=, w=, h=, rotation=, opacity=, locked=, ...)   # any comb
 panel.set_layout(x=, y=, roles=["admin"])         # scope to roles/client_id (per-viewer layout)
 panel.to_front(); panel.to_back(); panel.forward(); panel.backward()   # z-order
 panel.x, panel.y, panel.w, panel.h, panel.rotation   # read/write live
+panel.label = "New title"         # live card header rename
 panel.value                       # current value (sliders, toggles, button count)
 panel.queue = "latest"            # backpressure policy (below)
+```
+
+**Accent color** — any `color=` panel accepts `.color` as a live read/write property. Assigning updates both the CSS theme inside the panel and the card border tint immediately, with no restart:
+
+```python
+status = canvas.label("status", "idle", color=(0, 200, 0))
+status.color = (100, 100, 255)   # live; (r, g, b) tuple or "#rrggbb" hex
+status.color = None              # reset to default theme
+```
+
+`color=` works at construction and as a live setter on `Label`, `Slider`, `Toggle`, `Button`, `TextField`, and any `react(...)` panel.
+
+**Component-specific live setters:**
+
+```python
+slider.min = 0; slider.max = 360; slider.step = 5   # range / step live
+toggle.options = ["A", "B", "C"]                     # swap option list live
+text_field.placeholder = "Search…"                   # hint text live
 ```
 
 `to_front`/`to_back` persist across reload; `forward`/`backward` are a live
