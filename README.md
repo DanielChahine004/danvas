@@ -231,7 +231,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded; live: `.color` |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback; live: `.color` |
 | `Plot` | output | `.update(fig_or_html)` (Plotly figure or HTML, in an iframe); live: `.color` |
-| `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=`; live: `.smoothing`, `.color` |
+| `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)` (one point or a batch), `.clear()`, `smoothing=`; live: `.smoothing`, `.max_points`, `.mode`, `.color` |
 | `Histogram` | output | distribution over time; `.add(values, step)` |
 | `Custom` | bidirectional | arbitrary HTML in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html/css/js)`; `canvas.sendBinary(buf)` (browser→Python raw bytes); `canvas.requestCamera(opts)`/`canvas.requestMicrophone(opts)` (parent-page device capture → `@on_binary`) |
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=` |
@@ -240,7 +240,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `Table` | bidirectional | DataFrame/Series/records/dict → sortable, filterable, paginated; toolbar buttons toggle a `#` index column, a `cols ▾` column-visibility checklist, and a `sel` row-selection column; `@on_select` fires with the list of selected 0-based row indices; `.selected`, `.update(data)`; live: `.color` |
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message`; live: `.color` |
-| `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=`; live: `.color` |
+| `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=`; live: `.pattern`, `.show_hidden`, `.color` |
 | `Download` | input | a button that sends a host file/`bytes` to the viewer; `source=` (path or bytes) or `@provide`, `filename=` |
 | `Upload` | input | a button / drop-zone that receives a viewer's file into Python; `@on_upload`, `.value`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |

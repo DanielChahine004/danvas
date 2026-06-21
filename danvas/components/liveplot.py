@@ -240,6 +240,33 @@ class LivePlot(BaseComponent):
             payload = self._payload()
         self._stream({"plot": payload})
 
+    @property
+    def max_points(self):
+        """Rolling window size; settable live (trims the buffer immediately)."""
+        return self._max
+
+    @max_points.setter
+    def max_points(self, n):
+        with self._lock:
+            self._max = n
+            for name in self._traces:
+                self._x[name] = deque(self._x[name], maxlen=n)
+                self._y[name] = deque(self._y[name], maxlen=n)
+            payload = self._payload()
+        self._stream({"plot": payload})
+
+    @property
+    def mode(self):
+        """Plotly line mode (``'lines'``, ``'markers'``, ``'lines+markers'``); settable live."""
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        with self._lock:
+            self._mode = value
+            payload = self._payload()
+        self._stream({"plot": payload})
+
     def clear(self):
         with self._lock:
             for name in self._traces:

@@ -139,6 +139,26 @@ class FileBrowser(React):
         """The absolute sandbox root; navigation can't go above this."""
         return self._root
 
+    @property
+    def pattern(self):
+        """fnmatch filter applied to files (e.g. ``'*.csv'``); settable live."""
+        return self._pattern
+
+    @pattern.setter
+    def pattern(self, value):
+        self._pattern = value
+        self._push_listing()
+
+    @property
+    def show_hidden(self):
+        """Whether dotfiles are shown; settable live."""
+        return self._show_hidden
+
+    @show_hidden.setter
+    def show_hidden(self, value):
+        self._show_hidden = bool(value)
+        self._push_listing()
+
     # -- public decorators ---------------------------------------------------
     def on_select(self, fn):
         """Decorator: handler fired with the absolute path of a clicked file."""
