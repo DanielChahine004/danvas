@@ -1,8 +1,8 @@
-"""Build a standalone executable from a danvas script via PyInstaller.
+﻿"""Build a standalone executable from a danvas script via PyInstaller.
 
 Used by :meth:`danvas.Canvas.bake` and the ``python -m danvas.bake`` CLI.
 The build bundles the entry script, the danvas backend, and the pre-built
-frontend (``pycanvas/frontend/dist``) into one app that runs the canvas in a
+frontend (``danvas/frontend/dist``) into one app that runs the canvas in a
 native window with nothing else installed on the target machine.
 
 The argument list is assembled by the pure :func:`_build_args` helper so it can
@@ -16,7 +16,7 @@ import re
 import sys
 
 # Where the frontend is embedded inside the executable. Deliberately NOT under
-# `pycanvas/` — a data dir by that name would shadow the real package as a
+# `danvas/` — a data dir by that name would shadow the real package as a
 # namespace dir and break `import danvas`. server._dist_dir() reads it back
 # from here (`sys._MEIPASS/pcframe/dist`) when frozen.
 _FRONTEND_DEST = "pcframe/dist"
@@ -127,7 +127,7 @@ def _failure_hint(exc):
         )
     lines += [
         "Common causes:",
-        "  - the frontend isn't built: cd pycanvas/frontend && npm run build",
+        "  - the frontend isn't built: cd danvas/frontend && npm run build",
         "  - a broken/optional dependency crashes on import during analysis — "
         "exclude it with bake(exclude=[...])",
         "  - missing PyInstaller/pywebview: pip install 'danvas[desktop]'",
@@ -245,7 +245,7 @@ def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
     if not os.path.isdir(dist_src):
         raise RuntimeError(
             f"the frontend is not built ({dist_src} is missing) — build it with "
-            "`cd pycanvas/frontend && npm install && npm run build`"
+            "`cd danvas/frontend && npm install && npm run build`"
         )
 
     try:
@@ -256,7 +256,7 @@ def build_app(entry, name=None, *, icon=None, onefile=True, windowed=True,
             "extra: pip install 'danvas[desktop]'"
         ) from exc
 
-    pkg_root = os.path.dirname(os.path.dirname(__file__))  # contains pycanvas/
+    pkg_root = os.path.dirname(os.path.dirname(__file__))  # contains danvas/
     # The conda MKL DLLs are only relevant when numpy itself is bundled.
     binaries = _conda_mkl_binaries() if collect_numpy else []
     args = _build_args(

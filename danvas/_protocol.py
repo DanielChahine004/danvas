@@ -1,6 +1,6 @@
-"""Single source of truth for the Python <-> browser wire protocol.
+﻿"""Single source of truth for the Python <-> browser wire protocol.
 
-The backend (this package) and the frontend (``pycanvas/frontend/src/*.js``)
+The backend (this package) and the frontend (``danvas/frontend/src/*.js``)
 speak a small, hand-maintained protocol over one WebSocket: numeric codes for
 binary media frames, string ``type`` tags for JSON frames, and the lock/chrome
 flag *wire* keys. Today those constants are restated independently on each side
@@ -16,7 +16,7 @@ codegen):
 
 1.  Everything is declared here, once.
 2.  ``scripts/gen_protocol.py`` renders it to
-    ``pycanvas/frontend/src/protocol.generated.js`` so the JS imports the same
+    ``danvas/frontend/src/protocol.generated.js`` so the JS imports the same
     values instead of re-typing them.
 3.  :mod:`danvas.bridge` and :mod:`danvas._flags` import the codes/keys from
     here (rather than restating them), and ``tests/test_protocol_sync.py`` fails

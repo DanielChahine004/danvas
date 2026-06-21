@@ -1,4 +1,4 @@
-"""AudioFeed: streams PCM audio chunks to the browser for live playback.
+﻿"""AudioFeed: streams PCM audio chunks to the browser for live playback.
 
 Mirrors :class:`~danvas.VideoFeed` for sound. Capture audio however you like
 (e.g. ``sounddevice``) and push raw PCM chunks; the browser schedules them
@@ -68,7 +68,7 @@ class AudioFeed(BaseComponent):
         # import goes through importlib so PyInstaller's static analysis can't
         # see it and drag numpy (plus its MKL stack) into a baked app that never
         # streams array audio; bake() bundles numpy itself when an AudioFeed is
-        # on the canvas (see pycanvas/bake.py).
+        # on the canvas (see danvas/bake.py).
         import importlib
 
         np = importlib.import_module("numpy")

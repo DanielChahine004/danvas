@@ -1,4 +1,4 @@
-"""Bidirectional state sync between Python components and the browser.
+﻿"""Bidirectional state sync between Python components and the browser.
 
 A single WebSocket connection carries all components, multiplexed by id.
 ``broadcast`` is thread-safe: user threads call ``component.update(...)`` which
@@ -115,7 +115,7 @@ _REAP_INTERVAL = 10.0
 # base64 decode or JSON parse. Control messages (register/update/layout/chat/...)
 # stay JSON: they're low-rate and self-describing, so binary would cost
 # readability for no real throughput. The codes are sourced from the canonical
-# pycanvas/_protocol.py (the same definition the frontend's protocol.generated.js
+# danvas/_protocol.py (the same definition the frontend's protocol.generated.js
 # is rendered from), so the two sides can't drift.
 BINARY_VIDEO = BINARY_FRAME_CODES["VIDEO"]   # JPEG-encoded frame bytes
 BINARY_AUDIO = BINARY_FRAME_CODES["AUDIO"]   # little-endian int16 PCM (interleaved)

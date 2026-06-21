@@ -1,4 +1,4 @@
-"""Image: show a static image on the canvas.
+﻿"""Image: show a static image on the canvas.
 
 Accepts a file path, http(s)/data URL, raw image bytes, a Matplotlib figure or
 axes, a PIL image, or a NumPy array. (For a *stream* of frames use VideoFeed.)
@@ -105,7 +105,7 @@ def _to_data_uri(src):
             # Via importlib so PyInstaller's analysis doesn't follow it and pull
             # Pillow (and, through PIL._typing, numpy) into a baked app that
             # never renders an array image; bake() bundles Pillow when an Image
-            # component is on the canvas (see pycanvas/bake.py).
+            # component is on the canvas (see danvas/bake.py).
             import importlib
 
             _PILImage = importlib.import_module("PIL.Image")

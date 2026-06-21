@@ -1,4 +1,4 @@
-"""Single source of truth for a panel's lock / chrome flags.
+﻿"""Single source of truth for a panel's lock / chrome flags.
 
 Every panel shares the same set of boolean flags that gate how a *viewer* may
 interact with it (drag, resize, operate its controls, select it) and whether it
@@ -27,7 +27,7 @@ Flag = namedtuple("Flag", "wire attr default doc")
 
 # Python name -> Flag(wire key, backing attribute, default, property docstring).
 # Insertion order is the canonical order used wherever the flags are iterated.
-# The ``wire`` keys come from the canonical pycanvas/_protocol.py (the same
+# The ``wire`` keys come from the canonical danvas/_protocol.py (the same
 # definition the frontend's protocol.generated.js is rendered from) so the
 # browser-facing names can't drift; this module owns the backing attr / default /
 # docstring.

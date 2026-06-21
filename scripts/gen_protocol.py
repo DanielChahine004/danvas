@@ -1,7 +1,7 @@
-"""Render the canonical wire protocol to a frontend JS module.
+﻿"""Render the canonical wire protocol to a frontend JS module.
 
 Single source of truth lives in :mod:`danvas._protocol`; this script emits
-``pycanvas/frontend/src/protocol.generated.js`` from it so the browser code
+``danvas/frontend/src/protocol.generated.js`` from it so the browser code
 imports the same binary codes, flag wire keys, and message-type tags instead of
 re-declaring them. Run it whenever ``_protocol.py`` changes:
 

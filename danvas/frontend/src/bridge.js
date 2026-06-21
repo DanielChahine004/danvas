@@ -1,4 +1,4 @@
-import { createShapeId, createBindingId } from 'tldraw'
+﻿import { createShapeId, createBindingId } from 'tldraw'
 import { COMPONENT_TO_SHAPE } from './canvas'
 import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
 
@@ -671,7 +671,7 @@ function connect() {
 
 // Binary-frame type codes (BIN_VIDEO/AUDIO/CUSTOM/REACT) are imported at the top
 // from ./protocol.generated.js, which is rendered from the server's canonical
-// pycanvas/_protocol.py — so the two sides can't drift.
+// danvas/_protocol.py — so the two sides can't drift.
 const frameDecoder = new TextDecoder()
 
 // --- shared React assets (Python canvas.define / canvas.style) ---------------

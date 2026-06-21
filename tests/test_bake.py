@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import types
 
@@ -10,7 +10,7 @@ from danvas import bake
 
 def test_build_args_core_flags():
     args = bake._build_args(
-        "/proj/app.py", "MyApp", "/proj/pycanvas/frontend/dist", "/proj",
+        "/proj/app.py", "MyApp", "/proj/danvas/frontend/dist", "/proj",
         onefile=True, windowed=True,
     )
     # entry is first; name/output/data flags present.
@@ -21,7 +21,7 @@ def test_build_args_core_flags():
     # The frontend is embedded at the path the frozen server resolves.
     data = args[args.index("--add-data") + 1]
     src, dest = data.split(os.pathsep)
-    assert src == "/proj/pycanvas/frontend/dist"
+    assert src == "/proj/danvas/frontend/dist"
     # Embedded under a non-danvas name so it can't shadow the real package.
     assert dest == "pcframe/dist"
     # Lazy-imported backends are collected wholesale.

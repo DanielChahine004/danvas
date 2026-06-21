@@ -1,4 +1,4 @@
-"""FastAPI app: WebSocket endpoint + static serving of the built frontend."""
+﻿"""FastAPI app: WebSocket endpoint + static serving of the built frontend."""
 
 import asyncio
 import base64
@@ -36,7 +36,7 @@ def _dist_dir():
     """Locate the built frontend, both in-source and inside a baked executable.
 
     A PyInstaller build bundles the frontend under ``pcframe/dist`` in the
-    extraction dir (``sys._MEIPASS``) — deliberately *not* under ``pycanvas/``,
+    extraction dir (``sys._MEIPASS``) — deliberately *not* under ``danvas/``,
     which would shadow the real package as a namespace dir and break
     ``import danvas``. In a normal install it lives next to this module.
     """

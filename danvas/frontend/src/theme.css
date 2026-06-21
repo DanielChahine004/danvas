@@ -1,4 +1,4 @@
-/* PyCanvas panel theming.
+/* danvas panel theming.
  *
  * Every custom component's inline styles reference these CSS variables instead
  * of hardcoded colors, so panels follow tldraw's own light/dark theme with no

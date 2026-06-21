@@ -1,4 +1,4 @@
-"""Base class shared by all danvas components."""
+﻿"""Base class shared by all danvas components."""
 
 import functools
 import inspect
@@ -146,7 +146,7 @@ class BaseComponent:
         # ``locked`` (full lock, top-level tldraw isLocked); ``draggable`` /
         # ``resizable`` / ``operable`` / ``grabbable`` (interaction-preserving
         # locks carried in the shape's tldraw ``meta``); ``frame`` (the card
-        # chrome). See pycanvas/_flags.py for the per-flag semantics, the wire
+        # chrome). See danvas/_flags.py for the per-flag semantics, the wire
         # keys, and the property docstrings generated at the bottom of this file.
         for _flag in LAYOUT_FLAGS.values():
             setattr(self, _flag.attr, _flag.default)
@@ -362,7 +362,7 @@ class BaseComponent:
     # The lock/chrome flag properties (``locked``, ``draggable``, ``resizable``,
     # ``operable``, ``grabbable``, ``frame``) are generated from LAYOUT_FLAGS at
     # the bottom of this module — one read-back property + a setter that routes
-    # through set_layout for each. See pycanvas/_flags.py.
+    # through set_layout for each. See danvas/_flags.py.
 
     # -- registration / initial sync ----------------------------------------
     def register_props(self):

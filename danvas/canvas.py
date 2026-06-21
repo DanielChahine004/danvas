@@ -1,4 +1,4 @@
-"""Canvas: the public entry point. Holds components and serves the app."""
+﻿"""Canvas: the public entry point. Holds components and serves the app."""
 
 from __future__ import annotations
 
@@ -919,7 +919,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
     # -- component factories --------------------------------------------------
     # canvas.slider / button / react / markdown / show / … live in _FactoryMixin
-    # (pycanvas/_factories.py); _make() and _INSERT_KEYS moved there too.
+    # (danvas/_factories.py); _make() and _INSERT_KEYS moved there too.
 
     # -- tldraw shape factories -----------------------------------------------
 
