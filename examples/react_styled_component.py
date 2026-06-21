@@ -1,4 +1,4 @@
-import pycanvas
+import danvas
 
 
 REACT_SOURCE = """
@@ -125,11 +125,11 @@ export default Button;
 
 
 def main():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
 
     # from_uiverse rewrites a uiverse.io styled-components snippet into plain
     # React + CSS that the panel's in-browser Babel pipeline can compile.
-    panel = pycanvas.React(source=pycanvas.React.from_uiverse(REACT_SOURCE),
+    panel = danvas.React(source=danvas.React.from_uiverse(REACT_SOURCE),
                            w=300, h=120)
 
     # grabbable=False: hover effects (the tooltips) work without first

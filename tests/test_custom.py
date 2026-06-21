@@ -1,4 +1,4 @@
-import pycanvas
+import danvas
 
 
 class FakeBridge:
@@ -13,7 +13,7 @@ class FakeBridge:
 
 
 def _panel():
-    p = pycanvas.Custom(html="<div></div>", name="p")
+    p = danvas.Custom(html="<div></div>", name="p")
     p._bind("c1", FakeBridge())
     return p
 
@@ -45,7 +45,7 @@ def test_on_message_is_catch_all_and_fires_alongside_keyed():
 
 
 def test_custom_event_key_is_configurable():
-    panel = pycanvas.Custom(html="", name="p", event_key="type")
+    panel = danvas.Custom(html="", name="p", event_key="type")
     panel._bind("c1", FakeBridge())
     seen = []
     panel.on("ping")(lambda msg: seen.append(msg))

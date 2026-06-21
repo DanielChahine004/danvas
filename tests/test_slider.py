@@ -1,6 +1,6 @@
 import json
 
-import pycanvas
+import danvas
 
 
 class FakeBridge:
@@ -12,7 +12,7 @@ class FakeBridge:
 
 
 def test_slider_register_props():
-    s = pycanvas.Slider("servo", min=0, max=180, default=90)
+    s = danvas.Slider("servo", min=0, max=180, default=90)
     s._bind("abc", FakeBridge())
     props = s.register_props()
     # Slider is now a native React panel: its config rides in the JSON `data`
@@ -28,7 +28,7 @@ def test_slider_register_props():
 
 
 def test_slider_float_step_in_props():
-    s = pycanvas.Slider("gain", min=0, max=1, default=0.5, step=0.1)
+    s = danvas.Slider("gain", min=0, max=1, default=0.5, step=0.1)
     s._bind("abc", FakeBridge())
     data = json.loads(s.register_props()["data"])
     assert data["step"] == 0.1
@@ -36,7 +36,7 @@ def test_slider_float_step_in_props():
 
 
 def test_slider_input_updates_value_and_fires_callback():
-    s = pycanvas.Slider("servo", min=0, max=180)
+    s = danvas.Slider("servo", min=0, max=180)
     s._bind("abc", FakeBridge())
 
     seen = []
@@ -49,7 +49,7 @@ def test_slider_input_updates_value_and_fires_callback():
 
 def test_slider_update_broadcasts():
     bridge = FakeBridge()
-    s = pycanvas.Slider("servo", min=0, max=180, default=10)
+    s = danvas.Slider("servo", min=0, max=180, default=10)
     s._bind("abc", bridge)
 
     s.update(55)

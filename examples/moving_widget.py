@@ -15,13 +15,13 @@ coloured pointer and its own emoji looping around it.
 import math
 import time
 
-import pycanvas
+import danvas
 
 A = 140          # figure-8 amplitude (px)
 ORB = 60         # emoji panel size (px)
 EMOJI = ["🛸", "🐙", "🦊", "🐢", "🦋", "🐝", "🦀", "🐳", "🦜", "🐧", "🦥", "🐲"]
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 speed = canvas.slider("speed", min=0.1, max=30, step=0.1, default=10, x=40, y=40,
                       label="orbit speed")
 

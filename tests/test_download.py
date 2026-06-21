@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-import pycanvas
-from pycanvas.bridge import Bridge
+import danvas
+from danvas.bridge import Bridge
 
 
 class FakeBridge:
@@ -33,14 +33,14 @@ def _face(dl):
 
 
 def test_text_defaults_to_name_and_is_a_shape_prop():
-    dl = pycanvas.Download("export")
+    dl = danvas.Download("export")
     assert _face(dl) == "export"
-    dl2 = pycanvas.Download("x", text="Get report")
+    dl2 = danvas.Download("x", text="Get report")
     assert _face(dl2) == "Get report"
 
 
 def test_static_bytes_source_resolves_to_a_url(tmp_path):
-    dl = pycanvas.Download("data", source=b"a,b\n1,2\n", filename="data.csv")
+    dl = danvas.Download("data", source=b"a,b\n1,2\n", filename="data.csv")
     dl._bind("d1", FakeBridge())
 
     reply = dl._on_download(None)
@@ -54,7 +54,7 @@ def test_static_bytes_source_resolves_to_a_url(tmp_path):
 def test_static_path_source_uses_basename_when_no_filename(tmp_path):
     p = tmp_path / "report.pdf"
     p.write_bytes(b"%PDF-1.4 fake")
-    dl = pycanvas.Download("report", source=str(p))
+    dl = danvas.Download("report", source=str(p))
     dl._bind("d1", FakeBridge())
 
     dl._on_download(None)
@@ -65,7 +65,7 @@ def test_static_path_source_uses_basename_when_no_filename(tmp_path):
 
 
 def test_provider_runs_each_click_and_can_name_the_file():
-    dl = pycanvas.Download("export")
+    dl = danvas.Download("export")
     dl._bind("d1", FakeBridge())
     n = {"v": 0}
 
@@ -83,7 +83,7 @@ def test_provider_runs_each_click_and_can_name_the_file():
 
 
 def test_provider_supersedes_static_source():
-    dl = pycanvas.Download("export", source=b"static")
+    dl = danvas.Download("export", source=b"static")
     dl._bind("d1", FakeBridge())
     dl.provide(lambda: b"dynamic")
 
@@ -93,14 +93,14 @@ def test_provider_supersedes_static_source():
 
 
 def test_missing_content_raises():
-    dl = pycanvas.Download("export")
+    dl = danvas.Download("export")
     dl._bind("d1", FakeBridge())
     with pytest.raises(ValueError):
         dl._on_download(None)
 
 
 def test_missing_path_raises():
-    dl = pycanvas.Download("report", source="does/not/exist.pdf")
+    dl = danvas.Download("report", source="does/not/exist.pdf")
     dl._bind("d1", FakeBridge())
     with pytest.raises(FileNotFoundError):
         dl._on_download(None)
@@ -108,7 +108,7 @@ def test_missing_path_raises():
 
 def test_request_routes_through_react_handler():
     """A click arrives as a request with no event; the catch-all handler answers."""
-    dl = pycanvas.Download("data", source=b"x", filename="x.bin")
+    dl = danvas.Download("data", source=b"x", filename="x.bin")
     dl._bind("d1", FakeBridge())
     reply = dl._handle_request({})
     assert reply["filename"] == "x.bin"
@@ -116,7 +116,7 @@ def test_request_routes_through_react_handler():
 
 
 def test_factory_inserts_and_places():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     dl = canvas.download("export", source=b"x", text="Save", x=10, y=20)
     assert dl.component == "React"  # native React panel, like Button
     assert dl.x == 10 and dl.y == 20

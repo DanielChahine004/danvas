@@ -3,20 +3,20 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["pycanvas*"]
+include = ["danvas*"]
 
-# The built frontend (pycanvas/frontend/dist: the JS/CSS/font bundle tldraw and
+# The built frontend (danvas/frontend/dist: the JS/CSS/font bundle tldraw and
 # the panels are served from) is data, not Python, so packages.find won't pick
 # it up. Without this it's dropped from the wheel and a pip-installed canvas
 # serves a blank page (index.html with 404s for /assets/*). Ship the whole dist.
 [tool.setuptools.package-data]
-pycanvas = ["frontend/dist/**/*"]
+danvas = ["frontend/dist/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [project]
-name = "dans-pycanvas"
+name = "danvas"
 version = "0.1.0"
 description = "A browser-based spatial canvas with UI panels defined and controlled from Python."
 readme = "README.md"
@@ -29,7 +29,7 @@ dependencies = [
     "websockets>=12",
     # ~10x faster JSON encoding for the wire than stdlib json (the dominant
     # per-broadcast cost on the single event-loop thread). Ships prebuilt wheels
-    # for every common platform; pycanvas/bridge.py falls back to stdlib json
+    # for every common platform; danvas/bridge.py falls back to stdlib json
     # transparently if it's ever unavailable, so it's a free speedup, not a hard
     # requirement.
     "orjson>=3.9",
@@ -57,10 +57,10 @@ video = ["opencv-python>=4.8"]
 # examples. The browser plays the streamed PCM through the Web Audio API.
 audio = ["numpy>=1.24", "sounddevice>=0.4"]
 # Packaging a canvas into a standalone desktop app (Canvas.bake / python -m
-# pycanvas.bake). pywebview shows the canvas in a native window; PyInstaller
+# danvas.bake). pywebview shows the canvas in a native window; PyInstaller
 # bundles everything into a self-contained executable.
 desktop = ["pywebview>=4", "pyinstaller>=6"]
 
 [project.urls]
-Homepage = "https://github.com/DanielChahine004/pycanvas"
-Repository = "https://github.com/DanielChahine004/pycanvas"
+Homepage = "https://github.com/DanielChahine004/danvas"
+Repository = "https://github.com/DanielChahine004/danvas"

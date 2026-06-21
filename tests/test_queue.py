@@ -1,7 +1,7 @@
 import pytest
 
-import pycanvas
-from pycanvas.bridge import Bridge
+import danvas
+from danvas.bridge import Bridge
 
 
 class FakeBridge:
@@ -21,7 +21,7 @@ class FakeBridge:
 
 def test_default_is_fifo_plain_broadcast():
     bridge = FakeBridge()
-    label = pycanvas.Label("status")
+    label = danvas.Label("status")
     label._bind("l1", bridge)
     label.update("hello")
     assert bridge.conflated == []
@@ -32,7 +32,7 @@ def test_default_is_fifo_plain_broadcast():
 
 def test_latest_routes_dict_updates_to_conflated():
     bridge = FakeBridge()
-    label = pycanvas.Label("status")
+    label = danvas.Label("status")
     label.queue = "latest"  # universal property, no constructor arg needed
     label._bind("l1", bridge)
     label.update("hello")
@@ -44,9 +44,9 @@ def test_latest_routes_dict_updates_to_conflated():
 def test_invalid_queue_rejected():
     # Via the constructor (VideoFeed forwards to the base) and via the property.
     with pytest.raises(ValueError):
-        pycanvas.VideoFeed("x", queue="newest")
+        danvas.VideoFeed("x", queue="newest")
     with pytest.raises(ValueError):
-        pycanvas.Label("x").queue = "newest"
+        danvas.Label("x").queue = "newest"
 
 
 def test_conflation_drops_stale_frames_under_backpressure():

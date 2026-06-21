@@ -21,9 +21,9 @@ ephemeral: they sync across all viewers but live only in the tldraw store — th
 import math
 import time
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 canvas.set_view(navigation=('scroll_y', 0.7))  # lock horizontal pan; scroll up/down only
 
 # ---------------------------------------------------------------------------

@@ -6,9 +6,9 @@ import time
 
 import numpy as np
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 gain = canvas.slider("gain", min=1, max=10, default=3)
 reading = canvas.label("reading", "0.0")

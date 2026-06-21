@@ -1,6 +1,6 @@
 """Guard the Python <-> browser wire protocol against drift.
 
-The canonical contract lives in :mod:`pycanvas._protocol`. Until the integration
+The canonical contract lives in :mod:`danvas._protocol`. Until the integration
 step makes every side import from it, the constants are still restated in
 ``bridge.py`` (binary codes), ``_flags.py`` (lock wire keys), and ``bridge.js``
 (both). These tests assert all of those agree with the canonical module — so a
@@ -16,13 +16,13 @@ import importlib.util
 import os
 import re
 
-import pycanvas.bridge as bridge
-from pycanvas import _protocol
-from pycanvas._flags import LAYOUT_FLAGS
+import danvas.bridge as bridge
+from danvas import _protocol
+from danvas._flags import LAYOUT_FLAGS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BRIDGE_JS = os.path.join(_ROOT, "pycanvas", "frontend", "src", "bridge.js")
-_GEN_JS = os.path.join(_ROOT, "pycanvas", "frontend", "src",
+_BRIDGE_JS = os.path.join(_ROOT, "danvas", "frontend", "src", "bridge.js")
+_GEN_JS = os.path.join(_ROOT, "danvas", "frontend", "src",
                        "protocol.generated.js")
 _GEN_SCRIPT = os.path.join(_ROOT, "scripts", "gen_protocol.py")
 

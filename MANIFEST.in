@@ -1,7 +1,7 @@
 # The built frontend bundle is the app itself (tldraw + the panels), served from
-# pycanvas/frontend/dist. It is data, not Python, so it must be declared here (and
+# danvas/frontend/dist. It is data, not Python, so it must be declared here (and
 # via [tool.setuptools.package-data] in pyproject.toml) or it never lands in the
 # wheel/sdist and a pip-installed canvas serves a blank page.
-recursive-include pycanvas/frontend/dist *
+recursive-include danvas/frontend/dist *
 include LICENSE
 include README.md

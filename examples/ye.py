@@ -1,7 +1,7 @@
 import os
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # --- 1. Python logic to list actual files ---
 def get_directory_tree(path):

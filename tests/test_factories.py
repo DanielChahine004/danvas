@@ -13,11 +13,11 @@ No server is started — ``Canvas()`` builds a bridge in ``__init__`` and
 ``serve()``.
 """
 
-import pycanvas
+import danvas
 
 
 def _canvas():
-    return pycanvas.Canvas()
+    return danvas.Canvas()
 
 
 # -- placement flows through **place to insert -------------------------------

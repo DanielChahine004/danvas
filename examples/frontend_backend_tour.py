@@ -1,4 +1,4 @@
-"""An interactive tour of how the PyCanvas frontend talks to the backend.
+"""An interactive tour of how the danvas frontend talks to the backend.
 
 Everything between Python and the browser is JSON frames over one WebSocket
 (``ws://localhost:8000/ws``), multiplexed by component id:
@@ -21,9 +21,9 @@ Run:  python examples/frontend_backend_tour.py
 import json
 import time
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # ---------------------------------------------------------------------------
 # The tour guide — read this panel first in the browser.
@@ -193,7 +193,7 @@ def install_wiretap(canvas, panel):
     ``canvas.on_frame`` is the supported way to watch the wire: it sees every
     frame Python broadcasts (``"out"``) and every frame a browser sends
     (``"in"``), heartbeats excluded. The log line itself rides a ``panel.push``
-    — pycanvas guards taps against their own traffic, so frames the tap causes
+    — danvas guards taps against their own traffic, so frames the tap causes
     are not re-tapped and logging can't loop.
     """
     boring = {"presence", "chat", "draw", "get_snapshot", "load_snapshot"}

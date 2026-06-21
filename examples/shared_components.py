@@ -11,9 +11,9 @@ pick up the change. This is the pattern that kills the per-panel duplication of 
 shared table/badge/button in a bigger app.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # --- shared components: defined once, usable by name in every react() panel ---
 canvas.define("StatusPill", """

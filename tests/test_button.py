@@ -1,6 +1,6 @@
 import json
 
-import pycanvas
+import danvas
 
 
 class FakeBridge:
@@ -15,7 +15,7 @@ class FakeBridge:
 
 
 def test_on_click_fires_with_no_args_and_counts():
-    btn = pycanvas.Button("go", text="Run")
+    btn = danvas.Button("go", text="Run")
     btn._bind("b1", FakeBridge())
     calls = []
     btn.on_click(lambda: calls.append(1))
@@ -33,14 +33,14 @@ def _face(btn):
 
 
 def test_text_defaults_to_name_and_is_a_shape_prop():
-    btn = pycanvas.Button("save")
+    btn = danvas.Button("save")
     assert _face(btn) == "save"
-    btn2 = pycanvas.Button("x", text="Save now")
+    btn2 = danvas.Button("x", text="Save now")
     assert _face(btn2) == "Save now"
 
 
 def test_update_changes_the_face_text_live_and_persists():
-    btn = pycanvas.Button("toggle", text="Start")
+    btn = danvas.Button("toggle", text="Start")
     bridge = FakeBridge()
     btn._bind("b1", bridge)
 
@@ -55,7 +55,7 @@ def test_update_changes_the_face_text_live_and_persists():
 
 
 def test_button_factory_inserts_and_places():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     btn = canvas.button("go", text="Start", x=10, y=20)
     # Button is now a native React panel (mounted by ReactHost).
     assert btn.component == "React"

@@ -18,9 +18,9 @@ import json
 import threading
 
 import pytest
-import pycanvas
-from pycanvas.bridge import Bridge
-from pycanvas.shapes import (
+import danvas
+from danvas.bridge import Bridge
+from danvas.shapes import (
     BaseShape, Geo, Text, Note, Draw, Highlight, Line, Frame, DrawingShape,
     _segments_from_points, _line_points, _extract_rich_text,
 )
@@ -524,7 +524,7 @@ def test_bridge_remove_draw_tap():
 # ---------------------------------------------------------------------------
 
 def test_canvas_geo_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.geo(x=10, y=20, w=200, h=150, geo="ellipse", color="blue", name="e")
     assert isinstance(s, Geo)
     assert s.name == "e"
@@ -535,21 +535,21 @@ def test_canvas_geo_factory():
 
 
 def test_canvas_text_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.text(x=0, y=0, text="Hi", font="sans")
     assert isinstance(s, Text)
     assert s._props["text"] == "Hi"
 
 
 def test_canvas_note_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.note(x=0, y=0, text="note", color="yellow")
     assert isinstance(s, Note)
     assert s._props["color"] == "yellow"
 
 
 def test_canvas_draw_factory_normalises_origin():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.draw([(100, 200), (150, 250), (200, 200)], color="red")
     assert isinstance(s, Draw)
     # origin is min(x)=100, min(y)=200 → shape placed at (100, 200)
@@ -562,14 +562,14 @@ def test_canvas_draw_factory_normalises_origin():
 
 
 def test_canvas_highlight_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.highlight([(10, 10), (200, 10)], color="yellow")
     assert isinstance(s, Highlight)
     assert s._props["color"] == "yellow"
 
 
 def test_canvas_line_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.line([(0, 0), (100, 50), (200, 0)], color="black")
     assert isinstance(s, Line)
     assert s.x == 0.0
@@ -577,7 +577,7 @@ def test_canvas_line_factory():
 
 
 def test_canvas_frame_factory():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.frame(x=50, y=100, w=800, h=400, label="Slide 1")
     assert isinstance(s, Frame)
     assert s.label == "Slide 1"
@@ -585,7 +585,7 @@ def test_canvas_frame_factory():
 
 
 def test_canvas_draw_factory_accepts_explicit_xy():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.draw([(10, 20), (30, 40)], x=0, y=0, name="d")
     # explicit x/y=0 overrides bounding-box origin
     assert s.x == 0.0
@@ -593,7 +593,7 @@ def test_canvas_draw_factory_accepts_explicit_xy():
 
 
 def test_canvas_line_empty_raises():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     with pytest.raises(ValueError):
         c.line([])
 
@@ -603,7 +603,7 @@ def test_canvas_line_empty_raises():
 # ---------------------------------------------------------------------------
 
 def test_auto_name_assigned_when_none():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s1 = c.geo(x=0, y=0)
     s2 = c.geo(x=100, y=0)
     assert s1.name == "geo1"
@@ -611,7 +611,7 @@ def test_auto_name_assigned_when_none():
 
 
 def test_name_eviction_replaces_old_shape():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s1 = c.geo(x=0, y=0, name="box")
     s2 = c.geo(x=100, y=0, name="box")
     assert s1 not in c.shapes
@@ -624,14 +624,14 @@ def test_name_eviction_replaces_old_shape():
 # ---------------------------------------------------------------------------
 
 def test_canvas_shapes_property():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     g = c.geo(x=0, y=0, name="g")
     n = c.note(x=100, y=0, name="n")
     assert set(c.shapes) == {g, n}
 
 
 def test_canvas_drawings_snapshot():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     rec = _fake_record("shape:q")
     c._bridge._drawings["shape:q"] = rec
     d = c.drawings
@@ -641,7 +641,7 @@ def test_canvas_drawings_snapshot():
 
 
 def test_canvas_drawings_snapshot_is_fresh():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     c._bridge._drawings["shape:a"] = _fake_record("shape:a")
     _ = c.drawings  # first access
     c._bridge._drawings["shape:b"] = _fake_record("shape:b")
@@ -654,14 +654,14 @@ def test_canvas_drawings_snapshot_is_fresh():
 # ---------------------------------------------------------------------------
 
 def test_on_draw_registers_tap():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     fn = lambda e: None
     c.on_draw(fn)
     assert fn in c._bridge._draw_taps
 
 
 def test_off_draw_removes_tap():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     fn = lambda e: None
     c.on_draw(fn)
     c.off_draw(fn)
@@ -669,7 +669,7 @@ def test_off_draw_removes_tap():
 
 
 def test_on_draw_decorator():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     events = []
 
     @c.on_draw
@@ -684,7 +684,7 @@ def test_on_draw_decorator():
 # ---------------------------------------------------------------------------
 
 def test_canvas_remove_shape():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.geo(x=0, y=0, name="box")
     c.remove_shape(s)
     assert s not in c.shapes
@@ -692,14 +692,14 @@ def test_canvas_remove_shape():
 
 
 def test_canvas_remove_shape_by_name():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     c.geo(x=0, y=0, name="box")
     c.remove_shape("box")
     assert "box" not in c._named
 
 
 def test_canvas_remove_shape_noop_when_already_gone():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     s = c.geo(x=0, y=0, name="box")
     c.remove_shape(s)
     c.remove_shape(s)  # second call — must not raise

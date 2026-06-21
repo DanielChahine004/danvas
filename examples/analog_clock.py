@@ -6,7 +6,7 @@ that is updated in real-time from a background thread.
 import threading
 import time
 from datetime import datetime
-import pycanvas
+import danvas
 
 # --- The Widget's Front End ---
 # We use an SVG circle for the clock face and three lines for the hands.
@@ -74,7 +74,7 @@ CLOCK_HTML = """
 </script>
 """
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Create the custom clock component
 clock = canvas.custom(

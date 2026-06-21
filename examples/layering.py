@@ -16,9 +16,9 @@ overlap-aware nudge applied to the live canvas only.
     python examples/layering.py
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Three overlapping cards. Each is a frameless Custom panel filled with a solid
 # colour and a big letter, so the stacking order is obvious at a glance.

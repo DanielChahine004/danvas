@@ -21,9 +21,9 @@ Requires: pip install opencv-python numpy
 import time
 import numpy as np
 import cv2
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 status = canvas.label("status", value="waiting for frames…")
 feed   = canvas.video("echo", label="echo (Python processed)", x=420, y=40)

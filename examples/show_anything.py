@@ -1,4 +1,4 @@
-"""canvas.show(value) — let PyCanvas auto-pick the panel for any value.
+"""canvas.show(value) — let danvas auto-pick the panel for any value.
 
 You don't have to choose a component. ``show()`` inspects the value and inserts
 the panel that renders it best — a DataFrame becomes a table, a figure an image,
@@ -12,9 +12,9 @@ Run:  python examples/show_anything.py
 import base64
 import math
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # A string of Markdown -> rendered text. Equations are written in Unicode math
 # (μ, σ², √, Σ, ·) so they render without a LaTeX/MathJax dependency — the

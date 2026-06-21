@@ -28,19 +28,19 @@ Notes
 
 import os
 
-import pycanvas
+import danvas
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CANVAS_FILE = os.path.join(HERE, "saved_canvas.json")
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
-speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100, default=30),
+speed = canvas.insert(danvas.Slider("speed", min=0, max=100, default=30),
                       x=80, y=80)
-gain = canvas.insert(pycanvas.Slider("gain", min=1, max=10, default=2),
+gain = canvas.insert(danvas.Slider("gain", min=1, max=10, default=2),
                      x=80, y=220)
 # This label echoes the most recent UI edit so read-back is visible on-canvas too.
-moved = canvas.insert(pycanvas.Label("last_moved", value="drag a panel…"),
+moved = canvas.insert(danvas.Label("last_moved", value="drag a panel…"),
                       x=420, y=80, w=300)
 
 

@@ -1,8 +1,8 @@
-"""Minimal PyCanvas demo: a slider and a label that mirrors it."""
+"""Minimal danvas demo: a slider and a label that mirrors it."""
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Factory shorthand: canvas.<component>(...) builds and inserts in one call.
 servo = canvas.slider("servo_1", min=0, max=180, default=90, queue='latest')

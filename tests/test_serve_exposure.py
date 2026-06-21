@@ -7,11 +7,11 @@ in serve() and impossible to test without standing up a server. The defaults
 matter for safety (telemetry/Inspector exposed to viewers), so lock them down.
 """
 
-import pycanvas
+import danvas
 
 
 def _res(host="127.0.0.1", tunnel=False, ui_inspector=None, cursors=None):
-    return pycanvas.Canvas()._resolve_exposure(host, tunnel, ui_inspector,
+    return danvas.Canvas()._resolve_exposure(host, tunnel, ui_inspector,
                                                None, cursors)
 
 

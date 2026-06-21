@@ -8,9 +8,9 @@ observe everything that's said.
     python examples/chat_room.py
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 chat = canvas.chat("chat", x=80, y=80)
 canvas.label("tip", "edit your name in the chat panel", x=440, y=80)

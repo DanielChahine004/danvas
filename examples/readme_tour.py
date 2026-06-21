@@ -6,9 +6,9 @@ Run with:  python examples/readme_tour.py
 """
 import math
 import time
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 W   = 660   # main column width
 GAP = 24    # section gap
@@ -18,7 +18,7 @@ col = canvas.column(x=40, y=40, w=W, gap=GAP)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Intro
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-col.add(canvas.markdown("""# PyCanvas
+col.add(canvas.markdown("""# danvas
 A browser-based spatial canvas controlled entirely from Python.
 Panels are **bidirectional** — Python pushes data to them and reads user
 input back in real time over one WebSocket.
@@ -34,7 +34,7 @@ The frontend ships pre-built; you never touch Node or npm.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 col.add(canvas.markdown("""## Install
 ```bash
-pip install dans-pycanvas
+pip install dans-danvas
 ```
 Optional extras: `[video]`  `[audio]`  `[tunnel]`  `[desktop]`
 """, name="install"))

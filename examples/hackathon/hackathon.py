@@ -46,7 +46,7 @@ import csv
 import json
 import os
 
-import pycanvas
+import danvas
 
 _HERE = os.path.dirname(__file__)
 INVENTORY_CSV = os.path.join(_HERE, "hackathon_inventory.csv")
@@ -81,7 +81,7 @@ DEFAULT_BUDGET = 2000
 # even after the admin deletes every team the panel stays hidden from non-teams.
 TEAM_SENTINEL = "__team__"
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────

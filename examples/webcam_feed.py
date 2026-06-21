@@ -1,7 +1,7 @@
 """Embed a live webcam feed into a canvas using OpenCV, with optional audio.
 
 Video is captured with OpenCV. Audio is captured separately from the default
-microphone with ``sounddevice`` (``pip install pycanvas[audio]``) and streamed
+microphone with ``sounddevice`` (``pip install danvas[audio]``) and streamed
 to the browser, where you click "Enable audio" on the panel to start playback
 (the browser blocks autoplay until a user gesture). OpenCV can't capture audio,
 so the two are independent streams — handy for monitoring, not lip-synced.
@@ -13,9 +13,9 @@ import time
 
 import cv2
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # queue="latest" drops stale frames for a slow viewer so latency stays bounded
 # rather than the feed backing up (it's VideoFeed's default; explicit here).
@@ -59,7 +59,7 @@ def audio_worker():
     try:
         import sounddevice as sd
     except ImportError:
-        print("[webcam] audio disabled — run `pip install pycanvas[audio]` "
+        print("[webcam] audio disabled — run `pip install danvas[audio]` "
               "(needs sounddevice) to stream the microphone")
         return
 

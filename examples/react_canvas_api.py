@@ -13,7 +13,7 @@ Then pan/zoom the canvas and watch the readout track it; click the buttons to fl
 the camera; open a second browser tab to see the jump announcements relayed.
 """
 
-import pycanvas
+import danvas
 
 HUD = r"""
 function Component({ canvas }) {
@@ -71,7 +71,7 @@ function Component({ canvas }) {
 }
 """
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # A few panels scattered across the canvas to give the camera somewhere to fly.
 # Each re-captions itself with its live position when you drag it: `on_layout`

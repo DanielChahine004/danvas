@@ -8,11 +8,11 @@ import pytest
 pytest.importorskip("plotly")
 import plotly.graph_objects as go
 
-import pycanvas
+import danvas
 
 
 def test_add_records_steps_and_fixes_bins():
-    h = pycanvas.Histogram("weights", bins=10, value_range=(-1, 1))
+    h = danvas.Histogram("weights", bins=10, value_range=(-1, 1))
     h.add(np.zeros(100), step=0)
     h.add(np.ones(100), step=1)
     assert [s for s, _ in h._records] == [0, 1]
@@ -22,14 +22,14 @@ def test_add_records_steps_and_fixes_bins():
 
 
 def test_step_defaults_to_record_index():
-    h = pycanvas.Histogram("w", bins=5)
+    h = danvas.Histogram("w", bins=5)
     h.add([0, 1, 2, 3])
     h.add([0, 1, 2, 3])
     assert [s for s, _ in h._records] == [0, 1]
 
 
 def test_max_steps_bounds_the_buffer():
-    h = pycanvas.Histogram("w", bins=4, value_range=(0, 1), max_steps=3)
+    h = danvas.Histogram("w", bins=4, value_range=(0, 1), max_steps=3)
     for step in range(6):
         h.add(np.random.random(20), step=step)
     assert len(h._records) == 3
@@ -38,7 +38,7 @@ def test_max_steps_bounds_the_buffer():
 
 def test_figure_builds_for_both_modes():
     for mode in ("heatmap", "overlay"):
-        h = pycanvas.Histogram("w", bins=6, value_range=(0, 1), mode=mode)
+        h = danvas.Histogram("w", bins=6, value_range=(0, 1), mode=mode)
         h.add(np.random.random(50), step=0)
         h.add(np.random.random(50), step=1)
         fig = h._figure()
@@ -48,11 +48,11 @@ def test_figure_builds_for_both_modes():
 
 def test_bad_mode_rejected():
     with pytest.raises(ValueError):
-        pycanvas.Histogram("w", mode="violin")
+        danvas.Histogram("w", mode="violin")
 
 
 def test_factory_places_and_registers():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     h = canvas.histogram("grads", bins=8, x=100, y=120, w=400, h=300)
     assert canvas["grads"] is h
     assert (h.x, h.y, h.w, h.h) == (100, 120, 400, 300)

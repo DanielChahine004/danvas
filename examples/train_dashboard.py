@@ -1,8 +1,8 @@
-"""TensorBoard-style training tracker, built from plain PyCanvas panels.
+"""TensorBoard-style training tracker, built from plain danvas panels.
 
 The canvas answer to ``tensorboard --logdir``: instead of event files and a
 separate web app, you track a run live on an infinite canvas — and because
-PyCanvas is bidirectional you also get *controls* TensorBoard can't give you
+danvas is bidirectional you also get *controls* TensorBoard can't give you
 (pause/resume, a live learning-rate slider) on the same board.
 
 There's no logging framework to learn. You make each panel once, keep the
@@ -31,7 +31,7 @@ matplotlib.use("Agg")  # headless backend; no GUI window
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pycanvas
+import danvas
 
 HPARAMS = {
     "model": "tiny-cnn",
@@ -62,7 +62,7 @@ def sample_grid(step):
     return fig
 
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # --- controls: a left column of panels we drive the run with ----------------
 # `canvas.column(...)` auto-stacks whatever we insert, each keeping its natural

@@ -8,9 +8,9 @@ merge — no running server needed.
 
 import pytest
 
-import pycanvas
-from pycanvas.bridge import Bridge
-from pycanvas.canvas import _coerce_navigation
+import danvas
+from danvas.bridge import Bridge
+from danvas.canvas import _coerce_navigation
 
 
 # -- _coerce_navigation unit tests --------------------------------------------
@@ -53,19 +53,19 @@ def test_coerce_bad_type_raises():
 # -- set_view(navigation=) stores correct state -------------------------------
 
 def test_set_view_navigation_string_global():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(navigation="scroll_y")
     assert canvas._bridge._view == {"navigation": {"mode": "scroll_y", "zoom": 1.0}}
 
 
 def test_set_view_navigation_tuple_global():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(navigation=("scroll_x", 0.75))
     assert canvas._bridge._view == {"navigation": {"mode": "scroll_x", "zoom": 0.75}}
 
 
 def test_set_view_navigation_per_role():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(navigation="scroll_y", roles="kiosk")
     assert canvas._bridge._view_per_role == {
         "kiosk": {"navigation": {"mode": "scroll_y", "zoom": 1.0}}
@@ -74,7 +74,7 @@ def test_set_view_navigation_per_role():
 
 
 def test_set_view_navigation_per_client():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(navigation="scroll_x", client_id="abc123")
     assert canvas._bridge._view_per_client == {
         "abc123": {"navigation": {"mode": "scroll_x", "zoom": 1.0}}
@@ -83,7 +83,7 @@ def test_set_view_navigation_per_client():
 
 
 def test_set_view_navigation_merges_with_other_keys():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(ui=False)
     canvas.set_view(navigation="scroll_y")
     assert canvas._bridge._view == {
@@ -93,14 +93,14 @@ def test_set_view_navigation_merges_with_other_keys():
 
 
 def test_set_view_navigation_reset_to_free():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(navigation="scroll_y")
     canvas.set_view(navigation="free")
     assert canvas._bridge._view == {"navigation": {"mode": "free", "zoom": 1.0}}
 
 
 def test_set_view_invalid_navigation_raises():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with pytest.raises(ValueError, match="navigation"):
         canvas.set_view(navigation="sideways")
 

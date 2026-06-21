@@ -8,7 +8,7 @@ pushes new HTML; the chart itself remains interactive between updates.
 import numpy as np
 import plotly.graph_objects as go
 
-import pycanvas
+import danvas
 
 
 def render_chart(points):
@@ -26,13 +26,13 @@ def render_chart(points):
     return fig.to_html(include_plotlyjs="cdn", full_html=True)
 
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 resolution = canvas.insert(
-    pycanvas.Slider("resolution", min=10, max=400, default=120)
+    danvas.Slider("resolution", min=10, max=400, default=120)
 )
 chart = canvas.insert(
-    pycanvas.Custom(html=render_chart(120), name="plotly", w=560, h=420)
+    danvas.Custom(html=render_chart(120), name="plotly", w=560, h=420)
 )
 
 

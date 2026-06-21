@@ -1,7 +1,7 @@
 """Device classification + the on_connect hook (adapt-to-mobile)."""
 
-import pycanvas
-from pycanvas.bridge import Bridge, _device_from_ua
+import danvas
+from danvas.bridge import Bridge, _device_from_ua
 
 
 def test_device_from_user_agent():
@@ -29,7 +29,7 @@ def test_make_viewer_defaults_to_desktop():
 
 
 def test_on_connect_fires_with_viewer():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     seen = []
     canvas.on_connect(lambda v: seen.append(v))
     canvas._bridge._tap_connect({"id": "a1", "device": "mobile", "role": None})
@@ -37,7 +37,7 @@ def test_on_connect_fires_with_viewer():
 
 
 def test_off_connect_removes_the_observer():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     seen = []
     fn = canvas.on_connect(lambda v: seen.append(v))
     canvas.off_connect(fn)
@@ -46,7 +46,7 @@ def test_off_connect_removes_the_observer():
 
 
 def test_on_disconnect_fires_with_viewer():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     left = []
     canvas.on_disconnect(lambda v: left.append(v))
     canvas._bridge._tap_disconnect({"id": "a1", "name": "Fox"})
@@ -54,7 +54,7 @@ def test_on_disconnect_fires_with_viewer():
 
 
 def test_off_disconnect_removes_the_observer():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     left = []
     fn = canvas.on_disconnect(lambda v: left.append(v))
     canvas.off_disconnect(fn)

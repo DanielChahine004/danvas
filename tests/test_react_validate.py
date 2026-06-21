@@ -4,11 +4,11 @@ Catches a missing `Component` and unbalanced delimiters, skipping strings and
 comments so braces in text / CSS template literals don't false-positive.
 """
 
-import pycanvas
+import danvas
 
 
 def v(source):
-    return pycanvas.React(source=source).validate()
+    return danvas.React(source=source).validate()
 
 
 def test_good_source_passes():
@@ -49,5 +49,5 @@ def test_braces_in_strings_dont_false_positive():
 
 
 def test_jsx_built_panel_validates_clean():
-    panel = pycanvas.React(jsx='<div className="x">hi</div>', css=".x{color:red}")
+    panel = danvas.React(jsx='<div className="x">hi</div>', css=".x{color:red}")
     assert panel.validate() == []

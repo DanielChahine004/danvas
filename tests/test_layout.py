@@ -1,10 +1,10 @@
 """Auto-layout containers: canvas.grid / column / row."""
 
-import pycanvas
+import danvas
 
 
 def test_grid_flows_left_to_right_then_wraps():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)):
         a = canvas.label("a")
         b = canvas.label("b")
@@ -17,7 +17,7 @@ def test_grid_flows_left_to_right_then_wraps():
 
 
 def test_column_stacks_by_natural_height():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     # A label is 84 tall by default, a button 84, a slider 96 — the column keeps
     # each panel's own height and advances the cursor by it (not a uniform slot).
     with canvas.column(x=40, y=40, w=320, gap=10):
@@ -31,14 +31,14 @@ def test_column_stacks_by_natural_height():
 
 
 def test_column_width_none_keeps_each_panels_own_width():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.column(x=0, y=0, gap=10):
         a = canvas.label("a")              # default_w 240
     assert a.w == 240
 
 
 def test_row_flows_by_natural_width():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.row(x=0, y=0, h=50, gap=10):
         a = canvas.label("a")              # default_w 240
         b = canvas.label("b")
@@ -48,7 +48,7 @@ def test_row_flows_by_natural_width():
 
 
 def test_explicit_position_overrides_the_grid():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)):
         canvas.label("a")                  # claims slot 0
         b = canvas.label("b", x=500, y=500)  # explicit — bypasses the grid
@@ -58,14 +58,14 @@ def test_explicit_position_overrides_the_grid():
 
 
 def test_explicit_size_is_kept_position_from_grid():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=3, slot=(100, 50), gap=10, origin=(0, 0)):
         a = canvas.label("a", w=333)       # own width, grid height + position
     assert (a.x, a.y, a.w, a.h) == (0, 0, 333, 50)
 
 
 def test_relative_anchor_wins_over_grid():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     anchor = canvas.label("anchor", x=0, y=0, w=100, h=40)
     with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(900, 900)):
         b = canvas.label("b", below=anchor)
@@ -73,7 +73,7 @@ def test_relative_anchor_wins_over_grid():
 
 
 def test_layout_stack_unwinds_after_block():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2):
         assert canvas._layout_stack
     assert not canvas._layout_stack
@@ -83,7 +83,7 @@ def test_layout_stack_unwinds_after_block():
 
 
 def test_auto_height_panel_keeps_fitting_in_a_grid():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2, slot=(300, 200), gap=10, origin=(0, 0)):
         md = canvas.markdown("# hi", name="notes", h="auto")
     # Grid positions it, but h='auto' is preserved (not forced to slot height).
@@ -93,7 +93,7 @@ def test_auto_height_panel_keeps_fitting_in_a_grid():
 
 def test_label_defaults_to_auto_height():
     # A standalone label fits its content (no tall empty box)...
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a")
     assert a._auto_h is True
     # ...but an explicit height pins it (auto-height off).
@@ -105,7 +105,7 @@ def test_label_defaults_to_auto_height():
 def test_label_default_auto_height_yields_to_grid_slot():
     # Unlike an explicit h="auto", a label's *default* auto-height defers to a
     # grid slot height so the grid stays uniform.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)):
         a = canvas.label("a")
     assert a.h == 50
@@ -121,7 +121,7 @@ def _capture_broadcast(canvas):
 
 
 def test_column_reflow_broadcasts_container_sync():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.column(x=40, y=40, w=200, gap=10) as col:
         a = canvas.label("a", h=50)
         b = canvas.label("b", h=50)
@@ -137,7 +137,7 @@ def test_column_reflow_broadcasts_container_sync():
 
 
 def test_row_reflow_broadcasts_container_sync():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.row(x=0, y=0, h=50, gap=10) as r:
         a = canvas.label("a", w=80)
         b = canvas.label("b", w=80)
@@ -151,7 +151,7 @@ def test_row_reflow_broadcasts_container_sync():
 def test_reflow_after_container_remove_excludes_panel():
     # col.remove() is the right way to drop a panel from a container.
     # After removal the container_sync message no longer lists it.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.column(x=0, y=0, gap=10) as col:
         a = canvas.label("a")
         b = canvas.label("b")
@@ -166,7 +166,7 @@ def test_reflow_after_container_remove_excludes_panel():
 def test_grid_refit_repacks_locally_by_slot():
     # A grid keeps uniform fixed slots, so it re-packs in Python (no browser
     # round-trip) straight back onto the slot grid.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with canvas.grid(cols=2, slot=(100, 50), gap=10, origin=(0, 0)) as g:
         a = canvas.label("a")
         b = canvas.label("b")
@@ -181,7 +181,7 @@ def test_grid_refit_repacks_locally_by_slot():
 def test_nested_container_places_children_correctly():
     # A row nested inside a column: the row's children are placed relative to
     # where the column cursor lands, not the column's own origin.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     col = canvas.column(x=0, y=0, gap=10)
     col.add(canvas.label("top", h=40))        # top: y=0..40
     row = col.row(gap=8)                       # row starts at y=50

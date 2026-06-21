@@ -18,16 +18,16 @@ A Repl executes arbitrary Python in this process, so serving is local-only by
 default; pass `allow_remote_exec=True` to `serve` to expose it on a network.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas().enable_repl(globals())
+canvas = danvas.Canvas().enable_repl(globals())
 
 servo = canvas.insert(
-    pycanvas.Slider("servo", min=0, max=180, default=90),
+    danvas.Slider("servo", min=0, max=180, default=90),
     x=80, y=80, name="servo",
 )
 status = canvas.insert(
-    pycanvas.Label("status", value="idle"),
+    danvas.Label("status", value="idle"),
     x=80, y=210, name="status",
 )
 
@@ -45,8 +45,8 @@ waypoints = [(0, 0), (10, 5), (20, 0)]
 # One inspector with a source dropdown in its header: switch between the canvas
 # panels and the shared REPL namespace (this file's globals) live. It also has a
 # name-search box, a type filter, and click-to-drill-into-fields.
-canvas.insert(pycanvas.Inspector("inspector", refresh=1.0), x=420, y=80)
-canvas.insert(pycanvas.Repl("poke"), x=80, y=320)
+canvas.insert(danvas.Inspector("inspector", refresh=1.0), x=420, y=80)
+canvas.insert(danvas.Repl("poke"), x=80, y=320)
 
 print("Try in the REPL panel:  canvas.servo.x   or   servo.update(45)")
 canvas.serve(port=8000)

@@ -5,11 +5,11 @@ Python receives those messages via ``@panel.on_message`` and echoes a reply
 back into a Label card.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
-# A completely hand-authored HTML/CSS/JS panel — no PyCanvas component involved.
+# A completely hand-authored HTML/CSS/JS panel — no danvas component involved.
 PANEL_HTML = """
 <!doctype html>
 <html>

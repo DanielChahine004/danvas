@@ -3,14 +3,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import pycanvas
-from pycanvas import server
-from pycanvas.components import Repl
+import danvas
+from danvas import server
+from danvas.components import Repl
 
 
 def _app(password):
-    canvas = pycanvas.Canvas()
-    canvas.insert(pycanvas.Slider("servo", min=0, max=180, default=90))
+    canvas = danvas.Canvas()
+    canvas.insert(danvas.Slider("servo", min=0, max=180, default=90))
     return server.create_app(canvas._bridge, open_browser=False, password=password)
 
 
@@ -68,7 +68,7 @@ def test_authenticated_websocket_connects():
 
 
 def test_live_repl_insert_refused_on_public_bind():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.enable_repl({})
     # Simulate a running server bound publicly without the remote-exec opt-in.
     canvas._serving = True
@@ -79,7 +79,7 @@ def test_live_repl_insert_refused_on_public_bind():
 
 
 def test_live_repl_insert_allowed_with_opt_in():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.enable_repl({})
     canvas._serving = True
     canvas._public_bind = True
@@ -89,7 +89,7 @@ def test_live_repl_insert_allowed_with_opt_in():
 
 
 def test_live_repl_insert_allowed_on_local_bind():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.enable_repl({})
     canvas._serving = True
     canvas._public_bind = False  # 127.0.0.1

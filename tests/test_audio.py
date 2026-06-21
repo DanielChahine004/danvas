@@ -1,7 +1,7 @@
 import numpy as np
 
-import pycanvas
-from pycanvas.bridge import BINARY_AUDIO
+import danvas
+from danvas.bridge import BINARY_AUDIO
 
 
 class FakeBridge:
@@ -18,7 +18,7 @@ class FakeBridge:
 
 def test_audio_update_sends_binary_pcm_frame():
     bridge = FakeBridge()
-    feed = pycanvas.AudioFeed("mic", sample_rate=16000)
+    feed = danvas.AudioFeed("mic", sample_rate=16000)
     feed._bind("a1", bridge)
 
     samples = (np.sin(np.linspace(0, 6.28, 256)) * 30000).astype("<i2")
@@ -39,7 +39,7 @@ def test_audio_update_sends_binary_pcm_frame():
 
 def test_audio_empty_chunk_sends_nothing():
     bridge = FakeBridge()
-    feed = pycanvas.AudioFeed("mic")
+    feed = danvas.AudioFeed("mic")
     feed._bind("a1", bridge)
     feed.update(np.zeros(0, dtype="<i2"))
     assert bridge.binary == [] and bridge.sent == []

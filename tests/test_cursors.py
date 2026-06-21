@@ -4,12 +4,12 @@ import time
 
 from fastapi.testclient import TestClient
 
-import pycanvas
-from pycanvas import server
+import danvas
+from danvas import server
 
 
 def _build(cursors):
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.label("status", value="idle")
     canvas._bridge._cursors = cursors          # serve() sets this; do it directly here
     app = server.create_app(canvas._bridge, open_browser=False)

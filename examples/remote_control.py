@@ -1,6 +1,6 @@
 """Stream this machine's screen to the canvas and let a remote browser drive it.
 
-A single :class:`~pycanvas.Custom` panel doubles as a tiny remote desktop: a
+A single :class:`~danvas.Custom` panel doubles as a tiny remote desktop: a
 background thread grabs the screen and ``push()``es JPEG frames straight into the
 panel's iframe (no reload), while the iframe captures mouse + keyboard and sends
 them back, where they're replayed onto this machine with the Win32 API.
@@ -15,7 +15,7 @@ own LAN), stop it (Ctrl+C) when you're done, and never expose it to the public
 internet. You are responsible for what a connected client does.
 =============================================================================
 
-Dependencies: none beyond pycanvas — capture uses Pillow's ``ImageGrab`` and
+Dependencies: none beyond danvas — capture uses Pillow's ``ImageGrab`` and
 control uses the built-in Win32 API via ``ctypes`` (so this example is
 **Windows-only**; swap in ``pyautogui`` for a cross-platform controller).
 """
@@ -28,7 +28,7 @@ import time
 
 from PIL import ImageGrab
 
-import pycanvas
+import danvas
 
 # --- streaming knobs ---------------------------------------------------------
 FPS = 12             # frames per second to stream
@@ -116,8 +116,8 @@ PANEL_HTML = """
     // Frames pushed from Python (Custom.push) arrive as postMessage.
     window.addEventListener('message', (e) => {
       const d = e.data;
-      if (d && d.__pycanvas !== undefined) {
-        img.src = 'data:image/jpeg;base64,' + d.__pycanvas;
+      if (d && d.__danvas !== undefined) {
+        img.src = 'data:image/jpeg;base64,' + d.__danvas;
       }
     });
     const norm = (e) => {
@@ -155,7 +155,7 @@ PANEL_HTML = """
 </body>
 """
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Size the panel to the screen's aspect ratio so the streamed image isn't
 # distorted (object-fit:fill maps the panel area 1:1 onto the screen).

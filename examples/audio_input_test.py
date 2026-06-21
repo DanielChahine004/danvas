@@ -18,9 +18,9 @@ live volume bar without a Python round-trip.
 """
 
 import numpy as np
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 info  = canvas.label("stream info", value="tap Start Mic in the panel")
 level = canvas.label("dB level",    value="—", x=300, y=40)

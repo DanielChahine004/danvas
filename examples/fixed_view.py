@@ -6,9 +6,9 @@ whether the toolbars are shown. Here we frame two panels and lock the view down
 into a kiosk-style dashboard.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 speed = canvas.slider("speed", min=0, max=100, default=20, x=80, y=80)
 status = canvas.label("status", value="idle", x=80, y=200)

@@ -12,7 +12,7 @@ This builds a ``Dial`` — a draggable knob — in a handful of lines of user co
 Run:  python examples/custom_component.py
 """
 
-import pycanvas
+import danvas
 
 # --- the widget's front end: plain HTML + vanilla JS in the iframe -----------
 # It talks to Python with the injected ``canvas.send(...)`` helper and redraws
@@ -72,14 +72,14 @@ DIAL_HTML = """
   })
 
   // Python -> iframe: panel.push(deg) lands here and redraws the needle, so the
-  // dial stays in sync if the angle is changed programmatically. No __pycanvas
+  // dial stays in sync if the angle is changed programmatically. No __danvas
   // unwrapping or message-guard boilerplate — canvas.onPush handles it.
   canvas.onPush((deg) => draw(deg))
 </script>
 """
 
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # No subclass needed: insert the HTML, then route inbound events with @dial.on.
 dial = canvas.custom(html=DIAL_HTML, name="dial", w=220, h=260, x=80, y=80)

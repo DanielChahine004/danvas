@@ -7,8 +7,8 @@ that backs canvas.background), so a slow handler doesn't hold up the others.
 import threading
 import time
 
-import pycanvas
-from pycanvas.kernel import spawn
+import danvas
+from danvas.kernel import spawn
 
 
 def test_spawn_thread_collapses_when_fn_returns():
@@ -26,7 +26,7 @@ def test_spawn_logs_exception_without_propagating(capsys):
 
 
 def test_on_click_supports_both_decorator_forms():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     btn = canvas.button("go")
     canvas.insert(btn)
 
@@ -43,7 +43,7 @@ def test_on_click_supports_both_decorator_forms():
 
 
 def test_threaded_handler_does_not_block_the_dispatcher():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     sld = canvas.slider("v", min=0, max=10)
     canvas.insert(sld)
     ran = threading.Event()
@@ -60,7 +60,7 @@ def test_threaded_handler_does_not_block_the_dispatcher():
 
 
 def test_non_threaded_handler_runs_inline():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     btn = canvas.button("b")
     canvas.insert(btn)
 
@@ -74,7 +74,7 @@ def test_non_threaded_handler_runs_inline():
 
 
 def test_threaded_handler_still_receives_viewer():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     sld = canvas.slider("v", min=0, max=10)
     canvas.insert(sld)
     seen = []
@@ -91,7 +91,7 @@ def test_threaded_handler_still_receives_viewer():
 
 
 def test_routing_on_event_threaded():
-    panel = pycanvas.React(source="function P(){ return null }",
+    panel = danvas.React(source="function P(){ return null }",
                            name="p", event_key="action")
     fired = threading.Event()
 

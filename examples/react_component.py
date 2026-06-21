@@ -18,7 +18,7 @@ Run:  python examples/react_component.py
 import threading
 import time
 
-import pycanvas
+import danvas
 
 # The component is named ``Component`` and gets { canvas, value, props }.
 # ``React`` (with hooks) is in scope. This is real JSX — compiled in the browser.
@@ -48,7 +48,7 @@ function Component({ canvas, value, props }) {
 }
 """
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 panel = canvas.react(PING_JSX, name="ping", props={"title": "Hello, React"}, x=80, y=80, frame=False)
 status = canvas.label("status", value="click ping", x=400, y=80)
@@ -214,7 +214,7 @@ def camera_feed():
         cv2 = importlib.import_module("cv2")
     except ImportError:
         print("camera demo skipped: OpenCV not installed "
-              "(pip install 'pycanvas[video]').")
+              "(pip install 'danvas[video]').")
         return
     import numpy as np  # OpenCV pulls in numpy
 

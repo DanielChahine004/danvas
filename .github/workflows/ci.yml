@@ -46,8 +46,8 @@ jobs:
         run: |
           /tmp/clean/bin/python - <<'PY'
           import os, threading, time, urllib.request
-          import pycanvas
-          from pycanvas import server
+          import danvas
+          from danvas import server
 
           # 1. The built assets must be packaged, not just index.html.
           assets = os.path.join(server.DIST_DIR, "assets")
@@ -56,7 +56,7 @@ jobs:
           print("packaged assets:", files)
 
           # 2. The server must actually serve index.html and the referenced JS.
-          canvas = pycanvas.Canvas()
+          canvas = danvas.Canvas()
           canvas.label("ci", "hello")
           canvas.serve(port=8137, open_browser=False, block=False)
           time.sleep(1.0)

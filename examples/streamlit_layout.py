@@ -24,10 +24,10 @@ import math
 import random
 import time
 
-import pycanvas
+import danvas
 
 rng = random.Random(42)
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # ── Streamlit root ────────────────────────────────────────────────────────────
 # Sets camera to scroll_y (vertical scroll, zoom=1), returns a full-width

@@ -9,12 +9,12 @@ reconnect-stable identity, without needing a running event loop.
 import json
 
 import pytest
-import pycanvas
-from pycanvas.bridge import Bridge
+import danvas
+from danvas.bridge import Bridge
 
 
 def _panel(bridge, **props):
-    p = pycanvas.React("function Component(){return null}", name="p", props=props)
+    p = danvas.React("function Component(){return null}", name="p", props=props)
     p._bind("p1", bridge)
     return p
 

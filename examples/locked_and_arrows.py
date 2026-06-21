@@ -16,25 +16,25 @@ interaction). The ``lock`` toggle at the bottom flips that live: switch it to
 are bound to the panels, so while unlocked, dragging a panel drags its arrows.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Stage panels at fixed positions: pinned (no move/resize) but still interactive.
 source = canvas.insert(
-    pycanvas.Slider("input", min=0, max=100, default=20),
+    danvas.Slider("input", min=0, max=100, default=20),
     x=80, y=80, draggable=False, resizable=False,
 )
 gain = canvas.insert(
-    pycanvas.Slider("gain", min=1, max=10, default=2),
+    danvas.Slider("gain", min=1, max=10, default=2),
     x=420, y=80, draggable=False, resizable=False,
 )
 output = canvas.insert(
-    pycanvas.Label("output", value="0"),
+    danvas.Label("output", value="0"),
     x=760, y=80, draggable=False, resizable=False,
 )
 status = canvas.insert(
-    pycanvas.Label("status", value="idle"),
+    danvas.Label("status", value="idle"),
     x=420, y=300, draggable=False, resizable=False,
 )
 
@@ -47,7 +47,7 @@ canvas.connect(gain, status, name="monitor", text="monitor", dash="dashed")
 
 # A control panel that stays draggable, plus a toggle to lock/unlock the stages.
 lock = canvas.insert(
-    pycanvas.Toggle("lock", options=["locked", "unlocked"]),
+    danvas.Toggle("lock", options=["locked", "unlocked"]),
     x=80, y=300, draggable=False, resizable=False,
 )
 

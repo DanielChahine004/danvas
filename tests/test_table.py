@@ -2,8 +2,8 @@
 
 import json
 
-import pycanvas
-from pycanvas.components.table import _normalize, _column_profile
+import danvas
+from danvas.components.table import _normalize, _column_profile
 
 
 def test_normalize_list_of_dicts_unions_keys():
@@ -51,7 +51,7 @@ def test_table_is_a_native_react_panel_with_data():
     # The table renders as a native React component (sharp at any zoom): its
     # headers/rows/profiles ride in the JSON `data` prop, the interactive JSX in
     # `source`.
-    props = pycanvas.Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()
+    props = danvas.Table([{"name": "a", "v": 1}, {"name": "b", "v": 2}]).register_props()
     assert "source" in props and "data" in props and "html" not in props
     data = json.loads(props["data"])
     assert data["cols"] == ["name", "v"]
@@ -64,7 +64,7 @@ def test_distribution_data_carries_clickable_predicates():
     # Each column's distribution rides in `data`: numeric bins carry lo/hi (a
     # click filters to that range), categorical bars carry their value. The JSX
     # holds the active-filter chip.
-    props = pycanvas.Table([{"cat": "a", "n": 1}, {"cat": "b", "n": 2},
+    props = danvas.Table([{"cat": "a", "n": 1}, {"cat": "b", "n": 2},
                             {"cat": "a", "n": 9}]).register_props()
     data = json.loads(props["data"])
     cat, num = data["dists"][0], data["dists"][1]
@@ -74,20 +74,20 @@ def test_distribution_data_carries_clickable_predicates():
 
 
 def test_numeric_distribution_caption_has_min_mean_max():
-    data = json.loads(pycanvas.Table({"n": [1, 5, 9]}).register_props()["data"])
+    data = json.loads(danvas.Table({"n": [1, 5, 9]}).register_props()["data"])
     cap = data["dists"][0]["cap"]
     assert cap[0] == "1" and cap[-1] == "9" and cap[1].startswith("μ")
 
 
 def test_table_renders_filter_and_pagination_hooks():
-    src = pycanvas.Table([{"x": 1}, {"x": 2}]).register_props()["source"]
+    src = danvas.Table([{"x": 1}, {"x": 2}]).register_props()["source"]
     assert "pc-filter" in src and "pc-dist" in src and "pc-pager" in src
 
 
 def test_table_auto_height_sets_the_react_flag():
     # h="auto" flows through insert to the React auto-height flag (autoH) — the
     # native counterpart to the old iframe fit machinery.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     t = canvas.table([{"x": 1}], name="data", h="auto")
     assert t._auto_h is True
     assert t.register_props()["autoH"] is True
@@ -96,9 +96,9 @@ def test_table_auto_height_sets_the_react_flag():
 def test_table_defaults_to_auto_height():
     # React-based panels (Table included) fit their content by default; pinning a
     # numeric height turns auto-height off.
-    t = pycanvas.Table([{"x": 1}])           # no height given → auto-fit
+    t = danvas.Table([{"x": 1}])           # no height given → auto-fit
     assert t._auto_h is True
     assert t.register_props()["autoH"] is True
-    pinned = pycanvas.Table([{"x": 1}], h=300)
+    pinned = danvas.Table([{"x": 1}], h=300)
     assert pinned._auto_h is False
     assert pinned.register_props()["autoH"] is False

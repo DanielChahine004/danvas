@@ -6,7 +6,7 @@ touching the shared (broadcast) props. A stub bridge records the targeted sends.
 
 import json
 
-import pycanvas
+import danvas
 
 
 class StubBridge:
@@ -26,7 +26,7 @@ class StubBridge:
 
 
 def make():
-    panel = pycanvas.React("function Component(){return null}", name="p",
+    panel = danvas.React("function Component(){return null}", name="p",
                            props={"a": 1})
     bridge = StubBridge()
     panel._bind("p1", bridge)

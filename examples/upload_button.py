@@ -22,9 +22,9 @@ import csv
 import io
 import os
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # 1) In-memory: parse an uploaded CSV and show it as a sortable table.
 csv_up = canvas.upload("csv", text="Upload a CSV", accept=".csv",

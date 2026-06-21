@@ -4,8 +4,8 @@ import types
 
 import pytest
 
-import pycanvas
-from pycanvas import bake
+import danvas
+from danvas import bake
 
 
 def test_build_args_core_flags():
@@ -22,10 +22,10 @@ def test_build_args_core_flags():
     data = args[args.index("--add-data") + 1]
     src, dest = data.split(os.pathsep)
     assert src == "/proj/pycanvas/frontend/dist"
-    # Embedded under a non-pycanvas name so it can't shadow the real package.
+    # Embedded under a non-danvas name so it can't shadow the real package.
     assert dest == "pcframe/dist"
     # Lazy-imported backends are collected wholesale.
-    assert ["--collect-submodules", "pycanvas"] == [
+    assert ["--collect-submodules", "danvas"] == [
         args[args.index("--collect-submodules") - 0],
         args[args.index("--collect-submodules") + 1],
     ]
@@ -73,7 +73,7 @@ def test_build_app_missing_entry():
 def _capture_build_args(monkeypatch, tmp_path, **kwargs):
     """Run build_app with PyInstaller/frontend stubbed, returning the arg list."""
     entry = tmp_path / "app.py"
-    entry.write_text("import pycanvas\n")
+    entry.write_text("import danvas\n")
     monkeypatch.setattr(bake, "_frontend_dist", lambda: str(tmp_path))
     monkeypatch.setattr(bake, "_conda_mkl_binaries", lambda: [])
     captured = {}
@@ -130,8 +130,8 @@ def test_include_overrides_default_exclude(monkeypatch, tmp_path):
 def test_bake_runs_app_when_frozen(monkeypatch):
     # Inside the built executable, bake() must NOT rebuild — it delegates to
     # serve() in desktop mode so the .exe just launches the canvas.
-    monkeypatch.setattr(pycanvas.canvas.sys, "frozen", True, raising=False)
-    canvas = pycanvas.Canvas()
+    monkeypatch.setattr(danvas.canvas.sys, "frozen", True, raising=False)
+    canvas = danvas.Canvas()
     captured = {}
 
     def fake_serve(**kwargs):

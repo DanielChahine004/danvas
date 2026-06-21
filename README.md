@@ -1,4 +1,4 @@
-# PyCanvas
+# danvas
 
 A browser-based spatial canvas whose panels are defined and controlled entirely
 from Python. Panels are bidirectional — Python pushes data to them and reads
@@ -13,7 +13,7 @@ code-split and only downloaded when a Repl panel first appears.
 ## Install
 
 ```bash
-pip install dans-pycanvas
+pip install danvas
 ```
 
 For local development, clone the repo and install in editable mode instead:
@@ -26,10 +26,10 @@ The base install is lightweight. Heavier features are optional extras:
 
 | Extra | Enables |
 |---|---|
-| `pip install "dans-pycanvas[video]"` | `VideoFeed` JPEG encoding (OpenCV, ~90 MB) |
-| `pip install "dans-pycanvas[audio]"` | microphone capture for `AudioFeed` |
-| `pip install "dans-pycanvas[tunnel]"` | public sharing (`serve(tunnel=True)`) |
-| `pip install "dans-pycanvas[desktop]"` | native window + `bake()` to a standalone app |
+| `pip install "danvas[video]"` | `VideoFeed` JPEG encoding (OpenCV, ~90 MB) |
+| `pip install "danvas[audio]"` | microphone capture for `AudioFeed` |
+| `pip install "danvas[tunnel]"` | public sharing (`serve(tunnel=True)`) |
+| `pip install "danvas[desktop]"` | native window + `bake()` to a standalone app |
 
 `canvas.video(...)` needs `[video]` for default encoding — or stream
 already-JPEG bytes with `VideoFeed(encode=False)`, which needs nothing.
@@ -37,9 +37,9 @@ already-JPEG bytes with `VideoFeed(encode=False)`, which needs nothing.
 ## Hello world
 
 ```python
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 servo  = canvas.slider("servo_1", min=0, max=180, default=90)
 status = canvas.label("status", "idle")
 
@@ -69,9 +69,9 @@ shared worker stays free.
 The lifecycle is always the same handful of steps:
 
 ```python
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()                        # 1. make a canvas
+canvas = danvas.Canvas()                        # 1. make a canvas
 speed  = canvas.slider("speed", min=0, max=100)   # 2. make components (panels)
 status = canvas.label("status", "idle")
 
@@ -96,7 +96,7 @@ This README follows those five steps — [1. The canvas](#1-the-canvas),
 
 # 1. The canvas
 
-`pycanvas.Canvas()` is the document everything hangs off. You build panels with
+`danvas.Canvas()` is the document everything hangs off. You build panels with
 its factories (step 2) and reach or manage them through it:
 
 ```python
@@ -163,7 +163,7 @@ servo = canvas.slider("servo", min=0, max=180, default=90, label="Servo 1", x=80
 The two-step form builds now, places later (or onto another canvas):
 
 ```python
-s = pycanvas.Slider("servo_1", min=0, max=180, default=90)
+s = danvas.Slider("servo_1", min=0, max=180, default=90)
 canvas.insert(s, x=80, y=80)
 ```
 
@@ -281,9 +281,9 @@ values: `"black"`, `"blue"`, `"green"`, `"grey"`, `"light-blue"`, `"light-green"
 
 ```python
 import math
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Geo shapes
 box   = canvas.geo(x=40, y=40, w=200, h=120, geo="rectangle", color="blue", fill="semi")
@@ -618,7 +618,7 @@ canvas.show(model)                 # _repr_html_/_repr_png_ → its rich view
 
 Dispatch is conservative (single `*italic*` isn't Markdown; a path must be a
 real file). No `name` → fresh panel each call; `name=` replaces in place.
-`pycanvas.panel_for(value)` builds without inserting. Matplotlib figures are
+`danvas.panel_for(value)` builds without inserting. Matplotlib figures are
 released from pyplot after rendering — no manual `plt.close()`.
 
 ## Create your own components
@@ -1136,7 +1136,7 @@ All of `serve()`'s options in one place:
 | `ui_inspector` | auto¹ | toolbar button letting viewers spawn an Inspector |
 | `ui_graveyard` | auto¹ | toolbar button listing panels deleted from the canvas (restore without restarting) |
 | `desktop` | auto² | open a native window (pywebview) instead of the browser |
-| `window_title` / `window_size` | `"PyCanvas"` / `(1200, 800)` | native-window caption / size |
+| `window_title` / `window_size` | `"danvas"` / `(1200, 800)` | native-window caption / size |
 | `debug` | `False` | log every WebSocket frame to the console |
 
 ¹ on by default only for a private local bind (no tunnel, loopback host).
@@ -1310,7 +1310,7 @@ intent explicit and is the idiomatic choice here.
 `serve(block=False)` returns immediately so later cells edit the open canvas:
 
 ```python
-canvas = pycanvas.Canvas().serve(port=8000, block=False)
+canvas = danvas.Canvas().serve(port=8000, block=False)
 servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
 canvas.remove(servo)
 canvas.stop()
@@ -1322,11 +1322,11 @@ triggered by the bridge, not by which cell you're in). `hot_reload` isn't
 available here, so `background`'s monitor caveat doesn't apply: its threads
 simply start when you call `serve(block=False)`, in the kernel.
 
-`canvas.capture_cells(cols=2)` (alias `pycanvas.autopanel(canvas)`) mirrors
+`canvas.capture_cells(cols=2)` (alias `danvas.autopanel(canvas)`) mirrors
 every expression cell's output to its own auto-arranged panel (rendered via
 `show()`); re-running a cell swaps its panel in place, keeping any geometry you
-dragged. Override one cell with a `# pycanvas: x=40 y=80 w=600 locked=true`
-directive line (or `# pycanvas: skip`); pass `auto=False` to flip to an
+dragged. Override one cell with a `# danvas: x=40 y=80 w=600 locked=true`
+directive line (or `# danvas: skip`); pass `auto=False` to flip to an
 allowlist. Stop with `stop_capturing_cells()`.
 
 In a plain script, a daemon background server dies with the process — call
@@ -1340,11 +1340,11 @@ interactions back to whichever canvas owns each panel — computation stays
 sharded.
 
 ```bash
-python -m pycanvas.merge :8001 :8002 host3:8003 --port 8080
+python -m danvas.merge :8001 :8002 host3:8003 --port 8080
 ```
 
 ```python
-from pycanvas import Merge
+from danvas import Merge
 Merge([8001, 8002]).serve(port=8080)                  # blocks
 Merge(["https://a.trycloudflare.com", ":8002"]).serve(port=8080, tunnel=True)
 ```
@@ -1430,8 +1430,8 @@ Build without editing the script via the CLI (your existing `serve()`
 auto-switches to a native window when frozen):
 
 ```bash
-python -m pycanvas.bake your_script.py --name RobotConsole
-python -m pycanvas.bake your_script.py --onedir --icon app.ico
+python -m danvas.bake your_script.py --name RobotConsole
+python -m danvas.bake your_script.py --onedir --icon app.ico
 ```
 
 Needs `[desktop]`. Only the packages your script imports are bundled (heavy
@@ -1446,7 +1446,7 @@ canvas.bake(name="App", exclude=["torch"])        # skip a dep that breaks the b
 
 ## How it works
 
-PyCanvas is two halves joined by **one WebSocket**: your Python process, and a
+danvas is two halves joined by **one WebSocket**: your Python process, and a
 pre-built browser frontend (tldraw + React) it serves. You never touch the
 frontend — it ships compiled in the package.
 
@@ -1481,10 +1481,10 @@ across reconnects and restarts. Under `hot_reload`, a long-lived *monitor* proce
 re-execs the worker on each save and owns the tunnel + the cookie secret, so the
 public URL and everyone's session survive edits.
 
-**Where to look:** `pycanvas/canvas.py` (the `Canvas` façade + factories),
-`pycanvas/bridge.py` (the wire / replay / per-viewer sends), `pycanvas/server.py`
-(FastAPI app + auth), `pycanvas/components/` (the panels), and
-`pycanvas/frontend/src/bridge.js` (the browser side).
+**Where to look:** `danvas/canvas.py` (the `Canvas` façade + factories),
+`danvas/bridge.py` (the wire / replay / per-viewer sends), `danvas/server.py`
+(FastAPI app + auth), `danvas/components/` (the panels), and
+`danvas/frontend/src/bridge.js` (the browser side).
 
 ## Debugging the wire
 
@@ -1555,16 +1555,16 @@ matplotlib/plotly examples need `pip install matplotlib plotly`.
 
 ## Developing the frontend
 
-The built bundle lives in `pycanvas/frontend/dist/` and is committed. Rebuild:
+The built bundle lives in `danvas/frontend/dist/` and is committed. Rebuild:
 
 ```bash
-cd pycanvas/frontend
+cd danvas/frontend
 npm install
 npm run build          # npm run dev + http://localhost:5173/?demo for standalone UI work
 ```
 
 ## Licence
 
-pycanvas is licensed under the [GNU Affero General Public License v3.0](LICENSE)
+danvas is licensed under the [GNU Affero General Public License v3.0](LICENSE)
 (AGPL-3.0). Commercial licences are available on request via
 daniel.chahine004@gmail.com.

@@ -12,9 +12,9 @@ sends ints. Type a non-number into a field and submit — the console logs a
 "dropped …" line and the catalogue is unchanged (the handler never ran).
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 catalogue = {"Widget": {"price": 10, "stock": 5}}
 

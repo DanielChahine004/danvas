@@ -31,10 +31,10 @@ import math
 import random
 import time
 
-import pycanvas
+import danvas
 
 rng = random.Random(42)
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 
 # ── Root column ──────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""PyCanvas, explained by PyCanvas.
+"""danvas, explained by danvas.
 
 A canvas that diagrams *itself*: how the browser and Python connect, which
 thread does what, and how state stays in sync across viewers. Every panel is
@@ -23,9 +23,9 @@ Run it:  ``python examples/architecture.py``   (then open a second tab too).
 import threading
 import time
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 
 # ── Shared styling (one global sheet, the canvas.style() convention) ──────────

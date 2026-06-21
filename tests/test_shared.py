@@ -7,11 +7,11 @@ and broadcast live; the tests cover the Python-side state and the wire frame
 
 import pytest
 
-import pycanvas
+import danvas
 
 
 def _canvas():
-    return pycanvas.Canvas()
+    return danvas.Canvas()
 
 
 _PILL = ("function StatusPill({ kind, children }) "

@@ -3,10 +3,10 @@ import threading
 
 from fastapi.testclient import TestClient
 
-import pycanvas
-from pycanvas import server
-from pycanvas.bridge import Bridge
-from pycanvas.components import UploadedFile
+import danvas
+from danvas import server
+from danvas.bridge import Bridge
+from danvas.components import UploadedFile
 
 
 class FakeBridge:
@@ -31,7 +31,7 @@ def _props(up):
 
 
 def test_props_carry_token_url_and_options():
-    up = pycanvas.Upload("up", text="Send", accept=".csv", multiple=True)
+    up = danvas.Upload("up", text="Send", accept=".csv", multiple=True)
     p = _props(up)
     assert p["text"] == "Send"
     assert p["accept"] == ".csv"
@@ -40,14 +40,14 @@ def test_props_carry_token_url_and_options():
 
 
 def test_bind_registers_token_with_bridge():
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     bridge = FakeBridge()
     up._bind("u1", bridge)
     assert bridge.uploads[up._token] is up
 
 
 def test_receive_upload_fires_callback_and_sets_value():
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     up._bind("u1", FakeBridge())
     got = []
     up.on_upload(lambda f: got.append(f))
@@ -61,7 +61,7 @@ def test_receive_upload_fires_callback_and_sets_value():
 
 
 def test_callback_can_receive_viewer():
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     up._bind("u1", FakeBridge())
     seen = {}
     up.on_upload(lambda f, viewer: seen.update(viewer))
@@ -81,7 +81,7 @@ def test_uploadedfile_read_and_save_from_memory(tmp_path):
 
 
 def test_factory_inserts_and_places():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     up = canvas.upload("up", text="Send", x=10, y=20)
     assert up.component == "React"
     assert up.x == 10 and up.y == 20
@@ -90,7 +90,7 @@ def test_factory_inserts_and_places():
 # -- end-to-end through the HTTP route ------------------------------------------
 
 def _app_with(component):
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.insert(component)
     return canvas, TestClient(server.create_app(canvas._bridge, open_browser=False))
 
@@ -113,7 +113,7 @@ def _capture(up):
 
 
 def test_http_upload_in_memory_fires_handler():
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     _canvas, client = _app_with(up)
     box = _capture(up)
 
@@ -127,7 +127,7 @@ def test_http_upload_in_memory_fires_handler():
 
 
 def test_http_upload_streams_to_dest(tmp_path):
-    up = pycanvas.Upload("up", dest=str(tmp_path))
+    up = danvas.Upload("up", dest=str(tmp_path))
     _canvas, client = _app_with(up)
     box = _capture(up)
 
@@ -141,20 +141,20 @@ def test_http_upload_streams_to_dest(tmp_path):
 
 
 def test_http_upload_rejects_oversize():
-    up = pycanvas.Upload("up", max_size=10)
+    up = danvas.Upload("up", max_size=10)
     _canvas, client = _app_with(up)
     r = client.post(f"/__upload__/{up._token}?name=big", content=b"x" * 50)
     assert r.status_code == 413
 
 
 def test_http_upload_unknown_token_404():
-    _canvas, client = _app_with(pycanvas.Upload("up"))
+    _canvas, client = _app_with(danvas.Upload("up"))
     r = client.post("/__upload__/nope?name=x", content=b"x")
     assert r.status_code == 404
 
 
 def test_http_upload_filename_cannot_escape_dest(tmp_path):
-    up = pycanvas.Upload("up", dest=str(tmp_path))
+    up = danvas.Upload("up", dest=str(tmp_path))
     _canvas, client = _app_with(up)
     box = _capture(up)
 
@@ -169,7 +169,7 @@ def test_http_upload_filename_cannot_escape_dest(tmp_path):
 
 def test_bridge_register_and_remove_purges_token():
     bridge = Bridge()
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     up._bind("u1", bridge)
     assert bridge.upload_component(up._token) is up
     bridge.remove_component("u1")
@@ -206,7 +206,7 @@ def test_resolve_viewer_unknown_id_keeps_uniform_shape():
 
 def test_http_upload_attributes_to_a_connected_viewer():
     """An end-to-end upload carrying a live viewer id resolves to that identity."""
-    up = pycanvas.Upload("up")
+    up = danvas.Upload("up")
     canvas, client = _app_with(up)
     box = _capture(up)
 

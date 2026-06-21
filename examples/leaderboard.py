@@ -6,9 +6,9 @@ Viewer (password "view"):  sees the leaderboard only (read-only).
 Both views live on the same port — which password you type determines what you see.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 scores = {}  # team -> points
 
@@ -144,5 +144,5 @@ canvas.serve(
         "admin":  "admin",
         "viewer": "view",
     },
-    tunnel=True,  # open a public URL via pycanvas.app (for easy sharing and testing
+    tunnel=True,  # open a public URL via danvas.app (for easy sharing and testing
 )

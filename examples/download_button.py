@@ -18,9 +18,9 @@ import io
 import os
 import time
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # 1) A static file: serve this very script. ``filename`` sets the saved-as name
 #    (otherwise the path's basename is used).

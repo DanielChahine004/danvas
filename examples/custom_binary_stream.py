@@ -21,12 +21,12 @@ import math
 import struct
 import time
 
-import pycanvas
+import danvas
 
 N = 512          # samples per frame (one oscilloscope sweep)
 FPS = 60         # frames per second -> ~512 * 60 * 4 bytes ≈ 125 KB/s of raw f32
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # The panel: an HTML <canvas> that decodes each binary push and draws it. Control
 # messages (none here, but the branch shows the pattern) would arrive as plain

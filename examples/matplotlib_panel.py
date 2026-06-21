@@ -13,7 +13,7 @@ matplotlib.use("Agg")  # headless backend; no GUI window
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pycanvas
+import danvas
 
 
 def render_plot(freq):
@@ -21,7 +21,7 @@ def render_plot(freq):
     x = np.linspace(0, 2 * np.pi, 500)
     fig, ax = plt.subplots(figsize=(4.4, 3.0), dpi=100)
     ax.plot(x, np.sin(freq * x), color="#2563eb", lw=2)
-    ax.set_title(f"sin({freq}·x)")
+    ax.set_title(f"sin({freq}Â·x)")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
 
@@ -37,11 +37,11 @@ def render_plot(freq):
     )
 
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
-freq = canvas.insert(pycanvas.Slider("frequency", min=1, max=10, default=3))
+freq = canvas.insert(danvas.Slider("frequency", min=1, max=10, default=3))
 plot = canvas.insert(
-    pycanvas.Custom(html=render_plot(3), name="matplotlib", w=460, h=380)
+    danvas.Custom(html=render_plot(3), name="matplotlib", w=460, h=380)
 )
 
 

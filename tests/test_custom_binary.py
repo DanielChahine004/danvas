@@ -1,5 +1,5 @@
-import pycanvas
-from pycanvas.bridge import BINARY_CUSTOM
+import danvas
+from danvas.bridge import BINARY_CUSTOM
 
 
 class FakeBridge:
@@ -19,7 +19,7 @@ class FakeBridge:
 
 def test_push_binary_sends_binary_frame():
     bridge = FakeBridge()
-    panel = pycanvas.Custom(html="<div></div>", name="cam")
+    panel = danvas.Custom(html="<div></div>", name="cam")
     panel._bind("c1", bridge)
     panel.push_binary(b"\x00\x01\x02raw-bytes")
 
@@ -36,7 +36,7 @@ def test_push_binary_sends_binary_frame():
 
 def test_push_binary_accepts_bytearray_and_memoryview():
     bridge = FakeBridge()
-    panel = pycanvas.Custom(html="<div></div>", name="cam")
+    panel = danvas.Custom(html="<div></div>", name="cam")
     panel._bind("c1", bridge)
     panel.push_binary(bytearray(b"abc"))
     panel.push_binary(memoryview(b"def"))
@@ -46,7 +46,7 @@ def test_push_binary_accepts_bytearray_and_memoryview():
 
 def test_push_binary_latest_queue_conflates():
     bridge = FakeBridge()
-    panel = pycanvas.Custom(html="<div></div>", name="cam")
+    panel = danvas.Custom(html="<div></div>", name="cam")
     panel.queue = "latest"   # like VideoFeed: drop stale buffers for a slow viewer
     panel._bind("c1", bridge)
     panel.push_binary(b"frame")

@@ -12,9 +12,9 @@ just shows the window. Building needs the desktop extra:
 ``pip install -e ".[desktop]"``.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 speed = canvas.slider("speed", min=0, max=100, default=20, x=80, y=80)
 status = canvas.label("status", value="idle", x=80, y=200)

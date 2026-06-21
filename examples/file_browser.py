@@ -10,9 +10,9 @@ Run:  python examples/file_browser.py
 
 import os
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Browse the repo's examples/ folder by default; point this anywhere you like.
 ROOT = os.path.dirname(os.path.abspath(__file__))

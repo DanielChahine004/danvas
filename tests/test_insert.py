@@ -5,27 +5,27 @@ import warnings
 
 import pytest
 
-import pycanvas
+import danvas
 
 
 def test_factories_accept_queue_kwarg():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     lbl = canvas.label("status", queue="latest")
     assert lbl.queue == "latest"
     # None (the default) keeps the component's own policy.
-    feed = pycanvas.VideoFeed("cam")           # VideoFeed defaults to "latest"
+    feed = danvas.VideoFeed("cam")           # VideoFeed defaults to "latest"
     canvas.insert(feed)
     assert feed.queue == "latest"
 
 
 def test_insert_rejects_bad_queue():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with pytest.raises(ValueError):
         canvas.label("status", queue="newest")
 
 
 def test_below_and_right_of_derive_position():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a", x=100, y=200, w=300, h=80)
     b = canvas.label("b", below=a)
     assert (b.x, b.y) == (100, 200 + 80 + 16)
@@ -34,7 +34,7 @@ def test_below_and_right_of_derive_position():
 
 
 def test_above_and_left_of_offset_by_own_size():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a", x=500, y=500, w=200, h=100)
     b = canvas.label("b", above=a, w=150, h=60, gap=10)
     assert (b.x, b.y) == (500, 500 - 10 - 60)
@@ -43,7 +43,7 @@ def test_above_and_left_of_offset_by_own_size():
 
 
 def test_two_anchors_each_set_their_axis():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a", x=0, y=0, w=100, h=50)
     b = canvas.label("b", x=400, y=0, w=100, h=50)
     c = canvas.label("c", below=a, right_of=b, gap=10)
@@ -51,7 +51,7 @@ def test_two_anchors_each_set_their_axis():
 
 
 def test_anchor_by_name_and_explicit_coordinate_wins():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.label("a", x=100, y=100, w=100, h=50)
     b = canvas.label("b", below="a", x=999)
     assert (b.x, b.y) == (999, 100 + 50 + 16)
@@ -60,7 +60,7 @@ def test_anchor_by_name_and_explicit_coordinate_wins():
 def test_unplaced_anchor_defers():
     # An anchor without a position no longer raises; the relative placement is
     # deferred and applied once the anchor's position is reported by the browser.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a")               # auto-cascade: no Python-side position
     b = canvas.label("b", below=a)      # used to raise; now defers silently
     assert b.x is None and b.y is None  # no position yet — deferred
@@ -70,7 +70,7 @@ def test_unplaced_anchor_defers():
 
 
 def test_unknown_anchor_still_raises():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     with pytest.raises(ValueError, match="not a component"):
         canvas.label("c", below="ghost")
 
@@ -80,7 +80,7 @@ def test_matplotlib_figure_released_after_render():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from pycanvas.components.image import _to_data_uri
+    from danvas.components.image import _to_data_uri
 
     fig, ax = plt.subplots()
     ax.plot([0, 1], [1, 0])
@@ -94,7 +94,7 @@ def test_matplotlib_figure_released_after_render():
 
 
 def test_clear_removes_all_panels_and_arrows():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     a = canvas.label("a", x=0, y=0)
     b = canvas.label("b", x=100, y=0)
     canvas.connect(a, b, name="ab")
@@ -110,7 +110,7 @@ def test_clear_removes_all_panels_and_arrows():
 
 
 def test_restore_layout_warns_on_missing_panel():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.label("present", x=0, y=0)
     saved = canvas._layout()
     saved["components"].append({"name": "ghost", "id": "deadbeef",
@@ -125,7 +125,7 @@ def test_restore_layout_warns_on_missing_panel():
 
 
 def test_save_blocking_false_returns_future(tmp_path):
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.label("hello", value="world")
     path = tmp_path / "canvas.json"
 

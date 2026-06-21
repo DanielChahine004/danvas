@@ -10,7 +10,7 @@ Run:  python examples/react_request.py
 Then type a number and click "factorize".
 """
 
-import pycanvas
+import danvas
 
 PANEL = r"""
 function Component({ canvas }) {
@@ -61,7 +61,7 @@ function Component({ canvas }) {
 }
 """
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 panel = canvas.react(PANEL, name="rpc", label="canvas.request → on_request",
                      x=120, y=120, w=320, h=150)
 

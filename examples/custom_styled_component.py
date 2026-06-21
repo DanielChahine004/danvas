@@ -1,4 +1,4 @@
-import pycanvas
+import danvas
 
 # 1. PASTE RAW CSS FROM UIVERSE
 CSS = """
@@ -213,15 +213,15 @@ HTML = f"""
         </div>
         <div>Sunny</div>
       </div>
-      <div class="temperature">36°</div>
-      <div class="range">42°/28°</div>
+      <div class="temperature">36Â°</div>
+      <div class="range">42Â°/28Â°</div>
     </div>
     <div class="right-side">
       <div>
         <div class="hour">23:56</div>
         <div class="date">MON 08-23</div>
       </div>
-      <div class="city">A Coruña</div>
+      <div class="city">A CoruÃ±a</div>
     </div>
   </section>
   <section class="days-section">
@@ -332,11 +332,11 @@ HTML = f"""
 
 
 def main():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
 
     # html and css are pasted straight from uiverse.io; Custom composes them
     # into one iframe document under the hood (a js= string works the same way).
-    panel = pycanvas.Custom(html=HTML, css=CSS, w=300, h=200)
+    panel = danvas.Custom(html=HTML, css=CSS, w=300, h=200)
 
     # grabbable=False: the widget is hover/click-live immediately and the
     # user can never select it (move it from Python). frame=False strips the

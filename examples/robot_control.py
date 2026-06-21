@@ -11,28 +11,28 @@ import time
 
 import numpy as np
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
-# This example uses the explicit two-step form: pycanvas.X(...) builds the panel
+# This example uses the explicit two-step form: danvas.X(...) builds the panel
 # object, canvas.insert(...) places it. Reach for this when you want to construct
 # a panel up front and insert it later (or into a different canvas). For the
 # common build-and-place-now case, the canvas.<component>(...) factories are
 # shorter -- see hello_world.py and sensor_dashboard.py.
-servo_1 = canvas.insert(pycanvas.Slider("servo_1", min=0, max=180, default=90))
-servo_2 = canvas.insert(pycanvas.Slider("servo_2", min=0, max=180, default=45))
-mode = canvas.insert(pycanvas.Toggle("mode", options=["manual", "vision"]))
-status = canvas.insert(pycanvas.Label("status", value="idle"))
+servo_1 = canvas.insert(danvas.Slider("servo_1", min=0, max=180, default=90))
+servo_2 = canvas.insert(danvas.Slider("servo_2", min=0, max=180, default=45))
+mode = canvas.insert(danvas.Toggle("mode", options=["manual", "vision"]))
+status = canvas.insert(danvas.Label("status", value="idle"))
 plot = canvas.insert(
-    pycanvas.LivePlot(
+    danvas.LivePlot(
         name="servo history",
         traces=["servo_1", "servo_2"],
         max_points=200,
         layout={"yaxis": {"range": [0, 180]}},
     )
 )
-feed = canvas.insert(pycanvas.VideoFeed("camera"))
+feed = canvas.insert(danvas.VideoFeed("camera"))
 
 
 @servo_1.on_change

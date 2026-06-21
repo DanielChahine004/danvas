@@ -5,8 +5,8 @@ the actor's roster dict ({id, name, color, role}); one-arg handlers are untouche
 These cover the input, request, and layout paths threaded through the bridge.
 """
 
-import pycanvas
-from pycanvas.bridge import Bridge
+import danvas
+from danvas.bridge import Bridge
 
 VIEWER = {"id": "v1", "name": "Fox", "color": "#ef4444", "role": "admin"}
 
@@ -19,7 +19,7 @@ def _bridge_with_viewer():
 
 def test_on_change_receives_viewer():
     bridge = _bridge_with_viewer()
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._bind("s1", bridge)
     seen = {}
     s.on_change(lambda value, viewer: seen.update(viewer))
@@ -31,7 +31,7 @@ def test_on_change_receives_viewer():
 
 def test_on_change_without_viewer_still_works():
     bridge = _bridge_with_viewer()
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._bind("s1", bridge)
     got = []
     s.on_change(lambda value: got.append(value))
@@ -43,7 +43,7 @@ def test_on_change_without_viewer_still_works():
 
 def test_on_layout_receives_viewer():
     bridge = _bridge_with_viewer()
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._bind("s1", bridge)
     seen = {}
     s.on_layout(lambda comp, viewer: seen.update(viewer))
@@ -56,7 +56,7 @@ def test_on_layout_receives_viewer():
 
 def test_on_layout_without_viewer_still_works():
     bridge = _bridge_with_viewer()
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._bind("s1", bridge)
     moved = []
     s.on_layout(lambda comp: moved.append(comp))
@@ -68,7 +68,7 @@ def test_on_layout_without_viewer_still_works():
 
 def test_on_request_receives_viewer():
     bridge = _bridge_with_viewer()
-    panel = pycanvas.React("function Component(){ return null; }", name="r")
+    panel = danvas.React("function Component(){ return null; }", name="r")
     panel._bind("r1", bridge)
     got = {}
 
@@ -84,7 +84,7 @@ def test_on_request_receives_viewer():
 
 def test_on_request_without_viewer_still_works():
     bridge = _bridge_with_viewer()
-    panel = pycanvas.React("function Component(){ return null; }", name="r")
+    panel = danvas.React("function Component(){ return null; }", name="r")
     panel._bind("r1", bridge)
 
     @panel.on_request("double")
@@ -97,7 +97,7 @@ def test_on_request_without_viewer_still_works():
 
 def test_unknown_socket_yields_empty_viewer_not_crash():
     bridge = Bridge()   # no viewers registered
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._bind("s1", bridge)
     seen = []
     s.on_change(lambda value, viewer: seen.append(viewer))

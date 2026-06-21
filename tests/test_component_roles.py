@@ -5,7 +5,7 @@ newly allowed roles and dropping it from removed ones. A stub bridge records the
 calls (the real bridge's pushes no-op until it's serving).
 """
 
-import pycanvas
+import danvas
 
 
 class StubBridge:
@@ -21,7 +21,7 @@ class StubBridge:
 
 
 def make(roles):
-    s = pycanvas.Slider("s")
+    s = danvas.Slider("s")
     s._roles = list(roles)
     bridge = StubBridge()
     s._bind("s1", bridge)

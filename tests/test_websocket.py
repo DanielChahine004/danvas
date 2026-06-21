@@ -5,14 +5,14 @@ import time
 
 from fastapi.testclient import TestClient
 
-import pycanvas
-from pycanvas import server
+import danvas
+from danvas import server
 
 
 def build_client():
-    canvas = pycanvas.Canvas()
-    slider = canvas.insert(pycanvas.Slider("servo", min=0, max=180, default=90))
-    label = canvas.insert(pycanvas.Label("status", value="idle"))
+    canvas = danvas.Canvas()
+    slider = canvas.insert(danvas.Slider("servo", min=0, max=180, default=90))
+    label = canvas.insert(danvas.Label("status", value="idle"))
     app = server.create_app(canvas._bridge, open_browser=False)
     return canvas, slider, label, app
 
@@ -62,7 +62,7 @@ def test_register_message_carries_initial_locks():
     reading the old attribute names, so initial locks silently defaulted to "on"
     and only took effect after a later set_layout. Guard the mapping here.
     """
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     locked = canvas.label("pinned", "x", draggable=False, operable=False,
                           grabbable=False)
     free = canvas.label("free", "y")
@@ -272,9 +272,9 @@ def test_presence_count_broadcast():
 
 def _rpc_app(event, fn):
     """A canvas with one React panel whose @on_request(event) handler is fn."""
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     panel = canvas.insert(
-        pycanvas.React(source="function Component(){ return null }", name="rpc")
+        danvas.React(source="function Component(){ return null }", name="rpc")
     )
     panel.on_request(event)(fn)
     return canvas, panel, server.create_app(canvas._bridge, open_browser=False)

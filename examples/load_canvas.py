@@ -12,7 +12,7 @@ to every browser that connects (including reloads), so we load first, then serve
 
 import os
 
-import pycanvas
+import danvas
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CANVAS_FILE = os.path.join(HERE, "saved_canvas.json")
@@ -23,15 +23,15 @@ if not os.path.exists(CANVAS_FILE):
         "Run examples/readback_and_save.py first and press 's' to save one."
     )
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 # Recreate the panels in code — same labels as readback_and_save.py so the saved
 # formation can be matched back onto them.
-speed = canvas.insert(pycanvas.Slider("speed", min=0, max=100, default=30),
+speed = canvas.insert(danvas.Slider("speed", min=0, max=100, default=30),
                       x=80, y=80)
-gain = canvas.insert(pycanvas.Slider("gain", min=1, max=10, default=2),
+gain = canvas.insert(danvas.Slider("gain", min=1, max=10, default=2),
                      x=80, y=220)
-moved = canvas.insert(pycanvas.Label("last_moved", value="drag a panel…"),
+moved = canvas.insert(danvas.Label("last_moved", value="drag a panel…"),
                       x=420, y=80, w=300)
 
 # One call restores both the panel formation and the freehand drawings.

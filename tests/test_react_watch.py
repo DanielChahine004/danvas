@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-import pycanvas
+import danvas
 
 
 class RecordingBridge:
@@ -27,7 +27,7 @@ def _wait_for(pred, timeout=3.0):
 def test_watch_reloads_source_on_change(tmp_path):
     f = tmp_path / "panel.jsx"
     f.write_text("function Component(){ return 1; }", encoding="utf-8")
-    panel = pycanvas.React(path=str(f))
+    panel = danvas.React(path=str(f))
     bridge = RecordingBridge()
     panel._bind("p1", bridge)
 
@@ -45,7 +45,7 @@ def test_watch_reloads_source_on_change(tmp_path):
 def test_watch_does_not_push_on_startup(tmp_path):
     f = tmp_path / "panel.jsx"
     f.write_text("function Component(){ return 1; }", encoding="utf-8")
-    panel = pycanvas.React(path=str(f))
+    panel = danvas.React(path=str(f))
     bridge = RecordingBridge()
     panel._bind("p1", bridge)
 
@@ -62,7 +62,7 @@ def test_watch_css_path(tmp_path):
     src.write_text("function Component(){ return null; }", encoding="utf-8")
     css = tmp_path / "p.css"
     css.write_text(".a{color:red}", encoding="utf-8")
-    panel = pycanvas.React(path=str(src), css=".a{color:red}")
+    panel = danvas.React(path=str(src), css=".a{color:red}")
     bridge = RecordingBridge()
     panel._bind("p1", bridge)
 
@@ -76,6 +76,6 @@ def test_watch_css_path(tmp_path):
 
 
 def test_watch_without_path_raises():
-    panel = pycanvas.React(source="function Component(){ return null; }")
+    panel = danvas.React(source="function Component(){ return null; }")
     with pytest.raises(ValueError):
         panel.watch()

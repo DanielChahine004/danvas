@@ -6,8 +6,8 @@ import pytest
 # deliberately doesn't install the heavy video extra.
 pytest.importorskip("cv2")
 
-import pycanvas
-from pycanvas.bridge import BINARY_VIDEO
+import danvas
+from danvas.bridge import BINARY_VIDEO
 
 
 class FakeBridge:
@@ -33,7 +33,7 @@ def _frame():
 
 def test_video_update_sends_binary_jpeg_frame():
     bridge = FakeBridge()
-    feed = pycanvas.VideoFeed("cam")  # defaults to queue="latest"
+    feed = danvas.VideoFeed("cam")  # defaults to queue="latest"
     feed._bind("v1", bridge)
     feed.update(_frame())
 
@@ -51,7 +51,7 @@ def test_video_update_sends_binary_jpeg_frame():
 
 def test_video_fifo_uses_plain_binary_broadcast():
     bridge = FakeBridge()
-    feed = pycanvas.VideoFeed("cam", queue="fifo")
+    feed = danvas.VideoFeed("cam", queue="fifo")
     feed._bind("v1", bridge)
     feed.update(_frame())
     assert bridge.conflated == []
@@ -60,7 +60,7 @@ def test_video_fifo_uses_plain_binary_broadcast():
 
 def test_video_encode_false_sends_bytes_unchanged():
     bridge = FakeBridge()
-    feed = pycanvas.VideoFeed("cam", encode=False, queue="fifo")
+    feed = danvas.VideoFeed("cam", encode=False, queue="fifo")
     feed._bind("v1", bridge)
     jpeg = b"\xff\xd8\xff\xe0already-encoded\xff\xd9"
     feed.update(jpeg)

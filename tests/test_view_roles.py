@@ -5,12 +5,12 @@
 global < per-role < per-client, so a more specific scope wins.
 """
 
-import pycanvas
-from pycanvas.bridge import Bridge
+import danvas
+from danvas.bridge import Bridge
 
 
 def test_set_view_roles_records_per_role_state():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     # No server loop yet, so the push no-ops and only the stored state changes.
     canvas.set_view(read_only=True, ui=False, roles=["user"])
 
@@ -22,14 +22,14 @@ def test_set_view_roles_records_per_role_state():
 
 
 def test_set_view_roles_accepts_a_bare_string():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(locked=True, roles="kiosk")
 
     assert canvas._bridge._view_per_role == {"kiosk": {"locked": True}}
 
 
 def test_set_view_roles_merges_keys_across_calls():
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     canvas.set_view(ui=False, roles=["user"])
     canvas.set_view(read_only=True, roles=["user"])
 

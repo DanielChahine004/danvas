@@ -1,7 +1,7 @@
 """Share a canvas with anyone, anywhere — via a public HTTPS tunnel.
 
 LAN sharing (``host="0.0.0.0"``) only reaches devices on the same network. Pass
-``tunnel=True`` and PyCanvas keeps the server on ``127.0.0.1`` but opens a public
+``tunnel=True`` and danvas keeps the server on ``127.0.0.1`` but opens a public
 tunnel to it, printing a ``https://…`` URL you can send to anyone on any network.
 
 Needs a tunnel binary on PATH. The default is cloudflared (no signup, no visitor
@@ -13,9 +13,9 @@ Then open the printed public URL anywhere — drag the slider and watch every
 connected viewer update in real time.
 """
 
-import pycanvas
+import danvas
 
-canvas = pycanvas.Canvas()
+canvas = danvas.Canvas()
 
 servo = canvas.slider("servo_1", min=0, max=180, default=90)
 status = canvas.label("status", value="idle")

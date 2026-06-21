@@ -2,9 +2,9 @@
 
 import json
 
-import pycanvas
-from pycanvas import Image, Label, Markdown, Table, panel_for
-from pycanvas.components import Custom
+import danvas
+from danvas import Image, Label, Markdown, Table, panel_for
+from danvas.components import Custom
 
 
 def test_dispatch_strings():
@@ -91,7 +91,7 @@ def test_dispatch_png_repr_to_image_html():
 
 
 def test_existing_component_passes_through():
-    lbl = pycanvas.Label("x", value="v")
+    lbl = danvas.Label("x", value="v")
     assert panel_for(lbl) is lbl
 
 
@@ -107,7 +107,7 @@ def test_label_renders_value_as_plain_text():
 def test_label_auto_height_enabled_via_insert():
     # h="auto" must flag the panel (insert() keys off `_auto_h`); on the old native
     # Label it warned and did nothing.
-    canvas = pycanvas.Canvas()
+    canvas = danvas.Canvas()
     lbl = canvas.label("status", "ready", h="auto")
     assert lbl._auto_h is True
 
@@ -158,7 +158,7 @@ def test_image_from_bytes_sniffs_mime():
 
 
 def test_show_inserts_with_unique_names_and_replaces():
-    c = pycanvas.Canvas()
+    c = danvas.Canvas()
     a = c.show("hello")
     b = c.show([{"x": 1}])
     assert a.name != b.name

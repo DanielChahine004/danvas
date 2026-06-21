@@ -6,13 +6,13 @@ instead of crashing the handler, and the existing routing/viewer behaviour is
 unchanged.
 """
 
-import pycanvas
+import danvas
 
 
 def _panel():
     # event_key="action" so the handlers route on the payload's "action" field,
     # the convention an app like examples/hackathon/hackathon.py uses.
-    return pycanvas.React(source="function Component(){ return null }",
+    return danvas.React(source="function Component(){ return null }",
                           name="p", event_key="action")
 
 

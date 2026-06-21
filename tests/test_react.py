@@ -3,8 +3,8 @@ import struct
 
 import pytest
 
-import pycanvas
-from pycanvas.bridge import BINARY_REACT
+import danvas
+from danvas.bridge import BINARY_REACT
 
 
 class FakeBridge:
@@ -20,7 +20,7 @@ class FakeBridge:
 
 
 def _panel(**kw):
-    p = pycanvas.React(source="function Component(){ return null }", name="p", **kw)
+    p = danvas.React(source="function Component(){ return null }", name="p", **kw)
     p._bind("c1", FakeBridge())
     return p
 

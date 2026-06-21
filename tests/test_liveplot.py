@@ -2,12 +2,12 @@
 
 import pytest
 
-import pycanvas
-from pycanvas.components.liveplot import _ema
+import danvas
+from danvas.components.liveplot import _ema
 
 
 def test_push_creates_traces_on_the_fly():
-    plot = pycanvas.LivePlot("m")          # no traces declared up front
+    plot = danvas.LivePlot("m")          # no traces declared up front
     plot.push({"a": 1})
     plot.push({"a": 2, "b": 9})            # 'b' is new — appears as its own trace
     payload = plot._payload()
@@ -18,7 +18,7 @@ def test_push_creates_traces_on_the_fly():
 
 
 def test_explicit_x_is_used_as_the_step_axis():
-    plot = pycanvas.LivePlot("m", traces=["loss"])
+    plot = danvas.LivePlot("m", traces=["loss"])
     plot.push({"loss": 0.5}, x=10)
     plot.push({"loss": 0.4}, x=20)
     (trace,) = plot._payload()["data"]
@@ -26,7 +26,7 @@ def test_explicit_x_is_used_as_the_step_axis():
 
 
 def test_smoothing_emits_raw_plus_smoothed_per_trace():
-    plot = pycanvas.LivePlot("m", traces=["loss"], smoothing=0.5)
+    plot = danvas.LivePlot("m", traces=["loss"], smoothing=0.5)
     for y in (1.0, 0.0, 1.0, 0.0):
         plot.push({"loss": y})
     data = plot._payload()["data"]
@@ -42,7 +42,7 @@ def test_smoothing_emits_raw_plus_smoothed_per_trace():
 
 
 def test_smoothing_off_is_a_single_plain_trace():
-    plot = pycanvas.LivePlot("m", traces=["loss"])   # default smoothing=0
+    plot = danvas.LivePlot("m", traces=["loss"])   # default smoothing=0
     plot.push({"loss": 1.0})
     (trace,) = plot._payload()["data"]
     assert "opacity" not in trace and "line" not in trace
@@ -50,13 +50,13 @@ def test_smoothing_off_is_a_single_plain_trace():
 
 def test_invalid_smoothing_rejected():
     with pytest.raises(ValueError):
-        pycanvas.LivePlot("m", smoothing=1.0)
+        danvas.LivePlot("m", smoothing=1.0)
     with pytest.raises(ValueError):
-        pycanvas.LivePlot("m", smoothing=-0.1)
+        danvas.LivePlot("m", smoothing=-0.1)
 
 
 def test_smoothing_settable_live():
-    plot = pycanvas.LivePlot("m", traces=["loss"])
+    plot = danvas.LivePlot("m", traces=["loss"])
     plot.push({"loss": 1.0})
     plot.smoothing = 0.3
     assert len(plot._payload()["data"]) == 2   # now raw + smoothed
@@ -66,11 +66,11 @@ def test_smoothing_settable_live():
 
 def test_title_reserves_top_margin():
     # Title-less plots keep the tight default top margin...
-    plain = pycanvas.LivePlot("m", traces=["a"])
+    plain = danvas.LivePlot("m", traces=["a"])
     plain.push({"a": 1})
     assert plain._payload()["layout"]["margin"]["t"] == 15
     # ...but a user-supplied title gets head-room so it can't clip the plot.
-    titled = pycanvas.LivePlot("m", traces=["a"], layout={"title": {"text": "L"}})
+    titled = danvas.LivePlot("m", traces=["a"], layout={"title": {"text": "L"}})
     titled.push({"a": 1})
     assert titled._payload()["layout"]["margin"]["t"] >= 40
 
@@ -105,7 +105,7 @@ def _bound(plot):
 
 
 def test_push_streams_extend_delta_not_full_figure():
-    plot = pycanvas.LivePlot("m", traces=["train", "val"])
+    plot = danvas.LivePlot("m", traces=["train", "val"])
     bridge = _bound(plot)
     plot.push({"train": 1.0, "val": 2.0})
     plot.push({"train": 1.5, "val": 2.5})
@@ -120,7 +120,7 @@ def test_push_streams_extend_delta_not_full_figure():
 
 
 def test_new_trace_falls_back_to_full_figure():
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     bridge = _bound(plot)
     plot.push({"a": 1.0})                       # known trace -> delta
     assert "plot_extend" in bridge.sent[-1][1]
@@ -131,7 +131,7 @@ def test_new_trace_falls_back_to_full_figure():
 def test_latest_queue_sends_full_snapshot_not_delta():
     # Under "latest" the bridge drops stale pending frames, so an append delta
     # would lose points; the policy needs whole-figure replace semantics.
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     plot.queue = "latest"
     bridge = _bound(plot)
     plot.push({"a": 1.0})
@@ -140,7 +140,7 @@ def test_latest_queue_sends_full_snapshot_not_delta():
 
 
 def test_smoothing_delta_extends_raw_and_smoothed_traces():
-    plot = pycanvas.LivePlot("m", traces=["loss"], smoothing=0.6)
+    plot = danvas.LivePlot("m", traces=["loss"], smoothing=0.6)
     bridge = _bound(plot)
     plot.push({"loss": 10.0})
     plot.push({"loss": 20.0})
@@ -154,7 +154,7 @@ def test_smoothing_delta_extends_raw_and_smoothed_traces():
 # -- batch push: many points per trace in one call ----------------------------
 
 def test_push_batch_with_explicit_x_appends_all_points():
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     bridge = _bound(plot)
     plot.push({"a": [1.0, 2.0, 3.0]}, x=[10, 20, 30])
     (trace,) = plot._payload()["data"]
@@ -165,7 +165,7 @@ def test_push_batch_with_explicit_x_appends_all_points():
 
 
 def test_push_batch_auto_indexes_each_point():
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     _bound(plot)
     plot.push({"a": [5.0, 6.0]})            # no x -> auto 1, 2
     plot.push({"a": [7.0]})                 # continues from 3
@@ -174,7 +174,7 @@ def test_push_batch_auto_indexes_each_point():
 
 
 def test_push_batch_spans_multiple_traces():
-    plot = pycanvas.LivePlot("m", traces=["a", "b"])
+    plot = danvas.LivePlot("m", traces=["a", "b"])
     _bound(plot)
     plot.push({"a": [1.0, 2.0], "b": [3.0, 4.0]}, x=[0, 1])
     data = {t["name"]: t["y"] for t in plot._payload()["data"]}
@@ -182,7 +182,7 @@ def test_push_batch_spans_multiple_traces():
 
 
 def test_push_batch_length_mismatch_raises():
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     _bound(plot)
     with pytest.raises(ValueError):
         plot.push({"a": [1.0, 2.0, 3.0]}, x=[10, 20])      # x too short
@@ -191,7 +191,7 @@ def test_push_batch_length_mismatch_raises():
 
 
 def test_push_batch_trims_to_rolling_max():
-    plot = pycanvas.LivePlot("m", traces=["a"], max_points=3)
+    plot = danvas.LivePlot("m", traces=["a"], max_points=3)
     bridge = _bound(plot)
     plot.push({"a": [1.0, 2.0, 3.0, 4.0, 5.0]}, x=[1, 2, 3, 4, 5])
     (trace,) = plot._payload()["data"]
@@ -201,7 +201,7 @@ def test_push_batch_trims_to_rolling_max():
 
 
 def test_push_single_point_unchanged_by_batch_support():
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     bridge = _bound(plot)
     plot.push({"a": 9.0}, x=42)
     ext = bridge.sent[-1][1]["plot_extend"]
@@ -211,7 +211,7 @@ def test_push_single_point_unchanged_by_batch_support():
 def test_state_payload_still_replays_full_buffer():
     # Reconnecting clients get the whole series in one shot (deltas are only for
     # the live append path), so a late joiner sees the full curve.
-    plot = pycanvas.LivePlot("m", traces=["a"])
+    plot = danvas.LivePlot("m", traces=["a"])
     _bound(plot)
     for y in (1.0, 2.0, 3.0):
         plot.push({"a": y})
@@ -222,7 +222,7 @@ def test_state_payload_still_replays_full_buffer():
 # -- coalescing backpressure (the bridge merge that fixes the fifo backlog) -----
 
 def test_coalesce_extend_concatenates_per_trace_index():
-    from pycanvas.bridge import Bridge
+    from danvas.bridge import Bridge
 
     def frame(xi, ys):
         return {"type": "update", "id": "p",
@@ -238,7 +238,7 @@ def test_coalesce_extend_concatenates_per_trace_index():
 def test_coalesce_appends_delta_onto_pending_snapshot():
     # A full snapshot waiting to be sent absorbs a following delta, so order is
     # preserved when a clear/new-trace frame and a push race.
-    from pycanvas.bridge import Bridge
+    from danvas.bridge import Bridge
     snap = {"type": "update", "id": "p",
             "payload": {"plot": {"data": [{"x": [1], "y": [10], "name": "a"}],
                                  "layout": {}}}}
@@ -250,7 +250,7 @@ def test_coalesce_appends_delta_onto_pending_snapshot():
 
 
 def test_coalesce_snapshot_supersedes_pending_delta():
-    from pycanvas.bridge import Bridge
+    from danvas.bridge import Bridge
     delta = {"type": "update", "id": "p",
              "payload": {"plot_extend": {"indices": [0], "x": [[1]], "y": [[9]],
                                          "max": None}}}
@@ -261,7 +261,7 @@ def test_coalesce_snapshot_supersedes_pending_delta():
 
 
 def test_coalesce_trims_to_rolling_max():
-    from pycanvas.bridge import Bridge
+    from danvas.bridge import Bridge
     merged = None
     for i in range(5):
         f = {"type": "update", "id": "p",
@@ -274,7 +274,7 @@ def test_coalesce_trims_to_rolling_max():
 def test_merge_live_does_not_alias_source_frame():
     # The stored pending frame is a private copy: mutating the source after it's
     # stored must not corrupt what will be sent.
-    from pycanvas.bridge import Bridge
+    from danvas.bridge import Bridge
     src = {"type": "update", "id": "p",
            "payload": {"plot_extend": {"indices": [0], "x": [[9]], "y": [[9]],
                                        "max": None}}}
@@ -292,7 +292,7 @@ def test_push_uses_coalescing_for_fifo_and_replace_for_latest():
                                 exclude=None, tap=True, coalesce=False):
             seen["coalesce"] = coalesce
 
-    p = pycanvas.LivePlot("m", traces=["a"])
+    p = danvas.LivePlot("m", traces=["a"])
     p._bind("p1", Bridge2())
     p.push({"a": 1.0})
     assert seen["coalesce"] is True
