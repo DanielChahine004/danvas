@@ -1150,12 +1150,51 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         for nm, comp in list(self._named.items()):
             if comp is component:
                 del self._named[nm]
+        component._visible = False
         self._bridge.remove_component(component.id)
         component._bridge = None
         on_removed = getattr(component, "_on_removed", None)
         if callable(on_removed):
             on_removed()
         return component
+
+    def hide(self, component):
+        """Remove a panel from the browser without destroying its Python state.
+
+        The component stays in :attr:`components`, keeps its id, value,
+        and all registered callbacks. ``update()`` / ``push()`` calls while
+        hidden are silently dropped. Call :meth:`show` to make it reappear.
+
+        A no-op if the component is not currently visible (already hidden,
+        not yet inserted, or fully removed).
+        """
+        if not getattr(component, "_visible", False):
+            return
+        component._visible = False
+        # Remove from the bridge registry so reconnecting clients don't get it.
+        self._bridge._components.pop(component.id, None)
+        # Tell current clients to remove the shape.
+        self._bridge.broadcast({"type": "remove", "id": component.id})
+
+    def unhide(self, component):
+        """Make a previously hidden panel reappear on the canvas.
+
+        Re-registers the component with the bridge and pushes its full state
+        to all currently connected clients, exactly as if it had just been
+        inserted. The panel reappears at its last known position with all
+        Python state (value, callbacks) intact.
+
+        A no-op if the component is already visible or was fully removed
+        (use :meth:`insert` for a fresh insert instead).
+        """
+        if getattr(component, "_visible", False):
+            return
+        if component not in self._components:
+            return  # fully removed — use insert() instead
+        component._visible = True
+        component._graveyarded = False
+        self._bridge._components[component.id] = component
+        self._bridge.register_live(component)
 
     def reset_layout(self):
         """Restore every live panel to its Python-defined position and size.

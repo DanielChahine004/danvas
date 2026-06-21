@@ -100,11 +100,14 @@ This README follows those five steps — [1. The canvas](#1-the-canvas),
 its factories (step 2) and reach or manage them through it:
 
 ```python
-canvas.remove(panel)
+canvas.remove(panel)          # destroy: removes from Python and browser
+canvas.hide(panel)            # hide: removes from browser, keeps Python state intact
+canvas.unhide(panel)          # show again at last position; value/callbacks preserved
 canvas.connect(a, b, text="x2", color="blue")   # arrow that follows both panels
 canvas.disconnect(arrow)                         # or by name
 canvas.servo_1            # reach any panel by name (canvas["servo_1"] also works)
-canvas.components         # list of every panel (canvas.arrows for connectors)
+canvas.components         # list of every panel (visible and hidden)
+panel.visible             # True if currently shown on the canvas
 ```
 
 `canvas.clear()` removes everything at once; `canvas.save` / `canvas.load`
@@ -179,7 +182,8 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | **Make panels** | `canvas.slider/button/toggle/label/text_field/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/repl/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
 | | `canvas.show(value, **place)` | Auto-pick the best panel for any value |
 | | `canvas.insert(component, **place)` | Add a hand-built component; returns it |
-| | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows |
+| | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows (destroys Python state) |
+| | `canvas.hide(component)` / `canvas.unhide(component)` | Hide/show a panel without losing its value, state, or callbacks; `panel.visible` reads the current state |
 | | `canvas.connect(a, b, text=…)` / `canvas.disconnect(arrow)` | Draw / remove an arrow bound between two panels |
 | **Shapes** | `canvas.geo/text/note/draw/highlight/line/frame(...)` | Place a managed tldraw shape, Python-owned and live-updatable |
 | | `canvas.shapes` | List of managed shapes currently on the canvas |

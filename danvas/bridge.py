@@ -1142,6 +1142,7 @@ class Bridge:
             comp = self._components.get(msg.get("id"))
             if comp is not None and not getattr(comp, "_graveyarded", False):
                 comp._graveyarded = True
+                comp._visible = False
                 self._graveyarded[comp.id] = comp
                 self._dispatch.submit(self._refresh_graveyard)
         elif kind == "restore":
@@ -1149,6 +1150,7 @@ class Bridge:
             comp = self._graveyarded.pop(msg.get("id"), None)
             if comp is not None:
                 comp._graveyarded = False
+                comp._visible = True
                 self.register_live(comp)
                 self._dispatch.submit(self._refresh_graveyard)
         elif kind == "draw":

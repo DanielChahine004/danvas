@@ -120,6 +120,12 @@ class BaseComponent:
         self._roles = []
         self._lock_for = []
         self._bridge = None
+        # True once the component has been inserted on the canvas and is
+        # currently visible to browsers. Set to False before insert and by
+        # canvas.hide(); restored to True by canvas.show(). While False,
+        # _send_update and _send_binary are no-ops so a hidden panel never
+        # sends live updates to the browser.
+        self._visible = False
         self._lock = threading.Lock()
         # Optional canvas placement (x, y) in canvas coordinates; None = let the
         # frontend auto-cascade. Set by Canvas.insert. Width/height are passed
@@ -156,8 +162,20 @@ class BaseComponent:
     def _bind(self, component_id, bridge):
         self.id = component_id
         self._bridge = bridge
+        self._visible = True
 
     # -- read ----------------------------------------------------------------
+    @property
+    def visible(self):
+        """``True`` when this panel is currently shown on the canvas.
+
+        ``False`` before :meth:`~danvas.Canvas.insert`, after
+        :meth:`~danvas.Canvas.hide` or :meth:`~danvas.Canvas.remove`, and
+        while the panel is in the graveyard (user-deleted from the UI).
+        Check this to distinguish inserted-and-visible from inserted-but-hidden.
+        """
+        return self._visible
+
     @property
     def label(self):
         """The card title shown on the panel header."""
@@ -370,7 +388,7 @@ class BaseComponent:
         raise NotImplementedError
 
     def _send_update(self, payload):
-        if self._bridge is None:
+        if self._bridge is None or not self._visible:
             return
         msg = {"type": "update", "id": self.id, "payload": payload}
         if self._queue == "latest":
@@ -387,7 +405,7 @@ class BaseComponent:
         per-recipient writes (e.g. :meth:`React.update_for`); a no-op before the
         server is running, like the other sends.
         """
-        if self._bridge is None:
+        if self._bridge is None or not self._visible:
             return
         msg = {"type": "update", "id": self.id, "payload": payload}
         if client_id is not None:
@@ -423,7 +441,7 @@ class BaseComponent:
         ``latest`` queue policy a stale pending frame is dropped in favour of the
         newest, so a fast feed can't back up a slow viewer.
         """
-        if self._bridge is None:
+        if self._bridge is None or not self._visible:
             return
         from ..bridge import encode_binary_frame
         frame = encode_binary_frame(type_code, self.id, payload)
