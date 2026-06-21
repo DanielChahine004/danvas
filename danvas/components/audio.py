@@ -24,10 +24,14 @@ class AudioFeed(BaseComponent):
     default_h = 120
     BINARY_TYPE = BINARY_AUDIO
 
-    def __init__(self, name, sample_rate=16000, channels=1, label=None, color=None):
+    def __init__(self, name, sample_rate=16000, channels=1, label=None, color=None,
+                 queue="latest"):
+        # Live audio defaults to ``latest``: if a viewer falls behind, stale
+        # chunks are dropped rather than building a playback backlog. Pass
+        # ``queue="fifo"`` only when every sample must arrive (e.g. recording).
         # sampleRate/channels travel as register props so the frontend knows how
         # to interpret (and play back) the raw int16 PCM bytes it receives.
-        super().__init__(name=name, label=label,
+        super().__init__(name=name, label=label, queue=queue,
                          sampleRate=int(sample_rate), channels=int(channels))
         self._init_color(color)
         self._channels = int(channels)

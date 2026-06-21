@@ -15,6 +15,9 @@ class FakeBridge:
     def broadcast_binary(self, data):
         self.binary.append(data)
 
+    def broadcast_conflated(self, key, data):
+        self.binary.append(data)
+
 
 def test_audio_update_sends_binary_pcm_frame():
     bridge = FakeBridge()
