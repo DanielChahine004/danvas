@@ -101,12 +101,14 @@ class Download(React):
     default_w = 200
     default_h = 84
 
-    def __init__(self, name, source=None, filename=None, text=None, label=None):
+    def __init__(self, name, source=None, filename=None, text=None, label=None,
+                 color=None):
         # ``text`` is the button face; defaults to the label/name so naming the
         # download is enough to caption it.
         caption = text if text is not None else (label if label is not None else name)
         super().__init__(source=_DOWNLOAD_SOURCE, name=name, label=label,
                          props={"text": caption})
+        self._init_color(color)
         # The static content to serve (path or bytes); ``None`` when a provider
         # supplies it. Named ``_content`` to avoid colliding with React's
         # ``_source`` (the JSX). ``_filename`` is the saved-as name override.

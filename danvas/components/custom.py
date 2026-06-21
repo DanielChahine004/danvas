@@ -38,7 +38,8 @@ class Custom(_EventRouter, BaseComponent):
     _AUTO_W_MAX = 680
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
-                 label=None, w=None, h=None, event_key="event", permissions=None):
+                 label=None, w=None, h=None, color=None, event_key="event",
+                 permissions=None):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -58,6 +59,7 @@ class Custom(_EventRouter, BaseComponent):
         # to ``default_w``/``default_h`` (set per subclass) via BaseComponent.
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, **size)
+        self._init_color(color)
         if path is not None:
             with open(path, "r", encoding="utf-8") as f:
                 html = f.read()

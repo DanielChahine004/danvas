@@ -66,8 +66,8 @@ class React(_EventRouter, BaseComponent):
     default_h = 320
 
     def __init__(self, source=None, path=None, jsx=None, css=None, css_path=None,
-                 name="react", label=None, w=None, h=None, props=None, scope=None,
-                 event_key="event", queue="fifo"):
+                 name="react", label=None, w=None, h=None, color=None, props=None,
+                 scope=None, event_key="event", queue="fifo"):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         self._path = path   # remembered so watch() can reload it
@@ -112,6 +112,9 @@ class React(_EventRouter, BaseComponent):
         # browser as a JSON string prop so they persist in the shape and replay to
         # a reconnecting client.
         self._data = dict(props or {})
+        if color is not None:
+            self._data.setdefault("_th", _theme.derive(color))
+            self._init_color(color)
         # Per-viewer prop overlays for scoped updates (``update(roles=...)`` /
         # ``update(client_id=...)``): role/id -> the props that override the
         # shared ``_data`` for those viewers. Merged shared < role < client both

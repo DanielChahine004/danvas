@@ -190,7 +190,7 @@ class Upload(React):
     default_h = 120
 
     def __init__(self, name, text=None, label=None, dest=None, accept=None,
-                 multiple=False, max_size=None):
+                 multiple=False, max_size=None, color=None):
         caption = text if text is not None else (label if label is not None else name)
         # The token is the upload target; minted now so it's a stable prop, and
         # registered with the bridge in ``_bind`` once there is one.
@@ -200,6 +200,7 @@ class Upload(React):
                                 "url": f"/__upload__/{self._token}",
                                 "accept": accept or "",
                                 "multiple": bool(multiple)})
+        self._init_color(color)
         self._dest = os.path.realpath(dest) if dest else None
         self._max_size = max_size
         self._upload_cbs = []
@@ -210,7 +211,7 @@ class Upload(React):
         super()._bind(component_id, bridge)
         bridge.register_upload(self._token, self)
 
-    def on_upload(self, fn):
+    def on_upload(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handler fired with an :class:`UploadedFile` per upload.
 
         Accepts an optional second parameter (``def fn(file, viewer)``) to also
@@ -224,8 +225,9 @@ class Upload(React):
         for attribution/labelling, not authorization. See
         :meth:`~danvas.bridge.Bridge.resolve_viewer`.
         """
-        self._upload_cbs.append(fn)
-        return fn
+        def register(f):
+            return self._register_callback(self._upload_cbs, f, threaded, dedicated, queue)
+        return register(fn) if fn is not None else register
 
     def _receive_upload(self, info, viewer=None):
         """Wrap a server-built info dict into an :class:`UploadedFile` and fire.

@@ -21,8 +21,6 @@ browser), so its text stays sharp when the canvas is zoomed.
 
 import fnmatch
 import os
-import traceback
-
 from . import _theme
 from .react import React
 
@@ -160,15 +158,17 @@ class FileBrowser(React):
         self._push_listing()
 
     # -- public decorators ---------------------------------------------------
-    def on_select(self, fn):
+    def on_select(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handler fired with the absolute path of a clicked file."""
-        self._select_cbs.append(fn)
-        return fn
+        def register(f):
+            return self._register_callback(self._select_cbs, f, threaded, dedicated, queue)
+        return register(fn) if fn is not None else register
 
-    def on_navigate(self, fn):
+    def on_navigate(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handler fired with the new directory when it changes."""
-        self._nav_cbs.append(fn)
-        return fn
+        def register(f):
+            return self._register_callback(self._nav_cbs, f, threaded, dedicated, queue)
+        return register(fn) if fn is not None else register
 
     # -- Python-driven control ----------------------------------------------
     def go(self, path):
@@ -213,11 +213,7 @@ class FileBrowser(React):
             with self._lock:
                 self._value = target
             self._push_listing()  # re-render to highlight the selection
-            for cb in self._select_cbs:
-                try:
-                    cb(target)
-                except Exception:
-                    traceback.print_exc()
+            self._dispatch_callbacks(self._select_cbs, (target,), None)
 
     # ``.value`` is the selected file path, set above — not the raw inbound
     # message — so we route without the value-stashing React does by default.
@@ -233,11 +229,7 @@ class FileBrowser(React):
         return path == self._root or path.startswith(self._root + os.sep)
 
     def _fire_nav(self):
-        for cb in self._nav_cbs:
-            try:
-                cb(self._cwd)
-            except Exception:
-                traceback.print_exc()
+        self._dispatch_callbacks(self._nav_cbs, (self._cwd,), None)
 
     def _listing(self):
         try:
