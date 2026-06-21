@@ -37,7 +37,7 @@ from . import _theme
 from .react import React
 
 # Column sets sent to the frontend per source; the table renders exactly these.
-_COMPONENT_COLS = ["name", "label", "type", "value", "x", "y", "w", "h"]
+_COMPONENT_COLS = ["name", "label", "type", "value", "visible", "x", "y", "w", "h"]
 _GLOBALS_COLS   = ["name", "type", "value"]
 _SYSTEM_COLS    = ["name", "type", "value"]
 
@@ -475,6 +475,7 @@ class Inspector(React):
                 "label": c._props.get("label", ""),
                 "type": c.component,
                 "value": _short(c.value),
+                "visible": c.visible,
                 "x": c.x,
                 "y": c.y,
                 "w": c.w,
