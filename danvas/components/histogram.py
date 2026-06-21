@@ -22,12 +22,14 @@ class Histogram(Plot):
     default_h = 360
 
     def __init__(self, name="histogram", bins=30, mode="heatmap",
-                 value_range=None, max_steps=200, label=None, w=None, h=None):
-        super().__init__(name=name, label=label, w=w, h=h)
+                 value_range=None, max_steps=200, label=None, color=None,
+                 w=None, h=None):
+        super().__init__(name=name, label=label, w=w, h=h, color=color)
         if mode not in ("heatmap", "overlay"):
             raise ValueError(f"mode must be 'heatmap' or 'overlay', got {mode!r}")
         self._bins = bins
         self._mode = mode
+        self._color = color  # used to tint the Plotly figure itself
         self._value_range = value_range
         self._edges = None  # fixed on the first add so every step shares bins
         self._records = deque(maxlen=max_steps)  # (step, density-counts)
@@ -54,23 +56,28 @@ class Histogram(Plot):
     def _figure(self):
         import numpy as np
         import plotly.graph_objects as go
+        from . import _theme
 
         centers = (self._edges[:-1] + self._edges[1:]) / 2
         steps = [s for s, _ in self._records]
+        hex_color = _theme.accent_hex(self._color) if self._color is not None \
+            else "#4a90d9"
         if self._mode == "overlay":
             fig = go.Figure()
             n = len(self._records)
             for i, (s, counts) in enumerate(self._records):
                 fig.add_trace(go.Scatter(
                     x=centers, y=counts, mode="lines", name=str(s),
-                    line={"width": 1}, opacity=0.25 + 0.6 * (i + 1) / n,
+                    line={"width": 1, "color": hex_color},
+                    opacity=0.25 + 0.6 * (i + 1) / n,
                     showlegend=False,
                 ))
             fig.update_xaxes(title_text="value")
         else:  # heatmap: step (x) vs value-bin (y), density as colour
             z = np.array([counts for _, counts in self._records]).T
+            colorscale = [[0, "#ffffff"], [1, hex_color]]
             fig = go.Figure(go.Heatmap(
-                x=steps, y=centers, z=z, colorscale="Blues", showscale=False,
+                x=steps, y=centers, z=z, colorscale=colorscale, showscale=False,
             ))
             fig.update_xaxes(title_text="step")
             fig.update_yaxes(title_text="value")

@@ -81,17 +81,17 @@ _UPLOAD_CSS = """
 .pc-upload{box-sizing:border-box;width:100%;height:100%;padding:10px;
  display:flex;flex-direction:column;align-items:center;justify-content:center;
  gap:8px;text-align:center;
- font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3);
- background:var(--pc-surface,#1b2230);
- border:1.5px dashed var(--pc-border,#30363d);border-radius:8px;cursor:pointer;
+ font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-off-text);
+ background:var(--pc-off-bg);
+ border:1.5px dashed var(--pc-border);border-radius:8px;cursor:pointer;
  transition:background .12s,border-color .12s}
-.pc-upload:hover,.pc-upload.drag{background:var(--pc-surface-hover,#232c3d);
- border-color:var(--pc-accent,#3b82f6)}
+.pc-upload:hover,.pc-upload.drag{background:var(--pc-border-mid);
+ border-color:var(--pc-accent)}
 .pc-upload-ico{font-size:18px;line-height:1;margin-right:6px}
 .pc-upload-prog{width:100%;height:8px;border-radius:4px;
- background:var(--pc-border,#30363d);overflow:hidden}
-.pc-upload-bar{height:100%;background:var(--pc-accent,#3b82f6);transition:width .1s}
-.pc-upload-msg{font-weight:400;font-size:12px;color:var(--pc-muted,#9aa4b2);
+ background:var(--pc-border);overflow:hidden}
+.pc-upload-bar{height:100%;background:var(--pc-accent);transition:width .1s}
+.pc-upload-msg{font-weight:400;font-size:12px;color:var(--pc-muted);
  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 """
 

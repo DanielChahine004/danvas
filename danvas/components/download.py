@@ -36,10 +36,10 @@ from .react import React
 _DOWNLOAD_CSS = """
 .pc-download{box-sizing:border-box;width:100%;height:100%;padding:8px 12px;
  display:flex;align-items:center;justify-content:center;gap:8px;
- font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3);
- background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
+ font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-off-text);
+ background:var(--pc-off-bg);border:1px solid var(--pc-border);
  border-radius:8px;cursor:pointer;transition:background .12s}
-.pc-download:hover{background:var(--pc-surface-hover,#232c3d)}
+.pc-download:hover{background:var(--pc-border-mid)}
 .pc-download:active{transform:translateY(1px)}
 .pc-download:disabled{opacity:.6;cursor:default}
 .pc-download-ico{font-size:15px;line-height:1}

@@ -568,7 +568,8 @@ def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
             flush=True,
         )
         raise SystemExit(1)
-    config = uvicorn.Config(app, log_level="warning", **_ws_opts(compress))
+    config = uvicorn.Config(app, log_level="warning",
+                            timeout_graceful_shutdown=5, **_ws_opts(compress))
     server = uvicorn.Server(config)
     _announce(host, port)
     server.run(sockets=[sock])  # blocks until Ctrl+C / shutdown

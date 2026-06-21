@@ -1950,11 +1950,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             try:
                 _mon.wait()
             except KeyboardInterrupt:
-                _mon.terminate()
+                # The monitor (and its worker) also received Ctrl+C from the
+                # shared console group — give it a moment to handle its own
+                # KeyboardInterrupt and run its finally/stop(proc) cleanup
+                # before we reach for TerminateProcess (which on Windows is
+                # unblockable and skips the monitor's finally block, orphaning
+                # the uvicorn worker on the port).
                 try:
-                    _mon.wait(timeout=5)
+                    _mon.wait(timeout=8)
                 except _subprocess.TimeoutExpired:
-                    _mon.kill()
+                    _mon.terminate()
+                    try:
+                        _mon.wait(timeout=5)
+                    except _subprocess.TimeoutExpired:
+                        _mon.kill()
             sys.exit(0)
         if os.environ.get("_danvas_RELOAD_RESTART") == "1":
             # Already opened on first launch; a reload reuses the existing tab
