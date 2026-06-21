@@ -159,7 +159,8 @@ class Canvas:
         **place: Any,
     ) -> Button: ...
     def label(
-        self, name: str, value: str = ..., label: str | None = ..., **place: Any
+        self, name: str, value: str = ..., color: tuple[int, int, int] | str | None = ...,
+        label: str | None = ..., **place: Any
     ) -> Label: ...
     def video(
         self, name: str, quality: int = ..., label: str | None = ..., **place: Any
@@ -208,7 +209,8 @@ class Canvas:
         **place: Any,
     ) -> React: ...
     def markdown(
-        self, text: str = ..., name: str = ..., label: str | None = ..., **place: Any
+        self, text: str = ..., name: str = ..., color: tuple[int, int, int] | str | None = ...,
+        label: str | None = ..., **place: Any
     ) -> Markdown: ...
     def image(
         self,
@@ -248,6 +250,7 @@ class Canvas:
         refresh: float | None = ...,
         source: str = ...,
         namespace: dict[str, Any] | None = ...,
+        color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
         **place: Any,
     ) -> Inspector: ...

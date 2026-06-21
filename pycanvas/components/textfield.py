@@ -6,7 +6,7 @@ multiline. ``update(value)`` pushes new text to the browser live.
 """
 
 from . import _theme
-from .base import _mark_threaded
+from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 _FIELD_CSS = """
@@ -14,7 +14,7 @@ _FIELD_CSS = """
  display:flex;align-items:stretch}
 .pc-field input,.pc-field textarea{flex:1;min-height:0;min-width:0;
  box-sizing:border-box;padding:6px 8px;
- background:var(--pc-surface,#1b2230);border:1px solid var(--pc-border,#30363d);
+ background:var(--pc-input-bg,#ffffff);border:1px solid var(--pc-border,#e2e2e2);
  border-radius:6px;color:var(--pc-text,#e6edf3);
  font:13px system-ui,-apple-system,sans-serif;resize:none;outline:none}
 .pc-field input:focus,.pc-field textarea:focus{
@@ -98,15 +98,22 @@ class TextField(React):
         v = self._value
         return {"post": v} if v is not None else None
 
-    def on_change(self, fn=None, *, threaded=False):
+    def on_change(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: called with the committed text each time the user submits.
 
-        Pass ``threaded=True`` to run the handler on its own daemon thread —
-        useful when the handler does slow I/O (network call, file write) and
-        you don't want it to delay other events.
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._callbacks.append(_mark_dedicated(f, queue))
+            elif threaded:
+                self._callbacks.append(_mark_threaded(f))
+            else:
+                self._callbacks.append(f)
             return f
         return register(fn) if fn is not None else register
 

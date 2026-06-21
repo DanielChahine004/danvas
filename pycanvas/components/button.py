@@ -10,7 +10,7 @@ called with no arguments. ``value`` reads the running click count.
 import traceback
 
 from . import _theme
-from .base import _mark_threaded
+from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # Scoped under `.pc-button`; when a color theme is set via --pc-accent the button
@@ -72,16 +72,22 @@ class Button(React):
         """
         super().update(text=text)
 
-    def on_click(self, fn=None, *, threaded=False):
+    def on_click(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a handler fired (with no args) on each click.
 
-        Pass ``threaded=True`` to run the handler on its own daemon thread so a
-        slow click handler (a network call, a long compute) doesn't hold up
-        other handlers — see :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
-        for the trade-off (you then own any shared-state safety).
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._callbacks.append(_mark_dedicated(f, queue))
+            elif threaded:
+                self._callbacks.append(_mark_threaded(f))
+            else:
+                self._callbacks.append(f)
             return f
         return register(fn) if fn is not None else register
 

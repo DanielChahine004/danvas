@@ -8,13 +8,14 @@ in via :meth:`push` — the value prop swaps, so React re-renders just the text
 node (no shape-prop churn, fine for a status line updated every loop iteration).
 """
 
+from . import _theme
 from .react import React
 
 # Scoped under `.pc-label`; the text colour follows the canvas theme.
 _LABEL_CSS = """
 .pc-label{box-sizing:border-box;width:100%;padding:8px;font-weight:600;
  font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;
- color:var(--pc-text);white-space:pre-wrap;word-break:break-word}
+ color:var(--pc-accent,var(--pc-text));white-space:pre-wrap;word-break:break-word}
 """
 
 # Renders the latest pushed value (``value``), falling back to the initial value
@@ -23,10 +24,11 @@ _LABEL_CSS = """
 _LABEL_SOURCE = """
 function Component({ value, props }) {
   const text = value != null ? value : (props.text != null ? props.text : "");
+  const _th = props._th || {};
   return (
     <>
       <style>{`__CSS__`}</style>
-      <div className="pc-label">{text}</div>
+      <div className="pc-label" style={_th}>{text}</div>
     </>
   );
 }
@@ -41,10 +43,12 @@ class Label(React):
     default_w = 240
     default_h = 84
 
-    def __init__(self, name, value="", label=None, w=None, h=None):
+    def __init__(self, name, value="", color=None, label=None, w=None, h=None):
         super().__init__(source=_LABEL_SOURCE, name=name, label=label, w=w, h=h,
-                         props={"text": _str(value)})
+                         props={"text": _str(value),
+                                "_th": _theme.derive(color) if color is not None else {}})
         self._value = value
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         # A label holds a short line or number, so default to fitting the panel
         # to its content (no tall, mostly-empty box) unless the caller pinned an
         # explicit height. ``insert`` honours this flag for layout/placement too.

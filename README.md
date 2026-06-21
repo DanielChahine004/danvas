@@ -419,13 +419,18 @@ nudge only.
 ## Receiving input
 
 ```python
-@slider.on_change         # fn(value)
-@toggle.on_change         # fn(value)
-@button.on_click          # fn()
-@text_field.on_change     # fn(text); fires on Enter or blur (single-line), or blur (multiline)
-@table.on_select          # fn(indices); list of selected 0-based row indices
-@panel.on_layout          # fn(comp), after a user drag/resize (geometry synced)
-@chat.on_message          # fn(entry); reply with chat.post(text)
+@slider.on_change                              # fn(value)
+@toggle.on_change                              # fn(value)
+@button.on_click                               # fn()
+@text_field.on_change                          # fn(text); fires on Enter / blur
+@table.on_select                               # fn(indices); 0-based row indices
+@panel.on_layout                               # fn(comp), after a user drag/resize
+@chat.on_message                               # fn(entry); reply with chat.post(text)
+
+# all input decorators accept threading flags:
+@slider.on_change(threaded=True)               # new thread per call
+@slider.on_change(dedicated=True)             # one persistent thread for this handler
+@slider.on_change(dedicated=True, queue="latest")  # + drop stale calls while busy
 ```
 
 These are plain registration methods, so `@panel.on_change` and
@@ -470,29 +475,62 @@ def _(msg):                        # msg["stock"]/["price"] are ints here
 `examples/action_routing.py` is a minimal demo; `examples/hackathon/hackathon.py`
 uses the pattern at scale (one handler per admin/team action across several panels).
 
-**Slow handlers — `threaded=True`.** Handlers run one at a time on a shared
-dispatch thread (off the event loop, so the UI never freezes — but a slow
-handler holds up the ones queued behind it). Mark a handler `threaded=True` to
-run *it* on its own daemon thread, so a network call, a `time.sleep`, or a long
-compute doesn't stall the other panels:
+**Handler threading — three modes.** Handlers run on a shared dispatch thread
+by default (off the event loop, so the UI never freezes — but a slow handler
+holds up the ones queued behind it). Two flags move a handler off that thread:
+
+| Flag | Thread model | Right for |
+|---|---|---|
+| *(default)* | Inline on shared dispatch thread | Fast handlers: state updates, canvas calls |
+| `threaded=True` | New daemon thread *per call* | Occasional slow work: HTTP, `time.sleep`, one-off compute |
+| `dedicated=True` | One persistent thread *for this handler*, launched on first call | Handlers that fire rapidly with non-trivial work |
 
 ```python
-@fetch.on_click(threaded=True)        # also on_change / on(event) / on_message
+@fetch.on_click(threaded=True)           # new thread per click; doesn't block others
 def _(viewer):
-    data = slow_api_call()            # doesn't block other handlers
+    data = slow_api_call()
     table.update(data)
+
+@speed.on_change(dedicated=True)         # own persistent thread; calls are serialised
+def _(v):
+    result = heavy_compute(v)
+    status.update(result)
 ```
 
+**`dedicated=True` and `queue=`** — unlike `threaded=True` (which spawns a
+fresh thread per call), `dedicated=True` gives the handler *one persistent
+thread* with its own queue. Calls are always serialised on that thread (no
+concurrent self-invocations), and the shared dispatch thread is never blocked.
+The `queue=` parameter controls backpressure on that handler's own queue:
+
+- `"fifo"` (default) — every call is queued and run in order.
+- `"latest"` — only the most recent *pending* call is kept. The thread always
+  runs the current call to completion, then picks up only the latest one,
+  dropping any that piled up in between.
+
+```python
+@speed.on_change(dedicated=True, queue="latest")
+def _(v):
+    result = heavy_compute(v)   # user dragged to 73; intermediate values dropped
+    status.update(result)
+```
+
+The mental model: default → shared conveyor belt; `threaded` → fork a new worker per task; `dedicated` → hand all tasks to one dedicated worker.
+
+**`threaded` and `dedicated` are mutually exclusive.** `queue=` is only
+meaningful with `dedicated=True`. These flags work on all handler decorators:
+`on_change`, `on_click`, `on_select`, `on_message`, `on(event)`, `on_binary`.
+
 **When the thread starts** is the whole distinction from
-[`canvas.background`](#background-workers): `threaded=True` launches a thread
-*per UI interaction* — it only kicks in when the bridge dispatches an event, so
-calling the handler from your own code (or a notebook cell) is a plain inline
-call, no thread. `canvas.background` launches a thread *once, when serving
-starts* — for producer loops (a camera, a sensor) that have no triggering event.
-Same underlying primitive; the thread lives exactly as long as the function
-runs. The trade-off either way is concurrency: a threaded function may run
-alongside others, so guard any shared state you mutate (plain serial handlers
-need no locks).
+[`canvas.background`](#background-workers): both `threaded=True` and
+`dedicated=True` only kick in when the bridge dispatches an event (calling the
+handler from your own code is always a plain inline call, no thread).
+`canvas.background` launches a thread *once, when serving starts* — for
+producer loops (a camera, a sensor) that have no triggering event. The trade-off
+for `threaded=True` is concurrency: a threaded handler may run alongside itself
+if calls arrive fast, so guard any shared state you write. `dedicated=True`
+avoids this — the handler is serialised on its own thread, so no extra locks are
+needed unless other code also mutates the same state.
 
 <a id="the-viewer-dict"></a>
 The `viewer` dict (same shape everywhere it's handed to you — callbacks, uploads,

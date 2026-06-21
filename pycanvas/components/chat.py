@@ -20,7 +20,7 @@ is unchanged by where the panel renders.
         print(entry["name"], ":", entry["text"])
 """
 
-from .base import _mark_threaded
+from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # Port of the former native ChatShapeUtil view, driven by ``canvas.chat`` instead
@@ -155,16 +155,23 @@ class Chat(React):
         if self._bridge is not None:
             self._bridge.post_chat(text, name=name, color=color)
 
-    def on_message(self, fn=None, *, threaded=False):
+    def on_message(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a callback fired with every chat entry (a dict of
         ``id``/``name``/``color``/``text``/``ts``).
 
-        Chat sinks run inline on the server's event loop, so a slow one would
-        stall the canvas — pass ``threaded=True`` to run it on its own daemon
-        thread instead (you then own any shared-state safety it touches).
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            sink = _mark_threaded(f) if threaded else f
+            if dedicated:
+                sink = _mark_dedicated(f, queue)
+            elif threaded:
+                sink = _mark_threaded(f)
+            else:
+                sink = f
             self._chat_callbacks.append(sink)
             if self._bridge is not None:
                 self._bridge.add_chat_sink(sink)

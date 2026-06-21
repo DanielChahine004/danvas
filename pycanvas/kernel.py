@@ -63,6 +63,75 @@ class Kernel:
                 traceback.print_exc()
 
 
+class DedicatedKernel:
+    """A persistent single daemon thread bound to one handler, with configurable queuing.
+
+    Unlike :class:`Kernel` (which runs any callable), this is created once per
+    ``dedicated=True`` handler and lives for the app's lifetime. Two modes:
+
+    ``"fifo"`` — every call is queued and run in order (an unbounded
+    :class:`queue.Queue`). No calls are dropped; right when every event must
+    be processed (file uploads, confirmations, ordered state machines).
+
+    ``"latest"`` — only the most recent *pending* call is kept. The thread
+    always runs the current call to completion, then picks up only the latest
+    pending one, dropping everything that queued up in between. Right for
+    high-rate inputs where you only care about the current value: a slider
+    connected to a 200 ms compute — you want to process where it settled, not
+    replay every intermediate drag position.
+
+    In both modes the thread is started on the first :meth:`submit` call.
+    """
+
+    def __init__(self, mode="fifo"):
+        if mode not in ("fifo", "latest"):
+            raise ValueError(f"DedicatedKernel mode must be 'fifo' or 'latest', got {mode!r}")
+        self._mode = mode
+        if mode == "latest":
+            self._slot_lock = threading.Lock()
+            self._event = threading.Event()
+            self._pending = None
+        else:
+            self._q = queue.Queue()
+        self._start_lock = threading.Lock()
+        self._started = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def submit(self, fn):
+        """Queue (or replace) ``fn``; start the thread on first call."""
+        with self._start_lock:
+            if not self._started:
+                self._started = True
+                self._thread.start()
+        if self._mode == "latest":
+            with self._slot_lock:
+                self._pending = fn
+            self._event.set()
+        else:
+            self._q.put(fn)
+
+    def _run(self):
+        if self._mode == "latest":
+            while True:
+                self._event.wait()
+                with self._slot_lock:
+                    fn = self._pending
+                    self._pending = None
+                    self._event.clear()
+                if fn is not None:
+                    try:
+                        fn()
+                    except Exception:
+                        traceback.print_exc()
+        else:
+            while True:
+                fn = self._q.get()
+                try:
+                    fn()
+                except Exception:
+                    traceback.print_exc()
+
+
 def run_code(code, ns):
     """Exec ``code`` against namespace ``ns``, Jupyter-style.
 

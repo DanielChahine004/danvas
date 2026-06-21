@@ -8,7 +8,7 @@ import traceback
 import warnings
 
 from .._flags import LAYOUT_FLAGS
-from ..kernel import spawn
+from ..kernel import DedicatedKernel, spawn
 
 
 def _mark_threaded(fn):
@@ -26,6 +26,35 @@ def _mark_threaded(fn):
         def wrapper(*args, **kwargs):
             return fn(*args, **kwargs)
         wrapper._pc_threaded = True
+        return wrapper
+
+
+_HANDLER_QUEUES = ("fifo", "latest")
+
+
+def _mark_dedicated(fn, queue_mode="fifo"):
+    """Tag a callback for a :class:`~pycanvas.kernel.DedicatedKernel`.
+
+    Like :func:`_mark_threaded` but for handlers that should run on a
+    persistent per-handler thread rather than a freshly spawned one per call.
+    The kernel is created lazily on first dispatch and lives for the app's
+    lifetime. ``queue_mode`` sets the backpressure policy on that thread's
+    own queue (``"fifo"`` or ``"latest"`` — see :class:`DedicatedKernel`).
+    """
+    if queue_mode not in _HANDLER_QUEUES:
+        raise ValueError(
+            f"queue must be one of {_HANDLER_QUEUES}, got {queue_mode!r}"
+        )
+    try:
+        fn._pc_dedicated = True
+        fn._pc_handler_queue = queue_mode
+        return fn
+    except (AttributeError, TypeError):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+        wrapper._pc_dedicated = True
+        wrapper._pc_handler_queue = queue_mode
         return wrapper
 
 
@@ -78,6 +107,11 @@ class BaseComponent:
         self._value = None
         self._callbacks = []
         self._layout_callbacks = []
+        # Dedicated-handler kernels: id(callback) -> DedicatedKernel. Created
+        # lazily on first dispatch so no thread is started for a handler that
+        # never fires. Keyed by id(cb) because the callback objects are the
+        # stable identity. Only written/read from the dispatch thread.
+        self._dedicated_kernels = {}
         # Role-based access: _roles limits which viewer roles see this panel;
         # empty means all roles. _lock_for makes the panel non-interactive for
         # the listed roles on connect (operable=False sent per-client).
@@ -586,27 +620,48 @@ class BaseComponent:
         self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
 
     # -- input (browser -> Python) -------------------------------------------
-    def on_change(self, fn=None, *, threaded=False):
+    def on_change(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a callback fired on input from the browser.
 
-        Handlers normally run one at a time on a shared dispatch thread (off the
-        event loop, so the UI never freezes — but a slow handler holds up the
-        others behind it). Pass ``threaded=True`` to run *this* handler on its
-        own daemon thread instead, so a slow call (a network request, a
-        ``time.sleep``, a long compute) doesn't stall other panels::
+        **Default** — runs on a shared dispatch thread. Fast handlers (state
+        updates, canvas calls) belong here; a slow one delays the handlers
+        queued behind it.
 
-            @speed.on_change(threaded=True)
-            def _(v, viewer):
-                result = slow_api_call(v)   # doesn't block other handlers
+        **``threaded=True``** — spawns a new daemon thread *per call*. Keeps
+        the shared dispatch thread free for other handlers. Right for
+        occasional slow work (an HTTP call, a ``time.sleep``). The handler
+        may run concurrently with itself if calls arrive faster than it
+        finishes, so guard any shared state you write.
+
+        **``dedicated=True``** — launches one persistent daemon thread for
+        *this handler only*, started on its first invocation. All calls are
+        routed to that thread's own queue, so the handler is always serialised
+        (no concurrent self-calls) and the shared dispatch thread is never
+        blocked. Right for handlers that fire rapidly and do non-trivial work::
+
+            @speed.on_change(dedicated=True, queue="latest")
+            def _(v):
+                result = heavy_compute(v)   # own thread; only the latest drag fires
                 status.update(result)
 
-        The trade-off is concurrency: a threaded handler may run alongside
-        others, so guard any shared state you mutate from it. It's the
-        event-driven twin of :meth:`Canvas.background` (both run a function on
-        its own thread via the same primitive).
+        ``queue`` controls backpressure on the dedicated thread's queue:
+
+        - ``"fifo"`` (default) — every call is queued and run in order.
+        - ``"latest"`` — only the most recent *pending* call is kept; the
+          thread runs to completion first, then picks up only the latest one,
+          dropping any that piled up in between.
+
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._callbacks.append(_mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._callbacks.append(_mark_dedicated(f, queue))
+            elif threaded:
+                self._callbacks.append(_mark_threaded(f))
+            else:
+                self._callbacks.append(f)
             return f
         return register(fn) if fn is not None else register
 
@@ -638,11 +693,29 @@ class BaseComponent:
         than ``call_args`` supplies — if so, passes ``viewer`` (a dict with
         ``id``, ``name``, ``color``, ``role``) as the extra argument. Backwards
         compatible: existing one-arg handlers are never changed.
+
+        Three dispatch paths, chosen by marker attributes set at registration:
+
+        - ``_pc_dedicated`` — routes to a per-handler :class:`DedicatedKernel`
+          (created lazily here on first dispatch, keyed by ``id(cb)``). The
+          kernel's own queue serialises calls to this handler without blocking
+          the shared dispatch thread.
+        - ``_pc_threaded`` — spawns a fresh daemon thread per call via
+          :func:`spawn`. Keeps the dispatch thread free; may run concurrently.
+        - *(default)* — called inline on the shared dispatch thread; FIFO and
+          blocking (a slow handler stalls the queue behind it).
         """
         for cb in callbacks:
             args = (*call_args, viewer or {}) \
                 if self._accepts_viewer(cb, len(call_args)) else call_args
-            if getattr(cb, "_pc_threaded", False):
+            if getattr(cb, "_pc_dedicated", False):
+                k = self._dedicated_kernels.get(id(cb))
+                if k is None:
+                    mode = getattr(cb, "_pc_handler_queue", "fifo")
+                    k = DedicatedKernel(mode=mode)
+                    self._dedicated_kernels[id(cb)] = k
+                k.submit(lambda c=cb, a=args: c(*a))
+            elif getattr(cb, "_pc_threaded", False):
                 # Run on its own daemon thread so a slow handler doesn't hold up
                 # the rest; spawn() logs any exception (default-arg capture so
                 # the loop variable isn't shared across iterations).

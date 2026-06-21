@@ -31,7 +31,7 @@ re-renders with fresh data.
 
 from collections import Counter
 
-from .base import _mark_threaded
+from .base import _mark_dedicated, _mark_threaded
 from .react import React
 
 # The full dataset is shipped to the panel and the browser renders one
@@ -382,16 +382,25 @@ class Table(React):
         with self._lock:
             return list(self._selected)
 
-    def on_select(self, fn=None, *, threaded=False):
+    def on_select(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: called with a list of selected row indices on each selection change.
 
         The indices are 0-based positions in the original Python data structure
         (the same values shown in the ``#`` index column). Fires on every checkbox
         toggle, including when the selection is cleared (empty list).
-        Pass ``threaded=True`` to run the handler on its own daemon thread.
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._select_callbacks.append(_mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._select_callbacks.append(_mark_dedicated(f, queue))
+            elif threaded:
+                self._select_callbacks.append(_mark_threaded(f))
+            else:
+                self._select_callbacks.append(f)
             return f
         return register(fn) if fn is not None else register
 

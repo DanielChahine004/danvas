@@ -22,7 +22,7 @@ def test_slider_register_props():
     data = json.loads(props["data"])
     assert data == {
         "min": 0, "max": 180, "step": 1, "default": 90,
-        "value": 90, "on_release": False,
+        "value": 90, "on_release": False, "_th": {},
     }
     assert s.value == 90
 

@@ -20,6 +20,7 @@ same trust level as the rest of their PyCanvas app.
 import html as _html
 import re
 
+from . import _theme
 from .react import React
 
 # CSS scoped under `.pc-md`, driven by the canvas theme variables so the prose
@@ -49,10 +50,11 @@ _MD_CSS = """
 # them alone; only the {css} placeholder is filled).
 _MD_SOURCE = """
 function Component({{ props }}) {{
+  const _th = props._th || {{}};
   return (
     <>
       <style>{{`{css}`}}</style>
-      <div className="pc-md"
+      <div className="pc-md" style={{_th}}
            dangerouslySetInnerHTML={{{{ __html: props.html || "" }}}} />
     </>
   );
@@ -64,10 +66,12 @@ class Markdown(React):
     default_w = 380
     default_h = 240
 
-    def __init__(self, text="", name="markdown", label=None, w=None, h=None):
+    def __init__(self, text="", name="markdown", color=None, label=None, w=None, h=None):
         self._text = text
         super().__init__(source=_MD_SOURCE, name=name, label=label, w=w, h=h,
-                         props={"html": _md_to_html(text or "")})
+                         props={"html": _md_to_html(text or ""),
+                                "_th": _theme.derive(color) if color is not None else {}})
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
 
     @property
     def html(self):

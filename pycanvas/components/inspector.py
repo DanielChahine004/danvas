@@ -33,6 +33,7 @@ import threading
 import traceback
 import types
 
+from . import _theme
 from .react import React
 
 # Column sets sent to the frontend per source; the table renders exactly these.
@@ -339,7 +340,7 @@ class Inspector(React):
     default_h = 320
 
     def __init__(self, name="inspector", refresh=None, source="components",
-                 namespace=None, label=None):
+                 namespace=None, color=None, label=None):
         """``source`` is the *initial* view -- ``"components"`` (canvas panels) or
         ``"globals"`` (the shared REPL namespace); either way the panel's header
         dropdown switches between them live. ``namespace`` overrides the
@@ -358,6 +359,7 @@ class Inspector(React):
         super().__init__(source=_INSPECTOR_SOURCE, name=name, label=label,
                          props={"rows": "[]", "cols": json.dumps(cols),
                                 "detail": "", "source": source})
+        self._frame_color = _theme.accent_hex(color) if color is not None else None
         self._view = source
         self._canvas = None  # injected by Canvas.insert
         self._namespace = namespace  # injected by Canvas.insert if left None

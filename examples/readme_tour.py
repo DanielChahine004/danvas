@@ -142,7 +142,7 @@ col.add(canvas.markdown("""## Receiving input
 
 Any handler may declare a trailing `viewer` arg to see who acted:
 `def _(value, viewer):` — gives `viewer["name"]`, `viewer["role"]`, …
-""", name="input_hdr"))
+""", name="input_hdr", color=(0,255,255)))
 
 with col.row(gap=GAP):
     name_fld = canvas.text_field("visitor_name", label="Your name",
@@ -896,9 +896,9 @@ Scope to a role or single client with `roles=` / `client_id=`.
 """, name="section_4"))
 
 with col.row(gap=GAP):
-    zoom_in_bt  = canvas.button("zoom_in",    text="Zoom in (1.5×)",  w=180)
-    zoom_out_bt = canvas.button("zoom_out",   text="Zoom out (0.5×)", w=180)
-    zoom_rst_bt = canvas.button("zoom_rst",   text="Zoom 100%",       w=140)
+    zoom_in_bt  = canvas.button("zoom_in",    text="Zoom in (1.5×)",  w=180, color=(255,0,0))
+    zoom_out_bt = canvas.button("zoom_out",   text="Zoom out (0.5×)", w=180, color=(0,255,0))
+    zoom_rst_bt = canvas.button("zoom_rst",   text="Zoom 100%",       w=180, color=(0,100,255))
 
 layout_rst_bt = col.add(canvas.button("layout_rst", text="↺ Reset layout", w=180))
 

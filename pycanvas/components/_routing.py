@@ -9,7 +9,7 @@ a mixin; React layers request/response routing (``on_request``) on top.
 
 import sys
 
-from .base import _mark_threaded
+from .base import _mark_dedicated, _mark_threaded
 
 
 def _warn(msg):
@@ -46,7 +46,7 @@ class _EventRouter:
         self._routes = {None: list(self._callbacks)}
         self._binary_handlers = []
 
-    def on(self, event=None, *, fields=None, threaded=False):
+    def on(self, event=None, *, fields=None, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handle inbound ``canvas.send`` messages.
 
         ``@panel.on("tick")`` fires only for messages whose ``event`` field (see
@@ -68,13 +68,17 @@ class _EventRouter:
             def _(msg):                 # msg["points"] is an int here
                 teams[msg["id"]]["points"] += msg["points"]
 
-        ``threaded=True`` runs the handler on its own daemon thread so a slow one
-        (a network call, a long compute) doesn't hold up the others; you then own
-        any shared-state safety (see ``on_change``).
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def deco(fn):
             handler = self._with_fields(event, fn, fields) if fields else fn
-            if threaded:
+            if dedicated:
+                handler = _mark_dedicated(handler, queue)
+            elif threaded:
                 handler = _mark_threaded(handler)
             self._routes.setdefault(event, []).append(handler)
             return fn   # return the original so it stays usable/named by the caller
@@ -120,19 +124,25 @@ class _EventRouter:
                 return None
         return out
 
-    def on_message(self, fn=None, *, threaded=False):
+    def on_message(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handle *every* inbound message (a catch-all ``on()``).
 
-        ``threaded=True`` runs the handler on its own daemon thread (see
-        :meth:`on`), so a slow catch-all doesn't hold up other handlers.
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._routes.setdefault(None, []).append(
-                _mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._routes.setdefault(None, []).append(_mark_dedicated(f, queue))
+            else:
+                self._routes.setdefault(None, []).append(
+                    _mark_threaded(f) if threaded else f)
             return f
         return register(fn) if fn is not None else register
 
-    def on_binary(self, fn=None, *, threaded=False):
+    def on_binary(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handle raw binary data sent by ``canvas.sendBinary()``
         in a Custom or React panel.
 
@@ -143,12 +153,17 @@ class _EventRouter:
                 frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
                 ...
 
-        ``threaded=True`` runs the handler on its own daemon thread so slow
-        processing (a model inference, a codec decode) doesn't hold up other
-        handlers.
+        See :meth:`on_change <pycanvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        ``threaded`` and ``dedicated`` are mutually exclusive.
         """
+        if threaded and dedicated:
+            raise ValueError("threaded and dedicated are mutually exclusive")
         def register(f):
-            self._binary_handlers.append(_mark_threaded(f) if threaded else f)
+            if dedicated:
+                self._binary_handlers.append(_mark_dedicated(f, queue))
+            else:
+                self._binary_handlers.append(_mark_threaded(f) if threaded else f)
             return f
         return register(fn) if fn is not None else register
 
