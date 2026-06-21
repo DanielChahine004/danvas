@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import os
 import secrets
 import socket
@@ -554,8 +555,14 @@ def _make_server_socket(host, port):
     return sock
 
 
+def _configure_logging():
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s [%(name)s] %(message)s")
+    logging.getLogger("danvas").setLevel(logging.INFO)
+
+
 def run(bridge, port=8000, open_browser=True, host="127.0.0.1", password=None,
         passwords=None, compress=False):
+    _configure_logging()
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
     try:
@@ -583,6 +590,7 @@ def run_background(bridge, port=8000, open_browser=True, host="127.0.0.1",
     ``server.should_exit = True``. Suited to interactive sessions (Jupyter)
     where the cell must return so more components can be inserted.
     """
+    _configure_logging()
     app = create_app(bridge, port=port, open_browser=open_browser,
                      password=password, passwords=passwords)
     try:

@@ -576,10 +576,16 @@ function setupGraveyardSync(ed) {
 // rebroadcast it.
 function applyDraw(diff) {
   if (!diff) return
+  const nAdded = Object.keys(diff.added || {}).length
+  const nUpdated = Object.keys(diff.updated || {}).length
+  const nRemoved = Object.keys(diff.removed || {}).length
+  if (nAdded || nUpdated || nRemoved) {
+    console.debug('[danvas] applyDraw', { added: nAdded, updated: nUpdated, removed: nRemoved })
+  }
   try {
     applyRemote(() => editor.store.applyDiff(diff))
   } catch (err) {
-    console.error('[danvas] failed to apply remote drawing', err)
+    console.error('[danvas] failed to apply remote drawing', err, diff)
   }
 }
 

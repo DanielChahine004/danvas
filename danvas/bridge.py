@@ -8,6 +8,7 @@ schedules the actual send onto the server's asyncio event loop.
 import asyncio
 import copy
 import json
+import logging
 import math
 import random
 import re
@@ -17,6 +18,8 @@ import threading
 import time
 import traceback
 import uuid
+
+_log = logging.getLogger("danvas")
 from collections import deque
 
 from fastapi import WebSocketDisconnect
@@ -751,6 +754,7 @@ class Bridge:
             # Replay the live free-form drawings as a single "added" diff so a
             # fresh (or reloaded) browser sees what others have drawn.
             if self._drawings:
+                _log.info("replaying %d drawing record(s) to new viewer", len(self._drawings))
                 await self._send(ws, {
                     "type": "draw",
                     "diff": {"added": self._drawings, "updated": {}, "removed": {}},
@@ -1719,6 +1723,7 @@ class Bridge:
                 self._drawings[rid] = pair[1]
         for rid in (diff.get("removed") or {}):
             self._drawings.pop(rid, None)
+        _log.debug("draw sync: %d total records stored", len(self._drawings))
         self._notify_mutation()
         if self._draw_taps:
             self._dispatch.submit(lambda d=dict(diff): self._tap_draw(d))
