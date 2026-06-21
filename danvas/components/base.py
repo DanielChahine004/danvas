@@ -108,6 +108,7 @@ class BaseComponent:
         self._value = None
         self._callbacks = []
         self._layout_callbacks = []
+        self._error_callbacks = []
         # Dedicated-handler kernels: id(callback) -> DedicatedKernel. Created
         # lazily on first dispatch so no thread is started for a handler that
         # never fires. Keyed by id(cb) because the callback objects are the
@@ -638,6 +639,41 @@ class BaseComponent:
         """
         self._layout_callbacks.append(fn)
         return fn
+
+    def on_error(self, fn):
+        """Decorator: register a handler called when a JS error occurs in this panel.
+
+        The handler receives the error message string::
+
+            @panel.on_error
+            def handle(msg):
+                log_error(panel.name, msg)
+
+        When at least one handler is registered, the default stderr print is
+        suppressed — the handler owns the error. With no handlers registered,
+        errors are printed to stderr as before.
+        """
+        self._error_callbacks.append(fn)
+        return fn
+
+    def _dispatch_error(self, message):
+        """Fire error callbacks, or fall back to stderr if none are registered.
+
+        Called by the bridge on receipt of a ``panel_error`` message from the
+        browser (JS runtime errors, unhandled rejections, React error boundaries).
+        """
+        if self._error_callbacks:
+            for cb in self._error_callbacks:
+                try:
+                    cb(message)
+                except Exception:
+                    traceback.print_exc()
+        else:
+            import sys as _sys
+            print(
+                f"\033[31m[panel error] {self.name}: {message}\033[0m",
+                file=_sys.stderr,
+            )
 
     def _apply_remote_layout(self, msg, viewer=None):
         """Update stored geometry from a user drag/resize in the browser.

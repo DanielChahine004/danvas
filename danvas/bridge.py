@@ -1163,9 +1163,14 @@ class Bridge:
                 )
         elif kind == "panel_error":
             comp = self._components.get(msg.get("id"))
-            label = getattr(comp, "name", None) or msg.get("id", "?")
             message = msg.get("message", "unknown error")
-            print(f"\033[31m[panel error] {label}: {message}\033[0m", file=sys.stderr)
+            if comp is not None:
+                self._dispatch.submit(
+                    lambda c=comp, m=message: c._dispatch_error(m)
+                )
+            else:
+                label = msg.get("id", "?")
+                print(f"\033[31m[panel error] {label}: {message}\033[0m", file=sys.stderr)
         elif kind == "snapshot":
             # Reply to a request_snapshot; hand the document to the waiter.
             waiter = self._snapshot_waiters.get(msg.get("reqId"))
