@@ -437,15 +437,28 @@ nudge only.
 
 ## Receiving input
 
+| Handler | Component(s) | Args | Fires when |
+|---|---|---|---|
+| `@panel.on_change` | `Slider`, `Toggle`, `TextField` | `(value)` | User commits a new value |
+| `@button.on_click` | `Button` | `()` | Button pressed |
+| `@table.on_select` | `Table` | `(indices)` | Row selection changes; 0-based indices |
+| `@chat.on_message` | `Chat` | `(entry)` | Viewer posts a message |
+| `@browser.on_select` | `FileBrowser` | `(path)` | File clicked; absolute path |
+| `@browser.on_navigate` | `FileBrowser` | `(cwd)` | Directory changes; absolute path |
+| `@upload.on_upload` | `Upload` | `(file)` | File received; `file.data` (bytes) or `file.path` (disk) |
+| `@panel.on_layout` | any | `(comp)` | User drags or resizes the panel |
+| `@panel.on_error` | `Custom`, `React` | `(msg)` | JS runtime or compile error in the panel |
+| `@panel.on("event")` | `Custom`, `React` | `(msg)` | `canvas.send({event:"name",...})` from the panel |
+| `@panel.on_message` | `Custom`, `React` | `(msg)` | Any `canvas.send(...)` not matched by a keyed `on()` |
+| `@panel.on_binary` | `Custom` | `(data: bytes)` | `canvas.sendBinary(buf)` from the iframe |
+| `@panel.on_request("event")` | `React` | `(req)` | `await canvas.request(...)` — return value resolves the Promise |
+
 ```python
-@slider.on_change                              # fn(value)
-@toggle.on_change                              # fn(value)
-@button.on_click                               # fn()
-@text_field.on_change                          # fn(text); fires on Enter / blur
-@table.on_select                               # fn(indices); 0-based row indices
-@panel.on_layout                               # fn(comp), after a user drag/resize
-@chat.on_message                               # fn(entry); reply with chat.post(text)
-@custom_or_react.on_error                      # fn(msg); JS runtime / compile errors
+# all input decorators (except on_layout, on_error, on_request) accept threading flags:
+@slider.on_change(threaded=True)               # new thread per call
+@slider.on_change(dedicated=True)              # one persistent thread for this handler
+@slider.on_change(dedicated=True, queue="latest")  # + drop stale calls while busy
+```
 
 # all input decorators accept threading flags:
 @slider.on_change(threaded=True)               # new thread per call
