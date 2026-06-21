@@ -93,7 +93,7 @@ def test_reusing_name_replaces_panel_in_place():
 def test_various_factories_register_and_place():
     c = _canvas()
     made = [
-        c.toggle("mode", ["a", "b"], x=1, y=1),
+        c.toggle(["a", "b"], name="mode", x=1, y=1),
         c.label("lbl", value="hi", x=2, y=2),
         c.markdown("# title", name="md", x=3, y=3),
         c.button("press", x=4, y=4),

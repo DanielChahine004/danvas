@@ -73,7 +73,7 @@ class TextField(React):
     default_w = 240
     default_h = 80
 
-    def __init__(self, name, placeholder="", default="", multiline=False,
+    def __init__(self, name="text_field", placeholder="", default="", multiline=False,
                  color=None, label=None):
         super().__init__(source=_FIELD_SOURCE, name=name, label=label,
                          props={"value": default, "placeholder": placeholder,

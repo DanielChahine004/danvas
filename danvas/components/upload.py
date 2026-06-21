@@ -189,7 +189,7 @@ class Upload(React):
     default_w = 240
     default_h = 120
 
-    def __init__(self, name, text=None, label=None, dest=None, accept=None,
+    def __init__(self, name="upload", text=None, label=None, dest=None, accept=None,
                  multiple=False, max_size=None, color=None):
         caption = text if text is not None else (label if label is not None else name)
         # The token is the upload target; minted now so it's a stable prop, and

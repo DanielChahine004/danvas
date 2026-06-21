@@ -52,7 +52,7 @@ class Toggle(React):
     default_w = 260
     default_h = 84
 
-    def __init__(self, name, options, default=None, color=None, label=None):
+    def __init__(self, options, name="toggle", default=None, color=None, label=None):
         options = list(options)
         if not options:
             raise ValueError("Toggle requires at least one option")

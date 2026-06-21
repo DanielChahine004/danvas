@@ -131,7 +131,7 @@ class Canvas:
     # -- factory methods ------------------------------------------------------
     def slider(
         self,
-        name: str,
+        name: str = ...,
         min: float = ...,
         max: float = ...,
         default: float | None = ...,
@@ -143,8 +143,8 @@ class Canvas:
     ) -> Slider: ...
     def toggle(
         self,
-        name: str,
         options: Any,
+        name: str = ...,
         default: Any = ...,
         color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
@@ -152,22 +152,22 @@ class Canvas:
     ) -> Toggle: ...
     def button(
         self,
-        name: str,
+        name: str = ...,
         text: str | None = ...,
         color: tuple[int, int, int] | str | None = ...,
         label: str | None = ...,
         **place: Any,
     ) -> Button: ...
     def label(
-        self, name: str, value: str = ..., color: tuple[int, int, int] | str | None = ...,
+        self, name: str = ..., value: str = ..., color: tuple[int, int, int] | str | None = ...,
         label: str | None = ..., **place: Any
     ) -> Label: ...
     def video(
-        self, name: str, quality: int = ..., label: str | None = ..., **place: Any
+        self, name: str = ..., quality: int = ..., label: str | None = ..., **place: Any
     ) -> VideoFeed: ...
     def audio(
         self,
-        name: str,
+        name: str = ...,
         sample_rate: int = ...,
         channels: int = ...,
         label: str | None = ...,
@@ -225,7 +225,7 @@ class Canvas:
     ) -> Table: ...
     def text_field(
         self,
-        name: str,
+        name: str = ...,
         placeholder: str = ...,
         default: str = ...,
         multiline: bool = ...,

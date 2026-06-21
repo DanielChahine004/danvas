@@ -43,7 +43,7 @@ class Label(React):
     default_w = 240
     default_h = 84
 
-    def __init__(self, name, value="", color=None, label=None, w=None, h=None):
+    def __init__(self, name="label", value="", color=None, label=None, w=None, h=None):
         super().__init__(source=_LABEL_SOURCE, name=name, label=label, w=w, h=h,
                          props={"text": _str(value),
                                 "_th": _theme.derive(color) if color is not None else {}})

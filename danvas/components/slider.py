@@ -95,7 +95,7 @@ class Slider(React):
     default_w = 240
     default_h = 96
 
-    def __init__(self, name, min=0, max=100, default=None, step=1,
+    def __init__(self, name="slider", min=0, max=100, default=None, step=1,
                  on_release=False, color=None, label=None):
         if default is None:
             default = min

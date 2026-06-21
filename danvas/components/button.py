@@ -53,7 +53,7 @@ class Button(React):
     default_w = 200
     default_h = 84
 
-    def __init__(self, name, text=None, color=None, label=None):
+    def __init__(self, name="button", text=None, color=None, label=None):
         # ``text`` is the button face; it defaults to the label/name so naming the
         # button is enough to caption it.
         caption = text if text is not None else (label if label is not None else name)

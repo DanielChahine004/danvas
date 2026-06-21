@@ -106,7 +106,7 @@ class FileBrowser(React):
     default_w = 320
     default_h = 420
 
-    def __init__(self, root=".", name="files", label=None, w=None, h=None,
+    def __init__(self, root=".", name="filebrowser", label=None, w=None, h=None,
                  pattern=None, show_hidden=False, color=None):
         super().__init__(source=_FB_SOURCE, name=name, label=label, w=w, h=h,
                          props={"_th": _theme.derive(color) if color is not None else {}})

@@ -57,7 +57,7 @@ class VideoFeed(React):
     default_h = 280
     BINARY_TYPE = BINARY_VIDEO
 
-    def __init__(self, name, quality=70, label=None, encode=True, queue="latest",
+    def __init__(self, name="video", quality=70, label=None, encode=True, queue="latest",
                  color=None):
         # Live video defaults to the ``latest`` queue policy: if a viewer falls
         # behind, stale frames are dropped so latency stays bounded rather than

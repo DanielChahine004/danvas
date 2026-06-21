@@ -59,7 +59,7 @@ class _FactoryMixin:
         place = {k: kw.pop(k) for k in _INSERT_KEYS if k in kw}
         return self.insert(cls(*args, **kw), **place)
 
-    def slider(self, name, min=0, max=100, default=None, step=1,
+    def slider(self, name="slider", min=0, max=100, default=None, step=1,
                on_release=False, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Slider`. See :meth:`insert` for ``place``.
 
@@ -68,29 +68,29 @@ class _FactoryMixin:
         reports only the settled value when the user lets go, instead of every
         value during the drag.
         """
-        return self._make(Slider, name, min=min, max=max, default=default,
+        return self._make(Slider, name=name, min=min, max=max, default=default,
                           step=step, on_release=on_release, label=label, **place)
 
-    def toggle(self, name, options, default=None, label=None, **place: Unpack[Place]):
+    def toggle(self, options, name="toggle", default=None, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Toggle`. See :meth:`insert` for ``place``."""
-        return self._make(Toggle, name, options, default=default, label=label,
+        return self._make(Toggle, options, name=name, default=default, label=label,
                           **place)
 
-    def button(self, name, text=None, label=None, **place: Unpack[Place]):
+    def button(self, name="button", text=None, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Button`. See :meth:`insert` for ``place``."""
-        return self._make(Button, name, text=text, label=label, **place)
+        return self._make(Button, name=name, text=text, label=label, **place)
 
-    def label(self, name, value="", label=None, **place: Unpack[Place]):
+    def label(self, name="label", value="", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Label`. See :meth:`insert` for ``place``."""
-        return self._make(Label, name, value=value, label=label, **place)
+        return self._make(Label, name=name, value=value, label=label, **place)
 
-    def video(self, name, quality=70, label=None, **place: Unpack[Place]):
+    def video(self, name="video", quality=70, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.VideoFeed`. See :meth:`insert` for ``place``."""
-        return self._make(VideoFeed, name, quality=quality, label=label, **place)
+        return self._make(VideoFeed, name=name, quality=quality, label=label, **place)
 
-    def audio(self, name, sample_rate=16000, channels=1, label=None, **place: Unpack[Place]):
+    def audio(self, name="audio", sample_rate=16000, channels=1, label=None, **place: Unpack[Place]):
         """Insert an :class:`~danvas.AudioFeed`. See :meth:`insert` for ``place``."""
-        return self._make(AudioFeed, name, sample_rate=sample_rate,
+        return self._make(AudioFeed, name=name, sample_rate=sample_rate,
                           channels=channels, label=label, **place)
 
     def chat(self, name="chat", label=None, **place: Unpack[Place]):
@@ -108,7 +108,7 @@ class _FactoryMixin:
         return self._make(Custom, html=html, path=path, css=css, js=js,
                           name=name, label=label, **place)
 
-    def download(self, name, source=None, filename=None, text=None, label=None,
+    def download(self, name="download", source=None, filename=None, text=None, label=None,
                  **place: Unpack[Place]):
         """Insert a :class:`~danvas.Download` button. See :meth:`insert` for ``place``.
 
@@ -119,7 +119,7 @@ class _FactoryMixin:
         panel name, is used). The host code chooses what each click serves, so
         nothing the viewer sends selects a path.
         """
-        return self._make(Download, name, source=source, filename=filename,
+        return self._make(Download, name=name, source=source, filename=filename,
                           text=text, label=label, **place)
 
     def upload(self, name="upload", text=None, label=None, dest=None,
@@ -134,11 +134,11 @@ class _FactoryMixin:
         several at once, and ``max_size`` (bytes) rejects oversized uploads — set
         it on any public/tunneled canvas.
         """
-        return self._make(Upload, name, text=text, label=label, dest=dest,
+        return self._make(Upload, name=name, text=text, label=label, dest=dest,
                           accept=accept, multiple=multiple, max_size=max_size,
                           **place)
 
-    def file_browser(self, name="files", root=".", label=None, pattern=None,
+    def file_browser(self, name="filebrowser", root=".", label=None, pattern=None,
                      show_hidden=False, **place: Unpack[Place]):
         """Insert a :class:`~danvas.FileBrowser`. See :meth:`insert` for ``place``.
 
@@ -189,14 +189,14 @@ class _FactoryMixin:
         """
         return self._make(Table, data, name=name, label=label, **place)
 
-    def text_field(self, name, placeholder="", default="", multiline=False,
+    def text_field(self, name="text_field", placeholder="", default="", multiline=False,
                    label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.TextField`. See :meth:`insert` for ``place``.
 
         Single-line (default): fires ``on_change`` on Enter or focus-loss.
         Pass ``multiline=True`` for a textarea that fires on focus-loss.
         """
-        return self._make(TextField, name, placeholder=placeholder,
+        return self._make(TextField, name=name, placeholder=placeholder,
                           default=default, multiline=multiline, label=label,
                           **place)
 
@@ -219,7 +219,7 @@ class _FactoryMixin:
         # re-showing under the same name replaces in place on its own.
         return self.insert(comp, **place)
 
-    def webview(self, url, name="web", label=None, **place: Unpack[Place]):
+    def webview(self, url, name="webview", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.WebView`. See :meth:`insert` for ``place``."""
         return self._make(WebView, url, name=name, label=label, **place)
 
@@ -227,7 +227,7 @@ class _FactoryMixin:
         """Insert a :class:`~danvas.Plot`. See :meth:`insert` for ``place``."""
         return self._make(Plot, name=name, label=label, **place)
 
-    def live_plot(self, name="live plot", **kw):
+    def live_plot(self, name="liveplot", **kw):
         """Insert a :class:`~danvas.LivePlot`.
 
         Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,

@@ -101,7 +101,7 @@ class Download(React):
     default_w = 200
     default_h = 84
 
-    def __init__(self, name, source=None, filename=None, text=None, label=None,
+    def __init__(self, name="download", source=None, filename=None, text=None, label=None,
                  color=None):
         # ``text`` is the button face; defaults to the label/name so naming the
         # download is enough to caption it.

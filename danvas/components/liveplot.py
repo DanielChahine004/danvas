@@ -55,7 +55,7 @@ class LivePlot(BaseComponent):
 
     def __init__(
         self,
-        name="live plot",
+        name="liveplot",
         traces=None,
         max_points=300,
         mode="lines",

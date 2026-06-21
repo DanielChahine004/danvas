@@ -40,7 +40,7 @@ class WebView(React):
     default_w = 800
     default_h = 600
 
-    def __init__(self, url, name="web", label=None, w=None, h=None, color=None):
+    def __init__(self, url, name="webview", label=None, w=None, h=None, color=None):
         super().__init__(source=_WEBVIEW_SOURCE, name=name,
                          label=label if label is not None else url, w=w, h=h,
                          props={"url": self._normalize(url)})

@@ -24,7 +24,7 @@ class AudioFeed(BaseComponent):
     default_h = 120
     BINARY_TYPE = BINARY_AUDIO
 
-    def __init__(self, name, sample_rate=16000, channels=1, label=None, color=None,
+    def __init__(self, name="audio", sample_rate=16000, channels=1, label=None, color=None,
                  queue="latest"):
         # Live audio defaults to ``latest``: if a viewer falls behind, stale
         # chunks are dropped rather than building a playback backlog. Pass
