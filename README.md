@@ -110,6 +110,8 @@ canvas.components         # list of every panel (visible and hidden)
 panel.visible             # True if currently shown on the canvas
 ```
 
+**`hide` vs `remove`** — `hide` is reversible: the panel disappears from the browser but stays alive in Python with its id, value, and callbacks intact; `unhide` brings it back at the same position with no setup. `remove` is permanent: the Python object is detached and the id is gone — re-inserting it creates a brand-new panel. Use `hide`/`unhide` for panels you toggle on and off (a detail view, a debug overlay); use `remove` when the panel is genuinely done.
+
 `canvas.clear()` removes everything at once; `canvas.save` / `canvas.load`
 persist placement (see [Saving & loading](#saving--loading)).
 
