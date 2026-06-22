@@ -670,16 +670,14 @@ def _dtype_label(present, numeric):
     if all(isinstance(v, bool) for v in present):
         return "bool"
     if numeric:
-        # int if every value is a whole number (after coercing strings).
         allint = True
         for v in present:
             try:
-                if float(v) != int(float(v)):
+                f = float(v)
+                if f != int(f):
                     allint = False
-                    break
             except (TypeError, ValueError):
-                allint = False
-                break
+                return "mixed"
         return "int" if allint else "float"
     types = {type(v).__name__ for v in present}
     return "str" if types <= {"str"} else "mixed"
