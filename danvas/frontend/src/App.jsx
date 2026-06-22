@@ -478,9 +478,39 @@ function enableRightDragPan(editor) {
 // coarser; nudge if zoom feels too fast/slow on your device.
 const WHEEL_ZOOM_RATE = 0.002
 const PINCH_ZOOM_RATE = 0.01
+// Pan smoothing: each animation frame the camera moves this fraction of the way
+// to the outstanding scroll, so it eases toward the target instead of jumping on
+// every wheel event. 1 = no smoothing (snappy); lower = smoother/floatier. This
+// is the knob for how hard touchpad pan snaps to pure horizontal/vertical: the
+// OS axis-locks the raw deltas, and easing the response rounds the abrupt H↔V
+// transitions into a smoother diagonal. (The OS lock itself can't be undone in
+// JS — we only get the deltas it reports.)
+const PAN_SMOOTHING = 0.4
 
 function enableSmartScroll(editor) {
   const el = editor.getContainer()
+
+  // Outstanding pan (client px) not yet folded into the camera, drained by an
+  // rAF loop so quick axis-locked bursts blend into a smooth glide. The total is
+  // always fully applied (the per-frame fractions sum to it) — only spread out.
+  let panX = 0
+  let panY = 0
+  let raf = 0
+  const flushPan = () => {
+    const ax = panX * PAN_SMOOTHING
+    const ay = panY * PAN_SMOOTHING
+    panX -= ax
+    panY -= ay
+    const cam = editor.getCamera()
+    editor.setCamera({ x: cam.x - ax / cam.z, y: cam.y - ay / cam.z, z: cam.z }, { immediate: true })
+    if (Math.abs(panX) > 0.1 || Math.abs(panY) > 0.1) {
+      raf = requestAnimationFrame(flushPan)
+    } else {
+      raf = 0
+      panX = 0
+      panY = 0
+    }
+  }
 
   const onWheel = (e) => {
     // Identify physical mouse wheel events (vs trackpad).
@@ -497,27 +527,34 @@ function enableSmartScroll(editor) {
     e.preventDefault()
     e.stopPropagation()
 
-    const cam = editor.getCamera()
     // Normalize line/page mode (Firefox) to pixels.
     const dx = e.deltaMode === 1 ? e.deltaX * 40 : e.deltaX
     const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
 
     if (e.ctrlKey || isMouse) {
-      // Zoom toward the cursor, keeping the page point under it fixed.
+      // Zoom toward the cursor, keeping the page point under it fixed. Applied
+      // immediately — only pan is eased (zoom-to-cursor needs the live position).
+      const cam = editor.getCamera()
       const rate = e.ctrlKey ? PINCH_ZOOM_RATE : WHEEL_ZOOM_RATE
       const newZ = Math.max(0.1, Math.min(8, cam.z * Math.exp(-dy * rate)))
       const newX = e.clientX / newZ - e.clientX / cam.z + cam.x
       const newY = e.clientY / newZ - e.clientY / cam.z + cam.y
       editor.setCamera({ x: newX, y: newY, z: newZ }, { immediate: true })
     } else {
-      // Trackpad two-finger scroll → pan. delta is client px; divide by zoom to
-      // get page units. Minus matches tldraw: scroll down reveals lower content.
-      editor.setCamera({ x: cam.x - dx / cam.z, y: cam.y - dy / cam.z, z: cam.z }, { immediate: true })
+      // Trackpad two-finger scroll → pan, eased. Accumulate the delta (client px,
+      // minus matches tldraw: scroll down reveals lower content); flushPan drains
+      // it to the camera over the next few frames.
+      panX += dx
+      panY += dy
+      if (!raf) raf = requestAnimationFrame(flushPan)
     }
   }
 
   el.addEventListener('wheel', onWheel, { capture: true, passive: false })
-  return () => el.removeEventListener('wheel', onWheel, { capture: true, passive: false })
+  return () => {
+    el.removeEventListener('wheel', onWheel, { capture: true, passive: false })
+    if (raf) cancelAnimationFrame(raf)
+  }
 }
 
 function seedDemo(editor) {
