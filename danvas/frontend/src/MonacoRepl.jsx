@@ -80,7 +80,12 @@ export default function MonacoRepl({ value, dark, onChange, onRun, onComplete })
         pointerEvents: toolIsSelect ? 'all' : 'none',
       }}
       // Keep tldraw from hijacking pointer/keyboard meant for the editor.
-      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+      onPointerDown={toolIsSelect ? (e) => {
+        const pt = editor.screenToPage({ x: e.clientX, y: e.clientY })
+        const top = editor.getShapeAtPoint(pt, { hitInside: true })
+        if (top && !top.type.startsWith('pc')) return
+        e.stopPropagation()
+      } : undefined}
       onKeyDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
     >
       <Editor

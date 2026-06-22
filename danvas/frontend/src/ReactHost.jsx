@@ -456,7 +456,13 @@ export default function ReactHost({ shape }) {
       // receive clicks even when a parent HTML div has pointer-events:none.
       className={(!ghost && !toolIsSelect) ? 'pc-draw-passthrough' : undefined}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
-      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
+      onPointerDown={ghost ? undefined : (e) => {
+        if (!toolIsSelect) return
+        const pt = editor.screenToPage({ x: e.clientX, y: e.clientY })
+        const top = editor.getShapeAtPoint(pt, { hitInside: true })
+        if (top && !top.type.startsWith('pc')) return
+        e.stopPropagation()
+      }}
       onTouchStart={ghost ? undefined : (e) => e.stopPropagation()}
       onTouchEnd={ghost ? undefined : (e) => e.stopPropagation()}
       // Prevent native browser image/text drag from starting inside the panel

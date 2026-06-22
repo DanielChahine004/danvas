@@ -1,5 +1,16 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { BaseBoxShapeUtil, HTMLContainer, T, useEditor, useValue } from 'tldraw'
+
+// Returns true when the topmost tldraw shape at the pointer position is a
+// non-panel shape (a drawing, arrow, text, image, etc. drawn on the canvas).
+// Used to let pointerdown events bubble to tldraw in that case so the user
+// can select/drag drawings that overlap a panel, instead of the panel eating
+// the event via stopPropagation.
+function drawingOnTop(editor, e) {
+  const pt = editor.screenToPage({ x: e.clientX, y: e.clientY })
+  const top = editor.getShapeAtPoint(pt, { hitInside: true })
+  return top != null && !top.type.startsWith('pc')
+}
 import Plotly from 'plotly.js-basic-dist-min'
 import {
   sendInput,
@@ -452,7 +463,7 @@ function CustomView({ shape }) {
       }}
       // Keep tldraw from hijacking drags/zoom meant for the iframe content. A
       // ghost panel or active drawing tool wants the pointer to fall through.
-      onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
+      onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => { if (!drawingOnTop(editor, e)) e.stopPropagation() }}
       onDragStart={(e) => e.preventDefault()}
     />
   )
@@ -661,7 +672,7 @@ function LivePlotView({ shape }) {
     <div
       ref={ref}
       style={{ flex: 1, width: '100%', minHeight: 0, pointerEvents: toolIsSelect ? 'all' : 'none' }}
-      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+      onPointerDown={toolIsSelect ? (e) => { if (!drawingOnTop(editor, e)) e.stopPropagation() } : undefined}
     />
   )
 }
@@ -787,7 +798,7 @@ function AudioView({ shape }) {
   return (
     <div
       style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}
-      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+      onPointerDown={toolIsSelect ? (e) => { if (!drawingOnTop(editor, e)) e.stopPropagation() } : undefined}
     >
       <button
         onClick={toggle}
@@ -897,7 +908,7 @@ function ReplPanel({ shape }) {
           cursor: 'pointer',
           pointerEvents: toolIsSelect ? 'all' : 'none',
         }}
-        onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+        onPointerDown={toolIsSelect ? (e) => { if (!drawingOnTop(editor, e)) e.stopPropagation() } : undefined}
         onClick={() => run()}
       >
         Run (⌘/Ctrl+Enter)
@@ -916,7 +927,7 @@ function ReplPanel({ shape }) {
             whiteSpace: 'pre-wrap',
             pointerEvents: toolIsSelect ? 'all' : 'none',
           }}
-          onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+          onPointerDown={toolIsSelect ? (e) => { if (!drawingOnTop(editor, e)) e.stopPropagation() } : undefined}
         >
           {output}
           {result ? `=> ${result}` : ''}
