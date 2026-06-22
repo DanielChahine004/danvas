@@ -205,7 +205,7 @@ class _FactoryMixin:
                           default=default, multiline=multiline, label=label,
                           **place)
 
-    def show(self, value, name=None, label=None, **place: Unpack[Place]):
+    def show(self, value, name=None, label=None, **kw):
         """Auto-render any value as the best-fitting panel and insert it.
 
         Picks the component the way a notebook decides how to render an output
@@ -214,12 +214,19 @@ class _FactoryMixin:
         repr label) via :func:`danvas.panel_for`. With no ``name`` a unique one
         is generated; re-using a ``name`` replaces that panel in place. Returns
         the inserted component. See :meth:`insert` for ``place``.
+
+        Any keyword arguments not used for placement are forwarded to the
+        chosen component's constructor when it accepts them and silently ignored
+        otherwise — so ``editable=True`` enables editing on a table but is a
+        no-op if the value renders as an image or label.
         """
         from .dispatch import panel_for
+        # Split placement kwargs from component-specific ones.
+        place = {k: kw.pop(k) for k in _INSERT_KEYS if k in kw}
         if name is None:
             self._show_seq += 1
             name = f"panel_{self._show_seq}"
-        comp = panel_for(value, name=name, label=label)
+        comp = panel_for(value, name=name, label=label, **kw)
         # insert() handles eviction of whatever currently holds this name, so
         # re-showing under the same name replaces in place on its own.
         return self.insert(comp, **place)

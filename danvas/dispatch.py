@@ -14,6 +14,7 @@ is used first so notebook-registered formatters are honoured.
 """
 
 import base64
+import inspect
 import json
 import os
 import re
@@ -24,8 +25,29 @@ from .components import BaseComponent, Custom, Image, Label, Markdown, Plot, Tab
 from .components._doc import document
 
 
+def _filtered_kw(cls, kw):
+    """Return the subset of ``kw`` that ``cls.__init__`` explicitly accepts.
+
+    Prevents unknown kwargs from crashing component constructors while still
+    letting callers pass component-specific options to ``panel_for`` without
+    knowing in advance which component will be chosen.
+    """
+    if not kw:
+        return {}
+    try:
+        sig = inspect.signature(cls.__init__)
+        params = set(sig.parameters) - {"self"}
+        has_var_kw = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+        return dict(kw) if has_var_kw else {k: v for k, v in kw.items() if k in params}
+    except Exception:
+        return {}
+
+
 def panel_for(value, name="panel", label=None, w=None, h=None,
-              formatter=None):
+              formatter=None, **comp_kw):
     """Build (but don't insert) the panel that best renders ``value``.
 
     Detection order, most specific first, so scripts and notebooks agree:
@@ -58,7 +80,7 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
         return _image_panel(value, name, label, w, h)
 
     if _is_tabular(value):
-        return _table_panel(value, name, label, w, h)
+        return _table_panel(value, name, label, w, h, comp_kw)
 
     html = _rich_html(value, formatter)
     if html is not None:
@@ -66,14 +88,8 @@ def panel_for(value, name="panel", label=None, w=None, h=None,
         return _mark_auto(Custom(html=html, name=name, label=label, w=w, h=h))
 
     if isinstance(value, (dict, list, tuple, set)):
-        body = (
-            "<pre style='margin:0;white-space:pre-wrap;font-size:12px'>"
-            f"{_escape(_as_json(value))}</pre>"
-        )
-        # A JSON tree is a finite block — fit the panel to it instead of a tall
-        # mostly-empty default.
-        return _mark_auto(Custom(html=document(body), name=name, label=label,
-                                 w=w, h=h))
+        return _mark_auto(Custom(html=_json_tree_html(value), name=name,
+                                 label=label, w=w, h=h))
 
     # Raw bytes that look like an image (PNG/JPEG/GIF/…) render as the image;
     # anything else falls through to a repr label.
@@ -245,13 +261,28 @@ def _is_tabular(obj):
     mod = type(obj).__module__ or ""
     if mod.startswith("pandas") and callable(getattr(obj, "to_html", None)):
         return True
-    # Records (list of dicts) or a matrix (list of rows) are clearly tabular; a
-    # list of scalars or a bare dict stays JSON, where it reads better.
+    # NumPy: 1-D array → single "value" column; 2-D non-uint8 → row matrix.
+    # uint8 2-D arrays are pixel data and go to the image path instead.
+    if mod.startswith("numpy") and hasattr(obj, "shape"):
+        shape = obj.shape
+        dtype_str = str(getattr(obj, "dtype", ""))
+        if len(shape) == 1:
+            return True
+        if len(shape) == 2 and "uint8" not in dtype_str:
+            return True
+        return False
     if isinstance(obj, (list, tuple)) and obj:
         if all(isinstance(x, dict) for x in obj):
             return True
         if all(isinstance(x, (list, tuple)) for x in obj):
             return True
+        # Flat list of scalars → single-column table (cleaner than JSON pre).
+        if all(isinstance(x, (int, float, bool, str, type(None))) for x in obj):
+            return True
+    # Flat dict (all scalar values) → key/value table.
+    if isinstance(obj, dict) and obj and all(
+            not isinstance(v, (dict, list, tuple, set)) for v in obj.values()):
+        return True
     return False
 
 
@@ -262,10 +293,15 @@ def _is_image_like(obj):
     if mod.startswith("PIL"):
         return hasattr(obj, "save") and hasattr(obj, "mode")
     if mod.startswith("numpy") and hasattr(obj, "shape"):
-        # 2-D (grayscale) or H×W×{3,4} (RGB/RGBA) arrays read as images;
-        # anything else is data, handled as a table/structure.
         shape = obj.shape
-        return len(shape) == 2 or (len(shape) == 3 and shape[2] in (3, 4))
+        dtype_str = str(getattr(obj, "dtype", ""))
+        # H×W×{3,4} (RGB/RGBA) arrays are always image-like.
+        if len(shape) == 3 and shape[2] in (3, 4):
+            return True
+        # 2-D: only uint8 is pixel data; float matrices are tabular data.
+        if len(shape) == 2:
+            return "uint8" in dtype_str
+        return False
     return False
 
 
@@ -370,18 +406,85 @@ def _mark_auto(component):
     return component
 
 
-def _table_panel(value, name, label, w, h):
+_JSON_TREE_JS = r"""
+!function(){
+var D=document,data=%s;
+var root=D.getElementById('jtroot');
+root.style.cssText='font:13px/1.7 ui-monospace,monospace;padding:6px 8px;overflow:auto;box-sizing:border-box';
+root.appendChild(build(data,0));
+function build(v,d){
+  var t=typeof v;
+  if(v===null)return leaf('null','#a78bfa');
+  if(t==='boolean')return leaf(String(v),'#c084fc');
+  if(t==='number')return leaf(String(v),'#60a5fa');
+  if(t==='string')return leaf(JSON.stringify(v),'#86efac');
+  var arr=Array.isArray(v),keys=arr?[...Array(v.length).keys()]:Object.keys(v);
+  if(!keys.length)return leaf(arr?'[]':'{}','#94a3b8');
+  var wrap=el('span'),body=el('div');
+  body.style.paddingLeft='14px';
+  keys.forEach(function(k,i){
+    var row=el('div');
+    if(!arr){var ks=el('span');ks.textContent=JSON.stringify(k)+': ';ks.style.cssText='color:#93c5fd;font-weight:bold';row.appendChild(ks);}
+    row.appendChild(build(arr?v[k]:v[k],d+1));
+    if(i<keys.length-1){var cm=el('span');cm.textContent=',';cm.style.color='#64748b';row.appendChild(cm);}
+    body.appendChild(row);
+  });
+  var o=el('span'),c=el('span'),prev=el('span');
+  o.textContent=arr?'[':'{';o.style.cssText='cursor:pointer;color:#94a3b8;user-select:none';
+  c.textContent=arr?']':'}';c.style.color='#94a3b8';
+  prev.style.cssText='color:#475569;font-size:11px';
+  function peek(){return(arr?keys.slice(0,3).map(function(k){return String(v[k]);}):keys.slice(0,3).map(function(k){return JSON.stringify(k);})).join(', ')+(keys.length>3?', …':'');}
+  var col=d>0;
+  function tog(c){body.style.display=c?'none':'';prev.style.display=c?'':'none';prev.textContent=' '+peek()+' ';}
+  o.addEventListener('click',function(e){e.stopPropagation();col=!col;tog(col);});
+  tog(col);
+  wrap.appendChild(o);wrap.appendChild(prev);wrap.appendChild(body);wrap.appendChild(c);
+  return wrap;
+}
+function leaf(t,c){var e=el('span');e.textContent=t;e.style.color=c;return e;}
+function el(t){return D.createElement(t);}
+}();
+"""
+
+
+def _json_tree_html(value):
+    """A collapsible, syntax-colored JSON tree as a self-contained HTML document."""
+    json_str = json.dumps(value, default=str, ensure_ascii=False)
+    body = (f"<div id='jtroot'></div>"
+            f"<script>{_JSON_TREE_JS % json_str}</script>")
+    return document(body)
+
+
+def _table_panel(value, name, label, w, h, comp_kw=None):
     """A Table sized (when no height was given) to its rows, capped at the
     component default so a huge table stays scrollable instead of giant."""
+    # Normalize numpy arrays into forms Table._normalize already handles.
+    mod = type(value).__module__ or ""
+    if mod.startswith("numpy") and hasattr(value, "tolist"):
+        shape = value.shape
+        value = ({"value": value.tolist()} if len(shape) == 1
+                 else value.tolist())
+    # Flat list/tuple of scalars → named single column so header reads "value".
+    elif isinstance(value, (list, tuple)) and value \
+            and not isinstance(value[0], (dict, list, tuple)):
+        value = {"value": list(value)}
+
     if h is None:
         try:
-            n = max(1, len(value))
+            # Dict-of-columns: row count is the length of the first column.
+            # Flat-dict (scalar values) has len(dict) rows in the key/value layout.
+            if isinstance(value, dict):
+                first = next(iter(value.values()), None)
+                n = max(1, len(first) if hasattr(first, "__len__") else len(value))
+            else:
+                n = max(1, len(value))
         except TypeError:
             n = None
         if n is not None:
             h = min(_TBL_CHROME + _TBL_BAR + _TBL_HEAD + _TBL_DIST
                     + n * _TBL_ROW + 6, Table.default_h)
-    return Table(value, name=name, label=label, w=w, h=h)
+    return Table(value, name=name, label=label, w=w, h=h,
+                 **_filtered_kw(Table, comp_kw or {}))
 
 
 def _image_panel(src, name, label, w, h):

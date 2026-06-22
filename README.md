@@ -244,7 +244,7 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `React` | bidirectional | your JSX, compiled in-browser; `@on(event)`/`@on_request`, `.update(**props)` (scope with `roles=`/`client_id=`), `.push(data)`, `css=`; `@on_error` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=`; live: `.color` |
-| `Table` | bidirectional | DataFrame/Series/records/dict → sortable, filterable, paginated; toolbar buttons toggle a `#` index column, a `cols ▾` column-visibility checklist, and a `sel` row-selection column; `@on_select` fires with the list of selected 0-based row indices; `.selected`, `.update(data)`; live: `.color` |
+| `Table` | bidirectional | DataFrame/Series/records/dict/list/NumPy array → sortable, filterable, paginated; toolbar buttons toggle `#` index, `cols ▾` column visibility, `sel` row-selection, and (when `editable=True`) a ✎ edit-mode toggle; `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected`, `.update(data)`; live: `.color` |
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message`; live: `.color` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=`; live: `.pattern`, `.show_hidden`, `.color` |
@@ -449,6 +449,7 @@ nudge only.
 | `@panel.on_change` | `Slider`, `Toggle`, `TextField` | `(value)` | User commits a new value |
 | `@button.on_click` | `Button` | `()` | Button pressed |
 | `@table.on_select` | `Table` | `(indices)` | Row selection changes; 0-based indices |
+| `@table.on_edit` | `Table` | `(row, col, value)` | Cell edited (requires `editable=True`); value is always a string — coerce in the callback |
 | `@chat.on_message` | `Chat` | `(entry)` | Viewer posts a message |
 | `@browser.on_select` | `FileBrowser` | `(path)` | File clicked; absolute path |
 | `@browser.on_navigate` | `FileBrowser` | `(cwd)` | Directory changes; absolute path |
@@ -634,9 +635,13 @@ replies via `panel.push(data)`, received in JS by `canvas.onPush(cb)`.
 notebook deciding how to render an `Out[...]`, but works in plain scripts:
 
 ```python
-canvas.show(df)                    # DataFrame → interactive Table
+canvas.show(df)                    # DataFrame / list-of-dicts / list-of-lists → Table
+canvas.show({"lr": 3e-4, "epochs": 40})   # flat dict (scalar values) → key/value Table
+canvas.show([1.1, 2.2, 3.3])      # flat list of scalars → single-column Table
+canvas.show(arr_1d)                # NumPy 1-D array → Table; 2-D float → row-matrix Table
+canvas.show(arr_uint8)             # NumPy uint8 (2-D) or RGB (H×W×3) array → Image
 canvas.show(fig)                   # Matplotlib / Plotly → Image / Plot
-canvas.show({"status": "ok"})      # dict / list → pretty JSON
+canvas.show({"nested": {"a": 1}}) # nested dict/list/set → collapsible syntax-colored JSON tree
 canvas.show("use **bold**")        # Markdown syntax → rendered text
 canvas.show("report.csv")          # existing file → Table; "photo.png" → Image
 canvas.show("https://site.com/x.png")  # image URL → Image; web URL → link
@@ -647,6 +652,23 @@ Dispatch is conservative (single `*italic*` isn't Markdown; a path must be a
 real file). No `name` → fresh panel each call; `name=` replaces in place.
 `danvas.panel_for(value)` builds without inserting. Matplotlib figures are
 released from pyplot after rendering — no manual `plt.close()`.
+
+Extra keyword arguments are forwarded to the chosen component's constructor when
+it accepts them and silently ignored otherwise — so `editable=True` enables cell
+editing on a Table but is a no-op if the value renders as an Image or Label.
+Placement kwargs (`below=`, `right_of=`, `x=`, `y=`, etc.) are always routed to
+`insert()` regardless.
+
+```python
+tbl = canvas.show(data, label="params", editable=True, below=header)
+
+@tbl.on_edit
+def handle(row, col, value):
+    data[row][col] = value   # coerce type here if needed
+    tbl.update(data)
+```
+
+See `examples/show_anything.py` for a runnable tour of every type.
 
 ## Create your own components
 

@@ -101,6 +101,11 @@ _TABLE_CSS = """
 .pc-tbl th.pc-sel-col{cursor:pointer;font-weight:400}
 .pc-tbl th.pc-sel-col input,.pc-tbl td.pc-sel-col input{cursor:pointer;
  accent-color:#2563eb}
+.pc-tbl.pc-editable tbody td{cursor:text}
+.pc-tbl td.pc-editing{padding:0}
+.pc-tbl td.pc-editing input{width:100%;padding:4px 8px;border:none;
+ outline:2px solid #2563eb;outline-offset:-2px;font:inherit;
+ background:#eff6ff;box-sizing:border-box}
 """
 
 # The React component. Written as a plain string (no str.format/f-string) so its
@@ -111,10 +116,14 @@ _TABLE_SOURCE = """
 function Component({ canvas, props }) {
   const cols = props.cols || [];
   const numeric = props.numeric || [];
-  const rows = props.rows || [];
   const profiles = props.profiles || [];
   const dists = props.dists || [];
   const PAGE = props.pageSize || 2000;
+
+  // Local copy of rows so cell edits are visible immediately without waiting
+  // for a Python round-trip. Resets whenever Python pushes new props.
+  const [rows, setRows] = React.useState(props.rows || []);
+  React.useEffect(() => { setRows(props.rows || []); }, [props.rows]);
   const total = rows.length;
 
   const [sortCol, setSortCol] = React.useState(-1);
@@ -128,6 +137,11 @@ function Component({ canvas, props }) {
   const [showSel, setShowSel] = React.useState(false);
   const [selectedRows, setSelectedRows] = React.useState(new Set());
   const selAllRef = React.useRef(null);
+  const editable = !!props.editable;
+  const [editMode, setEditMode] = React.useState(false);
+  const [editCell, setEditCell] = React.useState(null);  // {ri, ci}
+  const [editVal, setEditVal] = React.useState("");
+  const editRef = React.useRef(null);
 
   // One lowercased haystack per row for the free-text filter. The \\u0001
   // separator keeps a query from matching across a cell boundary.
@@ -224,6 +238,26 @@ function Component({ canvas, props }) {
   }
   function clearSelection() { setSelectedRows(new Set()); canvas.send({ selected: [] }); }
 
+  function startEdit(ri, ci) {
+    if (!editMode) return;
+    setEditCell({ ri, ci });
+    setEditVal(rows[ri][ci] == null ? "" : rows[ri][ci]);
+    setTimeout(() => editRef.current && editRef.current.select(), 0);
+  }
+  function commitEdit() {
+    if (!editCell) return;
+    const { ri, ci } = editCell;
+    setRows((prev) => {
+      const next = prev.map((r) => r.slice());
+      next[ri][ci] = editVal;
+      return next;
+    });
+    canvas.send({ edited: { row: ri, col: ci, value: editVal } });
+    setEditCell(null);
+  }
+  function cancelEdit() { setEditCell(null); }
+  React.useEffect(() => { if (!editMode) setEditCell(null); }, [editMode]);
+
   function spark(c, dist) {
     if (!dist || !dist.bars || !dist.bars.length) return null;
     const n = dist.bars.length, bw = 120 / n;
@@ -248,7 +282,7 @@ function Component({ canvas, props }) {
     : view.length.toLocaleString() + " / " + total.toLocaleString();
 
   return (
-    <div className="pc-tbl">
+    <div className={"pc-tbl" + (editMode ? " pc-editable" : "")}>
       <style>{`__CSS__`}</style>
       <div className="pc-bar">
         <input className="pc-filter" placeholder="filter rows\\u2026" value={q}
@@ -257,6 +291,10 @@ function Component({ canvas, props }) {
                 onClick={() => setShowIdx((v) => !v)}>#</button>
         <button className={"pc-btn" + (showSel ? " on" : "")} title="row selection"
                 onClick={() => setShowSel((v) => !v)}>sel</button>
+        {editable
+          ? <button className={"pc-btn" + (editMode ? " on" : "")} title="toggle cell editing"
+                    onClick={() => setEditMode((v) => !v)}>{"\\u270e"}</button>
+          : null}
         <div className="pc-col-wrap">
           <button className={"pc-btn" + (hiddenCols.size ? " on" : "")} title="show/hide columns"
                   onClick={() => setColMenuOpen((v) => !v)}>cols {"\\u25be"}</button>
@@ -353,7 +391,24 @@ function Component({ canvas, props }) {
                     </td>
                   : null}
                 {showIdx ? <td className="pc-idx">{ri}</td> : null}
-                {rows[ri].map((cell, ci) => hiddenCols.has(ci) ? null : <td key={ci}>{cell == null ? "" : cell}</td>)}
+                {rows[ri].map((cell, ci) => {
+                  if (hiddenCols.has(ci)) return null;
+                  const isEditing = editCell && editCell.ri === ri && editCell.ci === ci;
+                  return (
+                    <td key={ci} className={isEditing ? "pc-editing" : ""}
+                        onClick={() => startEdit(ri, ci)}>
+                      {isEditing
+                        ? <input ref={editRef} value={editVal}
+                            onChange={(e) => setEditVal(e.target.value)}
+                            onBlur={commitEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+                              if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+                            }} />
+                        : (cell == null ? "" : cell)}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -369,21 +424,40 @@ class Table(React):
     default_w = 520
     default_h = 360
 
-    def __init__(self, data, name="table", label=None, w=None, h=None, color=None):
+    def __init__(self, data, name="table", label=None, w=None, h=None, color=None,
+                 editable=False):
         cols, rows = _normalize(data)
         props = _table_props(cols, rows)
         props["_th"] = _theme.derive(color) if color is not None else {}
+        if editable:
+            props["editable"] = True
         super().__init__(source=_TABLE_SOURCE, name=name, label=label, w=w, h=h,
                          props=props)
         self._init_color(color)
+        self._cols = cols  # kept so _handle_input can resolve ci → col name
         self._selected = []
         self._select_callbacks = []
+        self._edit_callbacks = []
 
     @property
     def selected(self):
         """The 0-based indices of currently selected rows in the original data."""
         with self._lock:
             return list(self._selected)
+
+    def on_edit(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
+        """Decorator: called with ``(row, col, value)`` when the user edits a cell.
+
+        ``row`` is the 0-based index into the original data (same as the ``#``
+        column). ``col`` is the column name string. ``value`` is always a string
+        — coerce to int/float in your callback if needed. Only fires when
+        ``editable=True`` was passed to the constructor.
+        See :meth:`on_change <danvas.components.base.BaseComponent.on_change>`
+        for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
+        """
+        def register(f):
+            return self._register_callback(self._edit_callbacks, f, threaded, dedicated, queue)
+        return register(fn) if fn is not None else register
 
     def on_select(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: called with a list of selected row indices on each selection change.
@@ -405,11 +479,23 @@ class Table(React):
                 self._selected = list(payload["selected"])
             self._dispatch_callbacks(self._select_callbacks, (list(self._selected),), viewer)
             return
+        if isinstance(payload, dict) and "edited" in payload:
+            e = payload["edited"]
+            row = e.get("row")
+            ci = e.get("col")
+            value = e.get("value", "")
+            with self._lock:
+                cols = self._cols
+            col = cols[ci] if ci is not None and ci < len(cols) else str(ci)
+            self._dispatch_callbacks(self._edit_callbacks, (row, col, value), viewer)
+            return
         super()._handle_input(payload, viewer)
 
     def update(self, data):
         """Replace the table contents, live."""
         cols, rows = _normalize(data)
+        with self._lock:
+            self._cols = cols
         super().update(**_table_props(cols, rows))
 
 
