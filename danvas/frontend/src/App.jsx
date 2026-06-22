@@ -48,10 +48,10 @@ export default function App() {
             editor.user.updateUserPreferences({ colorScheme: 'dark' })
           }
           // Camera controls: mouse-wheel zooms, trackpad two-finger scroll pans,
-          // trackpad pinch zooms, right-click-drag pans.
-          // tldraw's default wheelBehavior:'pan' already handles trackpad scroll
-          // (pan) and ctrlKey+wheel / pinch (zoom) natively — we leave that alone
-          // and only intercept physical mouse wheel events to zoom instead of pan.
+          // trackpad pinch zooms, right-click-drag pans. enableSmartScroll owns
+          // every wheel gesture in a capture-phase listener so it behaves the same
+          // over the empty canvas and over interactive panels (which scroll via
+          // their scrollbar, not the wheel).
           const cleanupPan = enableRightDragPan(editor)
           const cleanupScroll = enableSmartScroll(editor)
           setEditor(editor)
@@ -454,31 +454,36 @@ function enableRightDragPan(editor) {
   }
 }
 
-// Intercept physical mouse-wheel events and convert them to zoom.
-// Everything else — trackpad two-finger scroll (pan) and trackpad pinch-to-zoom
-// (ctrlKey+wheel) — is left to tldraw's default 'pan' mode which handles both
-// natively and reliably. We only touch mouse wheel events.
+// The canvas owns every wheel gesture. We handle zoom AND pan ourselves in a
+// capture-phase listener on the editor container, which fires before the event
+// reaches whatever's under the cursor — so the behaviour is identical over the
+// empty canvas and over an interactive panel. Panels no longer eat the wheel to
+// scroll their own content (they scroll via their scrollbar instead), which is
+// what made the cursor get "stuck" unable to zoom while hovering a panel.
+//
+//   physical mouse wheel  → zoom toward the cursor
+//   trackpad pinch (ctrl) → zoom toward the cursor
+//   trackpad two-finger   → pan the canvas
 //
 // Mouse-wheel detection (most-reliable first):
-//   deltaMode !== 0       → line/page mode = Firefox mouse wheel.
-//   wheelDeltaY % 120 ===0 → Chrome/Safari/Edge: physical wheels always emit in
-//                            exact ±120 multiples; trackpads never do.
-//   fallback              → large vertical-only delta (Firefox pixel mode).
+//   deltaMode !== 0        → line/page mode = Firefox mouse wheel.
+//   wheelDeltaY % 120 === 0 → Chrome/Safari/Edge: physical wheels always emit in
+//                             exact ±120 multiples; trackpads never do.
+//   fallback               → large vertical-only delta (Firefox pixel mode).
 //
-// Zoom math: keeps the canvas point under the cursor fixed by adjusting cam.x/y
-// alongside cam.z, matching the formula used in enableRightDragPan.
+// Zoom keeps the page point under the cursor fixed (same formula as
+// enableRightDragPan); pan shifts the camera by the scroll delta in page units
+// (client px / zoom), matching tldraw's own pan direction.
+// ponytail: zoom rates are the tuning knobs — pinch is fine-grained, the wheel
+// coarser; nudge if zoom feels too fast/slow on your device.
+const WHEEL_ZOOM_RATE = 0.002
+const PINCH_ZOOM_RATE = 0.01
+
 function enableSmartScroll(editor) {
   const el = editor.getContainer()
 
   const onWheel = (e) => {
-    // ctrlKey = pinch-to-zoom: tldraw's default mode handles it; prevent the
-    // browser from zooming the page instead (which would conflict).
-    if (e.ctrlKey) {
-      e.preventDefault()
-      return
-    }
-
-    // Identify physical mouse wheel events.
+    // Identify physical mouse wheel events (vs trackpad).
     let isMouse = false
     if (e.deltaMode !== 0) {
       isMouse = true  // Firefox line/page mode — always a mouse wheel
@@ -488,21 +493,27 @@ function enableSmartScroll(editor) {
       isMouse = Math.abs(e.deltaY) >= 40 && e.deltaX === 0  // Firefox pixel fallback
     }
 
-    if (!isMouse) return  // trackpad scroll: let tldraw pan natively
-
-    // Mouse wheel: zoom toward the cursor.
+    // Claim the gesture before the panel (or native scroll) can.
     e.preventDefault()
     e.stopPropagation()
-    // Normalize deltaY to pixels (Firefox line mode: ~40px per line).
-    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
+
     const cam = editor.getCamera()
-    const factor = Math.exp(-dy * 0.002)
-    const newZ = Math.max(0.1, Math.min(8, cam.z * factor))
-    // Keep the page point under the cursor fixed: derive new cam.x/y so that
-    // (clientX / newZ - clientX / cam.z + cam.x) maps the same page point.
-    const newX = e.clientX / newZ - e.clientX / cam.z + cam.x
-    const newY = e.clientY / newZ - e.clientY / cam.z + cam.y
-    editor.setCamera({ x: newX, y: newY, z: newZ }, { immediate: true })
+    // Normalize line/page mode (Firefox) to pixels.
+    const dx = e.deltaMode === 1 ? e.deltaX * 40 : e.deltaX
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
+
+    if (e.ctrlKey || isMouse) {
+      // Zoom toward the cursor, keeping the page point under it fixed.
+      const rate = e.ctrlKey ? PINCH_ZOOM_RATE : WHEEL_ZOOM_RATE
+      const newZ = Math.max(0.1, Math.min(8, cam.z * Math.exp(-dy * rate)))
+      const newX = e.clientX / newZ - e.clientX / cam.z + cam.x
+      const newY = e.clientY / newZ - e.clientY / cam.z + cam.y
+      editor.setCamera({ x: newX, y: newY, z: newZ }, { immediate: true })
+    } else {
+      // Trackpad two-finger scroll → pan. delta is client px; divide by zoom to
+      // get page units. Minus matches tldraw: scroll down reveals lower content.
+      editor.setCamera({ x: cam.x - dx / cam.z, y: cam.y - dy / cam.z, z: cam.z }, { immediate: true })
+    }
   }
 
   el.addEventListener('wheel', onWheel, { capture: true, passive: false })
