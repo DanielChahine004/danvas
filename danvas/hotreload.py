@@ -59,6 +59,14 @@ def _react_source_diff(old_text, new_text):
     changed_vars = {k for k in new_strs if new_strs[k] != old_strs.get(k)}
 
     if not changed_vars:
+        # Make sure no string constants changed anywhere else in the file
+        # (e.g. a color literal inside a function call). The structure check
+        # above zeroed all strings, so it couldn't catch those differences.
+        def _all_strings(tree):
+            return [n.value for n in ast.walk(tree)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        if _all_strings(old_tree) != _all_strings(new_tree):
+            return None  # string changed but not a React source var → full restart
         return {}  # only whitespace/comments changed
 
     # Build var_name → component_name mapping from canvas.react(source=VAR, name="X") calls.
