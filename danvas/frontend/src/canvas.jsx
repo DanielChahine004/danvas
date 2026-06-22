@@ -209,6 +209,19 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
   // When the user has a drawing/text/arrow/etc. tool active, panels must be
   // pointer-transparent so tldraw receives the strokes — not the panel HTML.
   const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
+  // When a non-panel tldraw shape (drawing, arrow, text…) is hovered, the panel
+  // must also be fully pointer-transparent so tldraw can select/drag it. tldraw's
+  // own hover detection already identifies the correct shape; we piggyback on
+  // that instead of re-implementing hit-testing. Bubbling events from inside
+  // HTMLContainers don't trigger tldraw's non-panel shape selection path, so
+  // simply not-stopping-propagation isn't enough — we need the panel out of the
+  // pointer event path entirely.
+  const nonPanelHovered = useValue('pc-hover', () => {
+    const hid = editor.getHoveredShapeId()
+    if (!hid) return false
+    const s = editor.getShape(hid)
+    return !!s && !s.type.startsWith('pc')
+  }, [editor])
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
   const noGrab = !!shape.meta?.noGrab
@@ -232,7 +245,13 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
     // in a panel stacked below. The event is not stopped, so it still bubbles to
     // tldraw for correct shape selection. Ghost panels opt out (they are purely
     // decorative and intentionally click-through).
-    <HTMLContainer className="pc-card" style={ghost || !toolIsSelect ? cardStyle(shape, isDark) : { ...cardStyle(shape, isDark), pointerEvents: 'all' }}>
+    <HTMLContainer
+      // pc-draw-passthrough forces pointer-events:none on this element and all
+      // descendants (including SVG children that ignore normal CSS cascade) so
+      // tldraw can fully own the pointer when a drawing/arrow/text shape is hovered.
+      className={nonPanelHovered ? 'pc-card pc-draw-passthrough' : 'pc-card'}
+      style={ghost || !toolIsSelect || nonPanelHovered ? cardStyle(shape, isDark) : { ...cardStyle(shape, isDark), pointerEvents: 'all' }}
+    >
       {children}
       {/* A persistent grip (stays up while selected, unlike the grab cover) so a
           body-interactive panel always has a drag/select point even when its

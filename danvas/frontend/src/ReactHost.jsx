@@ -432,6 +432,12 @@ export default function ReactHost({ shape }) {
   // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.
   const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
   const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
+  const nonPanelHovered = useValue('pc-hover', () => {
+    const hid = editor.getHoveredShapeId()
+    if (!hid) return false
+    const s = editor.getShape(hid)
+    return !!s && !s.type.startsWith('pc')
+  }, [editor])
   return (
     // pointerEvents:'all' + stopPropagation claim the pointer for the hosted
     // component; without this tldraw treats a press as a move/resize of the
@@ -454,7 +460,7 @@ export default function ReactHost({ shape }) {
       // descendants (including SVG, which ignores CSS cascade for pointer-events).
       // Without !important on *, SVG rects default to visiblePainted and still
       // receive clicks even when a parent HTML div has pointer-events:none.
-      className={(!ghost && !toolIsSelect) ? 'pc-draw-passthrough' : undefined}
+      className={(!ghost && (!toolIsSelect || nonPanelHovered)) ? 'pc-draw-passthrough' : undefined}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => {
         if (!toolIsSelect) return
