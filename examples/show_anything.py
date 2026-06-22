@@ -179,19 +179,19 @@ class Gauge:
             f"<div style='font:13px sans-serif;padding:4px'>"
             f"<b>{self.label}</b> — {self.value}/{self.total}"
             f"<div style='background:#e2e8f0;border-radius:6px;height:14px;"
-            f"width:220px;margin-top:4px'>"
+            f"width:200px;margin-top:4px'>"
             f"<div style='background:{self.color};height:14px;border-radius:6px;"
             f"width:{pct * 2.2:.0f}px'></div></div></div>"
         )
 
 repr_panel = canvas.show(
-    Gauge("accuracy", 87, color="#6366f1"),
+    Gauge("accuracy", 88, color="#23cd34"),
     label="_repr_html_ object", below=plotly_panel,
 )
 
 # ── Re-show: replace a panel in place under the same name ─────────────────────
-canvas.show("starting…",  name="live_demo", label="live update")
-canvas.show("ready ✔",    name="live_demo", label="live update")  # replaces above
+canvas.show("starting…",  name="live_demo", label="live update", below=repr_panel)
+canvas.show("ready ✔",    name="live_demo", label="live update", below=repr_panel)  # replaces above
 
 print("canvas.show() routed each value to its best panel — no component chosen by hand.")
 canvas.serve(port=8000, hot_reload=True)
