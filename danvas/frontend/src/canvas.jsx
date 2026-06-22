@@ -311,6 +311,15 @@ class PcShapeUtil extends BaseBoxShapeUtil {
 }
 
 // --- Label ------------------------------------------------------------------
+function LabelPanel({ shape }) {
+  return (
+    <Card shape={shape}>
+      <CardLabel shape={shape} />
+      <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--pc-text)' }}>{shape.props.value}</div>
+    </Card>
+  )
+}
+
 export class LabelShapeUtil extends PcShapeUtil {
   static type = 'pcLabel'
   static props = {
@@ -324,19 +333,22 @@ export class LabelShapeUtil extends PcShapeUtil {
     return { w: 240, h: 84, label: 'label', value: '' }
   }
 
-  component(shape) {
-    const { label, value } = shape.props
-    return (
-      <Card shape={shape}>
-        <CardLabel shape={shape} />
-        <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--pc-text)' }}>{value}</div>
-      </Card>
-    )
-  }
-
+  component(shape) { return <LabelPanel shape={shape} /> }
 }
 
 // --- Custom (arbitrary HTML in a sandboxed iframe) --------------------------
+function HtmlPanel({ shape }) {
+  return (
+    // ghostable: grabbable=False + operable=False makes the iframe (and the
+    // input overlay) click-through, so the panel is purely decorative.
+    <Card shape={shape} grab ghostable>
+      {/* Header has no pointerEvents, so dragging it moves the panel. */}
+      <CardLabel shape={shape} />
+      <CustomView shape={shape} />
+    </Card>
+  )
+}
+
 export class HtmlShapeUtil extends PcShapeUtil {
   static type = 'pcHtml'
   static props = {
@@ -356,18 +368,7 @@ export class HtmlShapeUtil extends PcShapeUtil {
     return { w: 380, h: 320, label: 'custom', html: '', themed: false, permissions: '' }
   }
 
-  component(shape) {
-    return (
-      // ghostable: grabbable=False + operable=False makes the iframe (and the
-      // input overlay) click-through, so the panel is purely decorative.
-      <Card shape={shape} grab ghostable>
-        {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <CardLabel shape={shape} />
-        <CustomView shape={shape} />
-      </Card>
-    )
-  }
-
+  component(shape) { return <HtmlPanel shape={shape} /> }
 }
 
 // The sandboxed iframe that hosts a Custom panel's HTML. Beyond rendering the
@@ -456,6 +457,39 @@ function CustomView({ shape }) {
 }
 
 // --- React (user-authored React component, rendered natively) ---------------
+function ReactPanel({ shape }) {
+  return (
+    // handle (not grab): a hover-revealed grip moves/selects the panel, so the
+    // hosted component stays interactive from the first pointer-over instead of
+    // sitting under a click-to-arm cover. ghostable: grabbable=False +
+    // operable=False makes the host (and the input overlay) click-through, so
+    // the panel is purely decorative.
+    <Card shape={shape} handle ghostable>
+      {/* Header has no pointerEvents, so dragging it moves the panel. */}
+      <CardLabel shape={shape} />
+      <Suspense
+        fallback={
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--pc-faint)',
+              fontSize: 13,
+            }}
+          >
+            compiling…
+          </div>
+        }
+      >
+        <ReactHost shape={shape} />
+      </Suspense>
+    </Card>
+  )
+}
+
+
 // The native counterpart to Custom: instead of sandboxed HTML in an iframe, the
 // panel hosts a user React component compiled at runtime from JSX source. It
 // renders as an ordinary React subtree inside the Card, so it inherits the theme
@@ -480,38 +514,7 @@ export class ReactShapeUtil extends PcShapeUtil {
     return { w: 380, h: 320, label: 'react', source: '', data: '{}', css: '', autoH: false, autoW: false, libs: '[]', wasm: '' }
   }
 
-  component(shape) {
-    return (
-      // handle (not grab): a hover-revealed grip moves/selects the panel, so the
-      // hosted component stays interactive from the first pointer-over instead of
-      // sitting under a click-to-arm cover. ghostable: grabbable=False +
-      // operable=False makes the host (and the input overlay) click-through, so
-      // the panel is purely decorative.
-      <Card shape={shape} handle ghostable>
-        {/* Header has no pointerEvents, so dragging it moves the panel. */}
-        <CardLabel shape={shape} />
-        <Suspense
-          fallback={
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--pc-faint)',
-                fontSize: 13,
-              }}
-            >
-              compiling…
-            </div>
-          }
-        >
-          <ReactHost shape={shape} />
-        </Suspense>
-      </Card>
-    )
-  }
-
+  component(shape) { return <ReactPanel shape={shape} /> }
 }
 
 // --- LivePlot (streaming Plotly, no iframe reload) --------------------------
@@ -659,6 +662,15 @@ function LivePlotView({ shape }) {
   )
 }
 
+function LivePlotPanel({ shape }) {
+  return (
+    <Card shape={shape} grab>
+      <CardLabel shape={shape} />
+      <LivePlotView shape={shape} />
+    </Card>
+  )
+}
+
 export class LivePlotShapeUtil extends PcShapeUtil {
   static type = 'pcLivePlot'
   static props = { w: T.number, h: T.number, label: T.string }
@@ -667,15 +679,7 @@ export class LivePlotShapeUtil extends PcShapeUtil {
     return { w: 560, h: 380, label: 'live plot' }
   }
 
-  component(shape) {
-    return (
-      <Card shape={shape} grab>
-        <CardLabel shape={shape} />
-        <LivePlotView shape={shape} />
-      </Card>
-    )
-  }
-
+  component(shape) { return <LivePlotPanel shape={shape} /> }
 }
 
 // --- AudioFeed (streaming PCM played through the Web Audio API) -------------
@@ -803,6 +807,15 @@ function AudioView({ shape }) {
   )
 }
 
+function AudioPanel({ shape }) {
+  return (
+    <Card shape={shape}>
+      <CardLabel shape={shape} />
+      <AudioView shape={shape} />
+    </Card>
+  )
+}
+
 export class AudioShapeUtil extends PcShapeUtil {
   static type = 'pcAudio'
   static props = {
@@ -817,18 +830,95 @@ export class AudioShapeUtil extends PcShapeUtil {
     return { w: 260, h: 120, label: 'audio', sampleRate: 16000, channels: 1 }
   }
 
-  component(shape) {
-    return (
-      <Card shape={shape}>
-        <CardLabel shape={shape} />
-        <AudioView shape={shape} />
-      </Card>
-    )
-  }
-
+  component(shape) { return <AudioPanel shape={shape} /> }
 }
 
 // --- Repl (code cell against the shared kernel namespace) -------------------
+function ReplPanel({ shape }) {
+  const editor = useEditor()
+  const { code, output, result } = shape.props
+  const id = componentIdOf(shape.id)
+  // Follow tldraw's theme so the Monaco editor uses a matching dark/light
+  // syntax theme (CSS vars handle the rest of the card). useValue keeps this
+  // reactive, so toggling tldraw's dark mode re-themes the editor live.
+  const dark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
+  // Run the given text (from the editor), falling back to the stored prop.
+  const run = (text) =>
+    sendInput(id, { code: text != null ? text : shape.props.code })
+  const setCode = (v) =>
+    editor.updateShape({ id: shape.id, type: shape.type, props: { code: v } })
+  return (
+    <Card shape={shape} grab>
+      <CardLabel shape={shape} />
+      <Suspense
+        fallback={
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--pc-faint)',
+              fontSize: 13,
+              border: '1px solid var(--pc-border)',
+              borderRadius: 4,
+            }}
+          >
+            loading editor…
+          </div>
+        }
+      >
+        <MonacoRepl
+          value={code}
+          dark={dark}
+          onChange={setCode}
+          onRun={run}
+          onComplete={(text) => requestCompletions(id, text)}
+        />
+      </Suspense>
+      <button
+        style={{
+          alignSelf: 'flex-start',
+          marginTop: 6,
+          padding: '4px 10px',
+          border: 'none',
+          borderRadius: 6,
+          fontSize: 13,
+          fontWeight: 600,
+          background: 'var(--pc-accent)',
+          color: 'var(--pc-accent-text)',
+          cursor: 'pointer',
+          pointerEvents: 'all',
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => run()}
+      >
+        Run (⌘/Ctrl+Enter)
+      </button>
+      {(output || result) && (
+        <pre
+          style={{
+            margin: '6px 0 0',
+            maxHeight: '40%',
+            overflow: 'auto',
+            background: 'var(--pc-code-bg)',
+            color: 'var(--pc-text)',
+            borderRadius: 4,
+            fontSize: 12,
+            padding: 6,
+            whiteSpace: 'pre-wrap',
+            pointerEvents: 'all',
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {output}
+          {result ? `=> ${result}` : ''}
+        </pre>
+      )}
+    </Card>
+  )
+}
+
 export class ReplShapeUtil extends PcShapeUtil {
   static type = 'pcRepl'
   static props = {
@@ -844,90 +934,7 @@ export class ReplShapeUtil extends PcShapeUtil {
     return { w: 460, h: 260, label: 'repl', code: '', output: '', result: '' }
   }
 
-  component(shape) {
-    const { label, code, output, result } = shape.props
-    const id = componentIdOf(shape.id)
-    // Follow tldraw's theme so the Monaco editor uses a matching dark/light
-    // syntax theme (CSS vars handle the rest of the card). useValue keeps this
-    // reactive, so toggling tldraw's dark mode re-themes the editor live.
-    const dark = useValue('pc-dark', () => this.editor.user.getIsDarkMode(), [])
-    // Run the given text (from the editor), falling back to the stored prop.
-    const run = (text) =>
-      sendInput(id, { code: text != null ? text : shape.props.code })
-    const setCode = (v) =>
-      this.editor.updateShape({ id: shape.id, type: shape.type, props: { code: v } })
-    return (
-      <Card shape={shape} grab>
-        <CardLabel shape={shape} />
-        <Suspense
-          fallback={
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--pc-faint)',
-                fontSize: 13,
-                border: '1px solid var(--pc-border)',
-                borderRadius: 4,
-              }}
-            >
-              loading editor…
-            </div>
-          }
-        >
-          <MonacoRepl
-            value={code}
-            dark={dark}
-            onChange={setCode}
-            onRun={run}
-            onComplete={(text) => requestCompletions(id, text)}
-          />
-        </Suspense>
-        <button
-          style={{
-            alignSelf: 'flex-start',
-            marginTop: 6,
-            padding: '4px 10px',
-            border: 'none',
-            borderRadius: 6,
-            fontSize: 13,
-            fontWeight: 600,
-            background: 'var(--pc-accent)',
-            color: 'var(--pc-accent-text)',
-            cursor: 'pointer',
-            pointerEvents: 'all',
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => run()}
-        >
-          Run (⌘/Ctrl+Enter)
-        </button>
-        {(output || result) && (
-          <pre
-            style={{
-              margin: '6px 0 0',
-              maxHeight: '40%',
-              overflow: 'auto',
-              background: 'var(--pc-code-bg)',
-              color: 'var(--pc-text)',
-              borderRadius: 4,
-              fontSize: 12,
-              padding: 6,
-              whiteSpace: 'pre-wrap',
-              pointerEvents: 'all',
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            {output}
-            {result ? `=> ${result}` : ''}
-          </pre>
-        )}
-      </Card>
-    )
-  }
-
+  component(shape) { return <ReplPanel shape={shape} /> }
 }
 
 // Map of the `component` string sent by Python -> tldraw shape type.
