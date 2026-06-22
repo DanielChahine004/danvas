@@ -25,7 +25,7 @@
 // `scope=[...]` are in scope as `libs` (e.g. `const d3 = libs.d3`).
 import { transform as transformJsx } from 'sucrase'
 import React from 'react'
-import { useEditor } from 'tldraw'
+import { useEditor, useValue } from 'tldraw'
 import { sendInput, sendBinary, requestData, registerLive, unregisterLive, registerStyle, unregisterStyle, componentIdOf, fitNative, applyCameraFrom, sendPanelError } from './bridge'
 import { subscribeChat, getChatLog, sendChat, setMyName, subscribeIdentity } from './bridge'
 import { getSharedComponents, getSharedVersion, subscribeShared } from './bridge'
@@ -431,12 +431,15 @@ export default function ReactHost({ shape }) {
   // host takes no pointer, so clicks pass to whatever sits underneath on the
   // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.
   const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   return (
     // pointerEvents:'all' + stopPropagation claim the pointer for the hosted
     // component; without this tldraw treats a press as a move/resize of the
     // panel and the component never sees the click. The Card header (the label)
     // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
     // wants the opposite — let the pointer fall through to the canvas entirely.
+    // When a non-select tool (draw, arrow, text…) is active the host drops to
+    // pointer-events:none so tldraw receives the stroke instead of this div.
     //
     // We also stop touch events here: tldraw's canvas onTouchStart/onTouchEnd
     // call preventDefault() on every touch (to own pinch/pan), which suppresses
@@ -447,10 +450,10 @@ export default function ReactHost({ shape }) {
     // the component, so this is purely about not letting tldraw kill the tap.
     <div
       ref={hostRef}
-      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
-      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
-      onTouchStart={ghost ? undefined : (e) => e.stopPropagation()}
-      onTouchEnd={ghost ? undefined : (e) => e.stopPropagation()}
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: (ghost || !toolIsSelect) ? 'none' : 'all' }}
+      onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
+      onTouchStart={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
+      onTouchEnd={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
     >
       {/* When fitting either axis the content sizes to itself (measurable);
           otherwise it's a transparent pass-through (display:contents) so existing
