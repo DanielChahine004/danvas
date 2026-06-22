@@ -450,6 +450,11 @@ export default function ReactHost({ shape }) {
     // the component, so this is purely about not letting tldraw kill the tap.
     <div
       ref={hostRef}
+      // pc-draw-passthrough forces pointer-events:none on this element AND all
+      // descendants (including SVG, which ignores CSS cascade for pointer-events).
+      // Without !important on *, SVG rects default to visiblePainted and still
+      // receive clicks even when a parent HTML div has pointer-events:none.
+      className={(!ghost && !toolIsSelect) ? 'pc-draw-passthrough' : undefined}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
       onTouchStart={ghost ? undefined : (e) => e.stopPropagation()}
@@ -485,14 +490,6 @@ export default function ReactHost({ shape }) {
           <Comp canvas={canvas} value={streamed} props={userProps} />
         </Boundary>
       </div>
-      {/* When a non-select tool is active, cover the entire host so pointer
-          events never reach the user component — not even SVG elements whose
-          pointer-events SVG default (visiblePainted) would otherwise ignore
-          the parent's CSS pointer-events:none. The overlay lets events bubble
-          to tldraw (no stopPropagation) so draw/arrow/text strokes work. */}
-      {!ghost && !toolIsSelect && (
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'all' }} />
-      )}
     </div>
   )
 }
