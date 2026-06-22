@@ -5,6 +5,7 @@
 // Monaco is self-hosted (bundled), not loaded from a CDN, so danvas keeps
 // working offline. We wire the editor web worker through Vite's ?worker import
 // and point @monaco-editor/react at the bundled `monaco` instance.
+import { useEditor, useValue } from 'tldraw'
 import * as monaco from 'monaco-editor'
 // The bare `monaco-editor` entry is the core editor API only -- no language
 // grammars -- so without this the Python `language` id has no tokenizer and
@@ -66,6 +67,8 @@ function ensureProvider(m) {
 }
 
 export default function MonacoRepl({ value, dark, onChange, onRun, onComplete }) {
+  const editor = useEditor()
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   return (
     <div
       style={{
@@ -74,11 +77,11 @@ export default function MonacoRepl({ value, dark, onChange, onRun, onComplete })
         border: '1px solid var(--pc-border)',
         borderRadius: 4,
         overflow: 'hidden',
-        pointerEvents: 'all',
+        pointerEvents: toolIsSelect ? 'all' : 'none',
       }}
       // Keep tldraw from hijacking pointer/keyboard meant for the editor.
-      onPointerDown={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
+      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
+      onKeyDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
     >
       <Editor
         language="python"

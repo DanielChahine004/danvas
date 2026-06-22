@@ -381,6 +381,7 @@ function CustomView({ shape }) {
   const ref = useRef(null)
   const id = componentIdOf(shape.id)
   const editor = useEditor()
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   // A `themed` panel (Markdown) blends into the canvas: its document body is
   // transparent so the panel's --pc-bg shows through, and we hand the iframe a
   // `color-scheme` matching tldraw's theme so the doc's prefers-color-scheme
@@ -447,11 +448,11 @@ function CustomView({ shape }) {
         // Themed (Markdown) panels propagate the canvas theme into the sandboxed
         // doc; everything else renders on its own (light) document.
         colorScheme: shape.props.themed ? (dark ? 'dark' : 'light') : undefined,
-        pointerEvents: ghost ? 'none' : 'all',
+        pointerEvents: (ghost || !toolIsSelect) ? 'none' : 'all',
       }}
       // Keep tldraw from hijacking drags/zoom meant for the iframe content. A
-      // ghost panel wants the opposite — let the pointer fall through entirely.
-      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
+      // ghost panel or active drawing tool wants the pointer to fall through.
+      onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
     />
   )
 }
@@ -523,6 +524,8 @@ export class ReactShapeUtil extends PcShapeUtil {
 function LivePlotView({ shape }) {
   const ref = useRef(null)
   const id = componentIdOf(shape.id)
+  const editor = useEditor()
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
 
   useEffect(() => {
     const node = ref.current
@@ -656,8 +659,8 @@ function LivePlotView({ shape }) {
   return (
     <div
       ref={ref}
-      style={{ flex: 1, width: '100%', minHeight: 0, pointerEvents: 'all' }}
-      onPointerDown={(e) => e.stopPropagation()}
+      style={{ flex: 1, width: '100%', minHeight: 0, pointerEvents: toolIsSelect ? 'all' : 'none' }}
+      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
     />
   )
 }
@@ -708,6 +711,8 @@ function decodeChunk(ctx, data, sampleRate, channels) {
 
 function AudioView({ shape }) {
   const id = componentIdOf(shape.id)
+  const editor = useEditor()
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   const sampleRate = shape.props.sampleRate || 16000
   const channels = shape.props.channels || 1
   const [on, setOn] = useState(false)
@@ -781,7 +786,7 @@ function AudioView({ shape }) {
   return (
     <div
       style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
     >
       <button
         onClick={toggle}
@@ -795,7 +800,7 @@ function AudioView({ shape }) {
           cursor: 'pointer',
           background: on ? 'var(--pc-accent)' : 'var(--pc-off-bg)',
           color: on ? 'var(--pc-accent-text)' : 'var(--pc-off-text)',
-          pointerEvents: 'all',
+          pointerEvents: toolIsSelect ? 'all' : 'none',
         }}
       >
         {on ? '🔊 Audio on' : '🔈 Enable audio'}
@@ -842,6 +847,7 @@ function ReplPanel({ shape }) {
   // syntax theme (CSS vars handle the rest of the card). useValue keeps this
   // reactive, so toggling tldraw's dark mode re-themes the editor live.
   const dark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   // Run the given text (from the editor), falling back to the stored prop.
   const run = (text) =>
     sendInput(id, { code: text != null ? text : shape.props.code })
@@ -888,9 +894,9 @@ function ReplPanel({ shape }) {
           background: 'var(--pc-accent)',
           color: 'var(--pc-accent-text)',
           cursor: 'pointer',
-          pointerEvents: 'all',
+          pointerEvents: toolIsSelect ? 'all' : 'none',
         }}
-        onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
         onClick={() => run()}
       >
         Run (⌘/Ctrl+Enter)
@@ -907,9 +913,9 @@ function ReplPanel({ shape }) {
             fontSize: 12,
             padding: 6,
             whiteSpace: 'pre-wrap',
-            pointerEvents: 'all',
+            pointerEvents: toolIsSelect ? 'all' : 'none',
           }}
-          onPointerDown={(e) => e.stopPropagation()}
+          onPointerDown={toolIsSelect ? (e) => e.stopPropagation() : undefined}
         >
           {output}
           {result ? `=> ${result}` : ''}
