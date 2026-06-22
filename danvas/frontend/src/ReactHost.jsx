@@ -90,6 +90,25 @@ function libUrl(name) {
 // One in-flight/resolved promise per URL, shared across panels and reconnects.
 const moduleCache = new Map() // url -> Promise<module namespace>
 
+// --- wasm loading -----------------------------------------------------------
+// Module-level cache keyed by the base64 string; each entry is a Promise that
+// resolves to the WebAssembly instance exports. Shared across panels so the
+// same .wasm isn't decoded/compiled twice if reused.
+const wasmCache = new Map() // b64 -> Promise<WebAssembly.Exports>
+
+function loadWasm(b64) {
+  if (!wasmCache.has(b64)) {
+    wasmCache.set(b64, (async () => {
+      // atob → Uint8Array is fast for moderate modules; for very large ones the
+      // WebAssembly.compileStreaming path is more efficient but requires a URL.
+      const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      const { instance } = await WebAssembly.instantiate(binary)
+      return instance.exports
+    })())
+  }
+  return wasmCache.get(b64)
+}
+
 function loadLib(name) {
   const url = libUrl(name)
   if (!moduleCache.has(url)) {
@@ -227,6 +246,7 @@ export default function ReactHost({ shape }) {
 
   // Stable bridge handle so the user component can post back to Python and
   // subscribe to the raw push() stream imperatively.
+  const wasmPromise = shape.props.wasm ? loadWasm(shape.props.wasm) : null
   const canvas = React.useMemo(
     () => ({
       send: (data) => sendInput(id, data),
@@ -284,8 +304,14 @@ export default function ReactHost({ shape }) {
       // the current camera), so `canvas.setView(canvas.viewport-reading)` round-
       // trips. Lets a panel drive the canvas — a minimap, "jump to" buttons.
       setView: (v) => applyCameraFrom(v || {}),
+      // Promise<WebAssembly.Exports> for the .wasm module supplied via Python
+      // `wasm=` / `wasm_path=`. Resolves once the binary is decoded and compiled;
+      // null when no wasm was provided. Use from a useEffect:
+      //   useEffect(() => { canvas.wasm?.then(w => w.run(…)) }, [])
+      wasm: wasmPromise,
     }),
-    [id, editor]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, editor, wasmPromise]
   )
 
   // Props from Python (update()/initial props=), carried as a JSON string prop so

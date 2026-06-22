@@ -67,7 +67,8 @@ class React(_EventRouter, BaseComponent):
 
     def __init__(self, source=None, path=None, jsx=None, css=None, css_path=None,
                  name="react", label=None, w=None, h=None, color=None, props=None,
-                 scope=None, event_key="event", queue="fifo"):
+                 scope=None, event_key="event", queue="fifo",
+                 wasm=None, wasm_path=None):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         self._path = path   # remembered so watch() can reload it
@@ -108,6 +109,30 @@ class React(_EventRouter, BaseComponent):
         # builds, and any other name is passed through to esm.sh. The component
         # reads them as ``libs`` (e.g. ``const d3 = libs.d3``).
         self._libs = [str(s) for s in (scope or [])]
+        # Optional WebAssembly binary. wasm_path= reads bytes from disk;
+        # wasm= accepts raw bytes directly. Encoded as base64 and sent in the
+        # shape props so the browser can instantiate it without a separate fetch.
+        # For large modules (>1 MB) prefer hosting the .wasm file and fetching
+        # from a URL inside the JSX instead — base64 adds ~33% overhead and the
+        # full string rides in the tldraw store on every reconnect.
+        import base64 as _base64
+        if wasm is not None and wasm_path is not None:
+            raise ValueError("pass either wasm= (bytes) or wasm_path=, not both")
+        if wasm_path is not None:
+            with open(wasm_path, "rb") as f:
+                wasm = f.read()
+        if wasm is not None:
+            _mb = len(wasm) / (1024 * 1024)
+            if _mb > 1:
+                print(
+                    f"[danvas] warning: wasm module is {_mb:.1f} MB — large binaries "
+                    "add latency on load and bloat the canvas store. Consider hosting "
+                    "the .wasm file and fetching it from a URL inside the JSX instead.",
+                    file=sys.stderr,
+                )
+            self._wasm_b64 = _base64.b64encode(wasm).decode("ascii")
+        else:
+            self._wasm_b64 = None
         # Props handed to the component (and merged by ``update``). Carried to the
         # browser as a JSON string prop so they persist in the shape and replay to
         # a reconnecting client.
@@ -146,6 +171,7 @@ class React(_EventRouter, BaseComponent):
         props["autoH"] = self._auto_h
         props["autoW"] = self._auto_w
         props["libs"] = json.dumps(self._libs)
+        props["wasm"] = self._wasm_b64 or ""
         return props
 
     def _data_for(self, role=None, client_id=None):

@@ -470,10 +470,11 @@ export class ReactShapeUtil extends PcShapeUtil {
     autoH: T.boolean, // h="auto": fit the panel height to the rendered content
     autoW: T.boolean, // w="auto": fit the panel width to the rendered content
     libs: T.string, // JSON array of library names to load (Python `scope=[...]`)
+    wasm: T.string, // base64-encoded .wasm binary (Python `wasm=` / `wasm_path=`)
   }
 
   getDefaultProps() {
-    return { w: 380, h: 320, label: 'react', source: '', data: '{}', css: '', autoH: false, autoW: false, libs: '[]' }
+    return { w: 380, h: 320, label: 'react', source: '', data: '{}', css: '', autoH: false, autoW: false, libs: '[]', wasm: '' }
   }
 
   component(shape) {

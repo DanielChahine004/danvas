@@ -684,6 +684,21 @@ bridge handle:
 - `scope=["d3"]` loads ESM libs from a CDN, exposed as the `libs` global.
   Friendly names (`d3`, `lodash`, `date-fns`, `framer-motion`, `lucide`) map to
   pinned React-externalised builds; anything else passes through to esm.sh.
+- `wasm_path="sim.wasm"` (or `wasm=bytes`) embeds a WebAssembly binary in the
+  panel. The compiled module's exports are available inside the JSX as
+  `await canvas.wasm`:
+  ```python
+  panel = canvas.react(path="viz.jsx", wasm_path="sim.wasm")
+  ```
+  ```jsx
+  // inside viz.jsx
+  React.useEffect(() => {
+    canvas.wasm?.then(exports => setResult(exports.run(1000)))
+  }, [])
+  ```
+  For modules larger than ~1 MB, prefer hosting the `.wasm` file and fetching
+  it from a URL inside the JSX — the embedded path encodes the binary as
+  base64 in the canvas store.
 - `source=` accepts any React snippet pasted from the web — `import`/`export`
   lines, `styled-components`, `@keyframes`, and React hooks are all normalised
   automatically before reaching the browser.

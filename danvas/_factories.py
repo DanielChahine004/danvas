@@ -150,7 +150,8 @@ class _FactoryMixin:
                           pattern=pattern, show_hidden=show_hidden, **place)
 
     def react(self, source=None, path=None, jsx=None, css=None, css_path=None,
-              name="react", label=None, props=None, scope=None, **place: Unpack[Place]):
+              name="react", label=None, props=None, scope=None,
+              wasm=None, wasm_path=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.React` panel — the workhorse for custom UI.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
@@ -163,13 +164,17 @@ class _FactoryMixin:
         uiverse.io styled-components snippet. ``props`` is the initial props dict; ``scope`` is third-party
         library names (e.g. ``["d3"]``) loaded as ESM and exposed as ``libs``.
 
+        ``wasm`` accepts raw ``.wasm`` bytes; ``wasm_path=`` loads them from a
+        file. The module is compiled once in the browser and its exports are
+        available as ``await canvas.wasm`` inside the JSX component.
+
         Placement, visibility (``roles`` / ``lock_for``), the lock/chrome flags,
         and ``queue`` all flow through ``**place`` — see :meth:`insert` (and the
         :class:`Place` keys your editor now autocompletes).
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
                           css_path=css_path, name=name, label=label, props=props,
-                          scope=scope, **place)
+                          scope=scope, wasm=wasm, wasm_path=wasm_path, **place)
 
     def markdown(self, text="", name="markdown", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Markdown` panel. See :meth:`insert` for ``place``."""
