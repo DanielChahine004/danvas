@@ -450,10 +450,13 @@ export default function ReactHost({ shape }) {
     // the component, so this is purely about not letting tldraw kill the tap.
     <div
       ref={hostRef}
-      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: (ghost || !toolIsSelect) ? 'none' : 'all' }}
-      onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
-      onTouchStart={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
-      onTouchEnd={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
+      onPointerDown={ghost ? undefined : (e) => e.stopPropagation()}
+      onTouchStart={ghost ? undefined : (e) => e.stopPropagation()}
+      onTouchEnd={ghost ? undefined : (e) => e.stopPropagation()}
+      // Prevent native browser image/text drag from starting inside the panel
+      // (which tldraw would catch as a drop and create an image shape).
+      onDragStart={(e) => e.preventDefault()}
     >
       {/* When fitting either axis the content sizes to itself (measurable);
           otherwise it's a transparent pass-through (display:contents) so existing
@@ -482,6 +485,14 @@ export default function ReactHost({ shape }) {
           <Comp canvas={canvas} value={streamed} props={userProps} />
         </Boundary>
       </div>
+      {/* When a non-select tool is active, cover the entire host so pointer
+          events never reach the user component — not even SVG elements whose
+          pointer-events SVG default (visiblePainted) would otherwise ignore
+          the parent's CSS pointer-events:none. The overlay lets events bubble
+          to tldraw (no stopPropagation) so draw/arrow/text strokes work. */}
+      {!ghost && !toolIsSelect && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'all' }} />
+      )}
     </div>
   )
 }

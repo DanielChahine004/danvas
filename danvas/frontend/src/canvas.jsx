@@ -453,6 +453,7 @@ function CustomView({ shape }) {
       // Keep tldraw from hijacking drags/zoom meant for the iframe content. A
       // ghost panel or active drawing tool wants the pointer to fall through.
       onPointerDown={(ghost || !toolIsSelect) ? undefined : (e) => e.stopPropagation()}
+      onDragStart={(e) => e.preventDefault()}
     />
   )
 }
