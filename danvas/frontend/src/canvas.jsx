@@ -195,6 +195,9 @@ function DragHandle() {
 function Card({ shape, children, grab = false, ghostable = false, handle = false }) {
   const editor = useEditor()
   const isDark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
+  // When the user has a drawing/text/arrow/etc. tool active, panels must be
+  // pointer-transparent so tldraw receives the strokes — not the panel HTML.
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   const fullyLocked = shape.isLocked
   const blockInput = fullyLocked || shape.meta?.lockInput
   const noGrab = !!shape.meta?.noGrab
@@ -218,21 +221,21 @@ function Card({ shape, children, grab = false, ghostable = false, handle = false
     // in a panel stacked below. The event is not stopped, so it still bubbles to
     // tldraw for correct shape selection. Ghost panels opt out (they are purely
     // decorative and intentionally click-through).
-    <HTMLContainer className="pc-card" style={ghost ? cardStyle(shape, isDark) : { ...cardStyle(shape, isDark), pointerEvents: 'all' }}>
+    <HTMLContainer className="pc-card" style={ghost || !toolIsSelect ? cardStyle(shape, isDark) : { ...cardStyle(shape, isDark), pointerEvents: 'all' }}>
       {children}
       {/* A persistent grip (stays up while selected, unlike the grab cover) so a
           body-interactive panel always has a drag/select point even when its
           content claims every pointer. Suppressed when the panel can't be
           moved/selected anyway (noGrab) or its input is locked. */}
-      {handle && !noGrab && !blockInput && <DragHandle />}
-      {grab && !noGrab && !selected && !blockInput && (
+      {toolIsSelect && handle && !noGrab && !blockInput && <DragHandle />}
+      {toolIsSelect && grab && !noGrab && !selected && !blockInput && (
         <div
           // No handler / no stopPropagation: the event bubbles to tldraw, which
           // selects + (on drag) moves the topmost panel — fixing overlap grabs.
           style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'grab' }}
         />
       )}
-      {blockInput && (
+      {toolIsSelect && blockInput && (
         <div
           // A ghost (decorative) panel takes no pointer at all, so clicks fall
           // through to panels beneath it. Otherwise the overlay catches the
