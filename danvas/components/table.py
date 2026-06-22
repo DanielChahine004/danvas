@@ -64,6 +64,7 @@ _TABLE_CSS = """
 .pc-tbl .pc-th-meta{font-weight:400;color:#94a3b8;font-size:10px;margin-top:1px;
  white-space:nowrap}
 .pc-tbl .pc-th-null{color:#e11d48}
+.pc-tbl .pc-th-type-mix{color:#64748b;font-size:10px}
 .pc-tbl thead tr.pc-dist th{position:static;background:#fff;cursor:default;
  font-weight:400;padding:3px 6px;vertical-align:bottom}
 .pc-tbl tbody tr:nth-child(even) td{background:#f8fafc}
@@ -634,6 +635,14 @@ def _column_profile(values, numeric):
             meta += f' · <span class="pc-th-null">{_pct(pct)}% null</span>'
             tip.append(f"{missing:,} null")
 
+        # For mixed columns show a per-type breakdown so the user can see the
+        # composition at a glance (e.g. "3 int · 2 str · 1 bool").
+        if dtype == "mixed":
+            counts = _type_counts(values)  # includes nulls
+            parts = " · ".join(f"{n} {t}" for t, n in counts)
+            meta += f" <span class=\"pc-th-type-mix\">({parts})</span>"
+            tip.append(parts)
+
         if numeric:
             nums = []
             for v in present:
@@ -674,6 +683,34 @@ def _dtype_label(present, numeric):
         return "int" if allint else "float"
     types = {type(v).__name__ for v in present}
     return "str" if types <= {"str"} else "mixed"
+
+
+def _type_counts(values):
+    """Count values by their Python type, using readable short names.
+
+    Returns an ordered list of ``(label, count)`` pairs sorted by count
+    descending, covering only types that are present.
+    """
+    buckets: dict[str, int] = {}
+    for v in values:
+        if v is None:
+            label = "null"
+        elif isinstance(v, bool):
+            label = "bool"
+        elif isinstance(v, int):
+            label = "int"
+        elif isinstance(v, float):
+            label = "float"
+        elif isinstance(v, str):
+            label = "str"
+        elif isinstance(v, (list, tuple)):
+            label = "list"
+        elif isinstance(v, dict):
+            label = "dict"
+        else:
+            label = type(v).__name__
+        buckets[label] = buckets.get(label, 0) + 1
+    return sorted(buckets.items(), key=lambda x: -x[1])
 
 
 # -- per-column distribution data (rendered as inline SVG in the panel) -------
