@@ -186,7 +186,7 @@ class Gauge:
 
 repr_panel = canvas.show(
     Gauge("accuracy", 88, color="#23cd34"),
-    label="_repr_html_ object", below=plotly_panel,
+    label="_repr_html_ object", below=plotly_panel, w=260,
 )
 
 # ── Re-show: replace a panel in place under the same name ─────────────────────

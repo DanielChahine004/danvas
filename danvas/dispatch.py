@@ -317,7 +317,12 @@ def _rich_html(value, formatter=None):
     if not data:
         data = _dunder_bundle(value)
     if "text/html" in data:
-        return document(_join(data["text/html"]))
+        # Wrap in an inline-block so the body's scrollWidth at max-content
+        # reflects the content's intrinsic width, not the iframe frame width.
+        # Without this, a block-level outer div fills 100% of the body and
+        # fitW() echoes the current frame width rather than the content size.
+        inner = _join(data["text/html"])
+        return document(f"<div style='display:inline-block'>{inner}</div>")
     for mime in ("image/png", "image/jpeg"):
         if mime in data:
             b64 = _join(data[mime]).strip()
