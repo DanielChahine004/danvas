@@ -485,7 +485,7 @@ const PINCH_ZOOM_RATE = 0.01
 // OS axis-locks the raw deltas, and easing the response rounds the abrupt H↔V
 // transitions into a smoother diagonal. (The OS lock itself can't be undone in
 // JS — we only get the deltas it reports.)
-const PAN_SMOOTHING = 0.4
+const PAN_SMOOTHING = 0.2
 
 function enableSmartScroll(editor) {
   const el = editor.getContainer()
