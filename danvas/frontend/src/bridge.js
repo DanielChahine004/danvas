@@ -759,6 +759,11 @@ function handle(msg) {
     // Python is asking for the user's free-form drawings only — danvas panels
     // and connector arrows are recreated from code, not persisted.
     sendRaw({ type: 'snapshot', reqId: msg.reqId, data: userContent(msg.panelIds || []) })
+  } else if (msg.type === 'get_image') {
+    // canvas.screenshot(): render shapes to a PNG and reply by reqId. Empty
+    // shapeIds means the whole page. Scene export (shapes at page coords, framed
+    // to their bounds) — deterministic, independent of any viewer's camera.
+    sendImage(msg.reqId, msg.shapeIds || [])
   } else if (msg.type === 'load_snapshot') {
     loadSnapshot(msg.data)
     scheduleInitialFit()
@@ -886,6 +891,50 @@ function userContent(panelIds) {
   if (ids.length === 0) return null
   // getContentFromCurrentPage bundles the shapes plus their bindings/assets.
   return editor.getContentFromCurrentPage(ids) || null
+}
+
+// Block until no React panel is still showing its "compiling…" Suspense
+// fallback (the first one also downloads the lazy ReactHost chunk), so a
+// screenshot taken right after connect captures the rendered UI, not the
+// placeholder. Bounded — gives up and shoots anyway after ~budgetMs.
+function waitForPanelsReady(budgetMs = 4000) {
+  return new Promise((resolve) => {
+    const t0 = performance.now()
+    const poll = () => {
+      const stillCompiling = document.querySelector('[data-pc-compiling]')
+      if (!stillCompiling || performance.now() - t0 > budgetMs) {
+        // small settle so the just-mounted component paints. setTimeout (not
+        // requestAnimationFrame) — rAF is paused in a backgrounded tab, which is
+        // exactly the case when the screenshot is driven from a terminal.
+        setTimeout(resolve, 30)
+        return
+      }
+      setTimeout(poll, 50)
+    }
+    poll()
+  })
+}
+
+// Render shapes to a PNG and reply with base64. `shapeIds` empty → whole page.
+// toImage is async; on any failure reply with data:null so Python's waiter wakes
+// (with an error) instead of timing out.
+async function sendImage(reqId, shapeIds) {
+  try {
+    const ids = shapeIds.length ? shapeIds : [...editor.getCurrentPageShapeIds()]
+    if (!ids.length) { sendRaw({ type: 'image', reqId, data: null, error: 'nothing to capture' }); return }
+    await waitForPanelsReady()
+    const { blob } = await editor.toImage(ids, { format: 'png', background: true })
+    const buf = await blob.arrayBuffer()
+    // base64 in chunks — btoa on a huge spread-string can blow the call stack.
+    const bytes = new Uint8Array(buf)
+    let bin = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    }
+    sendRaw({ type: 'image', reqId, data: btoa(bin) })
+  } catch (e) {
+    sendRaw({ type: 'image', reqId, data: null, error: String(e && e.message || e) })
+  }
 }
 
 // Merge saved user drawings onto the current page, on top of the live panels.

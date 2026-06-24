@@ -502,6 +502,7 @@ function ReactPanel({ shape }) {
       <Suspense
         fallback={
           <div
+            data-pc-compiling=""
             style={{
               flex: 1,
               display: 'flex',

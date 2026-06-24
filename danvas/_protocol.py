@@ -66,13 +66,13 @@ FLAG_WIRE_KEYS = {
 # (inbound). Outbound = server -> browser; inbound = browser -> server.
 MESSAGE_TYPES_OUT = (
     "register", "arrow", "shape", "shape_update", "update", "order", "remove",
-    "get_snapshot", "load_snapshot", "draw", "presence",
+    "get_snapshot", "get_image", "load_snapshot", "draw", "presence",
     "cursor", "cursor_gone", "view", "welcome", "chat",
     "response", "complete_result", "shared",
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui",
-    "input", "layout", "draw", "request", "snapshot", "panel_error",
+    "input", "layout", "draw", "request", "snapshot", "image", "panel_error",
 )
 
 

@@ -210,6 +210,8 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | **Background** | `canvas.background(fn)` | Register a producer loop, started on its own thread at `serve()` (worker-only) |
 | **REPL / notebook** | `canvas.enable_repl(namespace)` | Bind the namespace on-canvas `Repl` cells run against |
 | | `canvas.capture_cells(...)` / `stop_capturing_cells()` | Mirror notebook cell outputs onto the canvas |
+| **Inspect / capture** | `canvas.describe()` | Plain-data inventory of every panel + arrow (type, value, layout, visibility) — for an LLM or a log to read |
+| | `canvas.screenshot(target=None, path=None)` | Render the canvas (or a panel / list of panels) to PNG `bytes` via a connected browser |
 | **Persist** | `canvas.save(path)` / `canvas.load(source)` | Manual snapshot of formation + drawings (auto twin: `serve(persist=…)`) |
 | **Serve / run** | `canvas.serve(port=, host=, password=, tunnel=, persist=, hot_reload=, desktop=, view=, …)` | Start the server (blocks unless `block=False`) |
 | | `canvas.wait_for_client(timeout=)` | Block until a browser connects |
@@ -1450,6 +1452,45 @@ where the user last dragged it and their drawings reappear — then rewritten
 (`Ctrl+C` / `canvas.stop()`). Delete a panel from your script and its stale
 saved position is simply ignored. Leave `persist=False` (the default) to run
 entirely fresh from the script every time, reading and writing nothing.
+
+## Inspecting & screenshotting (LLM feedback loop)
+
+Two read-only methods let a script — or an LLM editing one — check that the UI
+it built matches what was asked for, closing the loop a code-only view can't:
+
+```python
+canvas.describe()                       # plain-data inventory: one dict per panel
+                                        # + arrow — type, value, x/y/w/h, visible
+canvas.screenshot(path="canvas.png")    # the whole canvas as a PNG (bytes returned)
+canvas.screenshot(slider)               # just one panel
+canvas.screenshot([slider, button])     # those panels, framed to their bounding box
+```
+
+`describe()` is the cheap text half: an LLM reads it to confirm the right
+components exist, are wired, laid out, and holding the values it expects —
+catching "wrong component / missing handler / bad layout" with no pixels.
+`screenshot()` is the visual half for a VLM: feed the PNG back to confirm the
+rendering actually *looks* like the request. Together they're a self-check —
+build the canvas, read it back, compare against the user's intent, fix the gap.
+
+danvas's edge here is that the front-to-back wiring already lives in the one
+Python file the model is editing; `describe()` + `screenshot()` add the runtime
+state and the pixels — the parts source alone can't show.
+
+Both round-trip to a connected browser, so `screenshot()` needs an open tab
+(`serve()` opens one); with none open it raises. `screenshot()` is a *scene*
+export — shapes at their canvas coordinates, independent of any viewer's camera —
+so the same call always yields the same image. tldraw renders shapes faithfully
+but can't capture sandboxed-iframe panels (`Custom`, `WebView`, `Plot`); for
+those, or fully headless capture with no tab open, drive a browser tool at the
+served URL instead.
+
+```python
+canvas.serve(block=False)               # start the server + open the tab
+canvas.wait_for_client()                # wait for that tab's socket to connect
+print(canvas.describe())
+canvas.screenshot(path="canvas.png")
+```
 
 ## Tracking an ML training run
 

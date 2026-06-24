@@ -1196,6 +1196,13 @@ class Bridge:
             if waiter is not None:
                 waiter["data"] = msg.get("data")
                 waiter["event"].set()
+        elif kind == "image":
+            # Reply to a request_image (canvas.screenshot); base64 PNG or error.
+            waiter = self._snapshot_waiters.get(msg.get("reqId"))
+            if waiter is not None:
+                waiter["data"] = msg.get("data")
+                waiter["error"] = msg.get("error")
+                waiter["event"].set()
 
     def _dispatch_input(self, comp, payload, ws):
         """Run a component's input handler (off the loop) and echo its state.
@@ -1779,6 +1786,35 @@ class Bridge:
             if not waiter["event"].wait(timeout):
                 raise TimeoutError("timed out waiting for the canvas snapshot")
             return waiter["data"]
+        finally:
+            self._snapshot_waiters.pop(req_id, None)
+
+    def request_image(self, shape_ids, timeout=10.0):
+        """Ask a connected browser to render ``shape_ids`` to a PNG.
+
+        Round-trips over the socket like :meth:`request_snapshot` and blocks the
+        calling thread until the browser replies (or ``timeout`` elapses).
+        ``shape_ids`` empty means the whole page. Returns raw PNG bytes; requires
+        at least one open client (the browser is the only thing that can render).
+        """
+        if not self._connections:
+            raise RuntimeError("no connected browser to capture from")
+        req_id = uuid.uuid4().hex
+        waiter = {"event": threading.Event(), "data": None, "error": None}
+        self._snapshot_waiters[req_id] = waiter
+        try:
+            self.broadcast({
+                "type": "get_image",
+                "reqId": req_id,
+                "shapeIds": list(shape_ids),
+            })
+            if not waiter["event"].wait(timeout):
+                raise TimeoutError("timed out waiting for the screenshot")
+            if waiter["error"] or not waiter["data"]:
+                raise RuntimeError(
+                    f"screenshot failed: {waiter['error'] or 'no image returned'}")
+            import base64
+            return base64.b64decode(waiter["data"])
         finally:
             self._snapshot_waiters.pop(req_id, None)
 

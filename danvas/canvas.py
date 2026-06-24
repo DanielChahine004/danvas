@@ -1354,6 +1354,64 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return arrow
 
     # -- save / load ----------------------------------------------------------
+    def describe(self):
+        """A plain-data inventory of the canvas — for an LLM (or a log) to read.
+
+        Returns a list of dicts, one per panel then per arrow, each with the
+        runtime state you *can't* see by reading the source: the resolved
+        ``x/y/w/h`` (after auto-layout and any user drags), the current
+        ``value``, ``visible`` and ``locked``. Pairs with :meth:`screenshot`
+        (pixels) — this is the cheap text half: enough to verify the right
+        components exist, are wired, laid out, and holding the values you expect.
+        Values are length-capped reprs, so a giant table/array stays readable.
+        """
+        from .components.inspector import _short
+        name_of = {id(c): n for n, c in self._named.items()}
+        rows = []
+        for c in self._components:
+            rows.append({
+                "name": name_of.get(id(c), ""),
+                "label": c._props.get("label", ""),
+                "type": type(c).__name__,   # "Slider", not the "React" wire type
+                "value": _short(c.value),
+                "visible": c.visible,
+                "locked": c.locked,
+                "x": c.x, "y": c.y, "w": c.w, "h": c.h,
+            })
+        for a in self._arrows:
+            rows.append({
+                "name": name_of.get(id(a), ""),
+                "label": a.text or "",
+                "type": "Arrow",
+                "value": _short(f"{a.start.id} → {a.end.id}"),
+                "visible": True, "locked": "",
+                "x": "", "y": "", "w": "", "h": "",
+            })
+        return rows
+
+    def screenshot(self, target=None, path=None, timeout=10.0):
+        """Render the canvas (or specific panels) to a PNG via a connected browser.
+
+        ``target`` is what to frame: ``None`` captures the whole canvas; a single
+        panel captures just it; a list of panels frames them to their bounding
+        box. Scene export — shapes at their canvas coordinates, independent of
+        where any viewer's camera is, so the same call always yields the same
+        image. Returns the PNG as ``bytes`` (and writes ``path`` if given).
+
+        Requires an open browser tab — the browser is the only thing that can
+        render. For headless/autonomous capture, point a tool at the served URL.
+        """
+        if target is None:
+            shape_ids = []                      # empty → whole page
+        else:
+            panels = target if isinstance(target, (list, tuple)) else [target]
+            shape_ids = [f"shape:{p.id}" for p in panels]
+        png = self._bridge.request_image(shape_ids, timeout=timeout)
+        if path is not None:
+            with open(path, "wb") as f:
+                f.write(png)
+        return png
+
     def save(self, path, timeout=5.0, blocking=True):
         """Save the canvas to one JSON file: panel formation + user drawings.
 
