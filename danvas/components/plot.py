@@ -1,89 +1,83 @@
-"""Plot: a convenience wrapper over Custom for interactive Plotly charts.
+"""Plot: a React panel rendering an interactive Plotly chart.
 
-``update`` accepts either a Plotly figure (rendered with ``to_html``) or a
-raw HTML string, then displays it in the same sandboxed iframe Custom uses.
+``update`` accepts a Plotly figure object and renders it natively inside the
+panel (no iframe, no CDN fetch — Plotly is bundled with the app). The figure
+is stored in the panel's shape props so it replays when a client reconnects.
 """
 
-from . import _theme
-from .custom import Custom
+from .react import React as _React
 
-_EMPTY = (
-    "<body style='margin:0;font-family:system-ui;color:#888;"
-    "display:flex;align-items:center;justify-content:center;height:100%'>"
-    "no data yet</body>"
-)
+_SOURCE = '''
+function Component({ canvas, props }) {
+  const Plotly = libs.plotly;
+  const nodeRef = React.useRef(null);
+  const fig = props && props._fig;
+  React.useEffect(() => {
+    const node = nodeRef.current;
+    if (!node) return;
+    let raf = null;
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => { raf = null; if (nodeRef.current) Plotly.Plots.resize(nodeRef.current); });
+      });
+      ro.observe(node);
+    }
+    return () => {
+      if (ro) ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      if (nodeRef.current) Plotly.purge(nodeRef.current);
+    };
+  }, []);
+  React.useEffect(() => {
+    const node = nodeRef.current;
+    if (!node || !fig) return;
+    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displayModeBar: false });
+  });
+  return (
+    <div style={{ flex: 1, width: "100%", minHeight: 0, position: "relative" }}>
+      {!fig && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--pc-muted, #9ca3af)", fontSize: 13 }}>
+          no data yet
+        </div>
+      )}
+      <div ref={nodeRef} style={{ width: "100%", height: "100%" }} />
+    </div>
+  );
+}
+'''
 
-# Keep the chart filling the panel on resize. Plotly's ``responsive: true`` only
-# listens to the iframe *window*'s resize, which doesn't reliably fire when the
-# tldraw panel (and thus the iframe element) is resized — so a taller panel left
-# the chart stuck at its load-time pixel height with empty space below. A
-# ResizeObserver on the graph div catches every box change and re-fits the plot,
-# the in-iframe analog of the native LivePlot path's observer. (Resizing the plot
-# reflows the SVG inside the div, not the div's own 100%×100% box, so no loop.)
-_RESIZE_SCRIPT = (
-    "<script>(function(){"
-    "var raf=null;"
-    "function fit(d){if(raf)return;raf=requestAnimationFrame(function(){"
-    "raf=null;if(window.Plotly)window.Plotly.Plots.resize(d);});}"
-    "function arm(){"
-    "var d=document.querySelector('.plotly-graph-div');"
-    "if(!d||!window.Plotly||!window.ResizeObserver){return setTimeout(arm,50);}"
-    "new ResizeObserver(function(){fit(d);}).observe(d);"
-    "}"
-    "arm();"
-    "})();</script>"
-)
 
-
-class Plot(Custom):
-    # Reuses the Custom (pcHtml) shape on the frontend.
-    component = "Custom"
+class Plot(_React):
     default_w = 560
     default_h = 420
 
     def __init__(self, name="plot", label=None, w=None, h=None, color=None):
-        super().__init__(html=_EMPTY, name=name, label=label, w=w, h=h)
-        self._init_color(color)
+        w = w if w is not None else 560
+        h = h if h is not None else 420
+        super().__init__(source=_SOURCE, scope=["plotly"], name=name, label=label,
+                         w=w, h=h, color=color)
 
     def update(self, figure):
-        """Display a Plotly figure or an HTML string."""
-        super().update(self._to_html(figure))
+        """Display a Plotly figure (``plotly.graph_objects.Figure`` or similar).
 
-    def _wrap(self, html):
-        """Lead the iframe document with a doctype so it renders in standards
-        mode. Plotly's ``full_html`` omits the doctype and ``Custom._wrap`` then
-        prepends the canvas helper script, so without this the document is
-        quirks-mode — where percentage heights and box-sizing differ, leaving the
-        chart sized oddly (a slight zoom/clip, most visible on a small or mobile
-        panel). Inherited by :class:`~danvas.Histogram`."""
-        return "<!DOCTYPE html>\n" + super()._wrap(html)
+        Stores the figure in the panel's props so it persists and replays when a
+        client reconnects. The chart renders natively in the panel — no iframe.
+        """
+        fig_dict = self._to_dict(figure)
+        _React.update(self, _fig=fig_dict)
 
     @staticmethod
-    def _to_html(figure):
-        if isinstance(figure, str):
+    def _to_dict(figure):
+        import json as _json
+        # to_json() serializes numpy arrays; to_plotly_json() leaves them raw.
+        to_json = getattr(figure, "to_json", None)
+        if callable(to_json):
+            return _json.loads(to_json())
+        if isinstance(figure, dict):
             return figure
-        to_html = getattr(figure, "to_html", None)
-        if callable(to_html):
-            # full_html so Plotly's JS runs inside the sandboxed iframe.
-            # ``responsive`` makes the chart track the iframe's size. The injected
-            # CSS gives <html>/<body> a real height so the chart's ``height:100%``
-            # resolves to the panel instead of collapsing to Plotly's fixed
-            # default height (which left the chart clipped / "scaled weirdly",
-            # worst on a small or mobile panel).
-            html = figure.to_html(include_plotlyjs="cdn", full_html=True,
-                                  config={"responsive": True})
-            # ``body>div`` targets the unstyled wrapper Plotly's ``to_html`` puts
-            # around the graph div: without giving *it* a height the graph div's
-            # ``height:100%`` resolves against an auto-height parent and collapses
-            # to Plotly's fixed default (~450px), so the chart never fills (or
-            # tracks) the panel. Carrying the full-height chain html→body→wrapper→
-            # graph div is what lets the chart size to the iframe.
-            return html.replace(
-                "</head>",
-                "<style>html,body{height:100%;margin:0;overflow:hidden}"
-                "body>div{height:100%}"
-                ".plotly-graph-div{height:100%;width:100%}</style>"
-                f"{_RESIZE_SCRIPT}</head>",
-                1,
-            )
-        raise TypeError("Plot.update expects a Plotly figure or an HTML string")
+        raise TypeError(
+            "Plot.update expects a Plotly figure (plotly.graph_objects.Figure) "
+            "or a dict with 'data' and 'layout' keys. "
+            "For raw HTML, use canvas.custom() instead.")

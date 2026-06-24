@@ -7,8 +7,7 @@ user input back in real time over one WebSocket.
 Built on [tldraw](https://tldraw.dev) + React + Vite (frontend) and FastAPI +
 WebSockets (backend). The frontend ships pre-built; you never touch Node or npm.
 The Python backend is ~560 kB of source with four core dependencies; the browser
-page loads under 1 MB gzip (tldraw + React bridge). The Monaco-powered Repl is
-code-split and only downloaded when a Repl panel first appears.
+page loads under 1 MB gzip (tldraw + React bridge).
 
 ## Install
 
@@ -182,7 +181,7 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 
 | Category | Member | What it does |
 |---|---|---|
-| **Make panels** | `canvas.slider/button/toggle/label/text_field/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/repl/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
+| **Make panels** | `canvas.slider/button/toggle/label/text_field/markdown/image/table/plot/live_plot/histogram/video/audio/chat/webview/custom/react/inspector/upload/download/file_browser(...)` | Build a panel and add it — see the [catalogue](#the-component-catalogue) for each |
 | | `canvas.show(value, **place)` | Auto-pick the best panel for any value |
 | | `canvas.insert(component, **place)` | Add a hand-built component; returns it |
 | | `canvas.remove(component)` / `canvas.clear()` | Remove one panel / all panels + arrows (destroys Python state) |
@@ -208,7 +207,6 @@ Everything reachable from a `Canvas`, grouped by what it's for:
 | | `canvas.on_cursor(fn)` / `off_cursor(fn)` | Stream viewer pointer moves (`serve(cursors=True)`) |
 | | `canvas.on_frame(fn)` / `off_frame(fn)` | Observe every WebSocket frame (debugging) |
 | **Background** | `canvas.background(fn)` | Register a producer loop, started on its own thread at `serve()` (worker-only) |
-| **REPL / notebook** | `canvas.enable_repl(namespace)` | Bind the namespace on-canvas `Repl` cells run against |
 | | `canvas.capture_cells(...)` / `stop_capturing_cells()` | Mirror notebook cell outputs onto the canvas |
 | **Inspect / capture** | `canvas.describe()` | Plain-data inventory of every panel + arrow (type, value, layout, visibility) — for an LLM or a log to read |
 | | `canvas.screenshot(target=None, path=None)` | Render the canvas (or a panel / list of panels) to PNG `bytes` via a connected browser |
@@ -252,7 +250,6 @@ Panel-level handlers (`@panel.on_change`, `@button.on_click`, `@panel.on(event)`
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=`; live: `.pattern`, `.show_hidden`, `.color` |
 | `Download` | input | a button that sends a host file/`bytes` to the viewer; `source=` (path or bytes) or `@provide`, `filename=` |
 | `Upload` | input | a button / drop-zone that receives a viewer's file into Python; `@on_upload`, `.value`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
-| `Repl` | bidirectional | on-canvas Python REPL; needs `enable_repl()` |
 | `Inspector` | output | live panel/globals state browser |
 
 ## Canvas shapes
@@ -1194,7 +1191,6 @@ All of `serve()`'s options in one place:
 | `login_message` | – | host note shown on the password page |
 | `tunnel` | `False` | expose publicly through a tunnel |
 | `tunnel_provider` | `"cloudflared"` | tunnel backend (`"cloudflared"` / `"localtunnel"`) |
-| `allow_remote_exec` | `False` | permit a `Repl` on a non-local/tunneled bind (unauthenticated RCE — opt in deliberately) |
 | `persist` | `False` | auto-save/restore the canvas; `True` or a path (see [Saving & loading](#saving--loading)) |
 | `hot_reload` | `False` | restart the process when a `.py` changes (script entry only) |
 | `view` | – | camera & chrome dict (see [Views & navigation](#4-views--navigation)) |
@@ -1328,10 +1324,6 @@ canvas.serve(port=8000, tunnel=True, tunnel_provider="localtunnel")
 
 `[tunnel]` downloads & caches cloudflared on first use. The tunnel closes when
 the server stops. Quick-tunnel URLs are random and ephemeral.
-
-> **Repl security.** A `Repl` runs arbitrary Python in-process, so any non-local
-> exposure (LAN bind, tunnel, merge) is refused unless you pass
-> `allow_remote_exec=True` — even behind a password.
 
 ## Hot reloading
 
@@ -1659,7 +1651,6 @@ python examples/react_canvas_api.py       # React: canvas.viewport / setView / c
 python examples/matplotlib_panel.py       # slider re-renders a matplotlib figure
 python examples/plotly_panel.py           # interactive Plotly chart
 python examples/robot_control.py          # sliders, toggle, plot, video together
-python examples/repl_inspector.py         # on-canvas REPL + inspectors
 python examples/download_button.py        # download a host file / generated data
 python examples/upload_button.py          # upload a file from the browser to Python
 python examples/chat_room.py              # shared chat with editable names

@@ -95,13 +95,22 @@ wv = canvas.webview("https://example.com", name="wv", label="Webview",
 # ── Inspector ──────────────────────────────────────────────────────────────────
 ins = canvas.inspector(name="ins", label="Inspector", color=TEAL, below=wv)
 
-# ── Live-plot feed ─────────────────────────────────────────────────────────────
+# ── Audio feed ─────────────────────────────────────────────────────────────────
+feed = canvas.audio("feed", sample_rate=16000, label="Audio feed", color=INDIGO, below=ins)
+
+# ── Live-plot feed + audio feed ────────────────────────────────────────────────
 @canvas.background
 def tick():
     t = 0.0
+    RATE = 16000
+    CHUNK = 1024  # samples per push (~64 ms at 16 kHz)
     while True:
         lp.push({"signal": math.sin(t * 0.5 + random.uniform(-0.1, 0.1))})
-        t += 0.1
-        time.sleep(0.1)
+        # 440 Hz sine wave at 16 kHz, int16
+        ts = np.arange(int(t * RATE), int(t * RATE) + CHUNK) / RATE
+        wave = (np.sin(2 * math.pi * 440 * ts) * 0.4 * 32767).astype("<i2")
+        feed.update(wave.tobytes())
+        t += CHUNK / RATE
+        time.sleep(CHUNK / RATE)
 
 canvas.serve(port=8001, tunnel=True)

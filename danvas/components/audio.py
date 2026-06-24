@@ -1,4 +1,4 @@
-﻿"""AudioFeed: streams PCM audio chunks to the browser for live playback.
+"""AudioFeed: streams PCM audio chunks to the browser for live playback.
 
 Mirrors :class:`~danvas.VideoFeed` for sound. Capture audio however you like
 (e.g. ``sounddevice``) and push raw PCM chunks; the browser schedules them
@@ -13,27 +13,107 @@ A/V sync). Browsers won't start audio until the user clicks the panel's enable
 button, per the browser autoplay policy.
 """
 
-from . import _theme
-from .base import BaseComponent
-from ..bridge import BINARY_AUDIO  # noqa: F401 – re-exported for bake.py discovery
+from ..bridge import BINARY_REACT
+from .react import React as _React
+
+_SOURCE = '''
+function Component({ canvas, props }) {
+  const sampleRate = (props && props.sampleRate) || 16000;
+  const channels = (props && props.channels) || 1;
+  const [on, setOn] = React.useState(false);
+  const ctxRef = React.useRef(null);
+  const nextRef = React.useRef(0);
+  const onRef = React.useRef(false);
+  React.useEffect(() => { onRef.current = on; }, [on]);
+  React.useEffect(() => {
+    const LEAD = 0.12;
+    return canvas.onFrame((payload) => {
+      const ctx = ctxRef.current;
+      if (!onRef.current || !ctx || !(payload instanceof ArrayBuffer)) return;
+      let n = payload.byteLength;
+      n -= n % 2;
+      const pcm = new Int16Array(payload, 0, n / 2);
+      const frames = Math.floor(pcm.length / channels);
+      if (!frames) return;
+      const buf = ctx.createBuffer(channels, frames, sampleRate);
+      for (let ch = 0; ch < channels; ch++) {
+        const out = buf.getChannelData(ch);
+        for (let i = 0; i < frames; i++) out[i] = pcm[i * channels + ch] / 32768;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      const now = ctx.currentTime;
+      let start = nextRef.current;
+      if (start < now + 0.01) start = now + LEAD;
+      src.start(start);
+      nextRef.current = start + buf.duration;
+    });
+  }, [sampleRate, channels]);
+  React.useEffect(() => {
+    return () => {
+      const ctx = ctxRef.current;
+      if (ctx) ctx.close().catch(() => {});
+      ctxRef.current = null;
+    };
+  }, []);
+  const toggle = async () => {
+    if (!on) {
+      let ctx = ctxRef.current;
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        ctx = new AC({ sampleRate });
+        ctxRef.current = ctx;
+      }
+      try { await ctx.resume(); } catch {}
+      nextRef.current = ctx.currentTime + 0.12;
+      setOn(true);
+    } else {
+      setOn(false);
+      const ctx = ctxRef.current;
+      if (ctx) ctx.suspend().catch(() => {});
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, padding: 12 }}>
+      <button
+        onClick={toggle}
+        style={{
+          alignSelf: "flex-start",
+          padding: "6px 12px",
+          border: "none",
+          borderRadius: 6,
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: "pointer",
+          background: on ? "var(--pc-accent)" : "var(--pc-off-bg, #e5e7eb)",
+          color: on ? "var(--pc-accent-text, #fff)" : "var(--pc-off-text, #374151)",
+        }}
+      >
+        {on ? "🔊 Audio on" : "🔈 Enable audio"}
+      </button>
+      <div style={{ fontSize: 12, color: "var(--pc-muted, #9ca3af)" }}>
+        {sampleRate} Hz · {channels === 1 ? "mono" : channels + " ch"}
+      </div>
+    </div>
+  );
+}
+'''
 
 
-class AudioFeed(BaseComponent):
-    component = "AudioFeed"
+class AudioFeed(_React):
+    BINARY_TYPE = BINARY_REACT
     default_w = 260
     default_h = 120
-    BINARY_TYPE = BINARY_AUDIO
 
     def __init__(self, name="audio", sample_rate=16000, channels=1, label=None, color=None,
                  queue="latest"):
         # Live audio defaults to ``latest``: if a viewer falls behind, stale
         # chunks are dropped rather than building a playback backlog. Pass
         # ``queue="fifo"`` only when every sample must arrive (e.g. recording).
-        # sampleRate/channels travel as register props so the frontend knows how
-        # to interpret (and play back) the raw int16 PCM bytes it receives.
-        super().__init__(name=name, label=label, queue=queue,
-                         sampleRate=int(sample_rate), channels=int(channels))
-        self._init_color(color)
+        super().__init__(source=_SOURCE, name=name, label=label, color=color, queue=queue,
+                         w=260, h=120,
+                         props={"sampleRate": int(sample_rate), "channels": int(channels)})
         self._channels = int(channels)
 
     def update(self, chunk):

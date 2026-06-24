@@ -68,7 +68,7 @@ MESSAGE_TYPES_OUT = (
     "register", "arrow", "shape", "shape_update", "update", "order", "remove",
     "get_snapshot", "get_image", "load_snapshot", "draw", "presence",
     "cursor", "cursor_gone", "view", "welcome", "chat",
-    "response", "complete_result", "shared",
+    "response", "shared",
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui",

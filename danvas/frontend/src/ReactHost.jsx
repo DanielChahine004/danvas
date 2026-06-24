@@ -109,7 +109,19 @@ function loadWasm(b64) {
   return wasmCache.get(b64)
 }
 
+// Libraries bundled locally so panels can use them without a CDN fetch.
+// Each entry is a thunk that returns a dynamic import Promise, keyed separately
+// from CDN URLs in moduleCache so the two namespaces never collide.
+const LOCAL_MODULES = {
+  plotly: () => import('plotly.js-basic-dist-min'),
+}
+
 function loadLib(name) {
+  if (name in LOCAL_MODULES) {
+    const key = `__local__${name}`
+    if (!moduleCache.has(key)) moduleCache.set(key, LOCAL_MODULES[name]())
+    return moduleCache.get(key)
+  }
   const url = libUrl(name)
   if (!moduleCache.has(url)) {
     // @vite-ignore: a runtime URL, not a build-time import to pre-bundle.
@@ -224,22 +236,6 @@ export default function ReactHost({ shape }) {
   const framesRef = React.useRef(new Set())
 
   React.useEffect(() => {
-    const onPush = (data) => {
-      // When the component drives its own painting via onFrame, deliver straight
-      // to those callbacks and skip setStreamed entirely (no re-render). The two
-      // are mutually exclusive: read `value` for declarative/low-rate updates, or
-      // subscribe onFrame for high-rate streams — not both.
-      if (framesRef.current.size) {
-        for (const cb of framesRef.current) cb(data)
-      } else {
-        setStreamed(data)
-      }
-    }
-    registerLive(id, onPush)
-    return () => unregisterLive(id)
-  }, [id])
-
-  React.useEffect(() => {
     registerStyle(id, setLiveStyle)
     return () => unregisterStyle(id)
   }, [id])
@@ -339,6 +335,26 @@ export default function ReactHost({ shape }) {
   }, [shape.props.libs])
   const { libs, ready: libsReady, error: libsError } = useLibs(libNames)
 
+  // Re-register on libsReady so that scope=[] panels (e.g. LivePlot) get the
+  // liveBuffer replay AFTER their libs load and Comp mounts, not during the
+  // initial render when framesRef is still empty and the full figure would be
+  // silently swallowed into setStreamed instead of reaching canvas.onFrame.
+  React.useEffect(() => {
+    const onPush = (data) => {
+      // When the component drives its own painting via onFrame, deliver straight
+      // to those callbacks and skip setStreamed entirely (no re-render). The two
+      // are mutually exclusive: read `value` for declarative/low-rate updates, or
+      // subscribe onFrame for high-rate streams — not both.
+      if (framesRef.current.size) {
+        for (const cb of framesRef.current) cb(data)
+      } else {
+        setStreamed(data)
+      }
+    }
+    registerLive(id, onPush)
+    return () => unregisterLive(id)
+  }, [id, libsReady])
+
   // h="auto" / w="auto": fit the panel height/width to the rendered content. The
   // content sits in its own box (sized to content) so we can measure it; the host
   // fills the card body so its offset* gives the chrome overhead (see fitNative).
@@ -406,12 +422,32 @@ export default function ReactHost({ shape }) {
     if (bound.error) sendPanelError(id, bound.error.message || String(bound.error))
   }, [id, bound.error])
 
+  React.useEffect(() => {
+    if (libsError) sendPanelError(id, `failed to load libraries: ${libsError.message || libsError}`)
+  }, [id, libsError])
+
+  // These hooks MUST be called unconditionally before any early return so that
+  // the hook count stays stable across renders (Rules of Hooks). They were
+  // previously after the libsReady / libsError guards, which caused React error
+  // #310 ("Rendered more hooks than during the previous render") the first time
+  // a scope=[...] panel finished loading its libraries.
+  const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
+  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
+  const handMode = useValue('pc-hand-tool', () => editor.getCurrentToolId() === 'hand', [editor])
+  const nonPanelHovered = useValue('pc-hover', () => {
+    const hid = editor.getHoveredShapeId()
+    if (!hid) return false
+    const s = editor.getShape(hid)
+    return !!s && !s.type.startsWith('pc')
+  }, [editor])
+
   if (libsError) {
     return <ErrorBox error={new Error(`failed to load libraries: ${libsError.message || libsError}`)} />
   }
   if (!libsReady) {
     return (
       <div
+        data-pc-loading=""
         style={{
           flex: 1,
           display: 'flex',
@@ -427,21 +463,6 @@ export default function ReactHost({ shape }) {
   }
   if (bound.error) return <ErrorBox error={bound.error} />
   const Comp = bound.Comp
-  // Decorative panels (grabbable=False + operable=False) are click-through: the
-  // host takes no pointer, so clicks pass to whatever sits underneath on the
-  // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.
-  const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
-  const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
-  // The hand (grab) tool is also non-select, but unlike draw/arrow it should keep
-  // the panel's controls usable while still letting empty space pan — so it gets
-  // its own class (pc-hand) that takes precedence over pc-draw-passthrough below.
-  const handMode = useValue('pc-hand-tool', () => editor.getCurrentToolId() === 'hand', [editor])
-  const nonPanelHovered = useValue('pc-hover', () => {
-    const hid = editor.getHoveredShapeId()
-    if (!hid) return false
-    const s = editor.getShape(hid)
-    return !!s && !s.type.startsWith('pc')
-  }, [editor])
   return (
     // pointerEvents:'all' + stopPropagation claim the pointer for the hosted
     // component; without this tldraw treats a press as a move/resize of the
@@ -475,7 +496,19 @@ export default function ReactHost({ shape }) {
               : undefined
       }
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
+      // Right/middle-button presses are tldraw's canvas pan gesture. tldraw pans
+      // off pointer events; component libraries like Plotly drag off *mouse*
+      // events — a separate stream for the same physical press. Swallow the
+      // non-primary mousedown here in the capture phase so Plotly never starts a
+      // drag, while the pointer event still bubbles to tldraw and pans the canvas.
+      onMouseDownCapture={ghost ? undefined : (e) => {
+        if (e.button !== 0) e.stopPropagation()
+      }}
       onPointerDown={ghost ? undefined : (e) => {
+        // Right/middle-button presses are tldraw's canvas pan gesture — let them
+        // bubble so a right-drag pans even when it starts over a panel's content
+        // (e.g. a Plotly graph), instead of the component swallowing it.
+        if (e.button !== 0) return
         // In hand mode only control presses reach this handler (empty space is
         // pointer-transparent and falls through to the canvas), so claim them so
         // tldraw doesn't also pan while a control is being used.

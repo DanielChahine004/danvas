@@ -7,9 +7,9 @@ between two views live:
   label (its displayed caption — same as the name unless one was set
   separately), type, current value and geometry. Reads state danvas already
   tracks, so
-  building the table is cheap and safe on the event-loop thread (no kernel).
-- ``"globals"`` lists the variables in the shared REPL namespace (the one from
-  :meth:`Canvas.enable_repl`), name/type/value -- a notebook-style variable
+  building the table is cheap and safe on the event-loop thread.
+- ``"globals"`` lists the variables in the namespace passed to ``serve(namespace=...)``
+  or ``Inspector(namespace=...)``, name/type/value -- a notebook-style variable
   explorer, skipping modules and private/dunder names (but keeping ``canvas``).
 
 The two views overlap only partly: a panel you assigned to a variable shows up
@@ -342,10 +342,10 @@ class Inspector(React):
     def __init__(self, name="inspector", refresh=None, source="components",
                  namespace=None, color=None, label=None):
         """``source`` is the *initial* view -- ``"components"`` (canvas panels) or
-        ``"globals"`` (the shared REPL namespace); either way the panel's header
-        dropdown switches between them live. ``namespace`` overrides the
-        namespace used by ``"globals"`` mode (defaults to the one from
-        :meth:`Canvas.enable_repl`, injected on insert). ``refresh`` is the
+        ``"globals"`` (variables from the script namespace); either way the
+        panel's header dropdown switches between them live. ``namespace``
+        overrides the namespace used by ``"globals"`` mode (defaults to the one
+        from ``serve(namespace=...)``, injected on insert). ``refresh`` is the
         auto-refresh period in seconds (``None`` = manual only); with a period
         set, a daemon thread rebuilds the table on that cadence while the canvas
         is serving and a browser is connected."""
@@ -657,11 +657,9 @@ class Inspector(React):
         up empty. The imported function returns the live shell singleton from
         any thread, at any time.
 
-        Falls back to ``canvas._namespace`` (set by :meth:`Canvas.enable_repl`)
-        so that plain ``.py`` scripts calling ``canvas.enable_repl(globals())``
-        work even when the Inspector was spawned via the toolbar button (which
-        never receives an explicit namespace) or inserted before enable_repl was
-        called.
+        Falls back to ``canvas._namespace`` (set via ``serve(namespace=...)``)
+        so that the Inspector spawned via the toolbar button (which never
+        receives an explicit namespace) can still show the script's globals.
         """
         if self._namespace is not None:
             return self._namespace

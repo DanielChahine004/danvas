@@ -27,7 +27,6 @@ from .components import (
     Markdown,
     Plot,
     React,
-    Repl,
     Slider,
     Table,
     TextField,
@@ -257,13 +256,6 @@ class _FactoryMixin:
         ``kw``. Feed it with ``panel.add(values, step)``; needs ``plotly``.
         """
         return self._make(Histogram, name=name, **kw)
-
-    def repl(self, name="repl", label=None, **place: Unpack[Place]):
-        """Insert a :class:`~danvas.Repl`. See :meth:`insert` for ``place``.
-
-        Call :meth:`enable_repl` first to bind the namespace cells run against.
-        """
-        return self._make(Repl, name=name, label=label, **place)
 
     def inspector(self, name="inspector", refresh=None, source="components",
                   namespace=None, label=None, **place: Unpack[Place]):

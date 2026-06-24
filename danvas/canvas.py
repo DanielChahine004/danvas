@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 
 from . import server
 from ._flags import LAYOUT_FLAGS
+from .kernel import spawn
 from .arrow import Arrow, _arrow_props
 from .bridge import Bridge
 from .components import Inspector  # spawned directly by the toolbar UI toggle
-from .kernel import Kernel, spawn
 from ._layout import _FlowLayout, _LayoutMixin  # noqa: F401  (_FlowLayout re-exported)
 from ._factories import _FactoryMixin
 from .shapes import (
@@ -104,15 +104,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._serving = False
         self._server = None
         self._tunnel = None
-        # Remembered from serve() so a Repl inserted *after* the server is already
-        # running (serve(block=False)) is gated the same way one present at serve
-        # time is -- a public bind without allow_remote_exec must refuse it, since
-        # a live insert pushes the panel straight to remote browsers.
         self._public_bind = False
-        self._allow_remote_exec = False
-        # Shared by all Repl cells: one kernel thread runs their code serially
-        # against one namespace (set by enable_repl). None until enable_repl.
-        self._kernel = Kernel()
         self._namespace = None
         # Set by capture_cells()/autopanel() to the active CellCapture, so a
         # second call is idempotent and stop_capturing_cells() can find it.
@@ -138,33 +130,6 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # one places any panel inserted inside its `with` block that didn't get an
         # explicit x/y or relative anchor. Empty = panels auto-cascade as before.
         self._layout_stack = []
-
-    def enable_repl(self, namespace=None):
-        """Bind the namespace that ``Repl`` cells execute against.
-
-        Call this before inserting any :class:`~danvas.Repl`. Pass
-        ``globals()`` from your notebook/script to share its variables with the
-        on-canvas cells; omit it to auto-detect the IPython user namespace (or
-        an empty namespace outside IPython). ``canvas`` is always made available
-        inside it so cells can write ``canvas.<panel>`` straight away.
-
-        Because a REPL runs arbitrary Python in this process, it is gated to
-        local-only serving unless ``serve(..., allow_remote_exec=True)``.
-        """
-        if namespace is None:
-            # Import get_ipython rather than relying on the bare builtin, which
-            # IPython only installs while a cell is executing -- the imported
-            # function returns the live shell from any context. Falls back to an
-            # empty namespace when not running under IPython.
-            try:
-                from IPython import get_ipython
-                ip = get_ipython()
-            except ImportError:
-                ip = None
-            namespace = ip.user_ns if ip is not None else {}
-        namespace.setdefault("canvas", self)
-        self._namespace = namespace
-        return self
 
     def background(self, fn, *args, **kwargs):
         """Register ``fn`` to run as a daemon thread when the canvas serves.
@@ -572,18 +537,6 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # the component (set in its constructor); the ``name`` arg here overrides
         # that, and a label/auto fallback covers hand-built components that set
         # neither.
-        # A Repl is unauthenticated remote code execution. serve() refuses one on
-        # a public bind without allow_remote_exec, but in background mode a Repl
-        # can be inserted *after* serve() -- gate that live insert too, so the
-        # check can't be sidestepped by ordering.
-        if self._serving and self._public_bind and not self._allow_remote_exec \
-                and getattr(component, "component", None) == "Repl":
-            raise RuntimeError(
-                "a Repl cell executes arbitrary Python in this process; refusing "
-                "to add it to a publicly-served canvas (no auth). Serve on "
-                "'127.0.0.1', or pass allow_remote_exec=True to serve() if you "
-                "really intend remote code execution on a trusted network."
-            )
         # ``width``/``height`` alias ``w``/``h`` so the panel spelling matches the
         # container one (``column(width=…)``). Fold them in before any sizing
         # logic runs; passing both spellings of an axis is a mistake.
@@ -829,13 +782,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
         self._components.append(component)
-        # Wire the execution/introspection components to canvas-level resources.
-        # Duck-typed so the common components stay untouched: a Repl exposes a
-        # ``_kernel`` slot (shared kernel), components that read the shared REPL
-        # namespace a ``_namespace`` slot (Repl, globals-mode Inspector), and an
-        # Inspector a ``_canvas`` slot (to read live component state).
-        if getattr(component, "_kernel", "missing") is None:
-            component._kernel = self._kernel
+        # Wire introspection components: Inspector exposes ``_namespace`` (for
+        # its globals view) and ``_canvas`` (to read live component state).
         if getattr(component, "_namespace", "missing") is None:
             component._namespace = self._namespace
         if getattr(component, "_canvas", "missing") is None:
@@ -1663,23 +1611,6 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def __getitem__(self, name):
         return self._named[name]
 
-    def _check_remote_exec(self, host, allow_remote_exec):
-        """Refuse to expose a code-executing canvas on a non-local address.
-
-        A :class:`~danvas.Repl` runs arbitrary Python in this process; serving
-        it on anything but loopback hands remote browsers code execution with no
-        auth. Block that unless the caller explicitly opts in.
-        """
-        if host in ("127.0.0.1", "localhost") or allow_remote_exec:
-            return
-        if any(c.component == "Repl" for c in self._components):
-            raise RuntimeError(
-                f"a Repl cell executes arbitrary Python in this process; refusing "
-                f"to serve it on host={host!r} (no auth). Bind to '127.0.0.1', or "
-                f"pass allow_remote_exec=True if you really intend remote code "
-                f"execution on a trusted network."
-            )
-
     # Keys accepted in a ``view`` config, each paired with the coercion applied
     # before it is sent to the browser. Unknown keys are rejected so a typo
     # (e.g. ``zooom``) surfaces immediately rather than being silently ignored.
@@ -1718,7 +1649,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return out
 
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
-              allow_remote_exec=False, block=True, wait=True,
+              block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
               ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="danvas",
               window_size=(1200, 800), password=None, passwords=None,
@@ -1754,18 +1685,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         ``host`` is the bind address. The default ``"127.0.0.1"`` is local-only;
         pass ``"0.0.0.0"`` to let other devices on your network connect at
-        ``http://<this-machine-ip>:<port>``. If any ``Repl`` is on the canvas,
-        non-local serving is refused unless ``allow_remote_exec=True`` (a REPL is
-        unauthenticated remote code execution).
+        ``http://<this-machine-ip>:<port>``.
 
         Pass ``tunnel=True`` to also expose the canvas on the public internet
         through a tunnel, so anyone — not just devices on your LAN — can open the
         printed ``https://…`` URL. ``tunnel_provider`` selects the backend
         (``"cloudflared"`` by default, needs no signup and no visitor
-        interstitial; ``"localtunnel"`` is also supported). A tunnel exposes the
-        loopback bind to the whole internet, so it is gated for ``Repl`` exactly
-        like a public bind: refused unless ``allow_remote_exec=True``. The tunnel
-        is torn down when the server stops (or via :meth:`stop`).
+        interstitial; ``"localtunnel"`` is also supported). The tunnel is torn
+        down when the server stops (or via :meth:`stop`).
 
         ``ui_inspector`` controls the native toolbar button that lets a viewer
         spawn an ephemeral :class:`~danvas.Inspector` from the browser. It can
@@ -1785,11 +1712,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         shown a small password page first and the WebSocket is refused until they
         pass it, so a shared LAN or tunneled URL isn't open to anyone who finds
         it. The check is per-browser-session (a cookie), so each viewer enters it
-        once. It is independent of ``allow_remote_exec`` — a password controls who
-        may connect, not whether a Repl may run, so a public Repl still needs the
-        explicit opt-in even behind a password. A password-protected canvas also
-        shows a built-in **Sign out** button (clears the session, returns the
-        password page) so a viewer can switch accounts.
+        once. A password-protected canvas also shows a built-in **Sign out**
+        button (clears the session, returns the password page) so a viewer can
+        switch accounts.
 
         ``login_message`` adds a host note to that password page (above the
         field) — handy with ``passwords=`` to tell viewers which password to use,
@@ -1840,11 +1765,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
         ("viewer connected / disconnected") are always printed, debug or not.
 
-        ``namespace`` is a shorthand for :meth:`enable_repl`: pass
-        ``namespace=globals()`` to share your script's variables with
-        :class:`~danvas.Repl` panels and the Inspector's globals view. Ignored
-        if ``None`` (the default); if :meth:`enable_repl` was already called
-        explicitly this has no effect.
+        ``namespace`` passes your script's variables to the Inspector's globals
+        view. Pass ``globals()`` to make them visible. Ignored if ``None``
+        (the default).
 
         ``tldraw_license_key`` is your tldraw production licence key, injected
         into the page as the ``<Tldraw licenseKey=…>`` prop. tldraw runs in
@@ -1864,7 +1787,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
                                              tunnel_provider)
         if namespace is not None and self._namespace is None:
-            self.enable_repl(namespace)
+            self._namespace = namespace
         if handoff.should_return:
             return self
         if handoff.open_browser is not None:
@@ -1874,18 +1797,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # *through* that tunnel, so every public-exposure decision stays keyed on
         # `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
         own_tunnel = tunnel and os.environ.get("_danvas_RELOAD_WORKER") != "1"
-        # A tunnel publishes the loopback bind to the entire internet, so the
-        # "127.0.0.1 is private" assumption behind the Repl gate breaks. Gate it
-        # as if binding publicly.
-        self._check_remote_exec("0.0.0.0" if tunnel else host, allow_remote_exec)
-        # Resolve how far this serve reaches and the telemetry defaults (the UI
-        # Inspector + cursor reporting). Remembered on self so a Repl inserted
-        # live (serve(block=False)) gets the same gate; a password doesn't lift it
-        # (auth'd users still get RCE), so allow_remote_exec stays the opt-in.
+        # A tunnel publishes the loopback bind to the entire internet; treat it
+        # as a public bind for exposure/telemetry decisions.
+        # Resolve how far this serve reaches and the telemetry defaults (UI
+        # Inspector + cursor reporting).
         exposure = self._resolve_exposure(host, tunnel, ui_inspector,
                                           ui_graveyard, cursors)
         self._public_bind = exposure.public_bind
-        self._allow_remote_exec = allow_remote_exec
         self._bridge._ui_inspector = exposure.ui_inspector
         self._bridge._ui_graveyard = exposure.ui_graveyard
         self._bridge._cursors = exposure.cursors

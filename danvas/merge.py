@@ -111,17 +111,15 @@ class MergeBridge(Bridge):
     ``input``/``layout`` messages back to that source.
     """
 
-    def __init__(self, sources, region_width=0, allow_remote_exec=False):
+    def __init__(self, sources, region_width=0):
         super().__init__()
         self._sources = sources
         self._region_width = region_width
-        self._allow_remote_exec = allow_remote_exec
         # Presentation caches (raw wire messages), replayed to fresh browsers.
         self._registers = {}   # id -> register msg (offset already applied)
         self._updates = {}     # id -> last update msg
         self._arrows_raw = {}  # id -> arrow msg
         self._id_source = {}   # id -> _Source that owns it
-        self._id_component = {}  # id -> component type name (for the Repl gate)
 
     # -- startup: spawn the source clients on the server's event loop ---------
     def set_loop(self, loop):
@@ -160,7 +158,6 @@ class MergeBridge(Bridge):
             cid = msg.get("id")
             self._registers[cid] = msg
             self._id_source[cid] = src
-            self._id_component[cid] = msg.get("component")
             await self._fanout(msg)
         elif kind == "update":
             cid = msg.get("id")
@@ -189,7 +186,6 @@ class MergeBridge(Bridge):
             self._updates.pop(cid, None)
             self._arrows_raw.pop(cid, None)
             self._id_source.pop(cid, None)
-            self._id_component.pop(cid, None)
             await self._fanout(msg)
         # 'load_snapshot' (free-form drawings) is intentionally not composited.
 
@@ -224,7 +220,6 @@ class MergeBridge(Bridge):
             self._updates.pop(cid, None)
             self._arrows_raw.pop(cid, None)
             self._id_source.pop(cid, None)
-            self._id_component.pop(cid, None)
             await self._fanout({"type": "remove", "id": cid})
         if dead:
             print(f"[merge] {src.label} disconnected; dropped {len(dead)} shapes")
@@ -287,10 +282,6 @@ class MergeBridge(Bridge):
         if src is None:
             return  # canvas-level message (e.g. snapshot) -- nothing to route
         if kind == "input":
-            # A Repl relays arbitrary code into the source's process; only let a
-            # browser drive one when the operator has explicitly opted in.
-            if self._id_component.get(cid) == "Repl" and not self._allow_remote_exec:
-                return
             await src.send(msg)
         elif kind == "layout":
             # Translate merged-canvas coords back into the source's own space so
@@ -316,20 +307,15 @@ class Merge:
     By default the canvases are **overlaid**, each panel keeping its real
     coordinates. Pass ``region_width`` to instead spread the sources out
     side-by-side, each in its own horizontal region that many pixels wide.
-    ``allow_remote_exec`` permits browsers on the merged view to drive ``Repl``
-    panels (remote code execution in the source's process); off by default,
-    mirroring :class:`~danvas.Canvas`.
     """
 
-    def __init__(self, sources, region_width=0, allow_remote_exec=False):
+    def __init__(self, sources, region_width=0):
         parsed = []
         for i, spec in enumerate(sources):
             uri, label = _parse_source(spec)
             parsed.append(_Source(uri, offset_x=i * region_width, offset_y=0,
                                   label=label))
-        self._bridge = MergeBridge(
-            parsed, region_width=region_width, allow_remote_exec=allow_remote_exec
-        )
+        self._bridge = MergeBridge(parsed, region_width=region_width)
         self._server = None
         self._tunnel = None
 
@@ -344,9 +330,7 @@ class Merge:
         Pass ``tunnel=True`` to expose the merged view on the public internet
         through a tunnel (``tunnel_provider`` selects the backend, default
         ``"cloudflared"``), so collaborators on any network can open the printed
-        ``https://…`` URL. The merge host runs no component code itself, so this
-        adds no remote-execution surface beyond the per-source ``Repl`` gate
-        (``allow_remote_exec``). The tunnel is closed when the host stops.
+        ``https://…`` URL. The tunnel is closed when the host stops.
         """
         if not block:
             self._server = server.run_background(
@@ -398,8 +382,6 @@ def main(argv=None):
     parser.add_argument("--region-width", type=int, default=0,
                         help="spread sources side-by-side, this many px each "
                              "(0 = overlay, preserving real coordinates)")
-    parser.add_argument("--allow-remote-exec", action="store_true",
-                        help="let browsers drive Repl panels (remote code exec)")
     parser.add_argument("--tunnel", action="store_true",
                         help="expose the merged view on the public internet")
     parser.add_argument("--tunnel-provider", default="cloudflared",
@@ -409,7 +391,6 @@ def main(argv=None):
     Merge(
         args.sources,
         region_width=args.region_width,
-        allow_remote_exec=args.allow_remote_exec,
     ).serve(port=args.port, open_browser=not args.no_open, host=args.host,
             tunnel=args.tunnel, tunnel_provider=args.tunnel_provider)
 

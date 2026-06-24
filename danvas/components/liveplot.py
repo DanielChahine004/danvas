@@ -1,6 +1,6 @@
 """LivePlot: efficient streaming line plot for live telemetry.
 
-Unlike ``Plot`` (which reloads a Plotly iframe per update), ``LivePlot`` keeps a
+Unlike ``Plot`` (which re-renders a Plotly chart per update), ``LivePlot`` keeps a
 rolling buffer of samples and pushes just the data arrays; the frontend applies
 them with ``Plotly.react`` on a chart that stays mounted — smooth at high rates.
 
@@ -16,7 +16,7 @@ faint raw one.
 from collections import deque
 
 from . import _theme
-from .base import BaseComponent
+from .react import React as _React
 
 _DEFAULT_LAYOUT = {
     "margin": {"l": 40, "r": 15, "t": 15, "b": 30},
@@ -30,6 +30,80 @@ _PALETTE = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
     "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
 ]
+
+# JSX source: rAF-batched Plotly rendering with server-side coalescing.
+# canvas.onFrame receives either a full Plotly figure (on mount/reconnect,
+# delivered by bridge.js liveBuffer flush) or {__extend: ext} (incremental
+# delta). The rAF loop coalesces bursts into one repaint per frame, so a fast
+# producer never saturates the main thread.
+_SOURCE = '''
+function Component({ canvas }) {
+  const Plotly = libs.plotly;
+  const plotRef = React.useRef(null);
+  React.useEffect(() => {
+    const node = plotRef.current;
+    if (!node || !Plotly) return;
+    let pendingFull = null, pendingExt = null, raf = null, initialized = false;
+    const mergeExt = (acc, e) => {
+      if (!acc) return { indices: e.indices.slice(), x: e.x.map(a => a.slice()), y: e.y.map(a => a.slice()), max: e.max };
+      const pos = new Map(acc.indices.map((ti, k) => [ti, k]));
+      e.indices.forEach((ti, j) => {
+        if (pos.has(ti)) { const k = pos.get(ti); acc.x[k] = acc.x[k].concat(e.x[j]); acc.y[k] = acc.y[k].concat(e.y[j]); }
+        else { pos.set(ti, acc.indices.length); acc.indices.push(ti); acc.x.push(e.x[j].slice()); acc.y.push(e.y[j].slice()); }
+      });
+      acc.max = e.max;
+      return acc;
+    };
+    const adapt = () => {
+      if (!initialized) return;
+      const w = node.clientWidth || 0, h = node.clientHeight || 0;
+      if (!w || !h) return;
+      const small = w < 340 || h < 200;
+      Plotly.relayout(node, {
+        margin: small ? { l: 30, r: 10, t: 10, b: 24 } : { l: 40, r: 15, t: 15, b: 30 },
+        showlegend: !small,
+        "font.size": small ? 9 : 12,
+      }).catch(() => {});
+    };
+    const flush = () => {
+      raf = null;
+      if (!node) return;
+      if (pendingFull) {
+        const p = pendingFull; pendingFull = null; pendingExt = null;
+        Plotly.react(node, (p.data || []).map(t => ({ ...t, x: [...(t.x || [])], y: [...(t.y || [])] })), p.layout || {}, { responsive: true, displayModeBar: false })
+          .then(() => { initialized = true; adapt(); })
+          .catch(() => {});
+        return;
+      }
+      if (pendingExt && initialized) {
+        const e = pendingExt; pendingExt = null;
+        Plotly.extendTraces(node, { x: e.x, y: e.y }, e.indices, e.max);
+      }
+    };
+    const unsub = canvas.onFrame((plot) => {
+      if (plot && plot.__extend) pendingExt = mergeExt(pendingExt, plot.__extend);
+      else { pendingFull = plot; pendingExt = null; }
+      if (raf == null) raf = requestAnimationFrame(flush);
+    });
+    let resizeRaf = null, ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => {
+        if (resizeRaf != null) return;
+        resizeRaf = requestAnimationFrame(() => { resizeRaf = null; Plotly.Plots.resize(node); adapt(); });
+      });
+      ro.observe(node);
+    }
+    return () => {
+      unsub();
+      if (raf != null) cancelAnimationFrame(raf);
+      if (resizeRaf != null) cancelAnimationFrame(resizeRaf);
+      if (ro) ro.disconnect();
+      Plotly.purge(node);
+    };
+  }, []);
+  return <div ref={plotRef} style={{ flex: 1, width: "100%", minHeight: 0 }} />;
+}
+'''
 
 
 def _ema(values, weight):
@@ -48,8 +122,7 @@ def _ema(values, weight):
     return smoothed
 
 
-class LivePlot(BaseComponent):
-    component = "LivePlot"
+class LivePlot(_React):
     default_w = 560
     default_h = 380
 
@@ -68,9 +141,10 @@ class LivePlot(BaseComponent):
     ):
         if not 0 <= smoothing < 1:
             raise ValueError(f"smoothing must be in [0, 1), got {smoothing!r}")
-        size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
-        super().__init__(name=name, label=label, **size)
-        self._init_color(color)
+        w = w if w is not None else 560
+        h = h if h is not None else 380
+        super().__init__(source=_SOURCE, scope=["plotly"], name=name, label=label,
+                         w=w, h=h, color=color)
         self._max = max_points
         self._mode = mode
         self._layout = layout or {}
@@ -79,8 +153,8 @@ class LivePlot(BaseComponent):
         self._x = {}
         self._y = {}
         self._counter = 0
-        for name in traces or []:
-            self._ensure(name)
+        for t in traces or []:
+            self._ensure(t)
 
     def _ensure(self, name):
         if name not in self._y:
@@ -312,5 +386,7 @@ class LivePlot(BaseComponent):
 
     def state_payload(self):
         # Send the current buffer so a (re)connecting client renders at once.
+        # bridge.js updateComponent stores this in liveBuffer and flushes it
+        # to canvas.onFrame when the ReactHost panel mounts.
         with self._lock:
             return {"plot": self._payload()}

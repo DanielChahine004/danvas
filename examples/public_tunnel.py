@@ -28,8 +28,4 @@ def on_servo(value):
 
 # tunnel=True prints a public https URL alongside the local one. The tunnel is
 # closed automatically when the server stops (Ctrl+C).
-#
-# Note: a tunnel exposes the server to the whole internet with no auth. If this
-# canvas had a Repl panel, serving it this way would be refused unless you also
-# passed allow_remote_exec=True (a Repl is unauthenticated remote code exec).
 canvas.serve(port=8000, tunnel=True, password="secret")

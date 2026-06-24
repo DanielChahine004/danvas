@@ -17,7 +17,6 @@ from .plot import Plot
 
 
 class Histogram(Plot):
-    component = "Custom"  # reuses the Custom (pcHtml) shape, same as Plot
     default_w = 560
     default_h = 360
 

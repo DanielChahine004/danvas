@@ -76,7 +76,7 @@ function Component({ canvas, value }) {
         {state.entries.length === 0
           ? <div className="pc-fb-empty">(empty)</div>
           : state.entries.map((ent, i) => (
-              <div key={i}
+              <div key={i} role="button"
                    className={"pc-fb-row" + (!ent.dir && ent.name === state.selected ? " sel" : "")}
                    onClick={() => canvas.send({ event: "open", name: ent.name })}>
                 <span className="pc-fb-ico">{ent.dir ? "📁" : "📄"}</span>

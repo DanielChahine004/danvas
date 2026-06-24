@@ -811,42 +811,9 @@ function handle(msg) {
     applyShared(msg)              // canvas.define / canvas.style assets
   } else if (msg.type === 'chat') {
     pushChat(msg)
-  } else if (msg.type === 'complete_result') {
-    resolveCompletion(msg.reqId, msg.completions)
   } else if (msg.type === 'response') {
     resolveRequest(msg.reqId, msg.result, msg.error)
   }
-}
-
-// --- editor autocomplete round-trip (used by the Repl's Monaco editor) -------
-// A request carries a reqId; Python answers with a `complete_result` carrying
-// the same id. Pending requests resolve their promise when the answer lands (or
-// after a short timeout, so a stuck/busy backend never hangs the editor).
-const pendingCompletions = new Map() // reqId -> { resolve, timer }
-let completionSeq = 0
-
-export function requestCompletions(id, text) {
-  return new Promise((resolve) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      resolve([])
-      return
-    }
-    const reqId = `cmp${++completionSeq}`
-    const timer = setTimeout(() => {
-      pendingCompletions.delete(reqId)
-      resolve([])
-    }, 1500)
-    pendingCompletions.set(reqId, { resolve, timer })
-    sendRaw({ type: 'input', id, payload: { action: 'complete', reqId, text } })
-  })
-}
-
-function resolveCompletion(reqId, completions) {
-  const pending = pendingCompletions.get(reqId)
-  if (!pending) return
-  clearTimeout(pending.timer)
-  pendingCompletions.delete(reqId)
-  pending.resolve(completions || [])
 }
 
 // --- request/response RPC (canvas.request from a React panel) ----------------
@@ -904,16 +871,16 @@ function userContent(panelIds) {
 // fallback (the first one also downloads the lazy ReactHost chunk), so a
 // screenshot taken right after connect captures the rendered UI, not the
 // placeholder. Bounded — gives up and shoots anyway after ~budgetMs.
-function waitForPanelsReady(budgetMs = 4000) {
+function waitForPanelsReady(budgetMs = 8000) {
   return new Promise((resolve) => {
     const t0 = performance.now()
     const poll = () => {
-      const stillCompiling = document.querySelector('[data-pc-compiling]')
+      const stillCompiling = document.querySelector('[data-pc-compiling],[data-pc-loading]')
       if (!stillCompiling || performance.now() - t0 > budgetMs) {
         // small settle so the just-mounted component paints. setTimeout (not
         // requestAnimationFrame) — rAF is paused in a backgrounded tab, which is
         // exactly the case when the screenshot is driven from a terminal.
-        setTimeout(resolve, 30)
+        setTimeout(resolve, 100)
         return
       }
       setTimeout(poll, 50)

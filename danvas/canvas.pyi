@@ -20,7 +20,6 @@ from .components import (
     Markdown,
     Plot,
     React,
-    Repl,
     Slider,
     Table,
     TextField,
@@ -53,7 +52,6 @@ class Canvas:
     def __init__(self) -> None: ...
 
     # -- lifecycle ------------------------------------------------------------
-    def enable_repl(self, namespace: dict[str, Any] | None = ...) -> Canvas: ...
     def background(
         self, fn: Callable[..., Any], *args: Any, **kwargs: Any
     ) -> Callable[..., Any]: ...
@@ -62,7 +60,6 @@ class Canvas:
         port: int = ...,
         open_browser: bool = ...,
         host: str = ...,
-        allow_remote_exec: bool = ...,
         block: bool = ...,
         wait: bool = ...,
         tunnel: bool = ...,
@@ -241,9 +238,6 @@ class Canvas:
     ) -> Plot: ...
     def live_plot(self, name: str = ..., **kw: Any) -> LivePlot: ...
     def histogram(self, name: str = ..., **kw: Any) -> Histogram: ...
-    def repl(
-        self, name: str = ..., label: str | None = ..., **place: Any
-    ) -> Repl: ...
     def inspector(
         self,
         name: str = ...,
