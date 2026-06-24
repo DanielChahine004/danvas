@@ -58,9 +58,11 @@ def test_dispatch_file_paths(tmp_path):
 
 def test_dispatch_scalars_and_structures():
     assert isinstance(panel_for(42), Label)
-    # A bare dict / list of scalars renders as JSON in a Custom panel.
-    assert isinstance(panel_for({"a": 1}), Custom)
-    assert isinstance(panel_for([1, 2, 3]), Custom)
+    # Flat dict / list of scalars render as a key/value (or single-column) table
+    # via smart dispatch; a nested structure still falls to a JSON Custom panel.
+    assert isinstance(panel_for({"a": 1}), Table)
+    assert isinstance(panel_for([1, 2, 3]), Table)
+    assert isinstance(panel_for({"a": {"b": 1}}), Custom)
 
 
 def test_dispatch_tabular():
