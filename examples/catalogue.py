@@ -102,7 +102,7 @@ feed = canvas.audio("feed", sample_rate=16000, label="Audio feed", color=INDIGO,
 cam = canvas.video("cam", label="Webcam", color=SAGE, below=feed)
 
 # ── Chat ───────────────────────────────────────────────────────────────────────
-chat = canvas.chat("chat", label="Chat", color=ROSE, below=cam)
+chat = canvas.chat("room", label="Chat", color=ROSE, below=cam)
 
 # ── Custom (raw HTML/CSS/JS) ────────────────────────────────────────────────────
 cust = canvas.custom(
