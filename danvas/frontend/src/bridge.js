@@ -1,10 +1,16 @@
 ﻿import { createShapeId, createBindingId } from 'tldraw'
 import { COMPONENT_TO_SHAPE } from './canvas'
+import { createTldrawSurface } from './surface.js'
 import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
 
 // Single shared WebSocket connection. All components are multiplexed over it,
 // keyed by component id. State lives in Python + tldraw shape props only.
 let editor = null
+// The canvas-engine seam (see surface.js): generic camera / shape / z-order /
+// export ops go through this, so the engine dependency lives in one file. The
+// load-bearing tldraw bits (store sync, bindings, instance state) stay on
+// `editor` directly, on purpose. Set alongside `editor` in setEditor.
+let surface = null
 let ws = null
 
 // Auto-place panels that arrive without an explicit x/y. We flow them
@@ -74,7 +80,7 @@ function relayoutFlow() {
   if (!editor || flowItems.size === 0) return
   const items = []
   for (const shapeId of flowItems) {
-    const shape = editor.getShape(shapeId)
+    const shape = surface.shapes.get(shapeId)
     if (!shape) { flowItems.delete(shapeId); continue }
     items.push({ id: shapeId, w: shape.props.w, h: shape.props.h })
   }
@@ -83,10 +89,10 @@ function relayoutFlow() {
   const moves = []
   applyRemote(() => {
     for (const it of items) {
-      const shape = editor.getShape(it.id)
+      const shape = surface.shapes.get(it.id)
       const p = pos.get(it.id)
       if (!shape || (Math.abs(shape.x - p.x) < 0.5 && Math.abs(shape.y - p.y) < 0.5)) continue
-      editor.updateShape({ id: it.id, type: shape.type, x: p.x, y: p.y })
+      surface.shapes.update({ id: it.id, type: shape.type, x: p.x, y: p.y })
       moves.push({ id: componentIdOf(it.id), x: p.x, y: p.y })
     }
   })
@@ -136,12 +142,12 @@ function packFlow(spec) {
     let cy = spec.y0
     for (const cid of spec.ids) {
       const shapeId = createShapeId(cid)
-      const shape = editor.getShape(shapeId)
+      const shape = surface.shapes.get(shapeId)
       if (!shape) continue // removed since insert — skip, don't reserve space
       const x = spec.kind === 'row' ? cx : spec.x0
       const y = spec.kind === 'row' ? spec.y0 : cy
       if (Math.abs(shape.x - x) >= 0.5 || Math.abs(shape.y - y) >= 0.5) {
-        editor.updateShape({ id: shapeId, type: shape.type, x, y })
+        surface.shapes.update({ id: shapeId, type: shape.type, x, y })
         moves.push({ id: cid, x, y })
       }
       if (spec.kind === 'row') cx += shape.props.w + spec.gap
@@ -198,7 +204,7 @@ function _refreshFillW() {
 
 function _setupFillWObserver() {
   if (_fillWObserver || !editor || typeof ResizeObserver === 'undefined') return
-  const el = editor.getContainer()
+  const el = surface.container()
   if (!el) return
   _fillWObserver = new ResizeObserver(_refreshFillW)
   _fillWObserver.observe(el)
@@ -238,7 +244,7 @@ function repackContainer(key, ox, oy) {
   // fill_w: expand to the visible viewport width (in canvas units = CSS px ÷ zoom).
   // In scroll_y mode zoom=1 and the camera is at x=0, so canvas px === screen px.
   const specW = spec.fill_w
-    ? Math.floor(editor.getContainer().offsetWidth / editor.getZoomLevel())
+    ? Math.floor(surface.container().offsetWidth / surface.camera.zoomLevel())
         - 2 * (spec.padding ?? 0)
     : spec.w
   const x0 = ox !== undefined ? ox : (spec.x0 ?? 0)
@@ -254,7 +260,7 @@ function repackContainer(key, ox, oy) {
 
     if (m.kind === 'panel') {
       const shapeId = createShapeId(m.id)
-      const shape = editor.getShape(shapeId)
+      const shape = surface.shapes.get(shapeId)
       if (!shape) continue  // removed since sync — skip, don't reserve space
       mw = specW != null ? specW : shape.props.w
       mh = spec.h != null ? spec.h : shape.props.h
@@ -267,7 +273,7 @@ function repackContainer(key, ox, oy) {
         const patch = { id: shapeId, type: shape.type }
         if (needsMove) { patch.x = mx; patch.y = my }
         if (needsW || needsH) patch.props = { ...(needsW ? { w: specW } : {}), ...(needsH ? { h: spec.h } : {}) }
-        applyRemote(() => editor.updateShape(patch))
+        applyRemote(() => surface.shapes.update(patch))
         const report = { type: 'layout', id: m.id }
         if (needsMove) { report.x = mx; report.y = my }
         if (needsW) report.w = specW
@@ -320,6 +326,7 @@ export function getEditor() {
 
 export function setEditor(e) {
   editor = e
+  surface = createTldrawSurface(e)
   setupGeometrySync(e)
   setupSelectionFilter(e)
   setupDrawSync(e)
@@ -486,7 +493,7 @@ function setupSelectionFilter(ed) {
 function flushGeometry() {
   flushTimer = null
   for (const shapeId of dirtyShapes) {
-    const shape = editor.getShape(shapeId)
+    const shape = surface.shapes.get(shapeId)
     if (!shape) continue
     sendRaw({
       type: 'layout',
@@ -883,14 +890,14 @@ function resolveRequest(reqId, result, error) {
 // shape whose type is a panel type, as a belt-and-suspenders guard.
 function userContent(panelIds) {
   const exclude = new Set(panelIds)
-  const ids = [...editor.getCurrentPageShapeIds()].filter((id) => {
+  const ids = [...surface.shapes.pageIds()].filter((id) => {
     if (exclude.has(id)) return false
-    const shape = editor.getShape(id)
+    const shape = surface.shapes.get(id)
     return shape && !(PANEL_TYPES && PANEL_TYPES.has(shape.type))
   })
   if (ids.length === 0) return null
   // getContentFromCurrentPage bundles the shapes plus their bindings/assets.
-  return editor.getContentFromCurrentPage(ids) || null
+  return surface.export.getContent(ids) || null
 }
 
 // Block until no React panel is still showing its "compiling…" Suspense
@@ -920,10 +927,10 @@ function waitForPanelsReady(budgetMs = 4000) {
 // (with an error) instead of timing out.
 async function sendImage(reqId, shapeIds) {
   try {
-    const ids = shapeIds.length ? shapeIds : [...editor.getCurrentPageShapeIds()]
+    const ids = shapeIds.length ? shapeIds : [...surface.shapes.pageIds()]
     if (!ids.length) { sendRaw({ type: 'image', reqId, data: null, error: 'nothing to capture' }); return }
     await waitForPanelsReady()
-    const { blob } = await editor.toImage(ids, { format: 'png', background: true })
+    const { blob } = await surface.export.toImage(ids, { format: 'png', background: true })
     const buf = await blob.arrayBuffer()
     // base64 in chunks — btoa on a huge spread-string can blow the call stack.
     const bytes = new Uint8Array(buf)
@@ -949,7 +956,7 @@ function loadSnapshot(data) {
   }
   try {
     applyRemote(() =>
-      editor.putContentOntoCurrentPage(data, { select: false, preservePosition: true })
+      surface.export.putContent(data, { select: false, preservePosition: true })
     )
   } catch (err) {
     console.error('[danvas] failed to load drawings', err)
@@ -967,7 +974,7 @@ function clearManaged() {
   const ids = [...managedIds]
   applyRemote(() => {
     for (const shapeId of ids) {
-      if (editor.getShape(shapeId)) editor.deleteShape(shapeId)
+      if (surface.shapes.get(shapeId)) surface.shapes.delete(shapeId)
     }
   })
   managedIds.clear()
@@ -997,7 +1004,7 @@ function removeComponent(id) {
   styleBuffer.delete(id)
   const shapeId = createShapeId(id)
   managedIds.delete(shapeId)
-  if (editor.getShape(shapeId)) applyRemote(() => editor.deleteShape(shapeId))
+  if (surface.shapes.get(shapeId)) applyRemote(() => surface.shapes.delete(shapeId))
 }
 
 // Build a shape `meta` object from the Python movable/resizable/interactive
@@ -1028,7 +1035,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, opacity,
   if (id === UI_INSPECTOR_ID) setUiInspectorOpen(true)
   const shapeId = createShapeId(id)
   managedIds.add(shapeId) // exclude from free-form drawing sync
-  if (editor.getShape(shapeId)) return // already on canvas (reconnect)
+  if (surface.shapes.get(shapeId)) return // already on canvas (reconnect)
 
   // Use the position Python supplied; cascade only the axes left unspecified.
   let px = x
@@ -1055,7 +1062,7 @@ function registerComponent({ id, component, props = {}, x, y, rotation, opacity,
       typeof frame === 'boolean' || typeof frameColor === 'string') {
     shape.meta = lockMeta({}, movable, resizable, interactive, selectable, frame, frameColor)
   }
-  applyRemote(() => editor.createShape(shape))
+  applyRemote(() => surface.shapes.create(shape))
   // Record an auto-assigned position back to Python so the panel keeps it on the
   // next viewer/reconnect instead of being re-flowed. Without this, a panel that
   // was placed by the masonry flow stays x=None in Python; once *other* panels
@@ -1081,9 +1088,9 @@ function registerComponent({ id, component, props = {}, x, y, rotation, opacity,
 function createArrow({ id, start, end, props = {} }) {
   const arrowId = createShapeId(id)
   managedIds.add(arrowId) // exclude from free-form drawing sync
-  if (editor.getShape(arrowId)) return // already on canvas (reconnect)
+  if (surface.shapes.get(arrowId)) return // already on canvas (reconnect)
   applyRemote(() => {
-    editor.createShape({ id: arrowId, type: 'arrow', props: { ...props } })
+    surface.shapes.create({ id: arrowId, type: 'arrow', props: { ...props } })
     editor.createBindings(
       ['start', 'end'].map((terminal) => ({
         id: createBindingId(),
@@ -1146,26 +1153,26 @@ function setupScrollWheelPan(mode) {
   }
   if (!mode || mode === 'free') return
 
-  const container = editor.getContainer()
+  const container = surface.container()
 
   const onWheel = (e) => {
     if (!editor) return
     e.preventDefault()
     e.stopPropagation() // stop tldraw's bubble-phase zoom handler
 
-    const camera = editor.getCamera()
+    const camera = surface.camera.get()
     // deltaMode: 0 = pixels, 1 = lines (~20 px), 2 = pages (~400 px)
     const scale = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? 400 : 1
 
     if (mode === 'scroll_y') {
       // Vertical scroll → vertical pan.  Horizontal delta is discarded;
       // the x:'fixed' constraint would block it anyway.
-      editor.setCamera({ x: camera.x, y: camera.y - e.deltaY * scale, z: camera.z })
+      surface.camera.set({ x: camera.x, y: camera.y - e.deltaY * scale, z: camera.z })
     } else {
       // scroll_x: map vertical scroll to horizontal pan so a standard
       // mouse wheel advances the timeline/deck without needing shift.
       const dx = (e.deltaX + e.deltaY) * scale
-      editor.setCamera({ x: camera.x - dx, y: camera.y, z: camera.z })
+      surface.camera.set({ x: camera.x - dx, y: camera.y, z: camera.z })
     }
   }
 
@@ -1176,7 +1183,7 @@ function setupScrollWheelPan(mode) {
 
 function applyCameraMode(mode, zoom = 1) {
   if (mode === 'free') {
-    editor.setCameraOptions({
+    surface.camera.setOptions({
       constraints: undefined,
       zoomSteps: DEFAULT_ZOOM_STEPS,
     })
@@ -1186,7 +1193,7 @@ function applyCameraMode(mode, zoom = 1) {
   const behavior = mode === 'scroll_y'
     ? { x: 'fixed', y: 'free' }
     : { x: 'free',  y: 'fixed' }
-  editor.setCameraOptions({
+  surface.camera.setOptions({
     constraints: {
       bounds: { x: 0, y: 0, w: CAMERA_LARGE, h: CAMERA_LARGE },
       padding: { x: 0, y: 0 },
@@ -1204,7 +1211,7 @@ function applyCameraMode(mode, zoom = 1) {
   // fit as done prevents that; we own the camera from here on.
   if (initialFitTimer) { clearTimeout(initialFitTimer); initialFitTimer = null }
   initialFitDone = true
-  editor.setCamera({ x: 0, y: 0, z: zoom })
+  surface.camera.set({ x: 0, y: 0, z: zoom })
 }
 
 // Managed tldraw shapes --------------------------------------------------------
@@ -1212,9 +1219,9 @@ function applyCameraMode(mode, zoom = 1) {
 function createManagedShape({ id, shapeType, x, y, rotation, opacity, props = {} }) {
   const shapeId = createShapeId(id)
   managedIds.add(shapeId) // exclude from free-form drawing sync and graveyard sync
-  if (editor.getShape(shapeId)) return // already on canvas (reconnect)
+  if (surface.shapes.get(shapeId)) return // already on canvas (reconnect)
   applyRemote(() => {
-    editor.createShape({
+    surface.shapes.create({
       id: shapeId,
       type: shapeType,
       x: x ?? 0,
@@ -1230,7 +1237,7 @@ function createManagedShape({ id, shapeType, x, y, rotation, opacity, props = {}
 // (x, y, rotation, opacity) and/or shape props.
 function updateManagedShape({ id, x, y, rotation, opacity, props }) {
   const shapeId = createShapeId(id)
-  const shape = editor.getShape(shapeId)
+  const shape = surface.shapes.get(shapeId)
   if (!shape) return
   const patch = { id: shapeId, type: shape.type }
   if (x != null) patch.x = x
@@ -1240,7 +1247,7 @@ function updateManagedShape({ id, x, y, rotation, opacity, props }) {
   if (props && Object.keys(props).length) {
     patch.props = normaliseManagedProps(shape.type, props)
   }
-  applyRemote(() => editor.updateShape(patch))
+  applyRemote(() => surface.shapes.update(patch))
 }
 
 function updateComponent(id, payload) {
@@ -1303,7 +1310,7 @@ function updateComponent(id, payload) {
   // to the Web Audio scheduler (see handleBinary / AudioView).
 
   const shapeId = createShapeId(id)
-  const shape = editor.getShape(shapeId)
+  const shape = surface.shapes.get(shapeId)
   if (!shape) return
   // x/y/rotation are top-level shape fields, not props; everything else
   // (incl. w/h) is a shape prop. Split them so live move/resize/rotate works.
@@ -1322,7 +1329,7 @@ function updateComponent(id, payload) {
   // If Python explicitly sets a position, pin the panel out of the masonry
   // flow so relayoutFlow() doesn't move it back on the next repack.
   if (typeof x === 'number' && typeof y === 'number') flowItems.delete(shapeId)
-  applyRemote(() => editor.updateShape(patch))
+  applyRemote(() => surface.shapes.update(patch))
 }
 
 // Change a managed panel's stacking order (Python to_front/to_back/forward/
@@ -1333,13 +1340,13 @@ function updateComponent(id, payload) {
 function reorderComponent(id, op) {
   if (!editor) return
   const shapeId = createShapeId(id)
-  if (!editor.getShape(shapeId)) return
+  if (!surface.shapes.get(shapeId)) return
   const ids = [shapeId]
   applyRemote(() => {
-    if (op === 'front') editor.bringToFront(ids)
-    else if (op === 'back') editor.sendToBack(ids)
-    else if (op === 'forward') editor.bringForward(ids)
-    else if (op === 'backward') editor.sendBackward(ids)
+    if (op === 'front') surface.zorder.toFront(ids)
+    else if (op === 'back') surface.zorder.toBack(ids)
+    else if (op === 'forward') surface.zorder.forward(ids)
+    else if (op === 'backward') surface.zorder.backward(ids)
   })
 }
 
@@ -1721,7 +1728,7 @@ function applyViewOptions() {
     const mids = [0.25, 0.5, 1, 2, 4].filter((z) => z > min && z < max)
     opts.zoomSteps = [min, ...mids, max]
   }
-  if (Object.keys(opts).length) editor.setCameraOptions(opts)
+  if (Object.keys(opts).length) surface.camera.setOptions(opts)
 
   // Read-only / grid are instance state, not camera options.
   const inst = {}
@@ -1763,7 +1770,7 @@ function scheduleInitialFit() {
 
 function runInitialFit() {
   if (initialFitDone || !editor) return
-  const bounds = editor.getCurrentPageBounds() // union of all shapes, or null
+  const bounds = surface.camera.currentPageBounds() // union of all shapes, or null
   if (!bounds) return // no panels yet; a later register reschedules
   initialFitDone = true
   fitCameraToBounds(bounds)
@@ -1773,7 +1780,7 @@ function runInitialFit() {
 // honouring any configured min/max zoom. Uses the same screen-centre math as
 // applyCameraFrom, and `force` so it lands even under a locked camera.
 function fitCameraToBounds(bounds) {
-  const vsb = editor.getViewportScreenBounds()
+  const vsb = surface.camera.viewportScreenBounds()
   const pad = 80 // px of breathing room around the panels on every side
   const fitW = Math.max(1, vsb.w - pad * 2)
   const fitH = Math.max(1, vsb.h - pad * 2)
@@ -1787,7 +1794,7 @@ function fitCameraToBounds(bounds) {
   z = Math.max(minZ, Math.min(maxZ, z))
   const cx = bounds.x + bounds.w / 2
   const cy = bounds.y + bounds.h / 2
-  editor.setCamera(
+  surface.camera.set(
     { x: vsb.w / (2 * z) - cx, y: vsb.h / (2 * z) - cy, z },
     { immediate: true, force: true }
   )
@@ -1804,12 +1811,12 @@ export function applyCameraFrom(src) {
   const hasY = typeof src.y === 'number'
   const hasZ = typeof src.zoom === 'number'
   if (!(hasX || hasY || hasZ)) return
-  const cur = editor.getViewportPageBounds().center
-  const z = hasZ ? src.zoom : editor.getZoomLevel()
+  const cur = surface.camera.viewportPageBounds().center
+  const z = hasZ ? src.zoom : surface.camera.zoomLevel()
   const x = hasX ? src.x : cur.x
   const y = hasY ? src.y : cur.y
-  const vsb = editor.getViewportScreenBounds()
-  editor.setCamera(
+  const vsb = surface.camera.viewportScreenBounds()
+  surface.camera.set(
     { x: vsb.w / (2 * z) - x, y: vsb.h / (2 * z) - y, z },
     { immediate: true, force: true }
   )
@@ -1893,8 +1900,8 @@ export function setMyName(name) {
 function zoomCanvasAtClient(clientX, clientY, deltaY) {
   if (!editor) return
   if (viewConfig && viewConfig.locked) return // a locked camera doesn't zoom
-  const cam = editor.getCamera()
-  const vsb = editor.getViewportScreenBounds()
+  const cam = surface.camera.get()
+  const vsb = surface.camera.viewportScreenBounds()
   const sx = clientX - vsb.x
   const sy = clientY - vsb.y
   const min = viewConfig && typeof viewConfig.min_zoom === 'number' ? viewConfig.min_zoom : 0.1
@@ -1905,7 +1912,7 @@ function zoomCanvasAtClient(clientX, clientY, deltaY) {
   const z1 = Math.min(max, Math.max(min, z0 * Math.exp(-deltaY * 0.0015)))
   if (z1 === z0) return
   const k = 1 / z1 - 1 / z0
-  editor.setCamera({ x: cam.x + sx * k, y: cam.y + sy * k, z: z1 }, { immediate: true })
+  surface.camera.set({ x: cam.x + sx * k, y: cam.y + sy * k, z: z1 }, { immediate: true })
 }
 
 // Map an iframe's own (clientX, clientY) into the parent viewport using the
@@ -1933,7 +1940,7 @@ function fitFromIframe(sourceWin, fit) {
   )
   if (!iframe) return
   const shapeId = createShapeId(fit.id)
-  const shape = editor.getShape(shapeId)
+  const shape = surface.shapes.get(shapeId)
   if (!shape) return
   // A fit may carry a height (h="auto", measured continuously), a width
   // (w="auto", a one-shot at load), or both. Apply each axis independently;
@@ -1953,7 +1960,7 @@ function fitFromIframe(sourceWin, fit) {
   }
   if (!props.h && !props.w) return // both settled — don't ping-pong
   applyRemote(() =>
-    editor.updateShape({ id: shapeId, type: shape.type, props })
+    surface.shapes.update({ id: shapeId, type: shape.type, props })
   )
   // Report only the size: a fit never moves the panel, and echoing x/y would
   // pin an auto-arranged panel (x=None in Python) to a number — which then makes
@@ -1976,7 +1983,7 @@ function fitFromIframe(sourceWin, fit) {
 export function fitNative(componentId, hostEl, fit) {
   if (!editor || !hostEl || !fit) return
   const shapeId = createShapeId(componentId)
-  const shape = editor.getShape(shapeId)
+  const shape = surface.shapes.get(shapeId)
   if (!shape) return
   const props = {}
   const report = { type: 'layout', id: componentId }
@@ -1992,7 +1999,7 @@ export function fitNative(componentId, hostEl, fit) {
   }
   if (props.h === undefined && props.w === undefined) return // both settled — don't ping-pong
   applyRemote(() =>
-    editor.updateShape({ id: shapeId, type: shape.type, props })
+    surface.shapes.update({ id: shapeId, type: shape.type, props })
   )
   // Size only — see fitFromIframe: echoing x/y would pin an auto-arranged panel
   // and break the placement flow for the next viewer.
