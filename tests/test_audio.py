@@ -1,7 +1,7 @@
 import numpy as np
 
 import danvas
-from danvas.bridge import BINARY_AUDIO
+from danvas.bridge import BINARY_REACT
 
 
 class FakeBridge:
@@ -33,7 +33,7 @@ def test_audio_update_sends_binary_pcm_frame():
     data = bridge.binary[0]
 
     # Header: [type][idLen][id bytes], then the raw int16 PCM, byte-exact.
-    assert data[0] == BINARY_AUDIO
+    assert data[0] == BINARY_REACT
     id_len = data[1]
     assert data[2:2 + id_len] == b"a1"
     payload = data[2 + id_len:]

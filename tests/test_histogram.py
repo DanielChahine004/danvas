@@ -56,4 +56,4 @@ def test_factory_places_and_registers():
     h = canvas.histogram("grads", bins=8, x=100, y=120, w=400, h=300)
     assert canvas["grads"] is h
     assert (h.x, h.y, h.w, h.h) == (100, 120, 400, 300)
-    assert h.component == "Custom"   # reuses the Custom (pcHtml) shape
+    assert h.component == "React"   # rendered by the React panel host

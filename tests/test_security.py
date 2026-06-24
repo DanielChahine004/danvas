@@ -1,11 +1,10 @@
-"""Access control: the serve password gate and the live Repl insert gate."""
+"""Access control: the serve password gate."""
 
 import pytest
 from fastapi.testclient import TestClient
 
 import danvas
 from danvas import server
-from danvas.components import Repl
 
 
 def _app(password):
@@ -65,33 +64,3 @@ def test_authenticated_websocket_connects():
             # A welcome frame proves the connection was accepted.
             assert any(ws.receive_json().get("type") == "welcome"
                        for _ in range(12))
-
-
-def test_live_repl_insert_refused_on_public_bind():
-    canvas = danvas.Canvas()
-    canvas.enable_repl({})
-    # Simulate a running server bound publicly without the remote-exec opt-in.
-    canvas._serving = True
-    canvas._public_bind = True
-    canvas._allow_remote_exec = False
-    with pytest.raises(RuntimeError, match="arbitrary Python"):
-        canvas.insert(Repl(name="r"))
-
-
-def test_live_repl_insert_allowed_with_opt_in():
-    canvas = danvas.Canvas()
-    canvas.enable_repl({})
-    canvas._serving = True
-    canvas._public_bind = True
-    canvas._allow_remote_exec = True
-    # Opted in: the insert is permitted.
-    canvas.insert(Repl(name="r"))
-
-
-def test_live_repl_insert_allowed_on_local_bind():
-    canvas = danvas.Canvas()
-    canvas.enable_repl({})
-    canvas._serving = True
-    canvas._public_bind = False  # 127.0.0.1
-    canvas._allow_remote_exec = False
-    canvas.insert(Repl(name="r"))

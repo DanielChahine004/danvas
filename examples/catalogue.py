@@ -98,19 +98,55 @@ ins = canvas.inspector(name="ins", label="Inspector", color=TEAL, below=wv)
 # ── Audio feed ─────────────────────────────────────────────────────────────────
 feed = canvas.audio("feed", sample_rate=16000, label="Audio feed", color=INDIGO, below=ins)
 
-# ── Live-plot feed + audio feed ────────────────────────────────────────────────
+# ── Webcam ─────────────────────────────────────────────────────────────────────
+cam = canvas.video("cam", label="Webcam", color=SAGE, below=feed)
+
+# ── Live-plot feed ───────────────────────────────────────────────────────────
 @canvas.background
 def tick():
     t = 0.0
-    RATE = 16000
-    CHUNK = 1024  # samples per push (~64 ms at 16 kHz)
     while True:
         lp.push({"signal": math.sin(t * 0.5 + random.uniform(-0.1, 0.1))})
-        # 440 Hz sine wave at 16 kHz, int16
-        ts = np.arange(int(t * RATE), int(t * RATE) + CHUNK) / RATE
-        wave = (np.sin(2 * math.pi * 440 * ts) * 0.4 * 32767).astype("<i2")
-        feed.update(wave.tobytes())
-        t += CHUNK / RATE
-        time.sleep(CHUNK / RATE)
+        t += 0.064
+        time.sleep(0.064)
+
+
+# ── Audio feed: live microphone ───────────────────────────────────────────────
+@canvas.background
+def mic():
+    try:
+        import sounddevice as sd
+    except ImportError:
+        print("[catalogue] mic disabled — `pip install danvas[audio]` for sounddevice")
+        return
+
+    def callback(indata, frames, time_info, status):
+        feed.update(indata[:, 0])  # float32 [-1, 1] -> int16 by AudioFeed
+
+    try:
+        with sd.InputStream(samplerate=16000, channels=1, dtype="float32",
+                            blocksize=1024, callback=callback):
+            while True:
+                time.sleep(0.5)
+    except Exception as exc:  # no input device, etc. — don't kill the app
+        print(f"[catalogue] mic capture failed: {exc}")
+
+@canvas.background
+def webcam():
+    try:
+        import cv2
+    except ImportError:
+        print("[catalogue] webcam disabled — `pip install danvas[video]` for OpenCV")
+        return
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("[catalogue] webcam disabled — no camera at index 0")
+        return
+    while True:
+        ok, frame = cap.read()
+        if ok:
+            cam.update(frame)
+        time.sleep(1 / 30)
+
 
 canvas.serve(port=8001, tunnel=True)
