@@ -52,6 +52,32 @@
   pointer-events: none !important;
 }
 
+/* Hand (grab) tool, used as the default on touch kiosks: like pc-draw-passthrough
+ * the host goes pointer-transparent so a one-finger drag on empty panel space
+ * falls through to the stable panel card and tldraw pans reliably (a press on a
+ * panel child gets pointercancel'd when the panel re-renders mid-drag, stuttering
+ * the pan). Unlike drawing, controls stay usable — they opt back in below. The
+ * !important overrides the host's inline pointer-events:all; only these semantic
+ * controls re-enable, so a bare-div custom control needs a role= or one of these
+ * tags or it's treated as empty space and pans. */
+.pc-hand {
+  pointer-events: none !important;
+}
+.pc-hand button,
+.pc-hand input,
+.pc-hand select,
+.pc-hand textarea,
+.pc-hand a,
+.pc-hand label,
+.pc-hand summary,
+.pc-hand [role="button"],
+.pc-hand [role="slider"],
+.pc-hand [role="switch"],
+.pc-hand [role="tab"],
+.pc-hand [contenteditable="true"] {
+  pointer-events: auto !important;
+}
+
 /* Mobile: tldraw sets touch-action:none on its canvas layer to own pinch/pan,
  * which also suppresses the browser's native cursor-positioning for text inputs.
  * Overriding here gives the browser back control inside panels so tapping to

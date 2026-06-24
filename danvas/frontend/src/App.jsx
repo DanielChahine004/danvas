@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from 'react'
-import { Tldraw, createShapeId } from 'tldraw'
+import { Tldraw, createShapeId, useEditor, useValue } from 'tldraw'
 import 'tldraw/tldraw.css'
 import './theme.css' // danvas panel theme vars (after tldraw.css so they win)
 import { shapeUtils } from './canvas'
@@ -57,9 +57,33 @@ export default function App() {
           setEditor(editor)
           return () => { cleanupPan(); cleanupScroll() }
         }}
-      />
+      >
+        {hideUi && <KioskHandTool />}
+      </Tldraw>
     </div>
   )
+}
+
+// Under a `ui: false` view there's no toolbar, so a touch user is stuck on the
+// select tool — one finger selects/drags the topmost panel instead of panning
+// the canvas. This keeps the hand tool armed on touch devices so a single finger
+// pans (tap and pinch-zoom still work). Rendered as a <Tldraw> child for editor
+// context; it watches the tool reactively and re-applies hand whenever tldraw
+// bounces it back to select (which it does during init and on cancel). It uses a
+// useValue read + an effect — the same pattern the panels use — not a raw
+// reactor (a raw `react()` here crashed tldraw's effect scheduler). Touch is
+// `(pointer: coarse)`: true only when the *primary* input is touch (a phone), so
+// a mouse-driven touchscreen laptop (maxTouchPoints>0 but a fine pointer) keeps
+// the normal select tool, and desktop Chrome (`'ontouchstart' in window`) isn't
+// wrongly treated as touch.
+function KioskHandTool() {
+  const editor = useEditor()
+  const toolId = useValue('kiosk-tool', () => editor.getCurrentToolId(), [editor])
+  useEffect(() => {
+    const isPhone = !!window.matchMedia?.('(pointer: coarse)').matches
+    if (isPhone && toolId !== 'hand') editor.setCurrentTool('hand')
+  }, [editor, toolId])
+  return null
 }
 
 // A small live-viewer badge floated over the canvas. Subscribes to the bridge's

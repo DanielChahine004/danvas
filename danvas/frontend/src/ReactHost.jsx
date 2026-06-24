@@ -432,6 +432,10 @@ export default function ReactHost({ shape }) {
   // canvas. Mirrors the Custom iframe's `ghost`; see Card's `ghostable`.
   const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
   const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
+  // The hand (grab) tool is also non-select, but unlike draw/arrow it should keep
+  // the panel's controls usable while still letting empty space pan — so it gets
+  // its own class (pc-hand) that takes precedence over pc-draw-passthrough below.
+  const handMode = useValue('pc-hand-tool', () => editor.getCurrentToolId() === 'hand', [editor])
   const nonPanelHovered = useValue('pc-hover', () => {
     const hid = editor.getHoveredShapeId()
     if (!hid) return false
@@ -445,7 +449,11 @@ export default function ReactHost({ shape }) {
     // keeps no pointerEvents, so it stays the panel's drag handle. A ghost panel
     // wants the opposite — let the pointer fall through to the canvas entirely.
     // When a non-select tool (draw, arrow, text…) is active the host drops to
-    // pointer-events:none so tldraw receives the stroke instead of this div.
+    // pointer-events:none so tldraw receives the stroke instead of this div. The
+    // hand tool is the exception (pc-hand below): a press on empty space falls
+    // through to the stable Card so a one-finger drag pans without the
+    // pointercancel stutter a re-rendering panel child would cause, while real
+    // controls stay interactive so they can still be tapped/dragged.
     //
     // We also stop touch events here: tldraw's canvas onTouchStart/onTouchEnd
     // call preventDefault() on every touch (to own pinch/pan), which suppresses
@@ -460,9 +468,18 @@ export default function ReactHost({ shape }) {
       // descendants (including SVG, which ignores CSS cascade for pointer-events).
       // Without !important on *, SVG rects default to visiblePainted and still
       // receive clicks even when a parent HTML div has pointer-events:none.
-      className={(!ghost && (!toolIsSelect || nonPanelHovered)) ? 'pc-draw-passthrough' : undefined}
+      className={
+        ghost ? undefined
+          : handMode ? 'pc-hand'
+            : (!toolIsSelect || nonPanelHovered) ? 'pc-draw-passthrough'
+              : undefined
+      }
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onPointerDown={ghost ? undefined : (e) => {
+        // In hand mode only control presses reach this handler (empty space is
+        // pointer-transparent and falls through to the canvas), so claim them so
+        // tldraw doesn't also pan while a control is being used.
+        if (handMode) { e.stopPropagation(); return }
         if (!toolIsSelect) return
         const pt = editor.screenToPage({ x: e.clientX, y: e.clientY })
         const top = editor.getShapeAtPoint(pt, { hitInside: true })
