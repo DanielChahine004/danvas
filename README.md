@@ -1693,12 +1693,20 @@ use — are available on request via daniel.chahine004@gmail.com.
 **Scope.** The AGPL covers danvas's own code. The pre-built frontend bundle
 shipped in `danvas/frontend/dist/` is compiled from third-party packages under
 *their* licences, not the AGPL — most notably [tldraw](https://tldraw.dev),
-which is under the **proprietary tldraw licence** (not AGPL) and shows a
-"made with tldraw" watermark on the free tier danvas ships on. See
+which is under the **proprietary tldraw licence** (not AGPL). See
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
+**You need your own tldraw licence to run danvas in production.** tldraw is free
+in development (no key), but *"will not work in production without a valid license
+key."* Get a free **hobby** key (non-commercial, keeps the "made with tldraw"
+watermark) or a paid **commercial** key from [tldraw](https://tldraw.dev/community/license),
+then hand it to danvas:
+
+```python
+canvas.serve(tldraw_license_key="tldraw-...")   # or: export TLDRAW_LICENSE_KEY=tldraw-...
+```
+
 **A danvas licence (AGPL or commercial) grants rights to danvas only — not to
-tldraw.** Whichever danvas licence you use, you remain responsible for your own
-tldraw compliance: keep the watermark, or obtain a tldraw business licence to
-remove it. A commercial danvas licence does not include or sublicense any tldraw
+tldraw.** Whoever runs a danvas app in production obtains their own tldraw
+licence; a commercial danvas licence does not include or sublicense any tldraw
 rights.

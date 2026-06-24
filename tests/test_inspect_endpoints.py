@@ -42,3 +42,17 @@ def test_endpoints_behind_auth_gate():
     client = TestClient(_app(canvas, password="pw"))
     # Unauthenticated request is bounced by the gate, not served the values.
     assert client.get("/__describe__").status_code == 401
+
+
+def test_tldraw_license_key_injected_into_index():
+    canvas = danvas.Canvas()
+    canvas._bridge._tldraw_license_key = "tldraw-test-123"
+    html = TestClient(_app(canvas)).get("/").text
+    assert "__DANVAS_TLDRAW_LICENSE_KEY__" in html
+    assert "tldraw-test-123" in html
+
+
+def test_index_unchanged_without_license_key():
+    canvas = danvas.Canvas()  # no key → development mode, page served as-is
+    html = TestClient(_app(canvas)).get("/").text
+    assert "__DANVAS_TLDRAW_LICENSE_KEY__" not in html

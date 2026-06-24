@@ -180,6 +180,10 @@ class Bridge:
         # this, a high-rate feed (e.g. 30fps video) overlaps sends and crashes.
         self._send_locks = {}  # ws -> asyncio.Lock
         self._loop = None
+        # tldraw production license key, injected into the page HTML by the
+        # server (set from serve(tldraw_license_key=) / $TLDRAW_LICENSE_KEY).
+        # None → tldraw runs in its development mode (no production key).
+        self._tldraw_license_key = None
         self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
         self._loaded_doc = None  # last full document loaded, replayed on connect
         # Live free-form drawings (tldraw records the *user* draws, not danvas

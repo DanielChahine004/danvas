@@ -1723,7 +1723,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="danvas",
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
-              namespace=None):
+              namespace=None, tldraw_license_key=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1845,7 +1845,19 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         :class:`~danvas.Repl` panels and the Inspector's globals view. Ignored
         if ``None`` (the default); if :meth:`enable_repl` was already called
         explicitly this has no effect.
+
+        ``tldraw_license_key`` is your tldraw production licence key, injected
+        into the page as the ``<Tldraw licenseKey=…>`` prop. tldraw runs in
+        development without one, but *requires* a key in production (free hobby
+        key for non-commercial use, paid commercial key otherwise — see
+        THIRD_PARTY_LICENSES.md). Falls back to ``$TLDRAW_LICENSE_KEY``.
         """
+        # tldraw needs a license key for production use (it runs in development
+        # without one). It's a mount-time <Tldraw> prop, so the server injects it
+        # into the page HTML — see server.create_app. Falls back to the env var
+        # so a key can be supplied without editing the call site.
+        self._bridge._tldraw_license_key = (
+            tldraw_license_key or os.environ.get("TLDRAW_LICENSE_KEY") or None)
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.

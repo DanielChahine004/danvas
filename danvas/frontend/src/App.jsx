@@ -28,6 +28,10 @@ export default function App() {
       {!hideUi && <InspectorButton />}
       {!hideUi && <GraveyardButton />}
       <Tldraw
+        // Production license key, injected into the page HTML by the danvas
+        // server (serve(tldraw_license_key=) / $TLDRAW_LICENSE_KEY). Undefined in
+        // development, where tldraw runs without a key.
+        licenseKey={(typeof window !== 'undefined' && window.__DANVAS_TLDRAW_LICENSE_KEY__) || undefined}
         hideUi={hideUi}
         shapeUtils={shapeUtils}
         onMount={(editor) => {

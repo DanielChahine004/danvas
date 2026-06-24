@@ -558,6 +558,28 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     async def ws_reject(ws: WebSocket):
         await ws.close(code=1008)
 
+    # Serve the root document ourselves so we can inject the tldraw license key.
+    # tldraw needs a production license key as a mount-time <Tldraw licenseKey=>
+    # prop — it can't arrive over /ws (the editor mounts before the socket
+    # connects). The key is read per-request from the bridge (set by
+    # serve(tldraw_license_key=) / $TLDRAW_LICENSE_KEY); with none set, tldraw
+    # runs in its development mode and the page is served unchanged. Registered
+    # before the static mount so it wins for "/"; /assets/* still come from the mount.
+    _index = os.path.join(DIST_DIR, "index.html")
+
+    @app.get("/")
+    def index():
+        if not os.path.isfile(_index):
+            return PlainTextResponse("frontend not built", status_code=404)
+        with open(_index, encoding="utf-8") as f:
+            doc = f.read()
+        key = getattr(bridge, "_tldraw_license_key", None)
+        if key:
+            tag = ("<script>window.__DANVAS_TLDRAW_LICENSE_KEY__ = "
+                   f"{json.dumps(str(key))};</script>")
+            doc = doc.replace("</head>", tag + "</head>", 1)
+        return HTMLResponse(doc, headers={"Cache-Control": "no-cache"})
+
     # Mount the built frontend last so /ws keeps priority over the catch-all.
     if os.path.isdir(DIST_DIR):
         app.mount("/", _FrontendStatic(directory=DIST_DIR, html=True), name="static")
