@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
+    JSONResponse,
     PlainTextResponse,
     RedirectResponse,
     Response,
@@ -468,6 +469,32 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
         # header (incl. utf-8 filename) from ``filename`` itself.
         return FileResponse(source, filename=filename,
                             media_type="application/octet-stream")
+
+    # Read-only inspection for an external process (a terminal, an LLM agent)
+    # to QC the live canvas without editing the serving script. Behind the same
+    # auth gate as everything else, so a password/role canvas doesn't leak its
+    # current UI state or a screenshot of the screen. Defined as sync `def` so
+    # Starlette runs them in a threadpool — request_image() blocks on a browser
+    # round-trip and must not stall the event loop (the same reason canvas.save
+    # calls request_snapshot from a worker thread, not the loop).
+    @app.get("/__describe__")
+    def describe():
+        # Pure Python state — works with no browser open (headless QC).
+        canvas = getattr(bridge, "_canvas", None)
+        if canvas is None:
+            return PlainTextResponse("no canvas", status_code=503)
+        return JSONResponse(canvas.describe())
+
+    @app.get("/__screenshot__.png")
+    def screenshot_png():
+        # Needs a connected browser to render; 503 if none, 504 on timeout.
+        try:
+            png = bridge.request_image([], timeout=15.0)
+        except RuntimeError as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        except TimeoutError as exc:
+            return PlainTextResponse(str(exc), status_code=504)
+        return Response(content=png, media_type="image/png")
 
     # File uploads received by an Upload panel. The browser POSTs the raw file
     # body (name in the query) to its panel's token URL; we stream it (to disk if

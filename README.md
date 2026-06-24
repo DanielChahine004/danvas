@@ -1492,6 +1492,21 @@ print(canvas.describe())
 canvas.screenshot(path="canvas.png")
 ```
 
+**From outside the process** — the running server also exposes the same two
+checks as read-only HTTP endpoints, so an agent (or you, from another terminal)
+can QC a live canvas without editing the script that's serving it:
+
+```bash
+curl localhost:8000/__describe__        # JSON inventory — works with no tab open
+curl localhost:8000/__screenshot__.png -o canvas.png   # PNG; needs a tab to render
+```
+
+`/__describe__` is pure Python state, so it answers headless (no browser needed)
+— the natural terminal-QC tool. `/__screenshot__.png` still needs a connected
+tab to render and returns `503` when none is open. Both sit behind the canvas's
+auth gate: on a `password=`/tunneled canvas an unauthenticated request gets the
+login page, not your UI state — so they're as protected as uploads/downloads.
+
 ## Tracking an ML training run
 
 The panels above *are* the dashboard — no logging framework. Make each once,
