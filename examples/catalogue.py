@@ -101,6 +101,18 @@ feed = canvas.audio("feed", sample_rate=16000, label="Audio feed", color=INDIGO,
 # ── Webcam ─────────────────────────────────────────────────────────────────────
 cam = canvas.video("cam", label="Webcam", color=SAGE, below=feed)
 
+# ── Chat ───────────────────────────────────────────────────────────────────────
+chat = canvas.chat("chat", label="Chat", color=ROSE, below=cam)
+
+# ── Custom (raw HTML/CSS/JS) ────────────────────────────────────────────────────
+cust = canvas.custom(
+    html="<button onclick=\"this.textContent='Clicked ' + (++n)\">Click me</button>",
+    css="button{font:14px sans-serif;padding:8px 16px;border-radius:6px;border:0;"
+        "background:#6b6bd4;color:#fff;cursor:pointer}",
+    js="var n=0;",
+    name="cust", label="Custom", color=AMBER, below=chat,
+)
+
 # ── Live-plot feed ───────────────────────────────────────────────────────────
 @canvas.background
 def tick():
@@ -149,4 +161,4 @@ def webcam():
         time.sleep(1 / 30)
 
 
-canvas.serve(port=8001, tunnel=True)
+canvas.serve(port=8001, hot_reload=True)
