@@ -1685,6 +1685,20 @@ npm run build          # npm run dev + http://localhost:5173/?demo for standalon
 
 ## Licence
 
-danvas is licensed under the [GNU Affero General Public License v3.0](LICENSE)
-(AGPL-3.0). Commercial licences are available on request via
-daniel.chahine004@gmail.com.
+danvas's own source code is licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
+Commercial licences — which waive the AGPL copyleft for internal or proprietary
+use — are available on request via daniel.chahine004@gmail.com.
+
+**Scope.** The AGPL covers danvas's own code. The pre-built frontend bundle
+shipped in `danvas/frontend/dist/` is compiled from third-party packages under
+*their* licences, not the AGPL — most notably [tldraw](https://tldraw.dev),
+which is under the **proprietary tldraw licence** (not AGPL) and shows a
+"made with tldraw" watermark on the free tier danvas ships on. See
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+**A danvas licence (AGPL or commercial) grants rights to danvas only — not to
+tldraw.** Whichever danvas licence you use, you remain responsible for your own
+tldraw compliance: keep the watermark, or obtain a tldraw business licence to
+remove it. A commercial danvas licence does not include or sublicense any tldraw
+rights.

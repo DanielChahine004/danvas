@@ -22,6 +22,11 @@ description = "A browser-based spatial canvas with UI panels defined and control
 readme = "README.md"
 requires-python = ">=3.9"
 license = "AGPL-3.0-or-later"
+# danvas's own code is AGPL; the bundled frontend (danvas/frontend/dist) is
+# third-party code under its own licences — see THIRD_PARTY_LICENSES.md. Both
+# files ship in the wheel + sdist so the tldraw/watermark obligation travels
+# with the package.
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Daniel Chahine", email = "daniel.chahine004@gmail.com" }]
 dependencies = [
     "fastapi>=0.110",
