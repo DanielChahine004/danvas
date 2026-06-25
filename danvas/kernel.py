@@ -43,6 +43,15 @@ class Kernel:
                 self._thread.start()
         self._q.put(fn)
 
+    def is_current_thread(self):
+        """True when called from this kernel's own worker thread.
+
+        Lets a blocking call (e.g. a browser round-trip that waits on a reply)
+        detect that it is running *on* the shared dispatch thread, where waiting
+        would stall every other queued handler until it returns.
+        """
+        return threading.current_thread() is self._thread
+
     def _run(self):
         while True:
             fn = self._q.get()

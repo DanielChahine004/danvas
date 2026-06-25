@@ -7,6 +7,8 @@ reconnect-stable identity, without needing a running event loop.
 """
 
 import json
+import threading
+import warnings
 
 import pytest
 import danvas
@@ -180,3 +182,50 @@ def test_make_viewer_without_request_is_fresh_and_unique():
     b = Bridge()
     a = b._make_viewer()
     assert a["id"] and a["name"] and a["role"] is None
+
+
+# -- blocking browser round-trips warn when called on the dispatch thread -----
+
+def _call_on_dispatch(bridge, fn, timeout=2.0):
+    """Run ``fn()`` on the bridge's dispatch thread and return the warnings it
+    raised. ``fn`` may raise (e.g. RuntimeError for no connected browser); that
+    is swallowed — these tests only care about the warning."""
+    captured = {}
+    done = threading.Event()
+
+    def runner():
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                fn()
+            except Exception:
+                pass  # no browser connected etc. — irrelevant to the warning
+            captured["warnings"] = [str(w.message) for w in caught]
+        done.set()
+
+    bridge._dispatch.submit(runner)
+    assert done.wait(timeout), "dispatch thread did not run the call"
+    return captured["warnings"]
+
+
+def test_request_image_warns_on_dispatch_thread():
+    b = Bridge()
+    msgs = _call_on_dispatch(b, lambda: b.request_image([], timeout=0.1))
+    assert any("canvas.screenshot()" in m and "dispatch thread" in m for m in msgs)
+
+
+def test_request_snapshot_warns_on_dispatch_thread():
+    b = Bridge()
+    msgs = _call_on_dispatch(b, lambda: b.request_snapshot(timeout=0.1))
+    assert any("canvas.save()" in m and "dispatch thread" in m for m in msgs)
+
+
+def test_no_warning_when_called_off_dispatch_thread():
+    # The common case — canvas.screenshot()/save() from the main thread (or a
+    # threaded=True handler) must not warn.
+    b = Bridge()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(RuntimeError):       # no browser connected
+            b.request_image([], timeout=0.1)
+    assert not any("dispatch thread" in str(w.message) for w in caught)

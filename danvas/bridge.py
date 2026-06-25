@@ -18,6 +18,7 @@ import threading
 import time
 import traceback
 import uuid
+import warnings
 
 _log = logging.getLogger("danvas")
 from collections import deque
@@ -1766,6 +1767,27 @@ class Bridge:
         )
 
     # -- user-drawing snapshot (request/response with the browser) ------------
+    def _warn_if_blocking_on_dispatch(self, what):
+        """Warn when a blocking browser round-trip runs on the dispatch thread.
+
+        :meth:`request_snapshot` / :meth:`request_image` block the calling thread
+        until a browser replies. Called from inside an input handler — which runs
+        on the shared dispatch thread (see :attr:`_dispatch`) — that blocks every
+        *other* panel's handler and input echo for the whole round-trip. It is not
+        a deadlock (the reply still arrives on the event loop and releases the
+        wait), but it freezes the canvas's responsiveness, so steer the caller to
+        do the slow work off that thread. The default warnings filter shows this
+        once per call site, so a handler that does it every time isn't spammed.
+        """
+        if self._dispatch.is_current_thread():
+            warnings.warn(
+                f"{what} was called from inside an input handler (the shared "
+                "dispatch thread); blocking there stalls every other panel's "
+                "handlers until the browser replies. Run it from a handler "
+                "marked threaded=True (or your own background thread) instead.",
+                stacklevel=3,
+            )
+
     def request_snapshot(self, timeout=5.0):
         """Ask a connected browser for the user's free-form drawings.
 
@@ -1776,6 +1798,7 @@ class Bridge:
         blocks the calling thread until a reply arrives (or ``timeout`` elapses).
         Requires at least one open client.
         """
+        self._warn_if_blocking_on_dispatch("canvas.save()")
         if not self._connections:
             raise RuntimeError("no connected browser to read the canvas from")
         req_id = uuid.uuid4().hex
@@ -1801,6 +1824,7 @@ class Bridge:
         ``shape_ids`` empty means the whole page. Returns raw PNG bytes; requires
         at least one open client (the browser is the only thing that can render).
         """
+        self._warn_if_blocking_on_dispatch("canvas.screenshot()")
         if not self._connections:
             raise RuntimeError("no connected browser to capture from")
         req_id = uuid.uuid4().hex
