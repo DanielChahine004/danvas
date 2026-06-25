@@ -20,13 +20,13 @@ def _mark_threaded(fn):
     (which preserves the signature, so the viewer-arity detection still works).
     """
     try:
-        fn._pc_threaded = True
+        fn._danvas_threaded = True
         return fn
     except (AttributeError, TypeError):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             return fn(*args, **kwargs)
-        wrapper._pc_threaded = True
+        wrapper._danvas_threaded = True
         return wrapper
 
 
@@ -47,15 +47,15 @@ def _mark_dedicated(fn, queue_mode="fifo"):
             f"queue must be one of {_HANDLER_QUEUES}, got {queue_mode!r}"
         )
     try:
-        fn._pc_dedicated = True
-        fn._pc_handler_queue = queue_mode
+        fn._danvas_dedicated = True
+        fn._danvas_handler_queue = queue_mode
         return fn
     except (AttributeError, TypeError):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             return fn(*args, **kwargs)
-        wrapper._pc_dedicated = True
-        wrapper._pc_handler_queue = queue_mode
+        wrapper._danvas_dedicated = True
+        wrapper._danvas_handler_queue = queue_mode
         return wrapper
 
 
@@ -813,11 +813,11 @@ class BaseComponent:
 
         Three dispatch paths, chosen by marker attributes set at registration:
 
-        - ``_pc_dedicated`` — routes to a per-handler :class:`DedicatedKernel`
+        - ``_danvas_dedicated`` — routes to a per-handler :class:`DedicatedKernel`
           (created lazily here on first dispatch, keyed by ``id(cb)``). The
           kernel's own queue serialises calls to this handler without blocking
           the shared dispatch thread.
-        - ``_pc_threaded`` — spawns a fresh daemon thread per call via
+        - ``_danvas_threaded`` — spawns a fresh daemon thread per call via
           :func:`spawn`. Keeps the dispatch thread free; may run concurrently.
         - *(default)* — called inline on the shared dispatch thread; FIFO and
           blocking (a slow handler stalls the queue behind it).
@@ -825,18 +825,18 @@ class BaseComponent:
         for cb in callbacks:
             args = (*call_args, viewer or {}) \
                 if self._accepts_viewer(cb, len(call_args)) else call_args
-            if getattr(cb, "_pc_dedicated", False):
+            if getattr(cb, "_danvas_dedicated", False):
                 k = self._dedicated_kernels.get(id(cb))
                 if k is None:
-                    mode = getattr(cb, "_pc_handler_queue", "fifo")
+                    mode = getattr(cb, "_danvas_handler_queue", "fifo")
                     k = DedicatedKernel(mode=mode)
                     self._dedicated_kernels[id(cb)] = k
                 k.submit(lambda c=cb, a=args: c(*a))
-            elif getattr(cb, "_pc_threaded", False):
+            elif getattr(cb, "_danvas_threaded", False):
                 # Run on its own daemon thread so a slow handler doesn't hold up
                 # the rest; spawn() logs any exception (default-arg capture so
                 # the loop variable isn't shared across iterations).
-                spawn(lambda c=cb, a=args: c(*a), name=f"pc-handler-{self.name}")
+                spawn(lambda c=cb, a=args: c(*a), name=f"danvas-handler-{self.name}")
             else:
                 try:
                     cb(*args)

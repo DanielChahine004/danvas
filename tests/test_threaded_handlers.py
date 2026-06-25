@@ -38,8 +38,8 @@ def test_on_click_supports_both_decorator_forms():
     def _slow():
         pass
 
-    assert not getattr(btn._callbacks[0], "_pc_threaded", False)
-    assert getattr(btn._callbacks[1], "_pc_threaded", False)
+    assert not getattr(btn._callbacks[0], "_danvas_threaded", False)
+    assert getattr(btn._callbacks[1], "_danvas_threaded", False)
 
 
 def test_threaded_handler_does_not_block_the_dispatcher():
@@ -102,4 +102,4 @@ def test_routing_on_event_threaded():
     panel._handle_input({"action": "tick"})
     assert fired.wait(1.0)
     # the stored handler (not the returned original) carries the mark
-    assert getattr(panel._routes["tick"][0], "_pc_threaded", False)
+    assert getattr(panel._routes["tick"][0], "_danvas_threaded", False)

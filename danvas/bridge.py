@@ -921,8 +921,8 @@ class Bridge:
         ``threaded=True`` (Chat.on_message), which runs them on their own thread
         so a slow one can't stall the canvas."""
         for sink in self._chat_sinks:
-            if getattr(sink, "_pc_threaded", False):
-                spawn(lambda s=sink: s(entry), name="pc-chat-sink")
+            if getattr(sink, "_danvas_threaded", False):
+                spawn(lambda s=sink: s(entry), name="danvas-chat-sink")
             else:
                 try:
                     sink(entry)

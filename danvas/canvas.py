@@ -175,7 +175,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         interpreter shutdown / a reload's teardown, and a crash is logged.
         """
         for fn, args, kwargs in self._background:
-            spawn(fn, *args, name="pc-background", **kwargs)
+            spawn(fn, *args, name="danvas-background", **kwargs)
 
     @property
     def components(self):
