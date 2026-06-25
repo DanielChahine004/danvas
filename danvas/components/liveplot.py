@@ -70,7 +70,11 @@ function Component({ canvas }) {
       if (!node) return;
       if (pendingFull) {
         const p = pendingFull; pendingFull = null; pendingExt = null;
-        Plotly.react(node, (p.data || []).map(t => ({ ...t, x: [...(t.x || [])], y: [...(t.y || [])] })), p.layout || {}, { responsive: true, displayModeBar: false })
+        // Hover-reveal toolbar (zoom/pan/box-zoom/autoscale/reset/download-PNG)
+        // so a live curve can be inspected and saved; displaylogo:false drops the
+        // Plotly link, and lasso/box-select are removed since they do nothing
+        // useful on a line/telemetry stream.
+        Plotly.react(node, (p.data || []).map(t => ({ ...t, x: [...(t.x || [])], y: [...(t.y || [])] })), p.layout || {}, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] })
           .then(() => { initialized = true; adapt(); })
           .catch(() => {});
         return;

@@ -33,7 +33,12 @@ function Component({ canvas, props }) {
   React.useEffect(() => {
     const node = nodeRef.current;
     if (!node || !fig) return;
-    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displayModeBar: false });
+    // Omitting displayModeBar gives Plotly's hover-reveal toolbar (zoom, pan,
+    // box-zoom, autoscale, reset, download-PNG) — the analysis tools researchers
+    // expect on a chart. displaylogo:false drops the Plotly link. Full button set
+    // is kept: Plot renders arbitrary figures (incl. scatter, where box/lasso
+    // select are meaningful).
+    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displaylogo: false });
   });
   return (
     <div style={{ flex: 1, width: "100%", minHeight: 0, position: "relative" }}>

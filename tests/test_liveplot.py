@@ -299,3 +299,20 @@ def test_push_uses_coalescing_for_fifo_and_replace_for_latest():
     p.queue = "latest"
     p.push({"a": 2.0})
     assert seen["coalesce"] is False
+
+
+# -- Plotly hover toolbar is enabled (zoom/pan/save-PNG for analysis) ----------
+# No JS test harness, so these guard the embedded Plotly config against a silent
+# re-disable, the way test_protocol_sync guards the wire contract.
+def test_plot_modebar_enabled():
+    from danvas.components import plot as plot_mod
+    assert "displayModeBar: false" not in plot_mod._SOURCE   # toolbar no longer suppressed
+    assert "displaylogo: false" in plot_mod._SOURCE           # Plotly link hidden
+
+
+def test_liveplot_modebar_enabled_and_trimmed():
+    from danvas.components import liveplot as lp_mod
+    assert "displayModeBar: false" not in lp_mod._SOURCE
+    assert "displaylogo: false" in lp_mod._SOURCE
+    # lasso/box-select do nothing on a line stream — kept out of the bar.
+    assert "modeBarButtonsToRemove" in lp_mod._SOURCE
