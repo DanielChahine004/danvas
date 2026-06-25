@@ -137,3 +137,70 @@ def test_default_path_falls_back_without_a_script(monkeypatch):
     monkeypatch.setitem(sys.modules, "__main__", types.ModuleType("__main__"))
     p = danvas.Canvas._default_persist_path()
     assert os.path.basename(p) == "danvas.canvas.json"
+
+
+# -- user-set input values survive save/load and serve(persist=) --------------
+
+def _controls(canvas):
+    """A slider, a toggle, and a text field — the value-bearing input controls."""
+    return (canvas.slider("vol", min=0, max=10),
+            canvas.toggle(["a", "b", "c"], name="mode"),
+            canvas.text_field("comment"))
+
+
+def test_layout_captures_input_values_but_not_content_panels():
+    c = danvas.Canvas()
+    s, t, tf = _controls(c)
+    c.label("status", "idle")          # content panel — no user value
+    s.update(7); t.update("b"); tf.update("hello")
+    by_name = {item["name"]: item for item in c._layout()["components"]}
+    assert by_name["vol"]["state"] == {"value": 7}
+    assert by_name["mode"]["state"] == {"value": "b"}
+    assert by_name["comment"]["state"] == {"value": "hello"}
+    assert "state" not in by_name["status"]   # Label persists no value
+
+
+def test_save_load_round_trip_restores_values(tmp_path):
+    path = str(tmp_path / "board.json")
+    c1 = danvas.Canvas()
+    s, t, tf = _controls(c1)
+    s.update(7); t.update("b"); tf.update("hello")
+    c1.save(path)                       # no browser -> layout (+values) only
+
+    c2 = danvas.Canvas()                # same code, fresh defaults
+    s2, t2, tf2 = _controls(c2)
+    assert (s2.value, t2.value, tf2.value) != (7, "b", "hello")
+    c2.load(path)
+    assert s2.value == 7
+    assert t2.value == "b"
+    assert tf2.value == "hello"
+
+
+def test_restore_does_not_fire_on_change(tmp_path):
+    path = str(tmp_path / "board.json")
+    c1 = danvas.Canvas()
+    s, _, _ = _controls(c1)
+    s.update(5)
+    c1.save(path)
+
+    c2 = danvas.Canvas()
+    s2, _, _ = _controls(c2)
+    fired = []
+    s2.on_change(lambda v: fired.append(v))
+    c2.load(path)
+    assert s2.value == 5
+    assert fired == []                  # restore is silent — code, not user input
+
+
+def test_persist_restores_values_on_startup(tmp_path):
+    path = str(tmp_path / "b.canvas.json")
+    c1 = danvas.Canvas()
+    s, _, _ = _controls(c1)
+    s.update(8)
+    c1._persist_setup(path)             # arms autosave (no file yet)
+    c1._persist_flush()                 # writes layout + values now
+
+    c2 = danvas.Canvas()
+    s2, _, _ = _controls(c2)
+    c2._persist_setup(path)             # file exists -> loads it, restoring 8
+    assert s2.value == 8

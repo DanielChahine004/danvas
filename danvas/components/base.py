@@ -383,6 +383,23 @@ class BaseComponent:
         """Current state pushed right after register (None = nothing)."""
         return None
 
+    # -- persistence (save / load / serve(persist=)) -------------------------
+    def _persist_state(self):
+        """A JSON-able snapshot of this panel's *restorable* state, or ``{}``.
+
+        The default persists nothing: a panel's content is normally reproduced
+        by re-running the code that built it (panels are code). Input controls
+        whose *value the user sets* (Slider/Toggle/TextField) override this via
+        :class:`_ValuePersist`, so that value survives a restart. Captured by
+        ``Canvas._layout`` and replayed by ``_restore_layout`` — so :meth:`save`,
+        :meth:`load`, and ``serve(persist=)`` all carry it through one code path.
+        """
+        return {}
+
+    def _restore_state(self, saved):
+        """Apply a dict produced by :meth:`_persist_state` (default: no-op)."""
+        return
+
     # -- write (Python -> browser) -------------------------------------------
     def update(self, *args, **kwargs):  # pragma: no cover - overridden
         raise NotImplementedError
@@ -871,3 +888,35 @@ def _flag_property(name, flag):
 # one table — adding a flag is a single entry there.
 for _name, _flag in LAYOUT_FLAGS.items():
     setattr(BaseComponent, _name, _flag_property(_name, _flag))
+
+
+class _ValuePersist:
+    """Mixin: persist/restore the user-set ``value`` of an input control.
+
+    Mixed into the controls whose value is *user* state worth surviving a
+    restart (Slider/Toggle/TextField), as opposed to content panels whose state
+    is reproduced by re-running the code that filled them. ``save``/``load`` and
+    ``serve(persist=)`` carry it via ``Canvas._layout``/``_restore_layout``.
+
+    Restore goes through the component's own ``update()`` — a Python→browser
+    push that sets the value and replays it on reconnect but does **not** fire
+    ``on_change`` (that path is only triggered by browser input), so a restored
+    value lands silently, with no spurious startup callbacks.
+    """
+
+    def _persist_state(self):
+        v = self.value
+        return {"value": v} if v is not None else {}
+
+    def _restore_state(self, saved):
+        if not saved:
+            return
+        v = saved.get("value")
+        if v is None:
+            return
+        try:
+            self.update(v)
+        except Exception:
+            # A value that no longer fits (e.g. a Toggle option the code
+            # dropped) must never break a load/restore — skip it, loudly.
+            traceback.print_exc()

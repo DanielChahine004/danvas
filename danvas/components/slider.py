@@ -7,6 +7,7 @@ pushes only override it (``update``) or read the settled value (``on_change``).
 """
 
 from . import _theme
+from .base import _ValuePersist
 from .react import React
 
 _SLIDER_CSS = """
@@ -91,7 +92,7 @@ function Component({ canvas, value, props }) {
 """.replace("__CSS__", _SLIDER_CSS)
 
 
-class Slider(React):
+class Slider(_ValuePersist, React):
     default_w = 240
     default_h = 96
 

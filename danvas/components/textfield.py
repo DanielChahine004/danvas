@@ -6,6 +6,7 @@ multiline. ``update(value)`` pushes new text to the browser live.
 """
 
 from . import _theme
+from .base import _ValuePersist
 from .react import React
 
 _FIELD_CSS = """
@@ -63,7 +64,7 @@ function Component({ canvas, value, props }) {
 """.replace("__CSS__", _FIELD_CSS)
 
 
-class TextField(React):
+class TextField(_ValuePersist, React):
     """A text-entry field that notifies Python when the user commits a value.
 
     Single-line (default): fires ``on_change`` on Enter or when the field loses

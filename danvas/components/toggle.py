@@ -7,6 +7,7 @@ on click) and is mirrored to Python via ``canvas.send({value})``; a Python
 """
 
 from . import _theme
+from .base import _ValuePersist
 from .react import React
 
 _TOGGLE_CSS = """
@@ -48,7 +49,7 @@ function Component({ canvas, value, props }) {
 """.replace("__CSS__", _TOGGLE_CSS)
 
 
-class Toggle(React):
+class Toggle(_ValuePersist, React):
     default_w = 260
     default_h = 84
 

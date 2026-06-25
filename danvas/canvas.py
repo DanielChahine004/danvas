@@ -1431,9 +1431,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return self
 
     def _layout(self):
-        """Build the formation dict: each panel's geometry and lock state."""
-        components = [
-            {
+        """Build the formation dict: each panel's geometry, lock state, and any
+        user-set value (input controls only — see ``_persist_state``)."""
+        components = []
+        for c in self._components:
+            item = {
                 "name": c.name,
                 "id": c.id,
                 "x": c.x,
@@ -1445,8 +1447,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 # Every lock/chrome flag, straight from the shared table.
                 **{name: getattr(c, name) for name in LAYOUT_FLAGS},
             }
-            for c in self._components
-        ]
+            # User-set value (Slider/Toggle/TextField). Empty for content panels,
+            # whose state is reproduced by re-running the code, so it's omitted.
+            state = c._persist_state()
+            if state:
+                item["state"] = state
+            components.append(item)
         arrows = [
             {
                 "name": a.name,
@@ -1481,6 +1487,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 # Flags absent from an older save stay None (left unchanged).
                 **{name: item.get(name) for name in LAYOUT_FLAGS},
             )
+            # Restore the user-set value (input controls). Silent: routes through
+            # the panel's update(), which pushes to the browser but never fires
+            # on_change. Absent in older saves / for content panels -> skipped.
+            state = item.get("state")
+            if state:
+                comp._restore_state(state)
 
     @staticmethod
     def _read_json(path):
