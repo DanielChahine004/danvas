@@ -3,28 +3,25 @@
 The backend (this package) and the frontend (``danvas/frontend/src/*.js``)
 speak a small, hand-maintained protocol over one WebSocket: numeric codes for
 binary media frames, string ``type`` tags for JSON frames, and the lock/chrome
-flag *wire* keys. Today those constants are restated independently on each side
-(``BINARY_*`` in :mod:`danvas.bridge`, ``BIN_*`` in ``bridge.js``; the flag
-wire keys in :mod:`danvas._flags` vs the destructured params in
-``bridge.js``), so a change to one side silently desyncs the other — the exact
-"protocol drift" failure mode that has no loud symptom (a wrong binary code just
-routes a frame to the wrong handler; a wrong wire key just corrupts a panel's
-lock meta).
-
-This module is the canonical definition. The plan (workstream C, single-source +
-codegen):
+flag *wire* keys. A change to one side that doesn't reach the other silently
+desyncs them — the "protocol drift" failure mode that has no loud symptom (a
+wrong binary code just routes a frame to the wrong handler; a wrong wire key
+just corrupts a panel's lock meta). This module is the canonical definition; the
+two sides are wired back to it so they can't drift:
 
 1.  Everything is declared here, once.
 2.  ``scripts/gen_protocol.py`` renders it to
-    ``danvas/frontend/src/protocol.generated.js`` so the JS imports the same
-    values instead of re-typing them.
-3.  :mod:`danvas.bridge` and :mod:`danvas._flags` import the codes/keys from
-    here (rather than restating them), and ``tests/test_protocol_sync.py`` fails
-    if either side — or the committed generated JS — drifts from this file.
-
-Until the integration step lands, the two sides still hold their own copies;
-``test_protocol_sync`` asserts they equal what is declared here, which both
-validates this module and acts as the drift guard in the meantime.
+    ``danvas/frontend/src/protocol.generated.js``; ``bridge.js`` imports the
+    ``BIN_*`` codes from there rather than re-typing them.
+3.  On the Python side :mod:`danvas.bridge` imports :data:`BINARY_FRAME_CODES`
+    and :mod:`danvas._flags` imports :data:`FLAG_WIRE_KEYS` from here, so neither
+    restates the constants.
+4.  ``tests/test_protocol_sync.py`` is the guard: it fails if either side — or
+    the committed generated JS — drifts from this file. The binary codes and
+    flag wire keys are checked by value; the JSON ``type`` tags below are checked
+    against the dispatch tables that actually handle them (``bridge.js``'s
+    ``handle()`` for outbound, ``Bridge._on_message`` for inbound), so a tag
+    added on one side without updating this list fails loudly.
 """
 
 from __future__ import annotations
@@ -60,19 +57,22 @@ FLAG_WIRE_KEYS = {
 
 # -- JSON frame ``type`` tags -----------------------------------------------
 # String tags are lower-risk than the numeric codes (a typo tends to fail
-# visibly), but they're enumerated here so the generated JS can expose named
-# constants and a reader has the whole vocabulary in one place. Verified against
-# the ``bridge.js`` inbound switch (outbound) and ``Bridge._on_message``
-# (inbound). Outbound = server -> browser; inbound = browser -> server.
+# visibly), but they're enumerated here so a reader has the whole vocabulary in
+# one place and ``test_protocol_sync`` can guard them: the outbound list must
+# equal the tags ``bridge.js``'s ``handle()`` dispatches on, and the inbound list
+# the tags ``Bridge._on_message`` handles. Order mirrors those dispatch tables
+# (the test compares as sets, so order is for readers only). Outbound = server ->
+# browser; inbound = browser -> server.
 MESSAGE_TYPES_OUT = (
     "register", "arrow", "shape", "shape_update", "update", "order", "remove",
-    "get_snapshot", "get_image", "load_snapshot", "draw", "presence",
-    "cursor", "cursor_gone", "view", "welcome", "chat",
-    "response", "shared",
+    "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot",
+    "draw", "presence", "cursor", "cursor_gone", "view", "welcome",
+    "graveyard_update", "shared", "chat", "response",
 )
 MESSAGE_TYPES_IN = (
-    "heartbeat", "cursor", "set_name", "chat", "ui",
-    "input", "layout", "draw", "request", "snapshot", "image", "panel_error",
+    "heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout",
+    "graveyard", "restore", "draw", "request", "panel_error", "snapshot",
+    "image",
 )
 
 

@@ -1,11 +1,12 @@
 """Guard the Python <-> browser wire protocol against drift.
 
-The canonical contract lives in :mod:`danvas._protocol`. Until the integration
-step makes every side import from it, the constants are still restated in
-``bridge.py`` (binary codes), ``_flags.py`` (lock wire keys), and ``bridge.js``
-(both). These tests assert all of those agree with the canonical module — so a
-change on any one side without the others fails loudly — and that the committed
-generated JS module is not stale.
+The canonical contract lives in :mod:`danvas._protocol`, and the two sides are
+wired back to it: ``bridge.py`` imports the binary codes, ``_flags.py`` imports
+the lock wire keys, and ``bridge.js`` imports the ``BIN_*`` codes from the
+generated module. These tests assert those agree with the canonical module, that
+the committed generated JS is not stale, and that the JSON ``type`` tag lists
+match the dispatch tables that actually handle them — so a tag added on one side
+without updating the canonical list fails loudly.
 
 The binary codes and lock wire keys are the high-value targets: a mismatch there
 fails *silently* in production (a frame routed to the wrong handler, a corrupted
@@ -13,6 +14,7 @@ lock meta), which is exactly what a test should catch instead of a user.
 """
 
 import importlib.util
+import inspect
 import os
 import re
 
@@ -75,6 +77,33 @@ def test_bridge_js_uses_the_flag_wire_keys():
     for wire in _protocol.FLAG_WIRE_KEYS.values():
         assert wire in params, (
             f"bridge.js registerComponent is missing wire key {wire!r}")
+
+
+# -- JSON type tags match the dispatch tables that handle them ---------------
+def test_message_types_out_match_bridge_js_dispatch():
+    # Outbound tags (server -> browser) are exactly what bridge.js's handle()
+    # dispatches on. Scope to that function so an unrelated `msg.type === …`
+    # elsewhere can't pollute the set, then compare to the canonical list.
+    src = _read(_BRIDGE_JS)
+    m = re.search(r"function handle\(msg\)\s*\{(.*?)\n\}", src, re.DOTALL)
+    assert m, "couldn't find the handle(msg) dispatch in bridge.js"
+    handled = set(re.findall(r"msg\.type === '(\w+)'", m.group(1)))
+    assert handled == set(_protocol.MESSAGE_TYPES_OUT), (
+        "MESSAGE_TYPES_OUT disagrees with bridge.js handle(); "
+        f"only in JS: {handled - set(_protocol.MESSAGE_TYPES_OUT)}, "
+        f"only in _protocol: {set(_protocol.MESSAGE_TYPES_OUT) - handled}")
+
+
+def test_message_types_in_match_bridge_py_dispatch():
+    # Inbound tags (browser -> server) are exactly the kinds Bridge._on_message
+    # handles. Read its source so the check tracks the real dispatch, not a
+    # hand-kept copy.
+    body = inspect.getsource(bridge.Bridge._on_message)
+    handled = set(re.findall(r'kind == "(\w+)"', body))
+    assert handled == set(_protocol.MESSAGE_TYPES_IN), (
+        "MESSAGE_TYPES_IN disagrees with Bridge._on_message; "
+        f"only in _on_message: {handled - set(_protocol.MESSAGE_TYPES_IN)}, "
+        f"only in _protocol: {set(_protocol.MESSAGE_TYPES_IN) - handled}")
 
 
 # -- the generated JS module is not stale ------------------------------------
