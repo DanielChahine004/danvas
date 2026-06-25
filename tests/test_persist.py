@@ -192,6 +192,18 @@ def test_restore_does_not_fire_on_change(tmp_path):
     assert fired == []                  # restore is silent — code, not user input
 
 
+def test_input_change_arms_the_persist_autosave():
+    # A committed value change must arm the debounced autosave the same way a
+    # drag/draw does — otherwise a value set mid-session is lost on a crash.
+    c = danvas.Canvas()
+    s = c.slider("vol", min=0, max=10)
+    fired = []
+    c._bridge._on_mutation = lambda: fired.append(1)
+    c._bridge._dispatch_input(s, {"value": 4}, ws=None)
+    assert s.value == 4
+    assert fired                       # autosave was armed
+
+
 def test_persist_restores_values_on_startup(tmp_path):
     path = str(tmp_path / "b.canvas.json")
     c1 = danvas.Canvas()

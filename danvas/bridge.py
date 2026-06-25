@@ -1223,6 +1223,11 @@ class Bridge:
             self.broadcast(
                 {"type": "update", "id": comp.id, "payload": state}, exclude=ws
             )
+        # A committed input is user-set state too (Slider/Toggle/TextField persist
+        # their value via _layout). Arm the same debounced autosave a drag/draw
+        # does, so serve(persist=) captures it even without a later layout change
+        # or a clean shutdown. No-op when persistence is off (_on_mutation None).
+        self._notify_mutation()
 
     def _dispatch_request(self, comp, req_id, data, ws=None):
         """Answer a panel's ``canvas.request`` (off the loop) and reply by reqId.
