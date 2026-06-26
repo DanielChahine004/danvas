@@ -93,7 +93,7 @@ canvas.remove(panel)      # destroy: gone from Python and browser
 canvas.hide(panel)        # remove from browser, keep Python state (value/callbacks)
 canvas.unhide(panel)      # show again at last position
 canvas.clear()            # remove every panel + arrow at once
-canvas.connect(a, b, text="x2", color="blue")   # arrow bound between two panels
+canvas.connect(a, b, text="x2", color="blue")   # arrow bound between two panels (or shapes)
 canvas.disconnect(arrow)
 canvas.servo_1            # reach any panel by name (canvas["servo_1"] also works)
 canvas.components         # list of every panel (visible and hidden)
@@ -589,6 +589,35 @@ canvas.shapes; canvas.remove_shape("name-or-object")
 `color` values: black, blue, green, grey, light-blue/green/red/violet, orange,
 red, violet, white, yellow. `fill`: none/semi/solid/pattern. `dash`:
 draw/dashed/dotted/solid. `size`: s/m/l/xl.
+
+**Arrows connect shapes too.** `canvas.connect(a, b)` binds an arrow between any
+two endpoints — panels *or* managed shapes — so a `geo`/`note`/`frame` becomes a
+node and the arrow reroutes as you drag it. That makes Python-owned diagrams
+(block diagrams, flowcharts, schematics) just shapes + arrows. Every arrow prop
+is live-writable, and re-connecting under the same `name` replaces the arrow in
+place rather than stacking a duplicate (the name defaults to the endpoints, so an
+unnamed re-connect of the same two also replaces):
+
+```python
+a = canvas.geo(x=40,  y=40, w=160, h=80, geo="rectangle", text="A")
+b = canvas.geo(x=40, y=200, w=160, h=80, geo="rectangle", text="B")
+arrow = canvas.connect(a, b, text="A→B", color="blue", dash="dashed", bend=40)
+arrow.text = "retry"                              # live caption change
+arrow.update(color="red", arrowhead_end="diamond")
+canvas.disconnect(arrow)                          # by object or by name
+```
+
+| Arrow prop | Values |
+|---|---|
+| `text` | caption drawn on the arrow (live-writable; omit for none) |
+| `color` | same palette as shapes (black, blue, grey, orange, red, …) |
+| `dash` | draw / solid / dashed / dotted |
+| `size` | s / m / l / xl |
+| `bend` | curve amount (number; `0` = straight) |
+| `arrowhead_start` / `arrowhead_end` | none / arrow / triangle / square / dot / pipe / diamond / inverted / bar |
+| `name` | identity / `canvas.<name>` handle; re-connecting under it replaces in place |
+
+See `examples/tldraw_shapes.py`.
 
 **Observing user drawings.** User freehand is ephemeral (Python can't pre-place
 it), but `on_draw` fires whenever viewers draw, move, or delete shapes, and
