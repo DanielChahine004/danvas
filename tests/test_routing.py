@@ -102,3 +102,63 @@ def test_explicit_viewer_default_still_filled():
         seen["role"] = (viewer or {}).get("role")
     p._handle_input({"action": "go"}, viewer={"role": "admin"})
     assert seen["role"] == "admin"
+
+
+# -- a message that matches no handler is diagnosed, not silently dropped -------
+
+def _default_panel():
+    # Default event_key="event" (the routing-mismatch trap).
+    return danvas.React(source="function Component(){ return null }", name="p")
+
+
+def test_unrouted_message_warns_with_event_key_hint(monkeypatch):
+    import danvas.components._routing as routing
+    msgs = []
+    monkeypatch.setattr(routing, "_warn", lambda m: msgs.append(m))
+    p = _default_panel()
+    p.on("select")(lambda m: None)            # routes on "event", JSX sends "action"
+    p._handle_input({"action": "select", "opt_id": "x"})
+    assert len(msgs) == 1
+    assert "event_key='action'" in msgs[0]    # names the exact fix
+
+
+def test_catch_all_suppresses_unrouted_warning(monkeypatch):
+    import danvas.components._routing as routing
+    msgs = []
+    monkeypatch.setattr(routing, "_warn", lambda m: msgs.append(m))
+    p = _default_panel()
+    got = []
+    p.on_message(lambda m: got.append(m))     # catch-all → nothing is dropped
+    p._handle_input({"action": "whatever"})
+    assert got == [{"action": "whatever"}]
+    assert msgs == []
+
+
+def test_handlerless_panel_does_not_warn(monkeypatch):
+    import danvas.components._routing as routing
+    msgs = []
+    monkeypatch.setattr(routing, "_warn", lambda m: msgs.append(m))
+    p = _default_panel()                       # no @on handlers at all
+    p._handle_input({"action": "x"})
+    assert msgs == []                          # no named routes to mismatch → quiet
+
+
+def test_unrouted_warns_only_once(monkeypatch):
+    import danvas.components._routing as routing
+    msgs = []
+    monkeypatch.setattr(routing, "_warn", lambda m: msgs.append(m))
+    p = _default_panel()
+    p.on("select")(lambda m: None)
+    p._handle_input({"action": "select"})
+    p._handle_input({"action": "select"})
+    assert len(msgs) == 1                      # once per panel, not per message
+
+
+def test_matched_message_does_not_warn(monkeypatch):
+    import danvas.components._routing as routing
+    msgs = []
+    monkeypatch.setattr(routing, "_warn", lambda m: msgs.append(m))
+    p = _panel()                              # event_key="action" — correct wiring
+    p.on("select")(lambda m: None)
+    p._handle_input({"action": "select"})
+    assert msgs == []

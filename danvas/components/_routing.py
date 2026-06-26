@@ -178,4 +178,34 @@ class _EventRouter:
         handlers = list(self._routes.get(event, []))
         if event is not None:
             handlers += self._routes.get(None, [])
+        if not handlers:
+            self._warn_unrouted(payload)   # nothing will fire — diagnose, once
         self._dispatch_callbacks(handlers, (payload,), viewer)
+
+    def _warn_unrouted(self, payload):
+        """Warn (once per panel) when an inbound message matched no handler at all.
+
+        The silent-drop case: the panel has ``@on(event)`` handlers but the
+        message routed to none of them and there's no catch-all ``on_message``,
+        almost always because the routing field doesn't match — e.g. the JSX
+        sends ``{action: ...}`` while the panel still routes on the default
+        ``event_key="event"``. We have the real payload here, so when one of its
+        *values* matches a registered event name we can name the exact fix; a
+        panel with a catch-all never reaches this (its handler list isn't empty),
+        and a handler-less panel stays quiet (no named routes to mismatch).
+        """
+        keyed = [k for k in self._routes if k is not None]
+        if not keyed or getattr(self, "_warned_unrouted", False):
+            return
+        self._warned_unrouted = True
+        routed = payload.get(self._event_key) if isinstance(payload, dict) else None
+        hint = ""
+        if isinstance(payload, dict):
+            for k, v in payload.items():
+                if k != self._event_key and v in keyed:
+                    hint = (f" — payload[{k!r}]=={v!r} matches a handler; "
+                            f"did you mean event_key={k!r}?")
+                    break
+        _warn(f"[danvas] {type(self).__name__} {getattr(self, 'name', None)!r}: an "
+              f"inbound message matched no handler (event_key={self._event_key!r} "
+              f"→ {routed!r}; registered events {sorted(keyed)}){hint}")
