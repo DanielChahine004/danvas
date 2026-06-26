@@ -77,3 +77,28 @@ def test_fields_does_not_affect_other_events():
     p.on("plain")(lambda m: seen.append(("plain", m["n"])))
     p._handle_input({"action": "plain", "n": "raw"})   # no coercion on this route
     assert seen == [("plain", "raw")]
+
+
+def test_captured_default_arg_is_not_treated_as_viewer():
+    # The loop-capture idiom `def h(msg, stage_id=sid)` must keep its default —
+    # danvas must NOT inject the viewer into that slot. (Reported footgun.)
+    p = _panel()
+    seen = {}
+    @p.on("select")
+    def handle(msg, stage_id="stage-3"):
+        seen["stage_id"] = stage_id
+        seen["opt"] = msg["opt_id"]
+    p._handle_input({"action": "select", "opt_id": "x"}, viewer={"role": "admin"})
+    assert seen == {"stage_id": "stage-3", "opt": "x"}   # default kept, viewer not injected
+
+
+def test_explicit_viewer_default_still_filled():
+    # A parameter literally named `viewer` (even with a default) still receives it,
+    # so `def h(msg, viewer=None)` keeps working.
+    p = _panel()
+    seen = {}
+    @p.on("go")
+    def handle(msg, viewer=None):
+        seen["role"] = (viewer or {}).get("role")
+    p._handle_input({"action": "go"}, viewer={"role": "admin"})
+    assert seen["role"] == "admin"

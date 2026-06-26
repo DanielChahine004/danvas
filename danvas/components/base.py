@@ -801,14 +801,24 @@ class BaseComponent:
 
     @staticmethod
     def _accepts_viewer(fn, n_call_args):
-        """Whether ``fn`` has room for a trailing ``viewer`` beyond ``n_call_args``.
+        """Whether ``fn`` wants a trailing ``viewer`` beyond the ``n_call_args``
+        danvas already supplies.
 
-        True when the callable declares more explicit positional parameters than
-        the fixed args we pass — the signal that a handler opted in to receiving
-        the viewer dict. Unintrospectable callables (some builtins/C funcs) report
-        False, so they're called without it. Shared by the fire-and-forget
-        callback path and the single-answer request path so both detect arity the
-        same way.
+        A handler opts into the viewer dict by declaring a parameter for it,
+        detected two ways — and we *deliberately* ignore an unrelated default
+        argument so it is never mistaken for the viewer slot:
+
+        - a **required** positional parameter beyond ``n_call_args`` (the common
+          ``def _(value, viewer): ...`` — no default, so it must be filled), or
+        - a positional parameter literally named ``viewer`` beyond ``n_call_args``
+          (so ``def _(value, viewer=None): ...`` still receives it).
+
+        A *defaulted* parameter that isn't named ``viewer`` — e.g. the standard
+        loop-capture idiom ``def handle(msg, stage_id=sid): ...`` — is the
+        caller's own argument and is left alone, so danvas won't clobber it with
+        the viewer. Unintrospectable callables (some builtins/C funcs) report
+        False. Shared by the fire-and-forget callback path and the single-answer
+        request path so both detect arity the same way.
         """
         try:
             params = [
@@ -816,9 +826,16 @@ class BaseComponent:
                 if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
                               inspect.Parameter.POSITIONAL_OR_KEYWORD)
             ]
-            return len(params) > n_call_args
         except (ValueError, TypeError):
             return False
+        # A required (no-default) param beyond what we supply: the handler is
+        # asking for the viewer slot.
+        required = [p for p in params if p.default is inspect.Parameter.empty]
+        if len(required) > n_call_args:
+            return True
+        # Otherwise honour an explicit ``viewer`` param (even defaulted), but
+        # never an unrelated default argument (the loop-capture footgun).
+        return any(p.name == "viewer" for p in params[n_call_args:])
 
     def _dispatch_callbacks(self, callbacks, call_args, viewer):
         """Call each callback, appending viewer as a final arg when its signature accepts it.
