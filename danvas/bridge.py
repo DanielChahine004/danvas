@@ -737,12 +737,14 @@ class Bridge:
                         ws, _dumps({"type": "update", "id": comp.id,
                                     "payload": {"operable": False}})
                     )
-            # Arrows bind to panels, so replay them after every panel exists.
-            for arrow in self._arrows.values():
-                await self._send(ws, arrow.register_message())
-            # Replay managed tldraw shapes (geo, text, note, draw, line, frame, highlight).
+            # Replay managed tldraw shapes (geo, text, note, draw, line, frame,
+            # highlight) before arrows, so an arrow may bind to a shape as well as
+            # a panel — both its endpoints now exist by the time it registers.
             for shape in self._shapes.values():
                 await self._send(ws, shape.register_message())
+            # Arrows bind to panels/shapes, so replay them after both exist.
+            for arrow in self._arrows.values():
+                await self._send(ws, arrow.register_message())
             # Replay stored reflows so auto-height columns/rows are stacked at
             # real browser-measured heights for every joining client.
             for reflow in self._reflows.values():
