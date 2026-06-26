@@ -126,6 +126,35 @@ def _apply_partial_hot_update(port, updates):
     return True
 
 
+def _apply_live_patch(port, old_text, new_text):
+    """POST old + new script text to the worker's ``/__hot_patch__`` endpoint.
+
+    The worker classifies the diff and, when only top-level function bodies
+    changed, swaps those code objects in place — no restart, so the worker's
+    heap, threads, and connections are preserved. Returns True on a clean live
+    patch (the caller skips the restart), False to fall back to a restart (the
+    change wasn't body-only, or the worker couldn't safely apply it).
+    """
+    body = json.dumps({"old": old_text, "new": new_text}).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/__hot_patch__",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read())
+    except OSError:
+        return False  # worker not reachable yet — fall back to a restart
+    if not result.get("ok"):
+        return False
+    swapped = result.get("swapped") or []
+    if swapped:
+        print(f"danvas hot reload: live-patched {', '.join(swapped)} "
+              "(no restart)")
+    return True
+
+
 def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared"):
     """Re-run ``main_file`` as a subprocess, restarting it on ``.py`` edits.
 
@@ -295,6 +324,12 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
                     if _apply_partial_hot_update(port, updates):
                         continue
                     # HTTP call failed (worker not ready yet?): fall through.
+                elif _apply_live_patch(port, old_script_text, new_script_text):
+                    # Only top-level function bodies changed — the worker swapped
+                    # those code objects live, so its heap, threads, sockets, and
+                    # panel state are untouched. No restart.
+                    old_script_text = new_script_text
+                    continue
 
             if not script_ok():
                 print("danvas hot reload: the edit has an error -- keeping "

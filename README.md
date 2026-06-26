@@ -759,10 +759,18 @@ canvas.serve(port=8000, tunnel=True)
 ```
 
 **Hot reload** — `serve(hot_reload=True)` (run as `python your_script.py`)
-restarts the process when you save a `.py` in the script's folder; the tab
-reconnects on its own, and a broken save is pre-flighted and skipped. Needs
-`block=True`. Under a tunnel, the public URL and viewers' sessions survive each
-edit.
+reloads when you save a `.py` in the script's folder; the tab reconnects on its
+own, and a broken save is pre-flighted and skipped. Needs `block=True`. Under a
+tunnel, the public URL and viewers' sessions survive each edit. When a save
+changed **only the bodies of top-level functions** — fixing what a handler does,
+tweaking a helper — the worker swaps those functions in place *without
+restarting*, so its heap, daemon threads, open connections, and in-memory state
+(a half-trained model, accumulated data) are preserved; the new code runs the
+next time the handler fires. Anything else (a new import, a changed signature, a
+new panel, an edit to a running `@canvas.background` loop) falls back to a full
+restart. To keep training-style state hot across edits, factor the changing work
+into a per-iteration `step()` the loop calls — editing `step` is a live swap,
+while editing the loop scaffold restarts it.
 
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving

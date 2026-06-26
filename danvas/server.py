@@ -552,6 +552,40 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
         comp.set_source(source)
         return {"ok": True}
 
+    # Internal endpoint for the hot-reload monitor's smart middle tier: when a
+    # save changed only the bodies of top-level functions, swap those code
+    # objects in the live worker instead of restarting it (see _livepatch). The
+    # monitor sends the old + new script text; this side classifies and applies.
+    # Loopback only — the monitor is always local.
+    @app.post("/__hot_patch__")
+    async def hot_patch(request: Request):
+        if request.client.host not in ("127.0.0.1", "::1"):
+            return PlainTextResponse("forbidden", status_code=403)
+        from ._livepatch import apply_live_patch, safe_live_diff
+
+        body = await request.json()
+        old = body.get("old") or ""
+        new = body.get("new") or ""
+        specs = safe_live_diff(old, new)
+        if specs is None:
+            return {"ok": False, "error": "not a body-only change"}
+        main_mod = sys.modules.get("__main__")
+        if main_mod is None:
+            return {"ok": False, "error": "no __main__ module"}
+        canvas = getattr(bridge, "_canvas", None)
+        background = [fn for fn, _a, _k in getattr(canvas, "_background", [])]
+        try:
+            ok, detail = apply_live_patch(
+                main_mod, list(bridge._components.values()),
+                old, new, specs, background_funcs=background,
+            )
+        except Exception as exc:  # never take the live worker down on a patch bug
+            import traceback as _tb
+            _tb.print_exc()
+            return {"ok": False, "error": repr(exc)}
+        return ({"ok": True, "swapped": detail} if ok
+                else {"ok": False, "error": detail})
+
     # Any other WebSocket path would otherwise fall through to the StaticFiles
     # mount, which only handles HTTP and raises AssertionError. Reject cleanly.
     @app.websocket("/{path:path}")
