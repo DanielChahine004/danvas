@@ -11,10 +11,16 @@ between two views live:
 - ``"globals"`` lists the variables in the namespace passed to ``serve(namespace=...)``
   or ``Inspector(namespace=...)``, name/type/value -- a notebook-style variable
   explorer, skipping modules and private/dunder names (but keeping ``canvas``).
+- ``"system"`` shows host telemetry -- CPU / RAM (and an NVIDIA GPU when
+  ``pynvml`` is present) plus the live thread list -- for a quick health read.
+- ``"canvas"`` shows *this* danvas instance instead: the process's own RSS and
+  host headroom, the panel / shape / arrow counts (the canvas's "weight"), and
+  the connected-viewer count -- the practical "how heavy is this, and how much
+  room is left to serve it" view.
 
-The two views overlap only partly: a panel you assigned to a variable shows up
-in both, but an anonymous panel (no variable) appears only under "components",
-and your non-panel variables appear only under "globals".
+The components and globals views overlap only partly: a panel you assigned to a
+variable shows up in both, but an anonymous panel (no variable) appears only
+under "components", and your non-panel variables appear only under "globals".
 
 The panel also has a name-search box and a type filter (both client-side).
 Refresh from the panel's button, from Python via :meth:`refresh`, or
@@ -40,6 +46,16 @@ from .react import React
 _COMPONENT_COLS = ["name", "label", "type", "value", "visible", "x", "y", "w", "h"]
 _GLOBALS_COLS   = ["name", "type", "value"]
 _SYSTEM_COLS    = ["name", "type", "value"]
+_CANVAS_COLS    = ["name", "type", "value"]
+
+# The view modes the header dropdown switches between, and the columns each shows.
+_VIEWS = ("components", "globals", "system", "canvas")
+_COLS_BY_VIEW = {
+    "components": _COMPONENT_COLS,
+    "globals":    _GLOBALS_COLS,
+    "system":     _SYSTEM_COLS,
+    "canvas":     _CANVAS_COLS,
+}
 
 # The React component: a port of the former native InspectorView/DetailView,
 # driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
@@ -218,6 +234,7 @@ function Component({ canvas, props }) {
       <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
         <select value={source} onChange={(e) => switchSource(e.target.value)} style={controlStyle} title="what to inspect">
           <option value="components">panels</option>
+          <option value="canvas">canvas</option>
           <option value="globals">globals</option>
           <option value="system">system</option>
         </select>
@@ -341,18 +358,18 @@ class Inspector(React):
 
     def __init__(self, name="inspector", refresh=None, source="components",
                  namespace=None, color=None, label=None):
-        """``source`` is the *initial* view -- ``"components"`` (canvas panels) or
-        ``"globals"`` (variables from the script namespace); either way the
-        panel's header dropdown switches between them live. ``namespace``
-        overrides the namespace used by ``"globals"`` mode (defaults to the one
-        from ``serve(namespace=...)``, injected on insert). ``refresh`` is the
-        auto-refresh period in seconds (``None`` = manual only); with a period
-        set, a daemon thread rebuilds the table on that cadence while the canvas
-        is serving and a browser is connected."""
-        if source not in ("components", "globals", "system"):
-            raise ValueError("source must be 'components', 'globals', or 'system'")
-        cols = (_GLOBALS_COLS if source == "globals" else
-                _SYSTEM_COLS  if source == "system"  else _COMPONENT_COLS)
+        """``source`` is the *initial* view -- one of ``"components"`` (canvas
+        panels), ``"canvas"`` (this instance's memory footprint + weight),
+        ``"globals"`` (variables from the script namespace) or ``"system"``
+        (host CPU/RAM/GPU/threads); the header dropdown switches between them
+        live. ``namespace`` overrides the namespace used by ``"globals"`` mode
+        (defaults to the one from ``serve(namespace=...)``, injected on insert).
+        ``refresh`` is the auto-refresh period in seconds (``None`` = manual
+        only); with a period set, a daemon thread rebuilds the table on that
+        cadence while the canvas is serving and a browser is connected."""
+        if source not in _VIEWS:
+            raise ValueError("source must be one of: " + ", ".join(_VIEWS))
+        cols = _COLS_BY_VIEW[source]
         # The table/detail data rides in the React props (``data`` JSON blob),
         # replayed on reconnect. ``source`` here is the *view mode*, distinct from
         # React's own ``source`` (the JSX); tracked internally as ``self._view``.
@@ -434,25 +451,26 @@ class Inspector(React):
                 self.update(detail=self._build_detail(key))
 
     def _set_view(self, source):
-        """Switch the live view between "components", "globals", and "system".
+        """Switch the live view between the inspector's modes (panels, canvas,
+        globals, system).
 
         Driven by the frontend's header dropdown; sends the new view, its column
         set and freshly built rows in one update.
         """
-        if source not in ("components", "globals", "system") or source == self._view:
+        if source not in _VIEWS or source == self._view:
             return
         self._view = source
         self._open_detail_key = None
-        cols = (_GLOBALS_COLS if source == "globals" else
-                _SYSTEM_COLS  if source == "system"  else _COMPONENT_COLS)
-        self.update(source=source, cols=json.dumps(cols), rows=self._build())
+        self.update(source=source, cols=json.dumps(_COLS_BY_VIEW[source]),
+                    rows=self._build())
 
     def _build(self):
-        if self._view == "globals":
-            return self._build_globals()
-        if self._view == "system":
-            return self._build_system()
-        return self._build_components()
+        builder = {
+            "globals": self._build_globals,
+            "system":  self._build_system,
+            "canvas":  self._build_canvas,
+        }.get(self._view, self._build_components)
+        return builder()
 
     def _build_components(self):
         self._row_targets = {}
@@ -605,6 +623,90 @@ class Inspector(React):
             self._row_targets[key] = t
             rows.append({"key": key, "name": t.name, "type": kind,
                          "value": f"alive={t.is_alive()}  ident={t.ident}"})
+
+        return json.dumps(rows)
+
+    def _build_canvas(self):
+        """Rows for the "canvas" view: this danvas instance's own footprint and
+        the weight of what it's serving.
+
+        Distinct from the host-wide "system" view -- the memory here is *this
+        process's* RSS (not the whole machine), and the panel/shape/arrow counts
+        plus connected-viewer count are the things that actually grow serving
+        cost. The practical answer to "how heavy is this canvas, and how much
+        room is left to serve it". Each row drills down: process ram into the
+        byte figures + host headroom, the weight rows into a per-type breakdown,
+        viewers into the live roster.
+        """
+        self._row_targets = {}
+        rows = []
+        canvas = self._canvas
+
+        # --- this process's memory footprint (psutil) ------------------------
+        try:
+            import psutil
+            rss = psutil.Process().memory_info().rss
+            vm = psutil.virtual_memory()
+            rss_mb = rss / 1024 ** 2
+            avail_gb = vm.available / 1024 ** 3
+            # Share of *currently free* host RAM this process holds -- a rough
+            # "how much of the remaining room am I using" gauge for headroom.
+            denom = rss + vm.available
+            pct_free = (rss / denom * 100) if denom else 0.0
+            data = {"rss_mb": round(rss_mb, 1), "rss_bytes": rss,
+                    "pct_of_host_total": round(rss / vm.total * 100, 2),
+                    "pct_of_host_free": round(pct_free, 2),
+                    "host_available_gb": round(avail_gb, 2),
+                    "host_total_gb": round(vm.total / 1024 ** 3, 2)}
+            self._row_targets["process_ram"] = data
+            rows.append({"key": "process_ram", "name": "process ram", "type": "metric",
+                         "value": f"{rss_mb:.0f} MB rss  ·  {avail_gb:.1f} GB host free "
+                                  f"({pct_free:.1f}% of free)"})
+        except ImportError:
+            hint = {"hint": "pip install psutil"}
+            self._row_targets["_psutil"] = hint
+            rows.append({"key": "_psutil", "name": "process ram", "type": "hint",
+                         "value": "install psutil for the process memory footprint"})
+
+        # --- canvas weight: what actually grows serving cost -----------------
+        if canvas is not None:
+            def _counts(objs, type_of):
+                by = {}
+                for o in objs:
+                    t = type_of(o)
+                    by[t] = by.get(t, 0) + 1
+                return dict(sorted(by.items(), key=lambda kv: -kv[1]))
+
+            panels = list(canvas.components)
+            shapes = list(canvas.shapes)
+            arrows = list(canvas.arrows)
+            # Break geo shapes down by their sub-type (rectangle/ellipse/…); other
+            # shapes by their kind (text/note/line/frame/…).
+            shape_kind = lambda s: (s._props.get("geo", s._type)
+                                    if s._type == "geo" else s._type)
+
+            def weight_row(key, label, items, by):
+                self._row_targets[key] = {"total": len(items), **by}
+                detail = "  ".join(f"{n}×{t}" for t, n in by.items()) or "—"
+                rows.append({"key": key, "name": label, "type": "weight",
+                             "value": f"{len(items)}   ({detail})"})
+
+            # Break panels down by Python class (Label/Slider/Inspector/…); the
+            # wire ``.component`` is "React" for most built-ins, so it would just
+            # report "N×React" here — the class name is the useful split.
+            weight_row("panels", "panels", panels, _counts(panels, lambda c: type(c).__name__))
+            weight_row("shapes", "shapes", shapes, _counts(shapes, shape_kind))
+            # Arrows are all one kind, so no per-type split is worth showing.
+            self._row_targets["arrows"] = {"total": len(arrows)}
+            rows.append({"key": "arrows", "name": "arrows", "type": "weight",
+                         "value": str(len(arrows))})
+
+            # --- connected viewers: serving cost scales with these -----------
+            viewers = canvas.viewers
+            self._row_targets["viewers"] = viewers
+            names = ", ".join(str(v.get("name") or v.get("id", "?")) for v in viewers)
+            rows.append({"key": "viewers", "name": "viewers", "type": "metric",
+                         "value": f"{len(viewers)}" + (f"   ({names})" if viewers else "")})
 
         return json.dumps(rows)
 
