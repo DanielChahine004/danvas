@@ -1238,12 +1238,11 @@ class Bridge:
             # when one is attached (the merge host has none and ignores it).
             if self._ui_inspector and self._canvas is not None:
                 if msg.get("action") == "toggle_inspector":
-                    # Spawn it where this viewer is looking: their last cursor
-                    # position is in canvas coords and within their current view,
-                    # so the panel lands on-screen rather than at a fixed spot.
-                    at = (self._viewers.get(ws) or {}).get("cursor")
+                    # Open it centred in this viewer's current view — the browser
+                    # sends its viewport centre with the toggle (falls back to a
+                    # fixed spot when it isn't available).
                     try:
-                        self._canvas._toggle_ui_inspector(at=at)
+                        self._canvas._toggle_ui_inspector(at=msg.get("center"))
                     except Exception:
                         traceback.print_exc()
             return
@@ -1265,15 +1264,8 @@ class Bridge:
                     lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
         elif kind == "graveyard":
-            # User deleted a danvas-managed shape in tldraw. Python keeps the
-            # component (callbacks, state all intact) but marks it as deleted so
-            # the graveyard toolbar panel can list it and offer a Restore button.
-            comp = self._components.get(msg.get("id"))
-            if comp is not None and not getattr(comp, "_graveyarded", False):
-                comp._graveyarded = True
-                comp._visible = False
-                self._graveyarded[comp.id] = comp
-                self._dispatch.submit(self._refresh_graveyard)
+            # User deleted a danvas-managed shape in tldraw.
+            self._graveyard(msg.get("id"))
         elif kind == "restore":
             # User clicked Restore in the graveyard panel; re-register the shape.
             comp = self._graveyarded.pop(msg.get("id"), None)
@@ -1455,6 +1447,32 @@ class Bridge:
 
     def _refresh_graveyard(self):
         self._broadcast_graveyard()
+
+    def _graveyard(self, comp_id):
+        """Handle a browser delete of a danvas-managed panel.
+
+        Normally the component is kept (callbacks and state intact) but marked
+        deleted, so the graveyard toolbar panel can list it with a Restore
+        button. Ephemeral dev panels — the Inspector and the dispatch-trace
+        panel — opt out via ``_ephemeral``: deleting one just *closes* it (the
+        same as toggling it off from its button), so it doesn't pile up in the
+        graveyard; re-open it from that button.
+        """
+        comp = self._components.get(comp_id)
+        if comp is None:
+            return
+        if getattr(comp, "_ephemeral", False):
+            if self._canvas is not None:
+                self._canvas.remove(comp)
+            else:
+                self.remove_component(comp.id)
+            return
+        if getattr(comp, "_graveyarded", False):
+            return
+        comp._graveyarded = True
+        comp._visible = False
+        self._graveyarded[comp.id] = comp
+        self._dispatch.submit(self._refresh_graveyard)
 
     def _move_y(self, comp, dh):
         """Shift comp's y by dh and propagate to every panel whose y derives from comp's."""

@@ -1632,7 +1632,17 @@ export function signOut() {
 }
 
 export function toggleUiInspector() {
-  sendRaw({ type: 'ui', action: 'toggle_inspector' })
+  // Send the current viewport centre (canvas/page coords) so Python can open the
+  // inspector centred in this viewer's view, rather than at a fixed spot or where
+  // the (bottom-left) toolbar button put the cursor.
+  let center = null
+  try {
+    if (editor) {
+      const c = editor.getViewportPageBounds().center
+      center = { x: c.x, y: c.y }
+    }
+  } catch (e) { /* no editor / bounds yet — Python falls back to a fixed spot */ }
+  sendRaw({ type: 'ui', action: 'toggle_inspector', center })
 }
 
 // --- viewport / navigation config (set from Python via serve(view=...)) ------

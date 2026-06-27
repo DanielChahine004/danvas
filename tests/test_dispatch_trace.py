@@ -300,13 +300,16 @@ def test_closing_trace_panel_detaches_its_tap():
     assert canvas._bridge._dispatch_taps == []
 
 
-def test_ui_inspector_spawns_at_viewer_cursor():
+def test_ui_inspector_spawns_centered_in_view():
+    # `at` is the viewport centre; the panel is placed so its own centre sits
+    # there (top-left offset by half its default size).
     canvas = danvas.Canvas()
     insp = canvas._toggle_ui_inspector(at={"x": 500, "y": 320})
-    assert (insp.x, insp.y) == (500, 320)         # opened where the viewer is looking
+    w, h = danvas.Inspector.default_w, danvas.Inspector.default_h
+    assert (insp.x, insp.y) == (500 - w / 2, 320 - h / 2)
 
 
-def test_ui_inspector_falls_back_to_fixed_spot_without_cursor():
+def test_ui_inspector_falls_back_to_fixed_spot_without_view():
     canvas = danvas.Canvas()
     insp = canvas._toggle_ui_inspector(at=None)
     assert (insp.x, insp.y) == (120, 120)
@@ -427,6 +430,45 @@ def test_trace_panel_seeds_from_history():
     # The recorded history is handed to the panel as an initial prop.
     assert panel._data["history"] == canvas.trace_history()
     assert panel.validate() == []
+
+
+# -- ephemeral panels close on delete instead of going to the graveyard -----
+
+def test_ephemeral_panels_close_instead_of_graveyarding():
+    canvas = danvas.Canvas()
+    panel = canvas.trace(deep=False)
+    insp = canvas.inspector(name="insp")
+    bridge = canvas._bridge
+
+    bridge._graveyard(panel.id)            # a browser delete of each
+    bridge._graveyard(insp.id)
+
+    assert panel.id not in bridge._components
+    assert insp.id not in bridge._components
+    assert bridge._graveyarded == {}       # neither went to the graveyard
+
+
+def test_normal_panel_still_graveyards():
+    canvas = danvas.Canvas()
+    btn = canvas.button("go")
+    canvas.insert(btn)
+    bridge = canvas._bridge
+
+    bridge._graveyard(btn.id)
+
+    assert btn.id in bridge._graveyarded
+    assert btn._graveyarded is True
+    assert btn._visible is False
+
+
+def test_deleting_trace_panel_detaches_its_tap():
+    canvas = danvas.Canvas()
+    panel = canvas.trace(deep=False)
+    assert len(canvas._bridge._dispatch_taps) == 1
+
+    canvas._bridge._graveyard(panel.id)    # browser delete
+
+    assert canvas._bridge._dispatch_taps == []
 
 
 # -- accessor plumbing ------------------------------------------------------

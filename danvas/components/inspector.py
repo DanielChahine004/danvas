@@ -385,6 +385,10 @@ class Inspector(React):
         # otherwise the panel grows to fit every row and a manual resize is
         # overridden, leaving no way to make it scroll.
         self._auto_h = False
+        # A dev panel: deleting it in the browser closes it (re-open from the
+        # toolbar / a fresh canvas.inspector()) rather than going to the
+        # graveyard — see Bridge._graveyard.
+        self._ephemeral = True
         self._view = source
         self._canvas = None  # injected by Canvas.insert
         self._namespace = namespace  # injected by Canvas.insert if left None

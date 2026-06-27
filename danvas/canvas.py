@@ -372,6 +372,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # tap that pushes to a gone panel.
         tap = lambda e: panel.push(e)
         panel._dispatch_tap = tap
+        # A dev panel: deleting it in the browser should just close it (re-open
+        # from the Inspector's Trace button), not send it to the graveyard.
+        panel._ephemeral = True
         self.on_dispatch(tap)
         _trace.start_thread_sampler(self, panel)
         return panel
@@ -580,24 +583,26 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         removes it and it broadcasts to every open view like any other panel.
         Returns the inspector when spawned, ``None`` when removed.
 
-        ``at`` is the spawning viewer's cursor (``{"x", "y"}`` in canvas coords,
-        when cursor reporting is on): the inspector opens there — in that viewer's
-        current view — instead of a fixed spot, so a viewer who has panned away
-        still gets it on-screen. Falls back to a fixed position when unknown.
+        ``at`` is the spawning viewer's viewport *centre* (``{"x", "y"}`` in
+        canvas coords, sent by the browser): the inspector opens centred in that
+        viewer's current view, so a viewer who has panned away still gets it
+        on-screen and centred. Falls back to a fixed position when unknown.
         """
         name = "__ui_inspector__"
         existing = self._named.get(name)
         if existing is not None:
             self.remove(existing)
             return None
-        x, y = 120, 120
+        insp = Inspector(name=name, refresh=1.0, source="components",
+                         label="inspector")
         if isinstance(at, dict) and at.get("x") is not None and at.get("y") is not None:
-            x, y = at["x"], at["y"]
-        return self.insert(
-            Inspector(name=name, refresh=1.0, source="components",
-                      label="inspector"),
-            x=x, y=y,
-        )
+            # Place the panel so its centre sits at the viewport centre.
+            w = getattr(insp, "default_w", 380)
+            h = getattr(insp, "default_h", 320)
+            x, y = at["x"] - w / 2, at["y"] - h / 2
+        else:
+            x, y = 120, 120
+        return self.insert(insp, x=x, y=y)
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=True,
@@ -1239,6 +1244,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         on_removed = getattr(component, "_on_removed", None)
         if callable(on_removed):
             on_removed()
+        # A trace panel feeds itself via an on_dispatch tap; detach it on removal
+        # (button-close or a browser delete) so it doesn't keep pushing to a panel
+        # that's gone.
+        tap = getattr(component, "_dispatch_tap", None)
+        if tap is not None:
+            self.off_dispatch(tap)
         return component
 
     def hide(self, component):
