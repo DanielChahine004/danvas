@@ -7,6 +7,7 @@ schedules the actual send onto the server's asyncio event loop.
 
 import asyncio
 import copy
+import itertools
 import json
 import logging
 import math
@@ -155,6 +156,19 @@ class Bridge:
         # sends (e.g. updating a debug panel) is not re-tapped, so a tap that
         # drives a component can't recurse.
         self._frame_taps = []
+        # Observers of handler dispatch (canvas.on_dispatch): fired as each input/
+        # layout handler is queued, starts, and finishes, so a tap can render a
+        # live execution trace. Empty by default — instrumentation in
+        # _dispatch_callbacks is fully skipped when no tap is registered, so an
+        # untapped canvas pays nothing. ``_trace_ids`` hands each browser action a
+        # correlation id shared by all the handlers it fans out to (next() on an
+        # itertools.count is atomic, so threaded handlers can read it safely).
+        self._dispatch_taps = []
+        self._trace_ids = itertools.count(1)
+        # When True, dispatch tracing also follows each handler *into* the user's
+        # own functions (canvas.trace_calls), via a sys.setprofile probe — off by
+        # default because that probe costs more than the shallow handler trace.
+        self._trace_deep = False
         # Observers of viewer cursor moves (canvas.on_cursor). Kept separate from
         # frame taps: cursors are high-rate and intentionally off the wire-tap
         # path, so they neither flood debug logs nor pay the frame-tap guard.
@@ -319,6 +333,47 @@ class Bridge:
     def remove_frame_tap(self, fn):
         if fn in self._frame_taps:
             self._frame_taps.remove(fn)
+
+    def add_dispatch_tap(self, fn):
+        """Register ``fn(event)`` to observe handler dispatch (on_dispatch).
+
+        Fires as each registered input/layout handler is queued, runs, and
+        finishes, so a tap can build a live execution trace. ``event`` is a dict:
+
+        * ``trace`` — an id shared by every handler one browser action fans out to;
+        * ``seq`` — that handler's position within the action (0-based);
+        * ``comp`` — the component's name;
+        * ``event`` — the kind of trigger (e.g. ``"click"``/``"input"``/``"layout"``);
+        * ``handler`` — the handler's name plus source location (``file:line``),
+          so the anonymous ``def _`` handlers stay distinguishable;
+        * ``mode`` — ``"inline"`` / ``"threaded"`` / ``"dedicated"``;
+        * ``phase`` — ``"queued"`` then ``"start"`` then ``"done"`` (or ``"error"``);
+        * ``t`` — a ``time.perf_counter()`` stamp; ``dur_ms`` (and ``error`` repr)
+          on the terminal event.
+
+        ``start``/``done`` fire on whatever thread the handler's dispatch mode
+        runs it on, so a ``threaded=True`` handler reports its run *concurrently*
+        with the others — the tap may be called from several threads at once, so
+        keep it cheap and thread-safe.
+        """
+        self._dispatch_taps.append(fn)
+        return fn
+
+    def remove_dispatch_tap(self, fn):
+        if fn in self._dispatch_taps:
+            self._dispatch_taps.remove(fn)
+
+    def _next_trace_id(self):
+        return next(self._trace_ids)
+
+    def _emit_dispatch(self, event):
+        """Fan a dispatch-trace event out to the taps; a broken tap never breaks
+        (or stalls) the handler it is observing."""
+        for fn in list(self._dispatch_taps):
+            try:
+                fn(event)
+            except Exception:
+                traceback.print_exc()
 
     def add_cursor_tap(self, fn):
         """Register ``fn(viewer)`` to observe viewer cursor moves (on_cursor).
@@ -1124,8 +1179,12 @@ class Bridge:
             # when one is attached (the merge host has none and ignores it).
             if self._ui_inspector and self._canvas is not None:
                 if msg.get("action") == "toggle_inspector":
+                    # Spawn it where this viewer is looking: their last cursor
+                    # position is in canvas coords and within their current view,
+                    # so the panel lands on-screen rather than at a fixed spot.
+                    at = (self._viewers.get(ws) or {}).get("cursor")
                     try:
-                        self._canvas._toggle_ui_inspector()
+                        self._canvas._toggle_ui_inspector(at=at)
                     except Exception:
                         traceback.print_exc()
             return

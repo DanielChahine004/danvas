@@ -249,6 +249,81 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Remove a frame observer registered with :meth:`on_frame`."""
         self._bridge.remove_frame_tap(fn)
 
+    def on_dispatch(self, fn):
+        """Observe handler execution: ``fn(event)``. Decorator-friendly.
+
+        The Python-side twin of :meth:`on_frame` — where ``on_frame`` watches the
+        wire, this watches *which handler ran*. As each input/layout handler is
+        queued, starts, and finishes (or errors), ``fn`` is called with a trace
+        event dict (``trace``/``seq``/``comp``/``event``/``handler``/``mode``/
+        ``phase``/``t``/``dur_ms`` — see :meth:`Bridge.add_dispatch_tap`). All the
+        handlers one browser action fans out to share a ``trace`` id, so a tap can
+        group and render a live execution trace — queued, then in-progress, then
+        done::
+
+            @canvas.on_dispatch
+            def _(e):
+                print(e["phase"], e["handler"], e.get("dur_ms"))
+
+        Handlers that run ``threaded=True`` report their start/finish from their
+        own thread, so concurrent handlers' events interleave — the tap may be
+        called from several threads at once, so keep it fast and thread-safe.
+        Registering a tap turns the (otherwise skipped) dispatch instrumentation
+        on; with none registered it costs nothing. Remove with :meth:`off_dispatch`.
+        """
+        return self._bridge.add_dispatch_tap(fn)
+
+    def off_dispatch(self, fn):
+        """Remove a dispatch observer registered with :meth:`on_dispatch`."""
+        self._bridge.remove_dispatch_tap(fn)
+
+    def trace_calls(self, enabled=True):
+        """Turn on *deep* dispatch tracing: follow each handler into your own
+        functions, not just the handler itself.
+
+        With this on, :meth:`on_dispatch` taps also receive ``start``/``done``
+        events for the calls a handler makes *into your project's code*, each
+        carrying a ``depth`` (0 = the handler, 1 = a function it calls, …) so a
+        trace view can indent the call tree. Calls into danvas, the standard
+        library, and third-party packages are skipped — the tree stays your code.
+
+        It works by installing a ``sys.setprofile`` probe for the duration of each
+        handler, which costs more than the shallow handler trace, so it's off by
+        default and meant to be switched on while debugging. Returns ``self``.
+        """
+        self._bridge._trace_deep = bool(enabled)
+        return self
+
+    def trace(self, name="dispatch_trace", label="dispatch trace", deep=True,
+              **place):
+        """Insert a live, back-traceable **dispatch-trace panel** on the canvas.
+
+        It shows each browser action as it runs — the handlers it fires and, with
+        ``deep=True`` (default), the calls those handlers make into your own
+        functions — as an indented call tree, amber while running, green when
+        done, red on error, with timings, newest action on top. It's a danvas
+        React panel (authored in Python), so it needs no separate build; under the
+        hood it turns on :meth:`trace_calls` and streams the :meth:`on_dispatch`
+        events into the panel. ``**place`` positions it like any other panel (see
+        :meth:`insert`). Returns the panel.
+
+        Meant for development — the deep probe has a cost — so add it while you're
+        wiring interactions and remove it when you're done.
+        """
+        from . import _trace
+
+        panel = self.react(source=_trace.PANEL_JSX, name=name, label=label, **place)
+        if deep:
+            self.trace_calls(True)
+        # Remember the tap on the panel so a launcher (the Inspector's Trace
+        # button) can detach it when it closes the panel, instead of leaking a
+        # tap that pushes to a gone panel.
+        tap = lambda e: panel.push(e)
+        panel._dispatch_tap = tap
+        self.on_dispatch(tap)
+        _trace.start_thread_sampler(self, panel)
+        return panel
+
     def on_cursor(self, fn):
         """Stream viewer cursor moves: ``fn(viewer)``. Decorator-friendly.
 
@@ -444,7 +519,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             self._cell_capture = None
         return self
 
-    def _toggle_ui_inspector(self):
+    def _toggle_ui_inspector(self, at=None):
         """Spawn (or remove) the native-UI ephemeral Inspector. Toggles.
 
         Called by the bridge when a browser hits the toolbar Inspector button
@@ -452,16 +527,24 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         :class:`~danvas.Inspector` under a reserved name, so re-toggling
         removes it and it broadcasts to every open view like any other panel.
         Returns the inspector when spawned, ``None`` when removed.
+
+        ``at`` is the spawning viewer's cursor (``{"x", "y"}`` in canvas coords,
+        when cursor reporting is on): the inspector opens there — in that viewer's
+        current view — instead of a fixed spot, so a viewer who has panned away
+        still gets it on-screen. Falls back to a fixed position when unknown.
         """
         name = "__ui_inspector__"
         existing = self._named.get(name)
         if existing is not None:
             self.remove(existing)
             return None
+        x, y = 120, 120
+        if isinstance(at, dict) and at.get("x") is not None and at.get("y") is not None:
+            x, y = at["x"], at["y"]
         return self.insert(
             Inspector(name=name, refresh=1.0, source="components",
                       label="inspector"),
-            x=120, y=120,
+            x=x, y=y,
         )
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,

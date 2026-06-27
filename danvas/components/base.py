@@ -3,10 +3,13 @@
 import functools
 import inspect
 import math
+import os
 import threading
+import time
 import traceback
 import warnings
 
+from .. import _trace
 from .._flags import LAYOUT_FLAGS
 from ..kernel import DedicatedKernel, spawn
 from . import _theme
@@ -57,6 +60,50 @@ def _mark_dedicated(fn, queue_mode="fifo"):
         wrapper._danvas_dedicated = True
         wrapper._danvas_handler_queue = queue_mode
         return wrapper
+
+
+# The danvas package directory, used to tell a *user's* handler from danvas's
+# own internal callbacks (e.g. the layout ``_deferred`` Canvas.insert registers).
+# The dispatch trace reports only user handlers — package internals are noise.
+_DANVAS_PKG_DIR = os.path.normcase(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _unwrap(cb):
+    """Follow ``__wrapped__`` to the user's function under a ``functools.wraps``
+    shim (danvas wraps only un-attributable callables — see ``_mark_threaded``)."""
+    fn = cb
+    seen = set()
+    while hasattr(fn, "__wrapped__") and id(fn) not in seen:
+        seen.add(id(fn))
+        fn = fn.__wrapped__
+    return fn
+
+
+def _is_user_handler(cb):
+    """True when ``cb`` is defined in the user's code rather than inside danvas.
+
+    Keeps the dispatch trace shallow: only the handlers the user wrote show up,
+    not danvas's own internal callbacks (layout deferral, inspector wiring, …).
+    Callables with no inspectable code (builtins/C) are treated as non-user."""
+    code = getattr(_unwrap(cb), "__code__", None)
+    if code is None:
+        return False
+    path = os.path.normcase(os.path.abspath(code.co_filename))
+    return not path.startswith(_DANVAS_PKG_DIR + os.sep)
+
+
+def _handler_label(cb):
+    """A human label for a handler in a dispatch trace: its qualified name plus
+    source location (``file:line``), so the anonymous ``def _`` handlers — all
+    named ``_`` — stay distinguishable."""
+    fn = _unwrap(cb)
+    name = (getattr(fn, "__qualname__", None)
+            or getattr(fn, "__name__", None) or repr(fn))
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return name
+    return f"{name} ({os.path.basename(code.co_filename)}:{code.co_firstlineno})"
 
 
 class BaseComponent:
@@ -742,7 +789,8 @@ class BaseComponent:
             self._role_layout[role].update(fields)
         else:
             self._store_base_layout(fields)
-        self._dispatch_callbacks(self._layout_callbacks, (self,), viewer)
+        self._dispatch_callbacks(self._layout_callbacks, (self,), viewer,
+                                 event="layout")
 
     # -- input (browser -> Python) -------------------------------------------
     def _register_callback(self, store, fn, threaded, dedicated, queue):
@@ -837,7 +885,48 @@ class BaseComponent:
         # never an unrelated default argument (the loop-capture footgun).
         return any(p.name == "viewer" for p in params[n_call_args:])
 
-    def _dispatch_callbacks(self, callbacks, call_args, viewer):
+    @staticmethod
+    def _traced(bridge, cb, meta, traceable=None):
+        """Wrap ``cb`` to emit dispatch-trace events around its run.
+
+        Shallow (``traceable is None``): emit the handler's own ``start`` then
+        ``done``/``error`` (all at ``depth`` 0). Deep (``traceable`` given): a
+        ``sys.setprofile`` probe emits ``start``/``done`` for the handler *and*
+        the user-code calls it makes, each depth-tagged, and this wrapper adds
+        only the handler-level ``error`` on exception.
+
+        The wrapper runs wherever the dispatch mode places it — inline, a spawned
+        thread, or a dedicated kernel — so the stamps reflect the *actual*
+        execution and concurrent (``threaded=True``) handlers report overlapping
+        runs. It swallows the handler's exception (after emitting ``error`` and
+        printing the traceback) so the inline/spawn/kernel error handling doesn't
+        also log it."""
+        def run(*args):
+            t0 = time.perf_counter()
+            if traceable is None:
+                bridge._emit_dispatch({**meta, "phase": "start", "depth": 0,
+                                       "t": t0})
+            try:
+                if traceable is None:
+                    cb(*args)
+                else:
+                    _trace.run_calls(bridge, cb, args, meta, traceable)
+            except Exception as exc:
+                bridge._emit_dispatch({
+                    **meta, "phase": "error", "depth": 0,
+                    "t": time.perf_counter(),
+                    "dur_ms": (time.perf_counter() - t0) * 1000.0,
+                    "error": repr(exc)})
+                traceback.print_exc()
+                return
+            if traceable is None:
+                bridge._emit_dispatch({
+                    **meta, "phase": "done", "depth": 0,
+                    "t": time.perf_counter(),
+                    "dur_ms": (time.perf_counter() - t0) * 1000.0})
+        return run
+
+    def _dispatch_callbacks(self, callbacks, call_args, viewer, event=None):
         """Call each callback, appending viewer as a final arg when its signature accepts it.
 
         Detects whether the callback has more explicit positional parameters
@@ -856,24 +945,61 @@ class BaseComponent:
         - *(default)* — called inline on the shared dispatch thread; FIFO and
           blocking (a slow handler stalls the queue behind it).
         """
+        # Dispatch tracing (canvas.on_dispatch): only when a tap is registered —
+        # an untapped canvas takes the original, uninstrumented path below and
+        # pays nothing. When tapping, every handler this trigger fans out to
+        # shares one ``trace`` id, and each is wrapped to emit start/done/error.
+        bridge = getattr(self, "_bridge", None)
+        taps = getattr(bridge, "_dispatch_taps", None)
+        # Deep tracing (canvas.trace_calls) also records the user-code calls each
+        # handler makes; opt-in because the sys.setprofile probe has real cost.
+        deep = bool(getattr(bridge, "_trace_deep", False))
+        # The action's correlation id is minted lazily on the first *user* handler,
+        # so a dispatch of only danvas-internal callbacks consumes nothing.
+        trace_id = None
+        seq = 0
+
         for cb in callbacks:
             args = (*call_args, viewer or {}) \
                 if self._accepts_viewer(cb, len(call_args)) else call_args
-            if getattr(cb, "_danvas_dedicated", False):
+            dedicated = getattr(cb, "_danvas_dedicated", False)
+            threaded = getattr(cb, "_danvas_threaded", False)
+            run = cb
+            if taps and _is_user_handler(cb):
+                if trace_id is None:
+                    trace_id = bridge._next_trace_id()
+                meta = {
+                    "trace": trace_id, "seq": seq,
+                    # A per-handler frame id so a consumer pairs start↔done even
+                    # when threaded handlers of one action run concurrently; the
+                    # deep tracer mints its own fids for the nested calls.
+                    "fid": f"{trace_id}:{seq}",
+                    "comp": getattr(self, "name", None) or getattr(self, "id", None),
+                    "event": event or "input",
+                    "handler": _handler_label(cb),
+                    "mode": ("dedicated" if dedicated
+                             else "threaded" if threaded else "inline"),
+                }
+                seq += 1
+                bridge._emit_dispatch({**meta, "phase": "queued", "depth": 0,
+                                       "t": time.perf_counter()})
+                run = self._traced(bridge, cb, meta,
+                                   _trace.is_user_code if deep else None)
+            if dedicated:
                 k = self._dedicated_kernels.get(id(cb))
                 if k is None:
                     mode = getattr(cb, "_danvas_handler_queue", "fifo")
                     k = DedicatedKernel(mode=mode)
                     self._dedicated_kernels[id(cb)] = k
-                k.submit(lambda c=cb, a=args: c(*a))
-            elif getattr(cb, "_danvas_threaded", False):
+                k.submit(lambda c=run, a=args: c(*a))
+            elif threaded:
                 # Run on its own daemon thread so a slow handler doesn't hold up
                 # the rest; spawn() logs any exception (default-arg capture so
                 # the loop variable isn't shared across iterations).
-                spawn(lambda c=cb, a=args: c(*a), name=f"danvas-handler-{self.name}")
+                spawn(lambda c=run, a=args: c(*a), name=f"danvas-handler-{self.name}")
             else:
                 try:
-                    cb(*args)
+                    run(*args)
                 except Exception:
                     traceback.print_exc()
 

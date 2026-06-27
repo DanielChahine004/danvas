@@ -245,6 +245,9 @@ function Component({ canvas, props }) {
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <button style={{ ...controlStyle, cursor: "pointer" }} onClick={() => canvas.send({ action: "refresh" })}>Refresh</button>
+        <button style={{ ...controlStyle, cursor: "pointer" }}
+          title="open the live dispatch-trace panel"
+          onClick={() => canvas.send({ action: "trace" })}>Trace</button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
@@ -449,6 +452,32 @@ class Inspector(React):
             self._open_detail_key = key or None
             if key:
                 self.update(detail=self._build_detail(key))
+        elif action == "trace":
+            self._open_trace()
+
+    def _open_trace(self):
+        """Toggle the live dispatch-trace panel beside this inspector.
+
+        The Inspector is where you go to see what the canvas *is*; the trace panel
+        shows what it's *doing*. Launching it from here keeps the two together
+        without forcing a live, indented call tree into the Inspector's
+        snapshot-table model. Clicking again closes the panel (and detaches its
+        dispatch tap), so the button opens and closes it."""
+        canvas = self._canvas
+        if canvas is None:
+            return
+        panel = getattr(self, "_trace_panel", None)
+        if panel is not None and panel.id in canvas._bridge._components:
+            tap = getattr(panel, "_dispatch_tap", None)
+            if tap is not None:
+                canvas.off_dispatch(tap)
+            canvas.remove(panel)
+            self._trace_panel = None
+            return
+        try:
+            self._trace_panel = canvas.trace(right_of=self, gap=20)
+        except Exception:
+            traceback.print_exc()
 
     def _set_view(self, source):
         """Switch the live view between the inspector's modes (panels, canvas,

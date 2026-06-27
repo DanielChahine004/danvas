@@ -94,4 +94,4 @@ class Button(React):
     def _handle_input(self, _payload, viewer=None):
         with self._lock:
             self._value = (self._value or 0) + 1
-        self._dispatch_callbacks(self._callbacks, (), viewer)
+        self._dispatch_callbacks(self._callbacks, (), viewer, event="click")

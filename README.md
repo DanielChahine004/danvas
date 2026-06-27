@@ -977,6 +977,28 @@ def log(direction, msg):
     print(direction, msg["type"], msg.get("id"))
 ```
 
+`on_frame` watches the wire; `on_dispatch` watches *which handler ran*. As each
+input/layout handler is queued, starts, and finishes (or errors), the tap gets a
+trace event — `comp`, `handler` (name + `file:line`), `mode`
+(`inline`/`threaded`/`dedicated`), `phase`, and `dur_ms` — with all the handlers
+one action fans out to sharing a `trace` id. Threaded handlers report from their
+own thread, so concurrent runs are visible. It's the data behind a "yellow while
+running, green when done" view, and it's off (zero cost) until a tap is added.
+
+```python
+@canvas.on_dispatch
+def _(e):
+    print(e["phase"], e["handler"], e.get("dur_ms"))   # queued / start / done
+```
+
+For an on-canvas view instead of a tap, `canvas.trace()` drops in a live,
+back-traceable panel (also launchable from the Inspector's **Trace** button) that
+groups each action's handlers, colours them amber→green→red, and lists the
+living background threads. `canvas.trace_calls()` turns on *deep* tracing: the
+trace then follows each handler **into your own functions** (not danvas/stdlib/
+package internals), indented by call depth, so you see which function called
+which. Deep tracing has a real cost, so it's opt-in and meant for development.
+
 Connection lines always print. Stale tabs heal themselves: panel ids are minted
 per run, and a tab from an earlier run drops the old panels and replays the new
 ones — re-running never leaves duplicates.
