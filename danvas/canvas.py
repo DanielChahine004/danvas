@@ -91,6 +91,27 @@ def _coerce_navigation(value):
         f"navigation must be a mode string or (mode, zoom) tuple, got {value!r}")
 
 
+def _caller_globals():
+    """The globals of the first frame *outside* danvas — the user's script or
+    notebook that constructed the Canvas — so the Inspector's globals view works
+    without an explicit ``serve(namespace=globals())``. Walks past danvas's own
+    frames (so internal construction doesn't capture danvas's module), and returns
+    a live reference (later-assigned variables show up too). ``None`` if it can't
+    be determined (e.g. an exotic embedding)."""
+    try:
+        frame = sys._getframe(1)
+    except Exception:  # noqa: BLE001 - no frame support on some runtimes
+        return None
+    depth = 0
+    while frame is not None and depth < 30:
+        name = frame.f_globals.get("__name__") or ""
+        if name != "danvas" and not name.startswith("danvas."):
+            return frame.f_globals
+        frame = frame.f_back
+        depth += 1
+    return None
+
+
 class Canvas(_FactoryMixin, _LayoutMixin):
     def __init__(self):
         self._bridge = Bridge()
@@ -105,7 +126,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._server = None
         self._tunnel = None
         self._public_bind = False
-        self._namespace = None
+        # Default the Inspector's "globals" view to wherever this Canvas was
+        # created (the user's script/notebook), so the variable explorer works
+        # out of the box. An explicit serve(namespace=...) / Inspector(namespace=)
+        # overrides it, and the view is gated to a private local bind by default,
+        # so this never exposes your variables to a shared canvas on its own.
+        self._namespace = _caller_globals()
         # Set by capture_cells()/autopanel() to the active CellCapture, so a
         # second call is idempotent and stop_capturing_cells() can find it.
         self._cell_capture = None
@@ -1886,9 +1912,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         it isn't. (Programmatic equivalent: :meth:`on_frame`.) Connection lines
         ("viewer connected / disconnected") are always printed, debug or not.
 
-        ``namespace`` passes your script's variables to the Inspector's globals
-        view. Pass ``globals()`` to make them visible. Ignored if ``None``
-        (the default).
+        ``namespace`` is the variable namespace the Inspector's "globals" view
+        lists. It defaults to the globals of wherever you created the ``Canvas``
+        (your script/notebook), so the variable explorer works without passing
+        anything; pass an explicit dict to override it, or ``{}`` to show none.
+        The globals view is gated to a private local bind by default, so your
+        variables aren't exposed on a shared/tunneled canvas unless you opt in.
 
         ``tldraw_license_key`` is your tldraw production licence key, injected
         into the page as the ``<Tldraw licenseKey=…>`` prop. tldraw runs in
@@ -1907,7 +1936,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # force open_browser off when a reload restart should reuse the tab.
         handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
                                              tunnel_provider)
-        if namespace is not None and self._namespace is None:
+        if namespace is not None:
             self._namespace = namespace
         if handoff.should_return:
             return self
