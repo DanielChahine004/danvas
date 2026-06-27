@@ -334,6 +334,101 @@ def test_thread_sampler_pushes_live_thread_snapshots():
     canvas._bridge._components.clear()             # panel gone -> sampler exits
 
 
+# -- always-on history (canvas.trace_history) -------------------------------
+
+def _armed_button():
+    canvas = danvas.Canvas()
+    canvas._bridge._trace_recording = True        # what serve() does
+    btn = canvas.button("go")
+    canvas.insert(btn)
+    return canvas, btn
+
+
+def test_history_records_actions_when_armed():
+    canvas, btn = _armed_button()
+
+    @btn.on_click
+    def handler():
+        pass
+
+    btn._handle_input({})
+
+    hist = canvas.trace_history()
+    assert len(hist) == 1
+    action = hist[0]
+    assert action["comp"] == "go"
+    assert action["frames"][0]["status"] == "done"
+    assert "handler" in action["frames"][0]["handler"]
+    assert action["frames"][0]["dur_ms"] is not None
+
+
+def test_history_records_errors():
+    canvas, btn = _armed_button()
+
+    @btn.on_click
+    def _():
+        raise ValueError("nope")
+
+    btn._handle_input({})
+
+    frame = canvas.trace_history()[0]["frames"][0]
+    assert frame["status"] == "error"
+    assert "ValueError" in frame["error"]
+
+
+def test_history_is_bounded_to_the_limit():
+    canvas, btn = _armed_button()
+    canvas._bridge._trace_history_limit = 5
+
+    @btn.on_click
+    def _():
+        pass
+
+    for _i in range(20):
+        btn._handle_input({})
+
+    assert len(canvas.trace_history()) == 5          # only the most recent kept
+
+
+def test_no_recording_until_armed():
+    canvas = danvas.Canvas()                          # not served -> not armed
+    btn = canvas.button("go")
+    canvas.insert(btn)
+
+    @btn.on_click
+    def _():
+        pass
+
+    btn._handle_input({})
+    assert canvas.trace_history() == []               # nothing recorded
+
+
+def test_history_snapshot_is_a_copy():
+    canvas, btn = _armed_button()
+
+    @btn.on_click
+    def _():
+        pass
+
+    btn._handle_input({})
+    canvas.trace_history()[0]["frames"].clear()       # mutate the returned copy
+    assert canvas.trace_history()[0]["frames"]        # live buffer is untouched
+
+
+def test_trace_panel_seeds_from_history():
+    canvas, btn = _armed_button()
+
+    @btn.on_click
+    def _():
+        pass
+
+    btn._handle_input({})
+    panel = canvas.trace(deep=False)
+    # The recorded history is handed to the panel as an initial prop.
+    assert panel._data["history"] == canvas.trace_history()
+    assert panel.validate() == []
+
+
 # -- accessor plumbing ------------------------------------------------------
 
 def test_on_dispatch_is_decorator_friendly_and_off_removes():

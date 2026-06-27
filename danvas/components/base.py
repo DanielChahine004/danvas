@@ -80,17 +80,27 @@ def _unwrap(cb):
     return fn
 
 
+_USER_FILE_CACHE = {}
+
+
 def _is_user_handler(cb):
     """True when ``cb`` is defined in the user's code rather than inside danvas.
 
     Keeps the dispatch trace shallow: only the handlers the user wrote show up,
     not danvas's own internal callbacks (layout deferral, inspector wiring, …).
-    Callables with no inspectable code (builtins/C) are treated as non-user."""
+    Callables with no inspectable code (builtins/C) are treated as non-user. The
+    per-file verdict is memoised — this runs on every dispatch once recording is
+    armed, and path normalisation isn't free."""
     code = getattr(_unwrap(cb), "__code__", None)
     if code is None:
         return False
-    path = os.path.normcase(os.path.abspath(code.co_filename))
-    return not path.startswith(_DANVAS_PKG_DIR + os.sep)
+    fname = code.co_filename
+    verdict = _USER_FILE_CACHE.get(fname)
+    if verdict is None:
+        path = os.path.normcase(os.path.abspath(fname))
+        verdict = not path.startswith(_DANVAS_PKG_DIR + os.sep)
+        _USER_FILE_CACHE[fname] = verdict
+    return verdict
 
 
 def _handler_label(cb):
@@ -950,7 +960,11 @@ class BaseComponent:
         # pays nothing. When tapping, every handler this trigger fans out to
         # shares one ``trace`` id, and each is wrapped to emit start/done/error.
         bridge = getattr(self, "_bridge", None)
-        taps = getattr(bridge, "_dispatch_taps", None)
+        # Instrument when a live tap is watching *or* history is being recorded
+        # (armed at serve). Fully skipped otherwise, so an unserved/untapped
+        # canvas pays nothing.
+        active = (getattr(bridge, "_dispatch_taps", None)
+                  or getattr(bridge, "_trace_recording", False))
         # Deep tracing (canvas.trace_calls) also records the user-code calls each
         # handler makes; opt-in because the sys.setprofile probe has real cost.
         deep = bool(getattr(bridge, "_trace_deep", False))
@@ -965,7 +979,7 @@ class BaseComponent:
             dedicated = getattr(cb, "_danvas_dedicated", False)
             threaded = getattr(cb, "_danvas_threaded", False)
             run = cb
-            if taps and _is_user_handler(cb):
+            if active and _is_user_handler(cb):
                 if trace_id is None:
                     trace_id = bridge._next_trace_id()
                 meta = {

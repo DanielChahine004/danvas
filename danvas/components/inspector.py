@@ -380,6 +380,11 @@ class Inspector(React):
                          props={"rows": "[]", "cols": json.dumps(cols),
                                 "detail": "", "source": source})
         self._init_color(color)
+        # The table is a fixed-height, scrollable box (its JSX uses
+        # ``flex:1; overflow:auto``), so turn off React's default auto-height —
+        # otherwise the panel grows to fit every row and a manual resize is
+        # overridden, leaving no way to make it scroll.
+        self._auto_h = False
         self._view = source
         self._canvas = None  # injected by Canvas.insert
         self._namespace = namespace  # injected by Canvas.insert if left None

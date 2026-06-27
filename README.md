@@ -993,11 +993,19 @@ def _(e):
 
 For an on-canvas view instead of a tap, `canvas.trace()` drops in a live,
 back-traceable panel (also launchable from the Inspector's **Trace** button) that
-groups each action's handlers, colours them amber→green→red, and lists the
-living background threads. `canvas.trace_calls()` turns on *deep* tracing: the
-trace then follows each handler **into your own functions** (not danvas/stdlib/
-package internals), indented by call depth, so you see which function called
-which. Deep tracing has a real cost, so it's opt-in and meant for development.
+groups each action's handlers, colours them amber→green→red, lists the living
+background threads, and gives each action a **copy** button. `canvas.trace_calls()`
+turns on *deep* tracing: the trace then follows each handler **into your own
+functions** (not danvas/stdlib/package internals), indented by call depth, so you
+see which function called which. Deep tracing has a real cost, so it's opt-in and
+meant for development.
+
+From the moment a canvas starts serving, the last 50 actions are recorded into a
+ring buffer whether or not a panel is open — so a trace panel opened *after*
+something happened shows it, and `canvas.trace_history()` returns the recent
+actions (each `{trace, comp, event, frames}`) for after-the-fact or scripted
+debugging. The background recording is shallow; turn on `trace_calls()` for the
+nested detail.
 
 Connection lines always print. Stale tabs heal themselves: panel ids are minted
 per run, and a tab from an earlier run drops the old panels and replays the new

@@ -294,6 +294,22 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._bridge._trace_deep = bool(enabled)
         return self
 
+    def trace_history(self):
+        """Return the recorded dispatch history for after-the-fact debugging.
+
+        Once the canvas is serving, every handler dispatch is recorded into a
+        bounded ring of the most recent actions (default 50), whether or not a
+        trace panel is open — so you can inspect what just happened. Returns a
+        list (oldest → newest) of ``{trace, comp, event, frames}``, where each
+        frame is ``{handler, depth, mode, status, dur_ms}`` (``status`` is
+        ``"running"`` / ``"done"`` / ``"error"``; an errored frame also carries
+        ``error``). The list is a copy — mutating it won't touch the live buffer.
+
+        Recording is shallow (handler-level) unless deep tracing is on
+        (:meth:`trace_calls`), which also records the nested user-code calls.
+        """
+        return self._bridge._trace_history_snapshot()
+
     def trace(self, name="dispatch_trace", label="dispatch trace", deep=True,
               **place):
         """Insert a live, back-traceable **dispatch-trace panel** on the canvas.
@@ -311,8 +327,18 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         wiring interactions and remove it when you're done.
         """
         from . import _trace
+        from .components import React
 
-        panel = self.react(source=_trace.PANEL_JSX, name=name, label=label, **place)
+        # Construct React directly (not via canvas.react) so the height reaches
+        # the constructor: a number there turns *off* auto-height, making the panel
+        # a fixed, resizable box whose history scrolls — instead of one that grows
+        # to fit every action and ignores a manual resize. Seed it with the history
+        # recorded so far (props replay on mount) so it opens already populated.
+        w = place.pop("w", place.pop("width", 420))
+        h = place.pop("h", place.pop("height", 340))
+        panel = React(source=_trace.PANEL_JSX, name=name, label=label,
+                      props={"history": self.trace_history()}, w=w, h=h)
+        self.insert(panel, **place)
         if deep:
             self.trace_calls(True)
         # Remember the tap on the panel so a launcher (the Inspector's Trace
@@ -1922,6 +1948,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         serve_view = self._normalize_view(view)
         if serve_view is not None:
             self._bridge._view = {**(self._bridge._view or {}), **serve_view}
+        # Arm dispatch-history recording (canvas.trace_history): from now on every
+        # handler dispatch is recorded into a bounded ring, so a trace panel opened
+        # later shows what already happened. In the serving worker only (the
+        # monitor returned above). Shallow unless deep tracing is also turned on.
+        self._bridge._trace_recording = True
         # Start any registered background workers now -- we're in the serving
         # process (the hot-reload monitor returned above), so producer loops that
         # grab single-owner resources (a camera, a serial port) run here, never

@@ -109,8 +109,18 @@ class _CallTracer:
 # (nested) call tree indented by ``depth`` — amber while running, green when done,
 # red on error. Newest action on top; history is capped so it stays light.
 PANEL_JSX = r"""
-function Component({ canvas }) {
-  const [traces, setTraces] = React.useState([])
+function Component({ canvas, props }) {
+  // Seed from the history recorded before this panel opened (props replay on
+  // mount); map the Python status names onto the panel's short ones.
+  const seed = () => ((props && props.history) || []).map((a) => ({
+    id: a.trace, comp: a.comp, event: a.event,
+    frames: (a.frames || []).map((f) => ({
+      fid: f.fid, depth: f.depth, handler: f.handler, mode: f.mode,
+      status: f.status === 'error' ? 'err' : (f.status === 'done' ? 'ok' : 'run'),
+      dur: f.dur_ms,
+    })),
+  }))
+  const [traces, setTraces] = React.useState(seed)
   const [threads, setThreads] = React.useState([])
   React.useEffect(() => canvas.onFrame((e) => {
     if (!e) return
@@ -136,9 +146,17 @@ function Component({ canvas }) {
   }), [])
   const COLOR = { run: '#d9a441', ok: '#3fa45b', err: '#d4483b' }
   const MARK = { run: '▶', ok: '✓', err: '✗' }
+  const TXT = { run: '..', ok: 'OK', err: 'XX' }
+  const copyAction = (t) => {
+    const lines = ['#' + t.id + ' ' + t.comp + ' · ' + t.event]
+    t.frames.forEach((f) => lines.push(
+      '  '.repeat(f.depth + 1) + TXT[f.status] + ' ' + f.handler +
+      (f.dur != null ? ' ' + Math.round(f.dur) + 'ms' : '')))
+    if (navigator.clipboard) navigator.clipboard.writeText(lines.join('\n'))
+  }
   return (
     <div style={{ font: '12px ui-monospace, monospace', padding: '6px 8px',
-      height: '100%', overflow: 'auto', boxSizing: 'border-box' }}>
+      height: '100%', overflow: 'auto', boxSizing: 'border-box', userSelect: 'text' }}>
       {threads.length > 0 &&
         <div style={{ marginBottom: 8, paddingBottom: 6,
           borderBottom: '1px solid rgba(128,128,128,0.3)' }}>
@@ -156,8 +174,15 @@ function Component({ canvas }) {
       {traces.slice().reverse().map((t) => (
         <div key={t.id} style={{ marginBottom: 8, paddingLeft: 6,
           borderLeft: '2px solid rgba(128,128,128,0.35)' }}>
-          <div style={{ opacity: 0.55, fontSize: 11, marginBottom: 2 }}>
-            #{t.id} {t.comp} · {t.event}
+          <div style={{ display: 'flex', justifyContent: 'space-between',
+            alignItems: 'center', marginBottom: 2 }}>
+            <span style={{ opacity: 0.55, fontSize: 11 }}>
+              #{t.id} {t.comp} · {t.event}
+            </span>
+            <button onClick={() => copyAction(t)} title="copy this trace"
+              style={{ fontSize: 10, cursor: 'pointer', opacity: 0.65,
+                background: 'none', color: 'inherit', padding: '0 4px',
+                border: '1px solid rgba(128,128,128,0.4)', borderRadius: 3 }}>copy</button>
           </div>
           {t.frames.map((f, i) => (
             <div key={i} style={{ paddingLeft: f.depth * 14, color: COLOR[f.status],

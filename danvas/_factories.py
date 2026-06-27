@@ -257,8 +257,14 @@ class _FactoryMixin:
         """
         return self._make(Histogram, name=name, **kw)
 
-    def inspector(self, name="inspector", refresh=None, source="components",
+    def inspector(self, name="inspector", refresh=1.0, source="components",
                   namespace=None, label=None, **place: Unpack[Place]):
-        """Insert an :class:`~danvas.Inspector`. See :meth:`insert` for ``place``."""
+        """Insert an :class:`~danvas.Inspector`. See :meth:`insert` for ``place``.
+
+        ``refresh`` is the auto-refresh period in seconds, so the table stays live
+        as panel values and positions change (default ``1.0``); the rebuild only
+        runs while serving with a browser connected, so an idle inspector is free.
+        Pass ``refresh=None`` to make it manual (the **Refresh** button only).
+        """
         return self._make(Inspector, name=name, refresh=refresh, source=source,
                           namespace=namespace, label=label, **place)

@@ -169,6 +169,15 @@ class Bridge:
         # own functions (canvas.trace_calls), via a sys.setprofile probe — off by
         # default because that probe costs more than the shallow handler trace.
         self._trace_deep = False
+        # Always-on history: once serving, every handler dispatch is recorded into
+        # a bounded ring of the most recent actions (newest evicts oldest), so a
+        # trace panel opened later — or canvas.trace_history() — can show what
+        # already happened. Armed by serve(); shallow (handler-level) unless deep
+        # tracing is also on. _trace_history maps trace id -> assembled action.
+        self._trace_recording = False
+        self._trace_history = {}
+        self._trace_history_limit = 50
+        self._trace_lock = threading.Lock()
         # Observers of viewer cursor moves (canvas.on_cursor). Kept separate from
         # frame taps: cursors are high-rate and intentionally off the wire-tap
         # path, so they neither flood debug logs nor pay the frame-tap guard.
@@ -367,13 +376,63 @@ class Bridge:
         return next(self._trace_ids)
 
     def _emit_dispatch(self, event):
-        """Fan a dispatch-trace event out to the taps; a broken tap never breaks
-        (or stalls) the handler it is observing."""
+        """Record a dispatch-trace event (when recording) and fan it out to the
+        taps; a broken tap never breaks (or stalls) the handler it observes."""
+        if self._trace_recording:
+            self._record_dispatch(event)
         for fn in list(self._dispatch_taps):
             try:
                 fn(event)
             except Exception:
                 traceback.print_exc()
+
+    def _record_dispatch(self, event):
+        """Fold one event into the bounded action-history ring.
+
+        Pairs ``start`` with its later ``done``/``error`` by ``fid`` to build each
+        action's frame list (handler/nested call, with depth, mode, status and
+        duration). Called from the dispatch thread and from handler threads, so it
+        locks. Per-action frames are capped too, so a runaway-recursive handler
+        under deep tracing can't grow one entry without bound."""
+        tid = event.get("trace")
+        if tid is None:
+            return
+        phase = event.get("phase")
+        with self._trace_lock:
+            hist = self._trace_history
+            rec = hist.get(tid)
+            if rec is None:
+                rec = {"trace": tid, "comp": event.get("comp"),
+                       "event": event.get("event"), "frames": [], "_byfid": {}}
+                hist[tid] = rec
+                while len(hist) > self._trace_history_limit:
+                    del hist[next(iter(hist))]      # evict the oldest action
+            if phase == "start":
+                if len(rec["frames"]) < 2000:
+                    frame = {"fid": event.get("fid"), "depth": event.get("depth"),
+                             "handler": event.get("handler"),
+                             "mode": event.get("mode"),
+                             "status": "running", "dur_ms": None}
+                    rec["frames"].append(frame)
+                    rec["_byfid"][event.get("fid")] = frame
+            elif phase in ("done", "error"):
+                frame = rec["_byfid"].get(event.get("fid"))
+                if frame is not None:
+                    frame["status"] = "error" if phase == "error" else "done"
+                    frame["dur_ms"] = event.get("dur_ms")
+                    if phase == "error":
+                        frame["error"] = event.get("error")
+
+    def _trace_history_snapshot(self):
+        """A JSON-serialisable copy of the recorded actions, oldest → newest.
+        Strips the internal fid index and copies frames so callers can't mutate
+        the live buffer."""
+        with self._trace_lock:
+            return [
+                {"trace": rec["trace"], "comp": rec["comp"],
+                 "event": rec["event"], "frames": [dict(f) for f in rec["frames"]]}
+                for rec in self._trace_history.values()
+            ]
 
     def add_cursor_tap(self, fn):
         """Register ``fn(viewer)`` to observe viewer cursor moves (on_cursor).
