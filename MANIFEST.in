@@ -3,6 +3,8 @@
 # via [tool.setuptools.package-data] in pyproject.toml) or it never lands in the
 # wheel/sdist and a pip-installed canvas serves a blank page.
 recursive-include danvas/frontend/dist *
+include danvas/py.typed
+include danvas/*.pyi
 include LICENSE
 include THIRD_PARTY_LICENSES.md
 include README.md

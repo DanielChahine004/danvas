@@ -10,7 +10,9 @@ include = ["danvas*"]
 # it up. Without this it's dropped from the wheel and a pip-installed canvas
 # serves a blank page (index.html with 404s for /assets/*). Ship the whole dist.
 [tool.setuptools.package-data]
-danvas = ["frontend/dist/**/*"]
+# The built frontend bundle, plus the typing marker (PEP 561) and the .pyi stub
+# so type checkers pick up danvas's types when it's pip-installed.
+danvas = ["frontend/dist/**/*", "py.typed", "*.pyi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -41,9 +43,20 @@ dependencies = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Environment :: Web Environment",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: User Interfaces",
+    "Typing :: Typed",
 ]
 
 [project.optional-dependencies]

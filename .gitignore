@@ -13,13 +13,13 @@ venv/
 env/
 
 # Python build output (root only — the committed frontend bundle at
-# pycanvas/frontend/dist/ is intentionally kept and must NOT be ignored).
+# danvas/frontend/dist/ is intentionally kept and must NOT be ignored).
 /build/
 /dist/
 
 # Frontend toolchain (the built bundle is committed; its deps are not)
 node_modules/
-pycanvas/frontend/.vite/
+danvas/frontend/.vite/
 
 # Generated example output (created by running the save/load + upload examples)
 examples/saved_canvas.json
