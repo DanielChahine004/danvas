@@ -4,7 +4,7 @@
 // for panels the autoH/autoW axis is locked (content-driven).
 import { store } from '../engine/store'
 import { pageToScreen, screenToPage } from '../engine/editor'
-import { marquee, eraseTrail, snapGuides, bindHighlight, bindAnchorDot, bindAnchorAt, interacting } from '../engine/interaction'
+import { marquee, eraseTrail, snapGuides, bindHighlight, bindAnchorDot, bindAnchorAt, connectorPoints, interacting } from '../engine/interaction'
 import { recordBBox, bindTargetAt } from '../engine/hittest'
 import { linePathD, bendFromApex, clipConnector, clipArrow, polyPointAt, nearestPolyParam, elbowSegments, collapseElbowCoords, elbowDefaultAxis, elbowRoutePts, type ArrowKind } from '../engine/lineGeo'
 import { measuredTextSize } from './measure'
@@ -236,6 +236,7 @@ export function SelectionOverlay() {
       </div>
       <SnapGuides />
       <BindHighlight />
+      <ConnectorHandles />
       <BindAnchorDot />
       <EraserTrail />
     </div>
@@ -291,6 +292,26 @@ function DimensionBadge({ id }: { id: string }) {
     >
       {Math.round(b.w)} × {Math.round(b.h)}
     </div>
+  )
+}
+
+// The connection handles (top/right/bottom/left midpoints) on the shape an arrow is
+// about to bind to — shown while drawing/dragging an arrow end or hovering a shape
+// with the arrow/line tool. An end snaps to the nearest of these (or the centre);
+// the snapped one is then marked by the brighter BindAnchorDot drawn on top.
+function ConnectorHandles() {
+  const id = useValue('connect-hl', () => bindHighlight(), [])
+  useValue('connect-cam', () => store.camera(), [])
+  if (!id) return null
+  const pts = connectorPoints(id)
+  if (!pts.length) return null
+  return (
+    <svg style={fullSvg}>
+      {pts.map((p, i) => {
+        const s = pageToScreen(p)
+        return <circle key={i} cx={s.x} cy={s.y} r={DOT - 1} fill="#fff" stroke={accent} strokeWidth={1.5} />
+      })}
+    </svg>
   )
 }
 

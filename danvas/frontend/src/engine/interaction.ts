@@ -72,16 +72,63 @@ export function setSnapEnabled(on: boolean): void {
   }
 }
 
+// Canonical connection points (normalised): centre + the four edge midpoints. An
+// arrow end SNAPS to the nearest of these within CONNECT_SNAP_SCREEN px — the same
+// "lock" the centre already had, now extended to N/S/E/W — so connectors latch to
+// clean anchors. Drag elsewhere on the shape to attach freely along the perimeter.
+const CONNECT_SNAP_SCREEN = 12
+const EDGE_ANCHORS: { x: number; y: number }[] = [
+  { x: 0.5, y: 0 }, // top middle
+  { x: 1, y: 0.5 }, // right middle
+  { x: 0.5, y: 1 }, // bottom middle
+  { x: 0, y: 0.5 }, // left middle
+]
+
+// World-space point of a normalised anchor on a (possibly rotated) box.
+function anchorToPage(bb: Box, rot: number, nx: number, ny: number): { x: number; y: number } {
+  const cx = bb.x + bb.w / 2
+  const cy = bb.y + bb.h / 2
+  const ox = nx * bb.w - bb.w / 2
+  const oy = ny * bb.h - bb.h / 2
+  const cc = Math.cos(rot)
+  const ss = Math.sin(rot)
+  return { x: cx + ox * cc - oy * ss, y: cy + ox * ss + oy * cc }
+}
+
+// Page-space dots for a shape's visible connection handles (the four edge
+// midpoints), for the overlay to draw while an arrow is being connected/hovered.
+export function connectorPoints(id: Id): { x: number; y: number }[] {
+  const rec = store.peek(id) as any
+  const bb = recordBBox(rec)
+  if (!bb || bb.w <= 0 || bb.h <= 0) return []
+  const rot = rec?.rotation || 0
+  return EDGE_ANCHORS.map((a) => anchorToPage(bb, rot, a.x, a.y))
+}
+
 // Where an arrow end attaches on a target shape: a normalised anchor + the page
-// dot. Near the centre it snaps to centre (anchor undefined → clean edge-clip).
+// dot. Snaps to the nearest connection point (centre → anchor undefined for a clean
+// centre-clip; an edge midpoint → its anchor); otherwise a free perimeter anchor.
 export function bindAnchorAt(pt: { x: number; y: number }, id: Id): { anchor: { x: number; y: number } | undefined; dot: { x: number; y: number } } | null {
   const rec = store.peek(id) as any
   const bb = recordBBox(rec)
   if (!bb || bb.w <= 0 || bb.h <= 0) return null
+  const rot = rec?.rotation || 0
+  const z = store.camera().z
+  let best: { anchor: { x: number; y: number } | undefined; dot: { x: number; y: number } } | null = null
+  let bestD = Infinity
+  const consider = (anchor: { x: number; y: number } | undefined, dot: { x: number; y: number }) => {
+    const d = Math.hypot(dot.x - pt.x, dot.y - pt.y) * z // screen px
+    if (d < bestD) {
+      bestD = d
+      best = { anchor, dot }
+    }
+  }
+  consider(undefined, anchorToPage(bb, rot, 0.5, 0.5)) // centre → clean centre-clip
+  for (const a of EDGE_ANCHORS) consider(a, anchorToPage(bb, rot, a.x, a.y))
+  if (best && bestD <= CONNECT_SNAP_SCREEN) return best
+  // No handle nearby — attach freely at the cursor's perimeter-relative anchor.
   const cx = bb.x + bb.w / 2
   const cy = bb.y + bb.h / 2
-  const rot = rec?.rotation || 0
-  // bring the cursor into the shape's local (unrotated) frame to get the anchor
   const c = Math.cos(-rot)
   const s = Math.sin(-rot)
   const dx = pt.x - cx
@@ -90,13 +137,7 @@ export function bindAnchorAt(pt: { x: number; y: number }, id: Id): { anchor: { 
   const ly = dx * s + dy * c
   const nx = Math.max(0, Math.min(1, (lx + bb.w / 2) / bb.w))
   const ny = Math.max(0, Math.min(1, (ly + bb.h / 2) / bb.h))
-  if (Math.abs(nx - 0.5) < 0.1 && Math.abs(ny - 0.5) < 0.1) return { anchor: undefined, dot: { x: cx, y: cy } }
-  // dot = the anchor rotated back into world space (sits on the rotated panel)
-  const ox = nx * bb.w - bb.w / 2
-  const oy = ny * bb.h - bb.h / 2
-  const cc = Math.cos(rot)
-  const ss = Math.sin(rot)
-  return { anchor: { x: nx, y: ny }, dot: { x: cx + ox * cc - oy * ss, y: cy + ox * ss + oy * cc } }
+  return { anchor: { x: nx, y: ny }, dot: anchorToPage(bb, rot, nx, ny) }
 }
 
 const DRAW_TOOLS = new Set<Tool>(['rectangle', 'ellipse', 'line', 'arrow', 'draw', 'text', 'note'])
@@ -435,7 +476,17 @@ export function attachInteraction(container: HTMLElement): () => void {
   }
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!drag) return
+    if (!drag) {
+      // Arrow/line tool idle: preview the connection handles on the shape under the
+      // cursor (so you can see where an arrow will start/attach before pressing).
+      const t = store.instance().tool
+      if (t === 'arrow' || t === 'line') {
+        bindHighlight(bindTargetAt(screenToPage({ x: e.clientX, y: e.clientY })) || null)
+      } else if (bindHighlight()) {
+        bindHighlight(null)
+      }
+      return
+    }
     if (gesturing()) {
       abortDrag()
       return
@@ -550,13 +601,10 @@ export function attachInteraction(container: HTMLElement): () => void {
             store.transact('local', () => store.patch(id, { props: { bindEnd: tgt, bindEndAnchor: ea?.anchor } }))
           }
         }
-        // An arrow drawn between TWO different shapes routes CENTRE-to-CENTRE (drop the
-        // precise click anchors → clipArrow aims at each centre and perimeter-clips),
-        // matching a canvas.connect arrow. One end free keeps its exact attach point.
-        const r2 = store.peek(id) as any
-        if (r2?.props?.bindStart && r2.props.bindEnd && r2.props.bindStart !== r2.props.bindEnd) {
-          store.transact('local', () => store.patch(id, { props: { bindStartAnchor: undefined, bindEndAnchor: undefined } }))
-        }
+        // Each end keeps the connection point the user snapped to (centre → undefined
+        // anchor for a clean centre-clip; an edge midpoint → that anchor), so a
+        // top-to-bottom (or any N/S/E/W) connection sticks instead of collapsing to
+        // centre-to-centre.
       }
       // finalize draw bbox; drop a too-tiny shape (an accidental click)
       if (drag.kind === 'draw') {
