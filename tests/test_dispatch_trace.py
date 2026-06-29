@@ -315,6 +315,16 @@ def test_ui_inspector_falls_back_to_fixed_spot_without_view():
     assert (insp.x, insp.y) == (120, 120)
 
 
+def test_ui_inspector_uses_reserved_wire_id():
+    # The frontend's toolbar button tracks the inspector by the wire id
+    # "__ui_inspector__" (register/remove frames carry the id, not the name), so
+    # this panel must register under that exact id rather than a UUID.
+    canvas = danvas.Canvas()
+    insp = canvas._toggle_ui_inspector(at=None)
+    assert insp.id == "__ui_inspector__"
+    assert insp.id in canvas._bridge._components
+
+
 def test_thread_sampler_pushes_live_thread_snapshots():
     from danvas import _trace
 

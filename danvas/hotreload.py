@@ -7,6 +7,7 @@ the real server; this side just restarts it on edits.
 
 import ast
 import copy
+import glob
 import json
 import os
 import secrets
@@ -14,6 +15,33 @@ import subprocess
 import sys
 import time
 import urllib.request
+
+
+def _snapshot(directory, watch_patterns=()):
+    """mtimes of the files the monitor watches.
+
+    Always the top-level ``.py`` files in ``directory`` (the script and its
+    siblings); plus any file matching a ``serve(watch=...)`` glob, resolved
+    relative to ``directory`` — so ``"*.jsx"`` catches sibling JSX and
+    ``"panels/**/*.css"`` reaches into subdirectories. A change to any of them
+    makes the monitor restart the worker (which re-reads files loaded via
+    ``path=``)."""
+    out = {}
+    for fname in os.listdir(directory):
+        if fname.endswith(".py"):
+            fpath = os.path.join(directory, fname)
+            try:
+                out[fpath] = os.path.getmtime(fpath)
+            except OSError:
+                pass
+    for pattern in watch_patterns:
+        for fpath in glob.glob(os.path.join(directory, pattern), recursive=True):
+            if os.path.isfile(fpath):
+                try:
+                    out[fpath] = os.path.getmtime(fpath)
+                except OSError:
+                    pass
+    return out
 
 
 def _react_source_diff(old_text, new_text):
@@ -155,13 +183,15 @@ def _apply_live_patch(port, old_text, new_text):
     return True
 
 
-def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared"):
-    """Re-run ``main_file`` as a subprocess, restarting it on ``.py`` edits.
+def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared",
+                watch=None):
+    """Re-run ``main_file`` as a subprocess, restarting it on edits.
 
     This is the monitor side of ``serve(hot_reload=True)``: it never binds a
-    port itself, just watches the script's directory (top-level ``.py`` files
-    only) by polling mtimes, and respawns the worker subprocess on any change or
-    addition/removal. The worker is launched with ``_danvas_RELOAD_WORKER=1``
+    port itself, just watches the script's directory (top-level ``.py`` files,
+    plus any ``watch=`` globs) by polling mtimes, and respawns the worker
+    subprocess on any change or addition/removal. The worker is launched with
+    ``_danvas_RELOAD_WORKER=1``
     so its own ``serve(hot_reload=True)`` call skips straight to actually
     serving; ``_danvas_RELOAD_RESTART=1`` is added from the second launch
     onward so it doesn't reopen the browser (the frontend reconnects its
@@ -182,17 +212,10 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
     the new worker is up, then the browser reconnects on its own.
     """
     directory = os.path.dirname(os.path.abspath(main_file)) or "."
+    watch_patterns = list(watch or [])
 
     def snapshot():
-        out = {}
-        for fname in os.listdir(directory):
-            if fname.endswith(".py"):
-                fpath = os.path.join(directory, fname)
-                try:
-                    out[fpath] = os.path.getmtime(fpath)
-                except OSError:
-                    pass
-        return out
+        return _snapshot(directory, watch_patterns)
 
     def stop(proc):
         proc.terminate()
@@ -241,7 +264,8 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
             if snap != last:
                 return snap
 
-    print(f"danvas hot reload: watching {directory} (*.py)")
+    _watched = "*.py" + (", " + ", ".join(watch_patterns) if watch_patterns else "")
+    print(f"danvas hot reload: watching {directory} ({_watched})")
     proc = spawn(restart=False)
     last = snapshot()
 

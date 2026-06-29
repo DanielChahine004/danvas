@@ -772,6 +772,14 @@ restart. To keep training-style state hot across edits, factor the changing work
 into a per-iteration `step()` the loop calls — editing `step` is a live swap,
 while editing the loop scaffold restarts it.
 
+By default only top-level `.py` files are watched; pass `watch=` to also watch
+other files — a glob or list of globs relative to the script's folder
+(`serve(hot_reload=True, watch=["*.jsx", "panels/**/*.css"])`). A change restarts
+the worker, which re-reads files loaded via `path=` (e.g. a
+`canvas.react(path="panel.jsx")`). For a single panel, `panel.watch()`
+live-reloads its JSX/CSS *without* a restart; `watch=` is the whole-process
+version for arbitrary assets.
+
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving
 process only*. Prefer this over a hand-started thread when using `hot_reload`, so

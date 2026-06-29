@@ -1257,22 +1257,41 @@ class Bridge:
                     lambda c=comp, p=payload: self._dispatch_input(c, p, ws)
                 )
         elif kind == "layout":
-            # User moved/resized a panel in the browser; sync Python's state.
-            comp = self._components.get(msg.get("id"))
+            # User moved/resized a panel or a managed shape; sync Python's state.
+            cid = msg.get("id")
+            comp = self._components.get(cid)
             if comp is not None:
                 self._dispatch.submit(
                     lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
+            else:
+                # A Python-managed shape (canvas.geo/text/line/…) was moved/resized
+                # in the browser — store the new geometry so it replays on reload.
+                shape = self._shapes.get(cid)
+                if shape is not None:
+                    self._apply_shape_layout(shape, msg, ws)
         elif kind == "graveyard":
-            # User deleted a danvas-managed shape in tldraw.
+            # User deleted a danvas-managed object (panel / shape / arrow). All go
+            # to the graveyard (restorable) and off the live canvas — anything
+            # placed programmatically is treated uniformly, just like panels.
             self._graveyard(msg.get("id"))
         elif kind == "restore":
-            # User clicked Restore in the graveyard panel; re-register the shape.
+            # User clicked Restore in the graveyard panel; bring the object back to
+            # the live canvas (route by the kind recorded when it was graveyarded).
             comp = self._graveyarded.pop(msg.get("id"), None)
             if comp is not None:
                 comp._graveyarded = False
-                comp._visible = True
-                self.register_live(comp)
+                gk = getattr(comp, "_grave_kind", "panel")
+                if gk == "shape":
+                    self._shapes[comp.id] = comp
+                    self.broadcast(comp.register_message())
+                elif gk == "arrow":
+                    self._arrows[comp.id] = comp
+                    self.broadcast(comp.register_message())
+                else:
+                    comp._visible = True
+                    self.register_live(comp)
+                self._notify_mutation()  # persist the restore (serve(persist=))
                 self._dispatch.submit(self._refresh_graveyard)
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
@@ -1429,6 +1448,35 @@ class Bridge:
                     root._sync()
         self._notify_mutation()
 
+    def _apply_shape_layout(self, shape, msg, ws=None):
+        """Apply a user move/resize of a Python-managed shape and relay it.
+
+        Mirrors :meth:`_dispatch_layout` for non-panel shapes (canvas.geo/text/
+        line/…): store the new geometry on the shape object so register_message
+        replays it to a reloading/joining client, and relay it to the *other*
+        live clients as a ``shape_update`` (the mover already applied it locally).
+        ``x``/``y``/``rotation`` move the shape; ``w``/``h`` (when sent) resize it.
+        """
+        top = {}
+        for k in ("x", "y", "rotation"):
+            v = msg.get(k)
+            if v is not None:
+                setattr(shape, k, v)
+                top[k] = v
+        props = {}
+        for k in ("w", "h"):
+            v = msg.get(k)
+            if v is not None:
+                shape._props[k] = v
+                props[k] = v
+        if top or props:
+            relay = {"type": "shape_update", "id": shape.id}
+            relay.update(top)
+            if props:
+                relay["props"] = props
+            self.broadcast(relay, exclude=ws)
+        self._notify_mutation()
+
     def _cascade_height(self, comp, dh):
         """When comp's height changes by dh, shift all panels anchored below= it."""
         for dep, _gap in getattr(comp, "_below_deps", []):
@@ -1449,30 +1497,46 @@ class Bridge:
         self._broadcast_graveyard()
 
     def _graveyard(self, comp_id):
-        """Handle a browser delete of a danvas-managed panel.
+        """Handle a browser delete of any danvas-managed object.
 
-        Normally the component is kept (callbacks and state intact) but marked
-        deleted, so the graveyard toolbar panel can list it with a Restore
-        button. Ephemeral dev panels — the Inspector and the dispatch-trace
-        panel — opt out via ``_ephemeral``: deleting one just *closes* it (the
-        same as toggling it off from its button), so it doesn't pile up in the
-        graveyard; re-open it from that button.
+        The object is kept (so the graveyard toolbar can offer Restore) but taken
+        off the live canvas. Panels stay in ``_components`` flagged
+        ``_graveyarded`` (callbacks/state intact); managed shapes/arrows are
+        popped from ``_shapes``/``_arrows`` so the reconnect replay skips them.
+        ``_grave_kind`` records which set to restore into. Ephemeral dev panels —
+        the Inspector and the dispatch-trace panel — opt out via ``_ephemeral``:
+        deleting one just *closes* it so it doesn't pile up in the graveyard.
         """
         comp = self._components.get(comp_id)
-        if comp is None:
+        if comp is not None:
+            if getattr(comp, "_ephemeral", False):
+                if self._canvas is not None:
+                    self._canvas.remove(comp)
+                else:
+                    self.remove_component(comp.id)
+                return
+            if getattr(comp, "_graveyarded", False):
+                return
+            comp._graveyarded = True
+            comp._visible = False
+            comp._grave_kind = "panel"
+            self._graveyarded[comp.id] = comp
+            self._notify_mutation()  # persist the deletion (serve(persist=))
+            self._dispatch.submit(self._refresh_graveyard)
             return
-        if getattr(comp, "_ephemeral", False):
-            if self._canvas is not None:
-                self._canvas.remove(comp)
-            else:
-                self.remove_component(comp.id)
-            return
-        if getattr(comp, "_graveyarded", False):
-            return
-        comp._graveyarded = True
-        comp._visible = False
-        self._graveyarded[comp.id] = comp
-        self._dispatch.submit(self._refresh_graveyard)
+        # Managed shape / arrow: pop from the active set (so the reconnect replay
+        # skips it) but keep the object for Restore.
+        obj = self._shapes.pop(comp_id, None)
+        kind = "shape"
+        if obj is None:
+            obj = self._arrows.pop(comp_id, None)
+            kind = "arrow"
+        if obj is not None:
+            obj._graveyarded = True
+            obj._grave_kind = kind
+            self._graveyarded[comp_id] = obj
+            self._notify_mutation()  # persist the deletion (serve(persist=))
+            self._dispatch.submit(self._refresh_graveyard)
 
     def _move_y(self, comp, dh):
         """Shift comp's y by dh and propagate to every panel whose y derives from comp's."""

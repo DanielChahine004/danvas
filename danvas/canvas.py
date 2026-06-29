@@ -602,13 +602,17 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             x, y = at["x"] - w / 2, at["y"] - h / 2
         else:
             x, y = 120, 120
-        return self.insert(insp, x=x, y=y)
+        # Pin the wire id to the reserved name so the frontend's toolbar Inspector
+        # button can detect this panel (it watches register/remove for this id) and
+        # reflect its open/closed state.
+        return self.insert(insp, x=x, y=y, component_id=name)
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=True,
                grabbable=True, frame=True, name=None, queue=None,
                below=None, above=None, right_of=None, left_of=None, gap=16,
-               width=None, height=None, roles=None, lock_for=None):
+               width=None, height=None, roles=None, lock_for=None,
+               component_id=None):
         """Register a component on the canvas and return it.
 
         ``x``/``y`` set the panel's position in canvas coordinates; omit them to
@@ -918,7 +922,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             component._roles = list(roles)
         if lock_for is not None:
             component._lock_for = list(lock_for)
-        component_id = uuid.uuid4().hex
+        # The wire id is normally a fresh UUID. ``component_id`` lets a caller pin
+        # a stable, known id — used for the reserved ``__ui_inspector__`` panel so
+        # the frontend's toolbar button can track it on the wire (the register/
+        # remove frames carry the id, not the danvas name); see _toggle_ui_inspector.
+        component_id = component_id or uuid.uuid4().hex
         component._bind(component_id, self._bridge)
         self._bridge.add_component(component)
         self._components.append(component)
@@ -1608,7 +1616,30 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             }
             for a in self._arrows
         ]
-        return {"components": components, "arrows": arrows}
+        # Managed shapes (canvas.geo/text/line/…). Each has a stable handle name
+        # (auto-assigned — geo1, text1, … — when not given), so a user move/resize
+        # can be matched back across a process restart, just like a panel.
+        shapes = [
+            {
+                "name": s.name,
+                "x": s.x,
+                "y": s.y,
+                "w": s._props.get("w"),
+                "h": s._props.get("h"),
+                "rotation": s.rotation,
+                "opacity": s.opacity,
+            }
+            for s in self._shapes
+        ]
+        # Deletions: the handle names of everything the user sent to the graveyard
+        # (panels, shapes, arrows). Saved by name so a restart can re-delete them
+        # even though the code re-creates each on its next run.
+        graveyard = [
+            obj.name for obj in self._bridge._graveyarded.values()
+            if getattr(obj, "name", None)
+        ]
+        return {"components": components, "arrows": arrows, "shapes": shapes,
+                "graveyard": graveyard}
 
     def _restore_layout(self, data):
         """Apply a formation dict (from :meth:`_layout`) onto live panels."""
@@ -1639,6 +1670,29 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             state = item.get("state")
             if state:
                 comp._restore_state(state)
+        # Restore managed-shape geometry by name (geo1, text1, …). No clients are
+        # connected at load time, so set the attributes directly; register_message
+        # then replays the saved geometry to every joining client.
+        shape_by_name = {s.name: s for s in self._shapes}
+        for item in data.get("shapes", []):
+            s = shape_by_name.get(item.get("name"))
+            if s is None:
+                continue
+            for k in ("x", "y", "rotation", "opacity"):
+                v = item.get(k)
+                if v is not None:
+                    setattr(s, k, v)
+            for k in ("w", "h"):
+                v = item.get(k)
+                if v is not None and k in s._props:
+                    s._props[k] = v
+        # Re-apply deletions: re-graveyard (by name) everything the user deleted,
+        # so a deleted panel/shape/arrow stays deleted across a restart even though
+        # the code re-created it. Match through the unified name registry.
+        for name in data.get("graveyard", []):
+            obj = self._named.get(name)
+            if obj is not None:
+                self._bridge._graveyard(obj.id)
 
     @staticmethod
     def _read_json(path):
@@ -1812,7 +1866,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="danvas",
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
-              namespace=None, tldraw_license_key=None):
+              namespace=None, tldraw_license_key=None, watch=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -1836,7 +1890,16 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         new tab opens). Only available with ``block=True`` (a script entry
         point); ``block=False`` with ``hot_reload=True`` raises an error, and
         calling it outside a ``python yourscript.py`` run (e.g. a notebook)
-        raises too. With ``tunnel=True`` the tunnel is opened once by the
+        raises too.
+
+        ``watch`` adds extra files for ``hot_reload`` to watch beyond the
+        top-level ``.py`` files: a glob string or list of globs, resolved
+        relative to the script's directory (``watch="*.jsx"``,
+        ``watch=["*.css", "panels/**/*.json"]``). A change to any match restarts
+        the worker, which re-reads files loaded via ``path=`` — handy for a
+        ``canvas.react(path="panel.jsx")`` whose JSX lives in its own file. (For
+        a single panel, :meth:`React.watch` live-reloads it *without* a restart;
+        ``watch`` is the whole-process equivalent for arbitrary assets.) With ``tunnel=True`` the tunnel is opened once by the
         long-lived watcher process (not the restarting worker), so the public URL
         stays the same across reloads and the provider isn't re-created on every
         save — visitors just see a momentary blip during each restart.
@@ -1946,7 +2009,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.
         handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
-                                             tunnel_provider)
+                                             tunnel_provider, watch)
         if namespace is not None:
             self._namespace = namespace
         if handoff.should_return:
@@ -2050,7 +2113,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         )
 
     def _maybe_handoff_reload(self, hot_reload, block, port, tunnel,
-                              tunnel_provider):
+                              tunnel_provider, watch=None):
         """Handle the hot-reload pre-flight and monitor handoff for serve().
 
         Returns ``_ReloadHandoff(should_return, open_browser)``: when
@@ -2094,6 +2157,13 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             import secrets as _secrets, subprocess as _subprocess
             env = {**os.environ}
             env.setdefault("_danvas_RELOAD_SECRET", _secrets.token_urlsafe(32))
+            # Extra files to watch (serve(watch=...)) ride in an env var as a JSON
+            # list, so the monitor restarts the worker when any matching file
+            # changes — e.g. a JSX/CSS panel loaded from disk via path=.
+            if watch:
+                import json as _json
+                patterns = [watch] if isinstance(watch, str) else list(watch)
+                env["_danvas_RELOAD_WATCH"] = _json.dumps(patterns)
             _mon = _subprocess.Popen(
                 [sys.executable, "-m", "danvas._hotreload_monitor",
                  main_file, str(port),
