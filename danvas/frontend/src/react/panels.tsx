@@ -17,9 +17,12 @@ function LabelPanel({ shape }: { shape: any }) {
 
 function HtmlPanel({ shape }: { shape: any }) {
   return (
-    // ghostable: grabbable=False + operable=False makes the iframe click-through.
-    <Card shape={shape} grab ghostable>
-      {/* Header has no pointerEvents, so dragging it moves the panel. */}
+    // `handle` (a corner drag grip) instead of `grab` (a full-cover overlay): the
+    // overlay sat on top of the iframe whenever the panel wasn't selected, so a
+    // click hit it (select+drag) instead of the iframe's content. With a handle the
+    // iframe is interactive immediately and you drag via the grip / header — same as
+    // React panels. ghostable: grabbable=False + operable=False = click-through.
+    <Card shape={shape} handle ghostable>
       <CardLabel shape={shape} />
       <CustomView shape={shape} />
     </Card>

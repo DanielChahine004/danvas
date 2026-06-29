@@ -307,6 +307,7 @@ export function attachInteraction(container: HTMLElement): () => void {
       marquee(null)
     }
     eraseTrail([])
+    container.classList.remove('pc-gesturing')
     drag = null
   }
 
@@ -315,6 +316,18 @@ export function attachInteraction(container: HTMLElement): () => void {
     if (gesturing()) return // a two-finger pinch owns the gesture
     clearInteracting() // a fresh canvas interaction brings the selection box back
     const tool = store.instance().tool
+    // Capture the pointer for gestures we own (marquee/move/draw/erase) so a Custom
+    // panel's iframe under the cursor can't swallow the move/up events mid-drag —
+    // which froze a marquee the moment it crossed an iframe. Released automatically
+    // on pointerup. The hand tool's pan is the camera's, so leave it alone.
+    if (tool !== 'hand') {
+      try {
+        container.setPointerCapture(e.pointerId)
+      } catch {
+        /* capture unsupported / pointer already gone */
+      }
+      container.classList.add('pc-gesturing') // iframes click-through for the gesture
+    }
     const pt = screenToPage({ x: e.clientX, y: e.clientY })
     const style = store.instance().style
 
@@ -564,6 +577,7 @@ export function attachInteraction(container: HTMLElement): () => void {
   }
 
   const onPointerUp = () => {
+    container.classList.remove('pc-gesturing') // end of gesture — iframes interactive again
     if (!drag) return
     if (drag.kind === 'move') {
       store.endGroup()

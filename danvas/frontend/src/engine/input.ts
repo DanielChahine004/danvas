@@ -117,6 +117,10 @@ function enableRightDragPan(el: HTMLElement): () => void {
     } catch {
       /* ignore */
     }
+    // Make panel iframes click-through for the pan so they can't intercept the
+    // move events as the cursor crosses them (pointer capture alone is flaky over
+    // sandboxed iframes, which made the pan flicker).
+    el.classList.add('pc-gesturing')
     e.stopPropagation()
   }
   const onMove = (e: PointerEvent) => {
@@ -140,6 +144,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
   const onUp = (e: PointerEvent) => {
     if (!panning) return
     panning = false
+    el.classList.remove('pc-gesturing')
     try {
       el.releasePointerCapture(e.pointerId)
     } catch {

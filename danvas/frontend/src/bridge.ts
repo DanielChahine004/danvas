@@ -11,7 +11,8 @@
 import { generateKeyBetween } from 'fractional-indexing'
 import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
-import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient } from './engine/camera'
+import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera } from './engine/camera'
+import { openContextMenuAt } from './engine/contextmenu'
 import { toImage } from './engine/export'
 import { measuredTextSize } from './react/measure'
 import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType } from './engine/types'
@@ -528,9 +529,8 @@ function handle(msg: any): void {
       // into our store as a remote change so it doesn't echo back out.
       applyDrawDiff(msg.diff)
       break
-    // --- stubbed until their milestone (kept in the dispatch table) ---
     case 'chat':
-      // chat lands later
+      ingestChat(msg)
       break
     default:
       break
@@ -541,6 +541,7 @@ function onWelcome(msg: any): void {
   if (msg.reload || (lastRunId !== null && msg.runId && msg.runId !== lastRunId)) {
     clearManaged()
     clearPeerCursors() // stale peers from the previous run shouldn't linger
+    resetChat() // a new run restarts msgId from 1 — drop the old log so replay repopulates
   }
   // A hot reload restarts the worker but the browser stays live — the user's
   // camera (and any pan/zoom they did) is still in the store. clearManaged()
@@ -1436,18 +1437,40 @@ export function subscribeIdentity(cb: (v: any) => void): () => void {
   return () => identityListeners.delete(cb)
 }
 
-// === chat (stubbed until M5; exports kept so ReactHost imports resolve) ======
-export function subscribeChat(_cb: (e: any) => void): () => void {
-  return () => {}
+// === chat ====================================================================
+// The server stamps each line with the sender's identity, broadcasts it to every
+// viewer (sender included), and replays recent history on connect. We keep a local
+// log so a Chat panel that mounts later can backfill via getChatLog(), and notify
+// live subscribers as new lines arrive. Deduped by msgId so the reconnect replay
+// can't double-post.
+const chatLog: any[] = []
+const chatSubs = new Set<(e: any) => void>()
+const CHAT_MAX = 200
+function ingestChat(entry: any): void {
+  if (!entry || entry.msgId == null) return
+  if (chatLog.some((e) => e.msgId === entry.msgId)) return
+  chatLog.push(entry)
+  if (chatLog.length > CHAT_MAX) chatLog.splice(0, chatLog.length - CHAT_MAX)
+  for (const cb of chatSubs) cb(entry)
+}
+function resetChat(): void {
+  chatLog.length = 0
+}
+export function subscribeChat(cb: (e: any) => void): () => void {
+  chatSubs.add(cb)
+  return () => chatSubs.delete(cb)
 }
 export function getChatLog(): any[] {
-  return []
+  return chatLog.slice()
 }
 export function sendChat(text: string): void {
   sendRaw({ type: 'chat', text })
 }
 export function setMyName(name: string): void {
   sendRaw({ type: 'set_name', name })
+  // The server doesn't echo set_name, so reflect the new name locally (keeps the
+  // "(you)" label + name field current; future chat lines carry it from the server).
+  if (myViewer) setIdentity({ ...myViewer, name })
 }
 
 // === view / navigation config (serve(view=...) / set_view) ===================
@@ -1548,13 +1571,41 @@ function fitFromIframe(sourceWin: any, fit: any): void {
 }
 
 // --- ctrl/cmd+wheel inside an iframe: zoom the canvas, not the browser --------
+// Coordinates from inside an iframe are in the iframe's OWN css px, but the iframe
+// is rendered scaled by the camera zoom `z` in the parent — so a cursor offset of
+// `n` iframe-px sits at `n * z` screen px from the iframe's top-left, and a drag of
+// `dx` iframe-px equals `dx` page units (the iframe's css px ARE page units, since
+// its width is the panel's page-unit width). Convert accordingly.
 function zoomFromIframe(sourceWin: any, w: any): void {
   const iframe = [...document.querySelectorAll('iframe')].find(
     (f) => (f as HTMLIFrameElement).contentWindow === sourceWin,
   ) as HTMLIFrameElement | undefined
   if (!iframe) return
   const rect = iframe.getBoundingClientRect()
-  zoomCanvasAtClient(rect.left + w.x, rect.top + w.y, w.d)
+  const z = store.camera().z
+  zoomCanvasAtClient(rect.left + w.x * z, rect.top + w.y * z, w.d)
+}
+
+// A right-drag inside a Custom iframe pans the canvas (the parent never sees those
+// events). The iframe sends screen-space cursor deltas (immune to the panel moving
+// under the cursor mid-pan, which is what made it "double-vision" oscillate), so we
+// just convert px→page units (÷z) and shift the camera — exactly like a bare-canvas
+// right-drag.
+function panFromIframe(p: any): void {
+  const cam = store.camera()
+  setCamera({ x: cam.x + (p.dx || 0) / cam.z, y: cam.y + (p.dy || 0) / cam.z, z: cam.z })
+}
+
+// A right-click (no drag) inside a Custom iframe opens the canvas context menu over
+// that panel — passing the iframe as the target so it resolves to its panel record.
+function menuFromIframe(sourceWin: any, m: any): void {
+  const iframe = [...document.querySelectorAll('iframe')].find(
+    (f) => (f as HTMLIFrameElement).contentWindow === sourceWin,
+  ) as HTMLIFrameElement | undefined
+  if (!iframe) return
+  const rect = iframe.getBoundingClientRect()
+  const z = store.camera().z
+  openContextMenuAt(rect.left + (m.x || 0) * z, rect.top + (m.y || 0) * z, iframe)
 }
 
 // --- parent-side camera capture (canvas.requestCamera from a Custom iframe) ---
@@ -1698,6 +1749,10 @@ if (typeof window !== 'undefined') {
     if (!d || typeof d !== 'object') return
     if (d.__danvas_wheel) {
       zoomFromIframe(e.source, d.__danvas_wheel)
+    } else if (d.__danvas_pan) {
+      panFromIframe(d.__danvas_pan)
+    } else if (d.__danvas_menu) {
+      menuFromIframe(e.source, d.__danvas_menu)
     } else if (d.__danvas_fit) {
       fitFromIframe(e.source, d.__danvas_fit)
     } else if (d.__danvas) {

@@ -143,17 +143,42 @@ class Custom(_EventRouter, BaseComponent):
         "var r=e.reason;"
         f"parent.postMessage({{__danvas_error:{{id:{cid},"
         "msg:'Unhandled rejection: '+(r&&r.message||String(r))}},'*');});"
-        # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
-            # *browser's* page zoom (the canvas can't preventDefault an event in a
-            # sandboxed frame). Swallow it here and forward the delta + cursor to
-            # the parent, which zooms the canvas at that point instead — so the
-            # gesture matches scrolling over the bare canvas. Capture phase so we
-            # win over any content (e.g. Plotly) wheel handler; plain wheel (no
-            # modifier) is left alone so panels can still scroll their content.
-            "window.addEventListener('wheel',function(e){"
-            "if(e.ctrlKey||e.metaKey){e.preventDefault();"
-            "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');}"
+        # Wheel inside the iframe can't reach the parent (cross-document) and the
+            # canvas can't preventDefault an event in a sandboxed frame. Swallow every
+            # wheel here and forward the delta + cursor to the parent, which zooms the
+            # canvas at that point — so scroll-to-zoom works over a panel exactly like
+            # over the bare canvas. (danvas zooms on wheel everywhere; React panels
+            # don't wheel-scroll their content either, so this just makes Custom
+            # panels consistent.) Capture phase so we win over any content (e.g.
+            # Plotly) wheel handler.
+            "window.addEventListener('wheel',function(e){e.preventDefault();"
+            "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');"
             "},{passive:false,capture:true});"
+            # Right-drag inside the iframe pans the canvas: the parent can't see these
+            # events (cross-document), so forward the deltas. Pointer-capture keeps the
+            # drag alive if the cursor leaves the frame. A right-click that didn't drag
+            # (<=4px) opens the canvas context menu there — parity with the bare canvas
+            # and React panels. The browser context menu is always suppressed.
+            # Pan deltas from screenX/screenY (absolute physical-screen coords): they
+            # don't change when the panel moves under a stationary cursor, so the pan
+            # can't feed back on itself (the iframe-relative clientX would, since the
+            # pan moves the iframe). `_pm` accumulates the drag distance to tell a
+            # click (-> context menu) from a drag.
+            "var _pan=false,_sx=0,_sy=0,_pm=0;"
+            "window.addEventListener('pointerdown',function(e){"
+            "if(e.button===2){_pan=true;_sx=e.screenX;_sy=e.screenY;_pm=0;"
+            "try{document.documentElement.setPointerCapture(e.pointerId);}catch(_){}}"
+            "},true);"
+            "window.addEventListener('pointermove',function(e){"
+            "if(!_pan)return;var dx=e.screenX-_sx,dy=e.screenY-_sy;_sx=e.screenX;_sy=e.screenY;"
+            "_pm+=Math.abs(dx)+Math.abs(dy);"
+            "parent.postMessage({__danvas_pan:{dx:dx,dy:dy}},'*');"
+            "},true);"
+            "window.addEventListener('pointerup',function(e){"
+            "if(e.button===2){_pan=false;"
+            "if(_pm<=4)parent.postMessage({__danvas_menu:{x:e.clientX,y:e.clientY}},'*');}"
+            "},true);"
+            "window.addEventListener('contextmenu',function(e){e.preventDefault();},true);"
             "</script>"
         )
         if self._auto_h or self._auto_w:

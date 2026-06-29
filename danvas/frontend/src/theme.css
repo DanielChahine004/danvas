@@ -54,6 +54,15 @@
   pointer-events: none !important;
 }
 
+/* While a camera pan or canvas drag (marquee/move/draw) is in progress, make panel
+ * iframes (Custom panels) click-through so they can't swallow the pointer mid-
+ * gesture — which froze a marquee and flickered a right-drag pan as the cursor
+ * crossed a Custom panel. The class is toggled on the container for the gesture's
+ * duration (see input.ts / interaction.ts). */
+.tl-container.pc-gesturing iframe {
+  pointer-events: none !important;
+}
+
 /* Hand (grab) tool, used as the default on touch kiosks: like pc-draw-passthrough
  * the host goes pointer-transparent so a one-finger drag on empty panel space
  * falls through to the stable panel card and the camera pans reliably. Unlike
