@@ -1,0 +1,36 @@
+import puppeteer from 'puppeteer-core'
+const CHROME='C:/Program Files/Google/Chrome/Application/chrome.exe'
+const sleep=ms=>new Promise(r=>setTimeout(r,ms))
+const b=await puppeteer.launch({executablePath:CHROME,headless:'new',args:['--no-sandbox','--disable-gpu']})
+const page=await b.newPage(); await page.setViewport({width:1200,height:880,deviceScaleFactor:2})
+await page.goto('http://localhost:8000',{waitUntil:'networkidle2',timeout:25000}); await sleep(4000)
+await page.click('[data-pc-tool="rectangle"]'); await sleep(250)
+const R={}
+R.palette=await page.evaluate(()=>[...document.querySelectorAll('[data-pc-stylepanel] div[style*="grid"] button[title]')].map(b=>b.title).slice(0,8))
+R.panelWidth=await page.evaluate(()=>Math.round(document.querySelector('[data-pc-stylepanel]').getBoundingClientRect().width))
+R.panelHasDelDupText=await page.evaluate(()=>/Delete|Duplicate/.test(document.querySelector('[data-pc-stylepanel]').innerText))
+await page.evaluate(()=>{const inp=document.querySelector('[data-pc-stylepanel] label[title="Pick a custom colour"] input[type=color]');const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;set.call(inp,'#11aa55');inp.dispatchEvent(new Event('input',{bubbles:true}));inp.dispatchEvent(new Event('change',{bubbles:true}))})
+await sleep(200)
+async function drag(x1,y1,x2,y2){await page.mouse.move(x1,y1);await page.mouse.down();for(let i=1;i<=10;i++){await page.mouse.move(x1+(x2-x1)*i/10,y1+(y2-y1)*i/10);await sleep(8)}await page.mouse.up()}
+await drag(840,640,940,720); await sleep(200)
+await page.evaluate(()=>{const sw=document.querySelector('[data-pc-stylepanel] button[title^="#11aa55"]');sw.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))})
+await sleep(200)
+R.menuOpen=await page.evaluate(()=>!!document.querySelector('[data-pc-stylepanel] label[title^="Edit colour"]'))
+R.menuHasDelete=await page.evaluate(()=>!!document.querySelector('[data-pc-stylepanel] button[title="Delete this custom colour"]'))
+await page.evaluate(()=>{const inp=document.querySelector('[data-pc-stylepanel] label[title^="Edit colour"] input[type=color]');const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;set.call(inp,'#cc2266');inp.dispatchEvent(new Event('input',{bubbles:true}))})
+await sleep(250)
+R.shapeLive=await page.evaluate(()=>{const r=[...document.querySelectorAll('[data-pc-drawings] rect')].pop();return r?(r.getAttribute('stroke')||r.getAttribute('fill')):null})
+R.liveUpdated=(R.shapeLive||'').toLowerCase().includes('cc2266')
+await page.click('[data-pc-stylepanel] button[title="Delete this custom colour"]'); await sleep(200)
+R.customRemoved=await page.evaluate(()=>!document.querySelector('[data-pc-stylepanel] button[title^="#cc2266"]')&&!document.querySelector('[data-pc-stylepanel] button[title^="#11aa55"]'))
+await page.click('[data-pc-tool="select"]'); await sleep(60); await page.mouse.click(890,680); await sleep(180)
+R.dupBtn=await page.evaluate(()=>!!document.querySelector('button[title="Duplicate (Ctrl+D)"]'))
+R.binBtn=await page.evaluate(()=>!!document.querySelector('button[title="Delete selection (Del)"]'))
+const before=await page.evaluate(()=>document.querySelectorAll('[data-pc-drawings] rect').length)
+if(R.dupBtn){await page.click('button[title="Duplicate (Ctrl+D)"]'); await sleep(250)}
+R.dupWorked=(await page.evaluate(()=>document.querySelectorAll('[data-pc-drawings] rect').length))>before
+console.log(JSON.stringify(R,null,1))
+await page.click('[data-pc-tool="rectangle"]'); await sleep(200)
+const c=await page.evaluate(()=>{const e=document.querySelector('[data-pc-stylepanel]');const b=e.getBoundingClientRect();return{x:Math.floor(b.x-6),y:Math.floor(b.y-6),width:Math.ceil(b.width+12),height:Math.ceil(b.height+12)}})
+await page.screenshot({path:'scripts/_v.png', clip:c})
+await b.close(); process.exit(0)

@@ -11,55 +11,44 @@ This file lists the notable components compiled into that bundle. It is a
 good-faith summary for downstream users — the authoritative terms are each
 project's own licence, linked below.
 
-## tldraw — proprietary "tldraw licence" (NOT open source, NOT AGPL)
+## Frontend — all permissive (no proprietary licence, no watermark, no key)
 
-danvas's canvas is built on [tldraw](https://tldraw.dev), which is **not** under
-a permissive or copyleft open-source licence. It is distributed under the
-**tldraw licence** — references:
-https://github.com/tldraw/tldraw/blob/main/LICENSE.md and
-https://tldraw.dev/community/license.
+danvas's canvas frontend is a custom, framework-free renderer built on **Preact**
+and a small set of **permissively licensed (MIT)** packages. There is **no
+proprietary component, no licence key, and no watermark** — running danvas in
+development or production requires no third-party frontend licence.
 
-**You (the danvas user) need your own tldraw licence to run in production.**
-tldraw's model is:
+Notable bundled packages (all **MIT** unless noted), from
+`danvas/frontend/package.json`:
 
-- **Development is free** and needs no licence key — running danvas locally to
-  build and test is fine as-is.
-- **Production requires a tldraw licence key.** Per tldraw: *"The tldraw SDK
-  will not work in production without a valid license key."* There are two:
-  - a **hobby** licence — free, for **non-commercial** production, requested via
-    a form at https://tldraw.dev/community/license; it requires the "made with
-    tldraw" watermark to stay visible;
-  - a **commercial** licence — paid (sales@tldraw.com), for commercial
-    production; removes the watermark.
-- Downstream users of a tldraw-based library are covered the same way: *"you and
-  your down-stream users will require their own trial, commercial, or hobby
-  license in order to use the SDK in production."*
+- [Preact](https://github.com/preactjs/preact) — MIT (aliased to `react`/`react-dom`
+  so Python-shipped React panels run unchanged)
+- [alien-signals](https://github.com/stackblitz/alien-signals) — MIT (reactivity)
+- [Plotly.js](https://github.com/plotly/plotly.js) (basic dist) — MIT
+  (loaded lazily, only when a plot panel first appears)
+- [Sucrase](https://github.com/alangpierce/sucrase) — MIT (compiles React panel JSX in-browser)
+- [perfect-freehand](https://github.com/steveruizok/perfect-freehand) — MIT (ink strokes)
+- [rbush](https://github.com/mourner/rbush) — MIT (spatial index)
+- [fractional-indexing](https://github.com/rocicorp/fractional-indexing) — MIT (z-order keys)
+- [@use-gesture](https://github.com/pmndrs/use-gesture) — MIT (pointer gestures)
+- [modern-screenshot](https://github.com/qq15725/modern-screenshot) — MIT (PNG/SVG export)
+- [Inter](https://github.com/rsms/inter) via
+  [@fontsource-variable/inter](https://github.com/fontsource/font-files) — the
+  **Inter** typeface is licensed under the **SIL Open Font License 1.1** (OFL-1.1);
+  the npm packaging is MIT.
+- [Vite](https://github.com/vitejs/vite) (build tooling, not shipped in the bundle) — MIT
 
-**Supplying your key to danvas:** pass it to `serve(...)` or set the env var, and
-danvas injects it into the page as the `<Tldraw licenseKey=…>` prop:
-
-```python
-canvas.serve(tldraw_license_key="tldraw-...")   # or: export TLDRAW_LICENSE_KEY=tldraw-...
-```
-
-**Important for danvas users and commercial licensees:** a danvas licence (AGPL
-*or* a commercial danvas licence) grants rights to **danvas only**. It does
-**not** grant or include any tldraw licence. Whoever runs a danvas app in
-production is independently responsible for obtaining their own tldraw hobby or
-commercial licence. A commercial danvas licence does not waive, sublicense, or
-alter the tldraw licence in any way.
-
-## Other bundled components — permissive (MIT)
-
-The frontend bundle also compiles in, among others:
-
-- [React / React DOM](https://github.com/facebook/react) — MIT
-- [Monaco Editor](https://github.com/microsoft/monaco-editor) — MIT
-  (loaded only when a `Repl` panel first appears)
-- [Plotly.js](https://github.com/plotly/plotly.js) — MIT
-- [Vite](https://github.com/vitejs/vite) (build tooling) — MIT
-
-These are permissive (MIT) and impose no copyleft or watermark obligation;
+These licences are permissive and impose no copyleft or watermark obligation;
 their notices are preserved in the respective upstream projects. This list is
-non-exhaustive — see `danvas/frontend/package.json` and its lockfile for the
-full dependency set and each package's own licence for authoritative terms.
+non-exhaustive — see `danvas/frontend/package.json` and its lockfile for the full
+dependency set and each package's own licence for authoritative terms. (To
+regenerate a complete, audited notice file, run a tool such as `license-checker`
+over `danvas/frontend/node_modules`.)
+
+## History
+
+Earlier danvas releases bundled [tldraw](https://tldraw.dev) under the proprietary
+"tldraw licence" (which required a production licence key and a "made with tldraw"
+watermark on the free tier). The frontend has since been rewritten to be
+tldraw-free; that obligation no longer applies. The tldraw-based frontend is
+preserved separately in the private `danvas-tldraw` repository.

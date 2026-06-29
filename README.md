@@ -560,7 +560,7 @@ pair with `grabbable=False` for a free-floating widget.
 
 # Canvas shapes
 
-Beyond panels you can place **managed tldraw shapes** — vector shapes, freehand
+Beyond panels you can place **managed canvas shapes** — vector shapes, freehand
 strokes, text, sticky notes, lines, frames, highlighter marks. These are
 Python-owned: they survive reload, update live, and are excluded from the
 free-form drawing sync.
@@ -645,7 +645,7 @@ Pass a `view` dict to `serve` (all keys optional), and change it live with
 | `x`, `y`, `zoom` | initial camera (centre on `(x, y)` at `zoom`; 1.0 = 100%) |
 | `locked` | `True` freezes pan/zoom (kiosk) |
 | `min_zoom`, `max_zoom` | clamp zoom range |
-| `ui` | `False` hides tldraw chrome **and** the Inspector button |
+| `ui` | `False` hides the editor chrome **and** the Inspector button |
 | `grid` | `True` shows the background grid |
 | `read_only` | `True` blocks freehand drawing |
 | `navigation` | `'free'` (default), `'scroll_y'`, `'scroll_x'`, or a `(mode, zoom)` tuple |
@@ -731,7 +731,7 @@ budget) on the fly.
 | `ui_graveyard` | auto¹ | toolbar button to restore deleted panels |
 | `desktop` | auto² | open a native window (pywebview) instead of the browser |
 | `window_title` / `window_size` | `"danvas"` / `(1200, 800)` | native-window caption / size |
-| `tldraw_license_key` | `$TLDRAW_LICENSE_KEY` | your tldraw production key (see [Licence](#licence)) |
+| `tldraw_license_key` | — | **deprecated/ignored** (the frontend is tldraw-free; kept for backwards compatibility) |
 | `debug` | `False` | log every WebSocket frame to the console |
 
 ¹ on by default only for a private local bind (loopback, no tunnel). ² on by
@@ -935,16 +935,16 @@ import with `include=[...]`, skip a build-breaking dep with `exclude=[...]`.
 # How it works
 
 danvas is two halves joined by **one WebSocket**: your Python process, and a
-pre-built browser frontend ([tldraw](https://tldraw.dev) + React) it serves. You
-never touch the frontend — it ships compiled in the package, no Node or build
-step. The backend is ~660 kB of pure Python over four dependencies (FastAPI,
-uvicorn, websockets, orjson); the browser page loads ~0.5 MB gzipped, with Plotly
-fetched on demand only when you add a chart.
+pre-built browser frontend (a custom [Preact](https://preactjs.com) canvas, with
+React panels) it serves. You never touch the frontend — it ships compiled in the
+package, no Node or build step. The backend is ~660 kB of pure Python over four
+dependencies (FastAPI, uvicorn, websockets, orjson); the browser page loads
+~0.1 MB gzipped, with Plotly fetched on demand only when you add a chart.
 
 **The model: Python owns state, the browser renders it.** Each panel is a Python
 *component* with a unique id. The **bridge** turns your calls into small JSON
 frames — `register` (a panel appeared), `update` (its state changed), `remove` —
-and ships them to every browser, where each component is a tldraw *shape*:
+and ships them to every browser, where each component is a canvas *panel*:
 built-ins are native React widgets, `custom` is a sandboxed iframe, `react` is
 your JSX compiled in-browser (Sucrase) and mounted as a real React subtree. User
 actions travel back as `input` / `layout` frames.
@@ -1084,18 +1084,16 @@ available on request via daniel.chahine004@gmail.com.
 
 **Scope.** The AGPL covers danvas's own code. The pre-built frontend bundle in
 `danvas/frontend/dist/` is compiled from third-party packages under *their*
-licences — most notably [tldraw](https://tldraw.dev), under the **proprietary
-tldraw licence** (not AGPL). See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+licences — all **permissive (MIT)**, built on [Preact](https://preactjs.com)
+(the [Inter](https://rsms.me/inter/) typeface is under the SIL Open Font License).
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-**You need your own tldraw licence to run danvas in production.** tldraw is free in
-development (no key) but *"will not work in production without a valid license
-key."* Get a free **hobby** key (non-commercial, keeps the "made with tldraw"
-watermark) or a paid **commercial** key from
-[tldraw](https://tldraw.dev/community/license), then hand it to danvas:
+**No frontend licence key is required.** The frontend is fully open and permissive
+— there is no proprietary component, no production licence key, and no watermark.
+Run danvas in development or production freely; only danvas's own AGPL terms apply
+to danvas's code.
 
-```python
-canvas.serve(tldraw_license_key="tldraw-...")   # or: export TLDRAW_LICENSE_KEY=tldraw-...
-```
-
-A danvas licence (AGPL or commercial) grants rights to danvas only — not to
-tldraw. Whoever runs a danvas app in production obtains their own tldraw licence.
+> Older releases bundled [tldraw](https://tldraw.dev) (proprietary licence, with a
+> production key and "made with tldraw" watermark). The frontend has been rewritten
+> to be tldraw-free, so that requirement no longer applies. `serve(tldraw_license_key=…)`
+> is accepted but ignored (kept for backwards compatibility).

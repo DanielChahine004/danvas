@@ -1,14 +1,12 @@
 // Emit precompressed .gz + .br siblings for every compressible dist asset, so
-// the Python server (pycanvas/server.py: _FrontendStatic) can serve the
+// the Python server (danvas/server.py: _FrontendStatic) can serve the
 // already-compressed bytes with Content-Encoding instead of shipping the raw
-// ~7 MB bundle uncompressed. Runs as part of `npm run build`, so the variants
-// can never drift from the assets they mirror.
+// bundle uncompressed. Runs as part of `npm run build`, so the variants can
+// never drift from the assets they mirror.
 //
 // Both encodings are kept on purpose: browsers only advertise `br` over HTTPS
 // (the tunnel), but send `gzip` over plain HTTP (the local/LAN bind, the common
-// case) — so gzip covers local serving and brotli wins on the tunnel, where
-// bandwidth matters most. Compression is build-time only; serving a .gz/.br
-// file at runtime needs no Python dependency.
+// case) — so gzip covers local serving and brotli wins on the tunnel.
 import { readdirSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";

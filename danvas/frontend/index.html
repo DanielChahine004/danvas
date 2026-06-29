@@ -2,13 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>danvas</title>
     <style>
       /* Instant pre-JS splash: rendered the moment the HTML parses, so the page
-         isn't blank white while the app bundle downloads (noticeable on phones /
-         tunnels). It lives inside #root, so React's createRoot().render() clears
-         it automatically when the app mounts — no teardown code needed. */
+         isn't blank white while the app bundle downloads. It lives inside #root,
+         so Preact's render() clears it automatically when the app mounts. */
       html, body { margin: 0; height: 100%; }
       #pc-splash {
         position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -32,6 +33,6 @@
         <div class="lbl">Loading canvas…</div>
       </div>
     </div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-# The built frontend bundle is the app itself (tldraw + the panels), served from
+# The built frontend bundle is the app itself (the Preact canvas + the panels), served from
 # danvas/frontend/dist. It is data, not Python, so it must be declared here (and
 # via [tool.setuptools.package-data] in pyproject.toml) or it never lands in the
 # wheel/sdist and a pip-installed canvas serves a blank page.

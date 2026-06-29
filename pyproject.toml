@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["danvas*"]
 
-# The built frontend (danvas/frontend/dist: the JS/CSS/font bundle tldraw and
-# the panels are served from) is data, not Python, so packages.find won't pick
-# it up. Without this it's dropped from the wheel and a pip-installed canvas
-# serves a blank page (index.html with 404s for /assets/*). Ship the whole dist.
+# The built frontend (danvas/frontend/dist: the JS/CSS/font bundle the Preact
+# canvas and the panels are served from) is data, not Python, so packages.find
+# won't pick it up. Without this it's dropped from the wheel and a pip-installed
+# canvas serves a blank page (index.html with 404s for /assets/*). Ship the whole dist.
 [tool.setuptools.package-data]
 # The built frontend bundle, plus the typing marker (PEP 561) and the .pyi stub
 # so type checkers pick up danvas's types when it's pip-installed.
@@ -25,9 +25,9 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "AGPL-3.0-or-later"
 # danvas's own code is AGPL; the bundled frontend (danvas/frontend/dist) is
-# third-party code under its own licences — see THIRD_PARTY_LICENSES.md. Both
-# files ship in the wheel + sdist so the tldraw/watermark obligation travels
-# with the package.
+# third-party code under its own (permissive, MIT) licences — see
+# THIRD_PARTY_LICENSES.md. Both files ship in the wheel + sdist so those notices
+# travel with the package.
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Daniel Chahine", email = "daniel.chahine004@gmail.com" }]
 dependencies = [

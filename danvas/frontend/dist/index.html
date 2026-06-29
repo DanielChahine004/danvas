@@ -2,13 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>danvas</title>
     <style>
       /* Instant pre-JS splash: rendered the moment the HTML parses, so the page
-         isn't blank white while the app bundle downloads (noticeable on phones /
-         tunnels). It lives inside #root, so React's createRoot().render() clears
-         it automatically when the app mounts — no teardown code needed. */
+         isn't blank white while the app bundle downloads. It lives inside #root,
+         so Preact's render() clears it automatically when the app mounts. */
       html, body { margin: 0; height: 100%; }
       #pc-splash {
         position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -24,8 +25,8 @@
       #pc-splash .lbl { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
       @keyframes pc-spin { to { transform: rotate(360deg); } }
     </style>
-    <script type="module" crossorigin src="./assets/index-BYBz0V8o.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DxqOjm4D.css">
+    <script type="module" crossorigin src="./assets/index-D_AMcGS4.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Cb9ohtbo.css">
   </head>
   <body>
     <div id="root">

@@ -1,4 +1,11 @@
-/* Full-viewport root so the tldraw canvas fills the page. Lives here (imported
-   from main.jsx) rather than as an inline <style> in index.html so the
-   production build doesn't trip vite's html-inline-css proxy. */
+/* Full-viewport root so the canvas fills the page. Lives here (imported from
+   main.tsx) rather than as an inline <style> in index.html so the production
+   build doesn't trip vite's html-inline-css proxy. */
 html, body, #root { height: 100%; margin: 0; padding: 0; }
+
+/* The canvas owns its own scrolling; the page never scrolls or rubber-bands. */
+html, body { overflow: hidden; overscroll-behavior: none; }
+
+/* Bundled UI font (self-hosted Inter) — the chrome + anything that inherits picks
+   it up; canvas text uses DRAW_FONT (palette.ts) which prefers the same. */
+body { font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif; }

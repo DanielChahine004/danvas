@@ -1,10 +1,12 @@
 /* danvas panel theming.
  *
- * Every custom component's inline styles reference these CSS variables instead
- * of hardcoded colors, so panels follow tldraw's own light/dark theme with no
- * per-component JavaScript. tldraw puts `tl-theme__dark` on its container in
- * dark mode (toggle it from tldraw's menu -> Preferences -> Dark mode); the
- * dark block below overrides the variables whenever that class is present.
+ * Every panel's inline styles reference these CSS variables instead of
+ * hardcoded colors, so panels follow the canvas light/dark theme with no
+ * per-component JavaScript. The new engine puts `tl-theme__dark` on the panel
+ * host container in dark mode; the dark block below overrides the variables
+ * whenever that class is present. The class names are kept from the tldraw
+ * build (.tl-container / .tl-theme__dark) so the ported panel CSS resolves
+ * unchanged.
  *
  * Defaults live on `.tl-container` (always matches) and the dark block has
  * equal specificity but comes later, so it wins when dark mode is on. */
@@ -42,11 +44,11 @@
 .pc-card:hover .pc-drag-handle { opacity: 0.5; }
 .pc-drag-handle:hover { opacity: 1; }
 
-/* When a non-select tldraw tool is active, panels must be fully pointer-
- * transparent so draw/arrow/text strokes reach tldraw's SVG canvas beneath.
- * CSS `pointer-events:none` on a parent doesn't cascade into SVG elements
- * (they default to `visiblePainted`, not `inherit`), so `!important` on `*`
- * is the only reliable way to silence SVG children (e.g. table spark charts). */
+/* When a non-select tool is active, panels must be fully pointer-transparent so
+ * draw/arrow/text strokes reach the drawing canvas beneath. CSS
+ * `pointer-events:none` on a parent doesn't cascade into SVG elements (they
+ * default to `visiblePainted`, not `inherit`), so `!important` on `*` is the
+ * only reliable way to silence SVG children (e.g. table spark charts). */
 .pc-draw-passthrough,
 .pc-draw-passthrough * {
   pointer-events: none !important;
@@ -54,12 +56,8 @@
 
 /* Hand (grab) tool, used as the default on touch kiosks: like pc-draw-passthrough
  * the host goes pointer-transparent so a one-finger drag on empty panel space
- * falls through to the stable panel card and tldraw pans reliably (a press on a
- * panel child gets pointercancel'd when the panel re-renders mid-drag, stuttering
- * the pan). Unlike drawing, controls stay usable — they opt back in below. The
- * !important overrides the host's inline pointer-events:all; only these semantic
- * controls re-enable, so a bare-div custom control needs a role= or one of these
- * tags or it's treated as empty space and pans. */
+ * falls through to the stable panel card and the camera pans reliably. Unlike
+ * drawing, controls stay usable — they opt back in below. */
 .pc-hand {
   pointer-events: none !important;
 }
@@ -78,10 +76,10 @@
   pointer-events: auto !important;
 }
 
-/* Mobile: tldraw sets touch-action:none on its canvas layer to own pinch/pan,
- * which also suppresses the browser's native cursor-positioning for text inputs.
- * Overriding here gives the browser back control inside panels so tapping to
- * move the cursor and autocorrect work normally on iOS/Android. */
+/* Mobile: the canvas layer sets touch-action:none to own pinch/pan, which also
+ * suppresses the browser's native cursor-positioning for text inputs. Overriding
+ * here gives the browser back control inside panels so tapping to move the cursor
+ * and autocorrect work normally on iOS/Android. */
 .pc-card input,
 .pc-card textarea,
 .pc-card [contenteditable] {
@@ -108,4 +106,95 @@
   --pc-input-bg: #1e1e22;
   --pc-shadow: rgba(0, 0, 0, 0.45);
   --pc-video-bg: #000000;
+}
+
+/* Chrome theme vars (toolbar / style panel / overlay buttons). These sit OUTSIDE
+   .tl-container so they can't use --pc-*; instead the App root carries `.pc-ui`
+   (dark defaults) plus `.pc-ui-light` in light mode, and the chrome inline styles
+   + <style> blocks reference these via var(). */
+.pc-ui {
+  --ui-bg: rgba(24, 24, 27, 0.94);
+  --ui-fg: #e8edf3;
+  --ui-fg-dim: #cbd5e1;
+  --ui-muted: #868f9b;
+  --ui-border: rgba(255, 255, 255, 0.13);
+  --ui-hover: rgba(255, 255, 255, 0.09);
+  --ui-btn: rgba(255, 255, 255, 0.07);
+  --ui-divider: rgba(255, 255, 255, 0.12);
+  --ui-label: rgba(255, 255, 255, 0.42);
+  --ui-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  --ui-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --ui-accent: #2563eb;
+  --ui-accent-grad: linear-gradient(180deg, #3b82f6, #2563eb);
+  --ui-accent-fg: #ffffff;
+  --ui-track: rgba(255, 255, 255, 0.16);
+  --ui-danger-bg: rgba(127, 29, 29, 0.92);
+  --ui-danger-fg: #fecaca;
+  --ui-danger-border: rgba(239, 68, 68, 0.5);
+}
+.pc-ui-light {
+  --ui-bg: rgba(252, 252, 253, 0.95);
+  --ui-fg: #1e293b;
+  --ui-fg-dim: #475569;
+  --ui-muted: #8a93a3;
+  --ui-border: rgba(0, 0, 0, 0.12);
+  --ui-hover: rgba(0, 0, 0, 0.06);
+  --ui-btn: rgba(0, 0, 0, 0.05);
+  --ui-divider: rgba(0, 0, 0, 0.1);
+  --ui-label: rgba(0, 0, 0, 0.4);
+  --ui-shadow: 0 6px 22px rgba(0, 0, 0, 0.17);
+  --ui-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.14);
+  --ui-track: rgba(0, 0, 0, 0.13);
+  --ui-danger-bg: rgba(254, 226, 226, 0.95);
+  --ui-danger-fg: #b91c1c;
+  --ui-danger-border: rgba(220, 38, 38, 0.4);
+}
+
+/* Kill the mobile tap-flash + the focus outline box that shows when a chrome
+   button is tapped (the user doesn't want it); keep a real focus ring only for
+   keyboard navigation (:focus-visible). */
+.pc-ui, .pc-ui * { -webkit-tap-highlight-color: transparent; }
+.pc-ui button { outline: none; }
+.pc-ui button:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+
+/* Floating bottom-left chrome (Inspector / Graveyard). Positioned via classes
+   (not inline) so a mobile media query can lift them clear of the toolbar. */
+.pc-chrome-inspector { bottom: 54px; left: 8px; }
+.pc-chrome-graveyard { bottom: 90px; left: 8px; }
+/* the graveyard list sits ABOVE its toggle button so it never covers it */
+.pc-graveyard-panel { bottom: 132px; }
+/* floating style-panel toggle: phones only (desktop shows the panel always). It
+   floats ABOVE the toolbar's right end so it never overlaps the toolbar. */
+.pc-style-toggle { display: none; right: 10px; bottom: calc(env(safe-area-inset-bottom, 0px) + 80px); }
+@media (max-width: 680px) {
+  .pc-chrome-inspector { bottom: calc(env(safe-area-inset-bottom, 0px) + 72px); }
+  .pc-chrome-graveyard { bottom: calc(env(safe-area-inset-bottom, 0px) + 106px); }
+  .pc-style-toggle { display: flex; }
+  /* the delete bin + duplicate move next to the floating style toggle on phones */
+  .pc-panel-delete {
+    top: auto !important;
+    left: auto !important;
+    right: 64px !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 80px) !important;
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 12px !important;
+  }
+  .pc-panel-duplicate {
+    top: auto !important;
+    left: auto !important;
+    right: 118px !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 80px) !important;
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 12px !important;
+  }
+  .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); }
+  /* tldraw-style: the panel floats bottom-right, ABOVE the toggle + toolbar */
+  [data-pc-stylepanel] {
+    top: auto !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 138px) !important;
+    right: 8px !important;
+    max-height: calc(100dvh - 200px) !important;
+  }
 }

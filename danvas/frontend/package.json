@@ -1,24 +1,29 @@
 {
-  "name": "danvas-frontend",
+  "name": "my-danvas-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/precompress.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "monaco-editor": "^0.52.2",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@use-gesture/vanilla": "^10.3.1",
+    "alien-signals": "^1.0.13",
+    "fractional-indexing": "^3.2.0",
+    "modern-screenshot": "^4.6.0",
+    "perfect-freehand": "^1.2.2",
     "plotly.js-basic-dist-min": "^3.6.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "sucrase": "^3.35.1",
-    "tldraw": "^3.4.0"
+    "preact": "^10.26.4",
+    "rbush": "^4.0.1",
+    "sucrase": "^3.35.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
+    "@types/rbush": "^4.0.0",
+    "typescript": "^5.7.3",
     "vite": "^5.4.0"
   }
 }
