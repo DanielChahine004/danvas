@@ -114,7 +114,7 @@ class React(_EventRouter, BaseComponent):
         # shape props so the browser can instantiate it without a separate fetch.
         # For large modules (>1 MB) prefer hosting the .wasm file and fetching
         # from a URL inside the JSX instead — base64 adds ~33% overhead and the
-        # full string rides in the tldraw store on every reconnect.
+        # full string rides in the record store on every reconnect.
         import base64 as _base64
         if wasm is not None and wasm_path is not None:
             raise ValueError("pass either wasm= (bytes) or wasm_path=, not both")
@@ -433,7 +433,7 @@ class React(_EventRouter, BaseComponent):
         fc = _theme.accent_hex(value) if value is not None else None
         self._frame_color = fc
         # post_style: fast React-state path (same as push/post) so the theme dict
-        # updates immediately without relying on tldraw store reconciliation.
+        # updates immediately without relying on store reconciliation.
         self._send_update({"post_style": th})
         # Also update _data so reconnecting clients get the right _th from the store.
         React.update(self, _th=th)

@@ -2,7 +2,7 @@
 
 The canonical contract lives in :mod:`danvas._protocol`, and the two sides are
 wired back to it: ``bridge.py`` imports the binary codes, ``_flags.py`` imports
-the lock wire keys, and ``bridge.js`` imports the ``BIN_*`` codes from the
+the lock wire keys, and ``bridge.ts`` imports the ``BIN_*`` codes from the
 generated module. These tests assert those agree with the canonical module, that
 the committed generated JS is not stale, and that the JSON ``type`` tag lists
 match the dispatch tables that actually handle them — so a tag added on one side
@@ -23,7 +23,7 @@ from danvas import _protocol
 from danvas._flags import LAYOUT_FLAGS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BRIDGE_JS = os.path.join(_ROOT, "danvas", "frontend", "src", "bridge.js")
+_BRIDGE_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "bridge.ts")
 _GEN_JS = os.path.join(_ROOT, "danvas", "frontend", "src",
                        "protocol.generated.js")
 _GEN_SCRIPT = os.path.join(_ROOT, "scripts", "gen_protocol.py")
@@ -47,49 +47,44 @@ def test_flag_wire_keys_match_protocol():
 
 
 # -- JS side agrees with the canonical module --------------------------------
-def test_bridge_js_imports_binary_codes_from_generated():
-    # bridge.js no longer hardcodes the codes — it imports them from the
-    # generated module (whose values are guaranteed by the staleness test +
-    # the Python-side check). Assert the import is present and that nothing
-    # re-declares them as literals (which would silently shadow the import).
-    src = _read(_BRIDGE_JS)
+def test_bridge_ts_imports_binary_codes_from_generated():
+    # bridge.ts doesn't hardcode the codes — it imports them from the generated
+    # module (whose values are guaranteed by the staleness test + the Python-side
+    # check). Assert the import is present and that nothing re-declares them as
+    # literals (which would silently shadow the import).
+    src = _read(_BRIDGE_TS)
     m = re.search(r"import\s*\{([^}]*)\}\s*from\s*'\./protocol\.generated\.js'",
                   src)
-    assert m, "bridge.js must import the BIN_* codes from ./protocol.generated.js"
+    assert m, "bridge.ts must import the BIN_* codes from ./protocol.generated.js"
     imported = {name.strip() for name in m.group(1).split(",")}
     for name in _protocol.BINARY_FRAME_CODES:
         assert f"BIN_{name}" in imported, (
-            f"bridge.js does not import BIN_{name} from the generated module")
+            f"bridge.ts does not import BIN_{name} from the generated module")
     assert not re.search(r"const BIN_\w+\s*=\s*\d+", src), (
-        "bridge.js still hardcodes a BIN_* code — it should import them")
+        "bridge.ts still hardcodes a BIN_* code — it should import them")
 
 
-def test_bridge_js_uses_the_flag_wire_keys():
-    # The registerComponent destructure is where the frontend names the lock
-    # wire keys; every canonical wire key must appear there, so a rename on
+def test_bridge_ts_names_the_flag_wire_keys():
+    # registerComponent reads the lock wire keys off the message (msg.movable,
+    # msg.resizable, …); every canonical wire key must appear, so a rename on
     # either side trips this.
-    src = _read(_BRIDGE_JS)
-    # Span to the destructure's closing `})` — non-greedy so the inner `{}` of
-    # `props = {}` doesn't end the match early.
-    m = re.search(r"function registerComponent\(\{(.*?)\}\s*\)", src, re.DOTALL)
-    assert m, "couldn't find registerComponent destructure in bridge.js"
-    params = {p.strip().split("=")[0].strip() for p in m.group(1).split(",")}
+    src = _read(_BRIDGE_TS)
     for wire in _protocol.FLAG_WIRE_KEYS.values():
-        assert wire in params, (
-            f"bridge.js registerComponent is missing wire key {wire!r}")
+        assert f"msg.{wire}" in src, (
+            f"bridge.ts never reads the lock wire key msg.{wire}")
 
 
 # -- JSON type tags match the dispatch tables that handle them ---------------
-def test_message_types_out_match_bridge_js_dispatch():
-    # Outbound tags (server -> browser) are exactly what bridge.js's handle()
-    # dispatches on. Scope to that function so an unrelated `msg.type === …`
-    # elsewhere can't pollute the set, then compare to the canonical list.
-    src = _read(_BRIDGE_JS)
-    m = re.search(r"function handle\(msg\)\s*\{(.*?)\n\}", src, re.DOTALL)
-    assert m, "couldn't find the handle(msg) dispatch in bridge.js"
-    handled = set(re.findall(r"msg\.type === '(\w+)'", m.group(1)))
+def test_message_types_out_match_bridge_ts_dispatch():
+    # Outbound tags (server -> browser) are exactly what bridge.ts's handle()
+    # switch dispatches on. Scope to that function, collect its `case '…':`
+    # labels, and compare to the canonical list.
+    src = _read(_BRIDGE_TS)
+    m = re.search(r"function handle\(msg[^)]*\)[^{]*\{(.*?)\n\}", src, re.DOTALL)
+    assert m, "couldn't find the handle(msg) dispatch in bridge.ts"
+    handled = set(re.findall(r"case '(\w+)':", m.group(1)))
     assert handled == set(_protocol.MESSAGE_TYPES_OUT), (
-        "MESSAGE_TYPES_OUT disagrees with bridge.js handle(); "
+        "MESSAGE_TYPES_OUT disagrees with bridge.ts handle(); "
         f"only in JS: {handled - set(_protocol.MESSAGE_TYPES_OUT)}, "
         f"only in _protocol: {set(_protocol.MESSAGE_TYPES_OUT) - handled}")
 

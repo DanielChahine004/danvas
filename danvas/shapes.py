@@ -1,7 +1,7 @@
-"""Managed tldraw shapes and ephemeral drawing observation.
+"""Managed canvas shapes and ephemeral drawing observation.
 
 Python-created shapes sit alongside panels on the canvas but are simpler: no
-iframe, no handlers, just geometry + style on a native tldraw shape.  Seven
+iframe, no handlers, just geometry + style on a native canvas shape.  Seven
 shape types are supported:
 
     box  = canvas.geo(x=100, y=100, w=200, h=150, geo='rectangle')
@@ -25,9 +25,9 @@ User-drawn (ephemeral) shapes are exposed via ``canvas.drawings`` and
 # ---------------------------------------------------------------------------
 
 class BaseShape:
-    """Base for Python-managed tldraw shapes."""
+    """Base for Python-managed canvas shapes."""
 
-    _type: str = ""  # tldraw shape type string (e.g. 'geo', 'text')
+    _type: str = ""  # shape type string (e.g. 'geo', 'text')
 
     def __init__(self, shape_id, x, y, props, name=None,
                  rotation=0.0, opacity=1.0):
@@ -70,7 +70,7 @@ class BaseShape:
         """Change any shape property live.
 
         Top-level keys ``x``, ``y``, ``rotation``, ``opacity`` move or tilt
-        the shape; all others are merged into the tldraw shape's props dict.
+        the shape; all others are merged into the shape's props dict.
         """
         _TOP = {"x", "y", "rotation", "opacity"}
         top = {k: kw.pop(k) for k in list(kw) if k in _TOP}
@@ -217,7 +217,7 @@ class Note(BaseShape):
 
 
 def _segments_from_points(raw):
-    """Build a normalised tldraw segment list from a flat point list or existing segments.
+    """Build a normalised segment list from a flat point list or existing segments.
 
     Accepts ``[(x, y), …]``, ``[(x, y, pressure), …]``, or an existing list of
     ``{type, points}`` segment dicts.  Returns ``(origin_x, origin_y, segments)``
@@ -264,7 +264,7 @@ class Draw(BaseShape):
     """A freehand drawn stroke.
 
     ``points`` is a list of ``(x, y)`` or ``(x, y, pressure)`` tuples, or a
-    list of tldraw segment dicts ``{type, points}``.  The bounding-box origin
+    list of segment dicts ``{type, points}``.  The bounding-box origin
     becomes the shape's ``x``/``y``; all points are stored relative to it.
 
     Style kwargs: color, fill, dash, size.
@@ -303,9 +303,9 @@ class Highlight(BaseShape):
 
 
 def _line_points(pts):
-    """Convert ``[(x, y), …]`` to tldraw's line ``points`` dict.
+    """Convert ``[(x, y), …]`` to the line ``points`` dict.
 
-    Points are stored relative to the first point (tldraw lines are placed at
+    Points are stored relative to the first point (lines are placed at
     their first control point).  Sequential fractional-style keys (``a1``,
     ``a2``, …) are used for ordering.
     """
@@ -331,7 +331,7 @@ class Line(BaseShape):
     ``points`` is a list of ``(x, y)`` tuples.  The first point becomes the
     shape's ``x``/``y``; all subsequent points are stored relative to it.
 
-    ``spline='cubic'`` makes tldraw curve smoothly through the control points.
+    ``spline='cubic'`` makes the line curve smoothly through the control points.
     Style kwargs: color, dash, size.
     """
 
@@ -355,7 +355,7 @@ class Frame(BaseShape):
 
     def __init__(self, shape_id, x, y, w=400, h=300, label="", name=None,
                  rotation=0.0, opacity=1.0, **props):
-        # tldraw stores the frame's display title in a prop called 'name'.
+        # The frame's display title is stored in a prop called 'name'.
         props = {"w": float(w), "h": float(h), "name": label, **props}
         super().__init__(shape_id, x, y, props, name=name,
                          rotation=rotation, opacity=opacity)
@@ -393,12 +393,12 @@ class DrawingShape:
     """A user-drawn shape on the canvas (not Python-managed).
 
     Instances are delivered to ``@canvas.on_draw`` callbacks and are also
-    available via ``canvas.drawings[tldraw_id]``.  Calling :meth:`update` or
-    :meth:`remove` mutates the ephemeral shape by broadcasting a tldraw draw
+    available via ``canvas.drawings[shape_id]``.  Calling :meth:`update` or
+    :meth:`remove` mutates the ephemeral shape by broadcasting a draw
     diff to every connected browser and updating the server's shadow store.
 
-    ``type`` is the tldraw shape type string (``'geo'``, ``'draw'``, etc.);
-    ``props`` is the raw tldraw props dict.  ``id`` is the tldraw shape id
+    ``type`` is the shape type string (``'geo'``, ``'draw'``, etc.);
+    ``props`` is the raw props dict.  ``id`` is the shape id
     (``'shape:…'`` format) — use it as the key in ``canvas.drawings``.
     """
 
@@ -419,17 +419,17 @@ class DrawingShape:
 
     @property
     def text(self):
-        """Best-effort plain text (extracts from tldraw richText when present)."""
+        """Best-effort plain text (extracts from ProseMirror richText when present)."""
         rt = self.props.get("richText") or self.props.get("text", "")
         if isinstance(rt, dict):
             return _extract_rich_text(rt)
         return str(rt)
 
     def update(self, **kw):
-        """Mutate this ephemeral shape by broadcasting a tldraw draw diff.
+        """Mutate this ephemeral shape by broadcasting a draw diff.
 
         Top-level keys (x, y, rotation, opacity) move or tilt the shape; all
-        others are merged into the shape's tldraw props dict.
+        others are merged into the shape's props dict.
         """
         if not self._bridge:
             return self
@@ -468,7 +468,7 @@ class DrawingShape:
 
 
 def _extract_rich_text(rt):
-    """Best-effort plain-text extraction from a tldraw ProseMirror richText doc."""
+    """Best-effort plain-text extraction from a ProseMirror richText doc."""
     if not isinstance(rt, dict):
         return str(rt)
     texts = []

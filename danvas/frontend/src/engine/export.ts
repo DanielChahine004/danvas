@@ -1,5 +1,5 @@
 // Export: render panels to a PNG (canvas.screenshot() / get_image) and the
-// snapshot get/put hooks. This replaces tldraw's editor.toImage. The image is a
+// snapshot get/put hooks. This is the engine's image export. The image is a
 // *scene* export — shapes at page coords, framed to their bounds, at z=1 —
 // independent of any viewer's camera, exactly like the old build.
 //

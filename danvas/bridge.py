@@ -204,17 +204,13 @@ class Bridge:
         # this, a high-rate feed (e.g. 30fps video) overlaps sends and crashes.
         self._send_locks = {}  # ws -> asyncio.Lock
         self._loop = None
-        # tldraw production license key, injected into the page HTML by the
-        # server (set from serve(tldraw_license_key=) / $TLDRAW_LICENSE_KEY).
-        # None → tldraw runs in its development mode (no production key).
-        self._tldraw_license_key = None
         self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
         self._loaded_doc = None  # last full document loaded, replayed on connect
-        # Live free-form drawings (tldraw records the *user* draws, not danvas
+        # Live free-form drawings (the records a *user* draws, not danvas
         # panels) keyed by record id. Browsers relay their changes as `draw`
         # diffs; we accumulate the canonical set here, fan it out to the other
         # browsers, and replay it to anyone who connects later.
-        self._drawings = {}  # record id -> tldraw record
+        self._drawings = {}  # record id -> drawing record
         # Reflow requests from col/row.refit() — keyed by container id so each
         # column's latest reflow supersedes its previous one. Replayed on connect
         # so auto-height panels stay correctly stacked for every joining client.
@@ -234,7 +230,7 @@ class Bridge:
         # the event-loop thread (draw) or a dispatch thread (layout), so the
         # listener must be thread-safe.
         self._on_mutation = None
-        # Graveyard: panels the user deleted in tldraw (but Python still owns).
+        # Graveyard: panels the user deleted in the canvas (but Python still owns).
         # Keyed by component id so lookup is O(1). When uiGraveyard is enabled
         # in serve(), the frontend shows a toolbar button that toggles a floating
         # graveyard panel; restore requests arrive as {type:"restore"} messages.
@@ -275,7 +271,7 @@ class Bridge:
         self._reload = False
         # Optional viewport/navigation config (initial camera, zoom limits, pan/
         # zoom lock, UI chrome visibility). Sent to each browser in `welcome` and
-        # applied to tldraw on connect. ``None`` leaves every default in place.
+        # applied to the canvas on connect. ``None`` leaves every default in place.
         self._view = None
         # Per-client view state: viewer_id -> view_dict. When set, overrides the
         # global _view for that specific client (merged with global defaults).
@@ -585,7 +581,7 @@ class Bridge:
         ``front``/``back`` also move the component to the end/start of the replay
         registry, so a client that connects or reloads rebuilds the panels in the
         new stacking order (later-registered shapes sit on top). ``forward`` /
-        ``backward`` are a live one-step nudge only: tldraw's overlap-aware step
+        ``backward`` are a live one-step nudge only: the canvas's overlap-aware step
         has no faithful registry equivalent, so it isn't persisted across reload.
         """
         comp = self._components.get(component_id)
@@ -612,7 +608,7 @@ class Bridge:
         self.broadcast({"type": "remove", "id": arrow_id})
 
     def add_shape(self, shape):
-        """Store a managed tldraw shape and broadcast its register message."""
+        """Store a managed shape and broadcast its register message."""
         self._shapes[shape.id] = shape
         shape._bridge = self
         self.broadcast(shape.register_message())
@@ -851,7 +847,7 @@ class Bridge:
                         ws, _dumps({"type": "update", "id": comp.id,
                                     "payload": {"operable": False}})
                     )
-            # Replay managed tldraw shapes (geo, text, note, draw, line, frame,
+            # Replay managed shapes (geo, text, note, draw, line, frame,
             # highlight) before arrows, so an arrow may bind to a shape as well as
             # a panel — both its endpoints now exist by the time it registers.
             for shape in self._shapes.values():
@@ -1742,7 +1738,7 @@ class Bridge:
         Precedence is global (:attr:`_view`) < per-role < per-client, so a
         client-specific override beats a role default beats the global view.
         Returns ``None`` when no layer is set (the welcome frame treats a missing
-        view as "leave tldraw's defaults").
+        view as "leave the canvas's defaults").
         """
         merged, have = {}, False
         for layer in (self._view, self._view_per_role.get(role),
@@ -1928,11 +1924,11 @@ class Bridge:
                 self._conflate_active.discard(key)
 
     def _apply_draw(self, diff):
-        """Fold a tldraw store diff into the canonical free-form record set.
+        """Fold a record-store diff into the canonical free-form record set.
 
         ``added``/``updated`` carry full records (``updated`` as ``[from, to]``
         pairs, of which we keep the new value); ``removed`` carries the dropped
-        records by id. This mirrors :meth:`tldraw Store.applyDiff` on the wire so
+        records by id. This mirrors the frontend's store applyDiff on the wire so
         the server's cache stays in step with every browser.
         """
         for rid, rec in (diff.get("added") or {}).items():
@@ -1961,7 +1957,7 @@ class Bridge:
                 traceback.print_exc()
 
     def _panel_shape_ids(self):
-        """tldraw shape ids of every danvas-managed entity (panels, arrows, shapes).
+        """Shape ids of every danvas-managed entity (panels, arrows, shapes).
 
         The frontend keys all shapes as ``shape:<id>``; these are the ones we
         own and want to exclude from a saved canvas, leaving only the user's
@@ -1998,7 +1994,7 @@ class Bridge:
     def request_snapshot(self, timeout=5.0):
         """Ask a connected browser for the user's free-form drawings.
 
-        Returns tldraw "content" (shapes/bindings/assets) for everything on the
+        Returns the canvas "content" (shapes/bindings/assets) for everything on the
         canvas *except* the danvas panels and connector arrows — those are
         recreated from Python code, not persisted. The browser is the source of
         truth for free-form drawings, so this round-trips over the socket and

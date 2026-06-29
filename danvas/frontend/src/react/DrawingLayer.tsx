@@ -240,7 +240,7 @@ function DrawingShape({ rec }: { rec: DrawingRecord }) {
     }
     case 'text': {
       // HTML div in a foreignObject so the text wraps within the box (resizable,
-      // tldraw-style) and aligns 1:1 with the inline editor's textarea. A numeric
+      // whiteboard-style) and aligns 1:1 with the inline editor's textarea. A numeric
       // props.fontSize (set by a vertical resize) overrides the s/m/l preset.
       const tfs = props.fontSize ?? fontSz(props.size)
       const tw = w || 160
@@ -355,7 +355,7 @@ function LineShape({ rec, editing, stroke, sw, dashArray, opacity }: { rec: Draw
 }
 
 // True if an arrowhead prop means "show a head". Connector arrows carry the
-// tldraw string props (arrowheadStart/End: 'none'|'arrow'|…) and default to an
+// string props (arrowheadStart/End: 'none'|'arrow'|…) and default to an
 // END head; user-set toggles (arrowStart/arrowEnd booleans) override.
 const showHead = (str: any, bool: any, dflt: boolean) => (str !== undefined ? str !== 'none' : bool !== undefined ? !!bool : dflt)
 

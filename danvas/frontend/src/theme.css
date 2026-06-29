@@ -4,7 +4,7 @@
  * hardcoded colors, so panels follow the canvas light/dark theme with no
  * per-component JavaScript. The new engine puts `tl-theme__dark` on the panel
  * host container in dark mode; the dark block below overrides the variables
- * whenever that class is present. The class names are kept from the tldraw
+ * whenever that class is present. The class names are kept from the original
  * build (.tl-container / .tl-theme__dark) so the ported panel CSS resolves
  * unchanged.
  *
@@ -190,7 +190,7 @@
     border-radius: 12px !important;
   }
   .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); }
-  /* tldraw-style: the panel floats bottom-right, ABOVE the toggle + toolbar */
+  /* whiteboard-style: the panel floats bottom-right, ABOVE the toggle + toolbar */
   [data-pc-stylepanel] {
     top: auto !important;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 138px) !important;

@@ -1,6 +1,6 @@
 // Core record + signal types for the engine. The store is the single source of
 // truth; every consumer (bridge, panel renderer, drawing renderer, overlays)
-// reads it. Records mirror what the old tldraw build kept as shapes, but the
+// reads it. Records mirror what the old build kept as shapes, but the
 // engine is framework-free TypeScript.
 
 export type Id = string
@@ -38,7 +38,7 @@ export interface PanelRecord {
 }
 
 // Python-managed canvas shapes (canvas.geo/text/line/frame/note/...). Rendered on
-// the SVG drawing layer below the panels. Props use tldraw's schema, interpreted
+// the SVG drawing layer below the panels. Props use the wire schema, interpreted
 // by the renderer (geo/color/fill, line points, frame label, ...).
 export type DrawingShapeType = 'geo' | 'text' | 'note' | 'line' | 'draw' | 'frame' | 'highlight' | 'image'
 export interface DrawingRecord {
@@ -89,7 +89,7 @@ export type Tool =
 
 // Style for newly-drawn shapes (and applied to the selection from the panel).
 export interface DrawStyle {
-  color: string // tldraw palette name (black/blue/red/green/orange/violet/yellow/grey)
+  color: string // palette name (black/blue/red/green/orange/violet/yellow/grey)
   size: 's' | 'm' | 'l' // stroke thickness / font size
   fill: 'none' | 'semi' | 'solid'
   dash: 'solid' | 'dashed' | 'dotted' // stroke style for geo/line/arrow edges

@@ -1,7 +1,7 @@
 // Runtime host for user-authored React components (the `React` Python panel,
 // which is now nearly every built-in: Slider, Label, Plot, Table, ...). Faithful
 // port of the old ReactHost.jsx, with two swaps: `react` -> `preact/compat`
-// (so the Python-shipped React-hook JSX runs unchanged) and tldraw's
+// (so the Python-shipped React-hook JSX runs unchanged) and the original
 // editor/useEditor/useValue -> the engine shims. The JSX is transformed by
 // Sucrase (classic runtime -> React.createElement) and evaluated with `React`
 // (= preact/compat) and `libs` in scope; it must define a function `Component`.

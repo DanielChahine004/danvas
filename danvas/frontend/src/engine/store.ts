@@ -205,8 +205,8 @@ export class Store {
     }
   }
 
-  // Shallow-merge top-level fields; deep-merge props and meta (mirrors tldraw's
-  // updateShape, which merges props rather than replacing them).
+  // Shallow-merge top-level fields; deep-merge props and meta (props are merged, not
+  // replaced, matching the wire's shape-update semantics).
   patch(id: Id, partial: Partial<CanvasRecord> & { props?: any; meta?: any }): void {
     const s = this.recs.get(id)
     if (!s) return

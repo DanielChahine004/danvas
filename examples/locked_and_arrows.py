@@ -40,7 +40,7 @@ status = canvas.insert(
 
 # Wire the panels together. Arrows bind to the panels and reroute on their own.
 # `name` is each arrow's identity (canvas.<name> lookup, unique); pass `text=`
-# to caption the arrow (none shown otherwise), plus tldraw props like color.
+# to caption the arrow (none shown otherwise), plus shape props like color.
 canvas.connect(source, gain, name="scale", text="scale", color="blue")
 canvas.connect(gain, output, name="result", text="result", color="green", bend=-180)
 canvas.connect(gain, status, name="monitor", text="monitor", dash="dashed")

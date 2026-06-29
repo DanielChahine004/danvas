@@ -168,7 +168,7 @@ export function PanelLayer() {
         ...gridStyle,
         touchAction: 'none',
         // Don't let canvas drags select panel text; inputs/editables opt back in
-        // (theme.css). Matches tldraw's canvas behaviour.
+        // (theme.css). Matches typical canvas behaviour.
         userSelect: 'none',
       }}
     >

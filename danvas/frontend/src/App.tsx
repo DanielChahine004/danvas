@@ -1,6 +1,6 @@
 // App root. Sets the initial theme (default dark, like the old build), opens the
-// WebSocket, and renders the panel layer plus the presence badge. tldraw's
-// <Tldraw> is gone — the engine + PanelLayer take its place.
+// WebSocket, and renders the panel layer plus the presence badge. The
+// engine + PanelLayer are the whole canvas surface.
 import { useEffect, useState } from 'preact/hooks'
 import { useValue } from './react/EngineContext'
 import { PanelLayer } from './react/PanelLayer'

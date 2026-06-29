@@ -248,7 +248,7 @@ export function TextEditor() {
             // store the SANITISED markup (allowlisted inline tags only); we don't
             // write it back to `el` so the caret isn't disturbed mid-edit.
             const patch: any = { props: { text: sanitizeRich(el.innerHTML) } }
-            // a text box auto-fits BOTH axes (tldraw-style): width to the longest
+            // a text box auto-fits BOTH axes (whiteboard-style): width to the longest
             // line, height to the line count — so the bounding box hugs the text.
             if (isText) {
               const pf = r.props?.fontSize ?? fontSz(r.props?.size)

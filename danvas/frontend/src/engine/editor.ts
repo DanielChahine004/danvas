@@ -1,7 +1,7 @@
 // The "editor" handle — the engine's public face for the Preact panel layer.
-// It is the swap-in for tldraw's `editor`: the ported Card / ReactHost / App
+// It is the engine's `editor` handle: the ported Card / ReactHost / App
 // call the same method names, but each one reads/writes the engine's signals
-// instead of tldraw. Because the reads go through alien-signals, calling them
+// instead of a board library. Because the reads go through alien-signals, calling them
 // inside a `useValue` selector subscribes the component to exactly those signals.
 import { effect } from 'alien-signals'
 import { store } from './store'
@@ -48,7 +48,7 @@ function viewportPageBounds() {
 }
 
 // session-scope change feed (camera + interaction state), the substrate for
-// tldraw's store.listen({scope:'session'}) that ReactHost.viewport() uses.
+// the session-scope store feed that ReactHost.viewport() uses.
 const sessionListeners = new Set<() => void>()
 effect(() => {
   // touch the signals so this effect re-runs whenever they change
@@ -60,7 +60,7 @@ effect(() => {
   for (const cb of sessionListeners) cb()
 })
 
-// The tldraw-shaped editor object. Method names mirror tldraw so the ported
+// The editor object. Method names match the original API so the ported
 // components need only trivial edits (shape.type → shape.shapeType where the
 // record field differs).
 export const editor = {

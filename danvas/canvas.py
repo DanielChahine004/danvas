@@ -120,7 +120,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._bridge._canvas = self
         self._components = []
         self._arrows = []
-        self._shapes = []   # managed tldraw shapes (geo/text/note/draw/line/frame/highlight)
+        self._shapes = []   # managed canvas shapes (geo/text/note/draw/line/frame/highlight)
         self._named = {}  # name -> component/arrow/shape, for canvas.<name>
         self._serving = False
         self._server = None
@@ -464,7 +464,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
     @property
     def shapes(self):
-        """Return a list of all managed tldraw shapes on the canvas.
+        """Return a list of all managed shapes on the canvas.
 
         These are the shapes created with :meth:`geo`, :meth:`text`,
         :meth:`note`, :meth:`draw`, :meth:`line`, :meth:`frame`, and
@@ -477,9 +477,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def drawings(self):
         """Live snapshot of user-drawn (ephemeral) shapes as a dict.
 
-        Keys are tldraw shape ids (``'shape:…'`` strings).  Values are
+        Keys are shape ids (``'shape:…'`` strings).  Values are
         :class:`~danvas.shapes.DrawingShape` objects with ``update()`` and
-        ``remove()`` methods that broadcast tldraw draw diffs to every browser.
+        ``remove()`` methods that broadcast draw diffs to every browser.
         The snapshot is fresh on each access — it reflects the current server
         shadow store, which is kept in step with every browser's drawing state::
 
@@ -501,7 +501,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
           shapes just created by a user
         - ``updated`` — list of :class:`~danvas.shapes.DrawingShape` for
           shapes just modified (each reflects the new state)
-        - ``removed`` — list of tldraw shape id strings for deleted shapes
+        - ``removed`` — list of shape id strings for deleted shapes
 
         Fires off the event loop on the dispatch thread, so it is safe to call
         ``shape.update()``, drive panels, or read ``canvas.drawings`` from
@@ -1017,7 +1017,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     # canvas.slider / button / react / markdown / show / … live in _FactoryMixin
     # (danvas/_factories.py); _make() and _INSERT_KEYS moved there too.
 
-    # -- tldraw shape factories -----------------------------------------------
+    # -- canvas shape factories -----------------------------------------------
 
     def _add_shape(self, shape):
         """Register a managed shape, handle name eviction, wire to bridge."""
@@ -1138,7 +1138,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Place a freehand stroke on the canvas.
 
         ``points`` is a list of ``(x, y)`` or ``(x, y, pressure)`` tuples, or
-        a list of tldraw segment dicts ``{type, points}``.  The bounding-box
+        a list of segment dicts ``{type, points}``.  The bounding-box
         origin becomes the shape's ``x``/``y`` unless overridden.  Style
         kwargs: ``color``, ``fill``, ``dash``, ``size``::
 
@@ -1179,7 +1179,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         ``points`` is a list of ``(x, y)`` tuples; the first point becomes the
         shape's position and all others are stored relative to it.
-        ``spline='cubic'`` makes tldraw curve smoothly through them.
+        ``spline='cubic'`` makes the line curve smoothly through them.
         Style kwargs: ``color``, ``dash``, ``size``::
 
             canvas.line([(0,0),(100,50),(200,0)], color='black', spline='cubic')
@@ -1199,7 +1199,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def frame(self, x=0, y=0, w=400, h=300, label="", name=None,
               right_of=None, left_of=None, below=None, above=None, gap=16,
               **props):
-        """Place a tldraw artboard frame on the canvas.
+        """Place an artboard frame on the canvas.
 
         ``label`` is the visible frame title (use ``name`` for the Python
         identity / eviction key).  Returns a live handle::
@@ -1304,7 +1304,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         Replays the (x, y, w, h) captured at :meth:`insert` time for every panel
         currently registered on the canvas. Panels removed via :meth:`remove` are
         skipped automatically because they leave the bridge registry at removal time.
-        Panels the user deleted in the tldraw UI (without going through Python) are
+        Panels the user deleted in the canvas UI (without going through Python) are
         still in the registry and will have their stored geometry refreshed; they
         will reappear on next reconnect at their original positions.
 
@@ -1387,7 +1387,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Draw an arrow from panel ``start`` to panel ``end`` and return it.
 
         Both arguments are components previously passed to :meth:`insert`. The
-        arrow binds to each panel in tldraw, so it follows them as they move or
+        arrow binds to each panel, so it follows them as they move or
         resize. ``name`` is the arrow's unique identity — the ``canvas.<name>`` /
         ``canvas["<name>"]`` handle and the eviction key, so re-connecting under
         the same ``name`` destroys the previous arrow rather than stacking a
@@ -1837,7 +1837,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def _normalize_view(cls, view):
         """Validate/coerce a ``serve(view=...)`` dict into the wire form.
 
-        Returns ``None`` for ``None`` (leave every tldraw default in place) and
+        Returns ``None`` for ``None`` (leave every canvas default in place) and
         raises on an unknown key or a non-numeric/zoom value, so configuration
         mistakes fail loudly at ``serve`` time instead of silently doing nothing.
         """
@@ -1942,7 +1942,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         e.g. ``login_message='Spectators enter "view"; teams enter your team
         password.'`` It is shown as plain text (HTML-escaped, newlines kept).
 
-        ``view`` configures how the tldraw canvas is presented and navigated, so
+        ``view`` configures how the canvas is presented and navigated, so
         the same canvas can be a free creative workspace or a fixed UI. Pass a
         dict with any of these keys (all optional):
 
@@ -1951,10 +1951,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
           applied once on first load so a viewer who pans away isn't snapped back.
         * ``locked`` — ``True`` freezes pan and zoom entirely (a fixed kiosk view).
         * ``min_zoom`` / ``max_zoom`` — clamp how far the viewer can zoom.
-        * ``ui`` — ``False`` hides tldraw's toolbars/menus for a chrome-free
+        * ``ui`` — ``False`` hides the canvas's toolbars/menus for a chrome-free
           surface (defaults to shown).
         * ``grid`` — ``True`` shows the background grid.
-        * ``read_only`` — ``True`` puts tldraw in read-only mode (no drawing).
+        * ``read_only`` — ``True`` puts the canvas in read-only mode (no drawing).
 
         ``desktop`` selects a native app window (via pywebview) instead of the
         system browser. It defaults to ``None`` = auto: on inside a baked
@@ -1993,18 +1993,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         The globals view is gated to a private local bind by default, so your
         variables aren't exposed on a shared/tunneled canvas unless you opt in.
 
-        ``tldraw_license_key`` is your tldraw production licence key, injected
-        into the page as the ``<Tldraw licenseKey=…>`` prop. tldraw runs in
-        development without one, but *requires* a key in production (free hobby
-        key for non-commercial use, paid commercial key otherwise — see
-        THIRD_PARTY_LICENSES.md). Falls back to ``$TLDRAW_LICENSE_KEY``.
+        ``tldraw_license_key`` is **deprecated and ignored** — the frontend is
+        tldraw-free, so no production licence key is needed. The argument is
+        accepted (and discarded) only so older call sites don't break.
         """
-        # tldraw needs a license key for production use (it runs in development
-        # without one). It's a mount-time <Tldraw> prop, so the server injects it
-        # into the page HTML — see server.create_app. Falls back to the env var
-        # so a key can be supplied without editing the call site.
-        self._bridge._tldraw_license_key = (
-            tldraw_license_key or os.environ.get("TLDRAW_LICENSE_KEY") or None)
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.

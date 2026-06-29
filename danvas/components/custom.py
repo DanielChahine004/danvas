@@ -144,7 +144,7 @@ class Custom(_EventRouter, BaseComponent):
         f"parent.postMessage({{__danvas_error:{{id:{cid},"
         "msg:'Unhandled rejection: '+(r&&r.message||String(r))}},'*');});"
         # Ctrl/Cmd+wheel inside the iframe would otherwise trigger the
-            # *browser's* page zoom (tldraw can't preventDefault an event in a
+            # *browser's* page zoom (the canvas can't preventDefault an event in a
             # sandboxed frame). Swallow it here and forward the delta + cursor to
             # the parent, which zooms the canvas at that point instead — so the
             # gesture matches scrolling over the bare canvas. Capture phase so we

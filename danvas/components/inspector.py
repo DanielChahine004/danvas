@@ -59,7 +59,7 @@ _COLS_BY_VIEW = {
 
 # The React component: a port of the former native InspectorView/DetailView,
 # driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
-# live framing readout) instead of the tldraw editor. Authored as a plain string
+# live framing readout) instead of a built-in editor. Authored as a plain string
 # so its JSX braces survive — nothing is substituted. Reads the table/detail data
 # Python pushes as ``props.rows``/``props.cols``/``props.detail``/``props.source``
 # (each a JSON string, matching the former shape props).

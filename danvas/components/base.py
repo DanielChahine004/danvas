@@ -195,14 +195,14 @@ class BaseComponent:
         # Rotation in degrees (clockwise). Defaults to 0 (unrotated) so it can be
         # read and incremented. Like position, it is a top-level shape field.
         self._rotation = 0
-        # Opacity: 0.0 = fully transparent, 1.0 = fully opaque. tldraw top-level
+        # Opacity: 0.0 = fully transparent, 1.0 = fully opaque. The shape's top-level
         # field (same tier as x/y/rotation). Omitted from messages at the default
         # so existing wire protocol is unchanged.
         self._opacity = 1.0
         # Lock / chrome flags, all defaulted from the single table in _flags.py:
-        # ``locked`` (full lock, top-level tldraw isLocked); ``draggable`` /
+        # ``locked`` (full lock, top-level isLocked); ``draggable`` /
         # ``resizable`` / ``operable`` / ``grabbable`` (interaction-preserving
-        # locks carried in the shape's tldraw ``meta``); ``frame`` (the card
+        # locks carried in the shape's ``meta``); ``frame`` (the card
         # chrome). See danvas/_flags.py for the per-flag semantics, the wire
         # keys, and the property docstrings generated at the bottom of this file.
         for _flag in LAYOUT_FLAGS.values():
@@ -576,7 +576,7 @@ class BaseComponent:
     def forward(self):
         """Raise this panel one step up the stack, live.
 
-        A single overlap-aware nudge (tldraw semantics); not persisted across a
+        A single overlap-aware nudge; not persisted across a
         reload — use :meth:`to_front` for a durable change.
         """
         self._send_order("forward")
@@ -584,7 +584,7 @@ class BaseComponent:
     def backward(self):
         """Lower this panel one step down the stack, live.
 
-        A single overlap-aware nudge (tldraw semantics); not persisted across a
+        A single overlap-aware nudge; not persisted across a
         reload — use :meth:`to_back` for a durable change.
         """
         self._send_order("backward")
@@ -605,7 +605,7 @@ class BaseComponent:
         position, ``rotation`` (degrees) the angle, ``w``/``h`` the size.
         ``locked`` is a full lock (blocks interaction *and* programmatic updates);
         ``draggable``/``resizable``/``operable``/``grabbable`` are
-        interaction-preserving locks carried in the shape's tldraw ``meta``
+        interaction-preserving locks carried in the shape's ``meta``
         (``operable=False`` makes controls inert to the user while value updates
         keep rendering); ``frame`` toggles the card chrome.
 
@@ -667,7 +667,7 @@ class BaseComponent:
 
     def _layout_payload(self, fields):
         """Normalised layout ``fields`` -> the wire ``update`` payload (rotation
-        to radians for tldraw, flag names to their wire keys)."""
+        to radians for the wire, flag names to their wire keys)."""
         payload = {}
         for key in ("x", "y", "w", "h"):
             if key in fields:
@@ -775,7 +775,7 @@ class BaseComponent:
         a hand-arranged layout sticks, and in a role-based canvas a drag rearranges
         only the dragger's role rather than everyone's. Does not broadcast (the
         change already happened in that browser). ``rotation`` arrives in radians
-        (tldraw) and is stored as degrees, matching the rest of the Python API.
+        (radians on the wire) and is stored as degrees, matching the rest of the Python API.
         ``on_layout`` handlers fire with the component, plus the mover's ``viewer``
         when they declare a second parameter.
         """

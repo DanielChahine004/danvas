@@ -3,9 +3,6 @@
 // The Python <-> browser wire contract (binary codes, lock-flag wire
 // keys, JSON frame type tags) lives in one place so the two sides can't
 // drift; tests/test_protocol_sync.py fails if this file is stale.
-//
-// Copied verbatim from danvas/frontend/src/protocol.generated.js — this is the
-// canonical contract and must stay byte-identical to the Python side.
 
 export const BIN_VIDEO = 1
 export const BIN_AUDIO = 2

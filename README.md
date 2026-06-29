@@ -617,7 +617,7 @@ canvas.disconnect(arrow)                          # by object or by name
 | `arrowhead_start` / `arrowhead_end` | none / arrow / triangle / square / dot / pipe / diamond / inverted / bar |
 | `name` | identity / `canvas.<name>` handle; re-connecting under it replaces in place |
 
-See `examples/tldraw_shapes.py`.
+See `examples/managed_shapes.py`.
 
 **Observing user drawings.** User freehand is ephemeral (Python can't pre-place
 it), but `on_draw` fires whenever viewers draw, move, or delete shapes, and
@@ -631,7 +631,7 @@ def tidy(event):   # {"added": [...], "updated": [...], "removed": [id, ...]}
             s.update(color="blue")   # recolour user strokes live
 ```
 
-See `examples/tldraw_shapes.py`.
+See `examples/managed_shapes.py`.
 
 # Views, navigation & roles
 
@@ -1044,7 +1044,7 @@ python examples/sensor_dashboard.py       # live VideoFeed + worker thread
 python examples/show_anything.py          # canvas.show() over every type
 python examples/custom_html.py            # hand-written bidirectional HTML panel
 python examples/custom_binary_stream.py   # high-rate binary telemetry (push_binary)
-python examples/tldraw_shapes.py          # managed shapes + on_draw observer
+python examples/managed_shapes.py          # managed shapes + on_draw observer
 python examples/binary_input_test.py      # webcam → Python via canvas.requestCamera
 python examples/audio_input_test.py       # microphone → Python via canvas.requestMicrophone
 python examples/react_canvas_api.py       # React: canvas.viewport / setView / chat

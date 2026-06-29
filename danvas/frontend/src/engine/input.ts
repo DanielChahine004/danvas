@@ -3,7 +3,7 @@
 // in a capture-phase listener (so it behaves the same over empty canvas and over
 // interactive panels), and right-drag pans. All camera writes go through
 // camera.setCamera, which respects the zoom limits and a locked camera. The math
-// is identical to the old build (and to tldraw's convention: screen = (page+cam)*z).
+// is identical to the old build (and to the standard convention: screen = (page+cam)*z).
 import { setCamera, getScrollMode } from './camera'
 import { store } from './store'
 import { openContextMenuAt, closeContextMenu } from './contextmenu'

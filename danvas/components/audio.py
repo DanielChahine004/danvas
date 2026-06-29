@@ -132,7 +132,7 @@ class AudioFeed(_React):
         if not pcm:
             return
         # Rides a binary WebSocket frame (no base64, no JSON) straight to the Web
-        # Audio scheduler — like VideoFeed. Bypasses tldraw shape props so
+        # Audio scheduler — like VideoFeed. Bypasses shape props so
         # high-rate chunks never touch undo history.
         self.push_binary(pcm)
 

@@ -44,15 +44,12 @@ def test_endpoints_behind_auth_gate():
     assert client.get("/__describe__").status_code == 401
 
 
-def test_tldraw_license_key_injected_into_index():
+def test_index_served_without_license_key_injection():
+    # The frontend is tldraw-free: the page is served as-is with no license-key
+    # injection (the old __DANVAS_TLDRAW_LICENSE_KEY__ shim is gone), and no-cache
+    # so rebuilt (hash-named) asset bundles are always picked up.
     canvas = danvas.Canvas()
-    canvas._bridge._tldraw_license_key = "tldraw-test-123"
-    html = TestClient(_app(canvas)).get("/").text
-    assert "__DANVAS_TLDRAW_LICENSE_KEY__" in html
-    assert "tldraw-test-123" in html
-
-
-def test_index_unchanged_without_license_key():
-    canvas = danvas.Canvas()  # no key → development mode, page served as-is
-    html = TestClient(_app(canvas)).get("/").text
-    assert "__DANVAS_TLDRAW_LICENSE_KEY__" not in html
+    resp = TestClient(_app(canvas)).get("/")
+    assert resp.status_code == 200
+    assert "__DANVAS_TLDRAW_LICENSE_KEY__" not in resp.text
+    assert resp.headers.get("cache-control") == "no-cache"

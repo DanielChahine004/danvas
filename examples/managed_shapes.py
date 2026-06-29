@@ -14,7 +14,7 @@ All seven managed shape types and the ephemeral drawing observation layer:
 
 Managed shapes are Python-owned: they survive page reload, can be updated live,
 and are excluded from the free-form drawing sync.  User-drawn shapes are
-ephemeral: they sync across all viewers but live only in the tldraw store — the
+ephemeral: they sync across all viewers but live only in the canvas's record store — the
 ``on_draw`` hook lets Python react to them and optionally mutate or delete them.
 """
 

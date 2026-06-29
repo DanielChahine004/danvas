@@ -1,5 +1,5 @@
 // The card chrome shared by every panel — port of canvas.jsx's Card/CardLabel/
-// DragHandle + the colour helpers. tldraw's HTMLContainer is replaced by a plain
+// DragHandle + the colour helpers. the original HTMLContainer is replaced by a plain
 // div (class `pc-card`, so theme.css hover rules still apply); the lock / grab /
 // ghost overlay logic and pointer policy are preserved verbatim. Hit-testing for
 // "drawing on top" is stubbed (no drawing layer until M8), so under the select

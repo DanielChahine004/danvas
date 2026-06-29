@@ -19,7 +19,7 @@ _BASE_CSS = (
 # canvas instead of reading as a white notebook output. The body is transparent
 # so the panel's own background shows through, and `color-scheme: light dark`
 # lets the text/link colours follow the embedder's scheme: the frontend sets the
-# iframe element's `color-scheme` to match tldraw's dark/light toggle, so the
+# iframe element's `color-scheme` to match the canvas's dark/light toggle, so the
 # `prefers-color-scheme` query below tracks the canvas theme (not the OS).
 _THEMED_CSS = (
     ":root{color-scheme:light dark;}"

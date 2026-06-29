@@ -6,9 +6,9 @@ to the canvas bridge, so its appearance can be changed live.
 """
 
 
-# Friendly snake_case names mapped onto tldraw's arrow shape prop names. The
+# Friendly snake_case names mapped onto the arrow shape's prop names. The
 # arrow's ``name`` (its identity / eviction key) is handled separately and never
-# sent as a shape prop; ``text`` is the caption tldraw actually draws.
+# sent as a shape prop; ``text`` is the caption the canvas actually draws.
 _ARROW_PROP_ALIASES = {
     "arrowhead_start": "arrowheadStart",
     "arrowhead_end": "arrowheadEnd",
@@ -17,14 +17,14 @@ _ARROW_PROP_ALIASES = {
 
 
 def _arrow_props(props):
-    """Translate snake_case kwargs to tldraw arrow prop names."""
+    """Translate snake_case kwargs to the arrow shape's prop names."""
     return {_ARROW_PROP_ALIASES.get(k, k): v for k, v in props.items()}
 
 
 class Arrow:
     """A connector between two panels, managed much like a component.
 
-    Returned by :meth:`Canvas.connect`. The arrow binds to each panel in tldraw,
+    Returned by :meth:`Canvas.connect`. The arrow binds to each panel,
     so it reroutes automatically as the panels move or resize. It is bound to the
     canvas bridge so its appearance can be changed live::
 
@@ -43,7 +43,7 @@ class Arrow:
     without affecting identity. When ``text`` is omitted the arrow shows no
     caption (the identity is never drawn).
 
-    Valid tldraw values: ``color`` one of black/grey/violet/light-violet/blue/
+    Valid values: ``color`` one of black/grey/violet/light-violet/blue/
     light-blue/yellow/orange/green/light-green/light-red/red/white; ``dash`` one
     of draw/solid/dashed/dotted; ``size`` one of s/m/l/xl; ``arrowhead_start`` /
     ``arrowhead_end`` one of none/arrow/triangle/square/dot/pipe/diamond/
@@ -100,7 +100,7 @@ class Arrow:
 
     @property
     def text(self):
-        """The caption drawn on the arrow (tldraw's ``text`` prop)."""
+        """The caption drawn on the arrow (the ``text`` prop)."""
         return self._props.get("text")
 
     @text.setter

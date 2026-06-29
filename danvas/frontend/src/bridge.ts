@@ -1,7 +1,7 @@
 // The protocol adapter. Inbound wire frame -> store mutation (source:'remote');
 // local store change -> outbound frame. This is the faithful port of the old
-// bridge.js, rewritten to talk to the engine's `store` + `editor` instead of the
-// tldraw editor. It invents no protocol — every frame matches danvas's existing
+// bridge.js, rewritten to talk to the engine's `store` + `editor` instead of a
+// board library. It invents no protocol — every frame matches danvas's existing
 // wire contract (verified against captured frames).
 //
 // M1 scope: connection + welcome/register/update/remove + the live data/style
@@ -745,12 +745,12 @@ store.subscribe((changes, source) => {
 // apply as `remote` so they don't echo back. danvas-managed shapes (managedIds)
 // are excluded on both directions — those round-trip as shape/arrow frames.
 //
-// The wire record is our native DrawingRecord plus a `type` alias (the tldraw
+// The wire record is our native DrawingRecord plus a `type` alias (the wire
 // shape-type string) so Python's DrawingShape / @canvas.on_draw read it the same
-// way they read the old tldraw build. Python's update() preserves the whole
+// way they read the old build. Python's update() preserves the whole
 // record dict and only patches changed fields, so our extra fields survive a
 // Python-side mutation and come back intact.
-const TLDRAW_TYPE: Record<string, string> = {
+const WIRE_TYPE: Record<string, string> = {
   geo: 'geo',
   text: 'text',
   note: 'note',
@@ -761,7 +761,7 @@ const TLDRAW_TYPE: Record<string, string> = {
 }
 function wireType(r: DrawingRecord): string {
   if (r.shapeType === 'line' && r.props?.arrow) return 'arrow'
-  return TLDRAW_TYPE[r.shapeType] || r.shapeType
+  return WIRE_TYPE[r.shapeType] || r.shapeType
 }
 function wireRecord(r: DrawingRecord): any {
   return { ...r, id: r.id, type: wireType(r) }
@@ -775,7 +775,7 @@ function shapeTypeFromWire(rec: any): DrawingRecord['shapeType'] {
 }
 // Re-hydrate a wire record into a native DrawingRecord. Records that originated
 // in another my_danvas browser already carry our fields; ones synthesised by a
-// Python update() carry tldraw-ish fields, so we reconstruct from those.
+// Python update() carry wire-format fields, so we reconstruct from those.
 function toDrawingRecord(id: string, rec: any): DrawingRecord {
   if (rec && rec.typeName === 'drawing' && rec.shapeType) return { ...rec, id }
   const isArrow = rec?.type === 'arrow'
@@ -893,7 +893,7 @@ function userDrawingsSnapshot(panelIds: string[] = []): any {
 function loadDrawingsSnapshot(data: any): void {
   if (!data) return
   // Our own format is { pc, drawings:{id:rec} }; anything else (e.g. a legacy
-  // tldraw document) we can't interpret, so ignore it rather than throw.
+  // foreign document) we can't interpret, so ignore it rather than throw.
   const drawings = data.drawings
   if (!drawings || typeof drawings !== 'object') return
   applyRemote(() => {

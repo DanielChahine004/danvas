@@ -30,7 +30,7 @@ export interface SnapGuide {
 export const snapGuides = signal<SnapGuide[]>([]) as WriteSignal<SnapGuide[]>
 
 // Id of the shape an arrow endpoint is hovering and would bind to — the overlay
-// outlines it (tldraw-style) while drawing/dragging an arrow end. null when none.
+// outlines it (whiteboard-style) while drawing/dragging an arrow end. null when none.
 export const bindHighlight = signal<Id | null>(null) as WriteSignal<Id | null>
 
 // Page-space dot showing exactly where an arrow end will attach on the hovered
@@ -628,7 +628,7 @@ export function attachInteraction(container: HTMLElement): () => void {
       store.transact('local', () => store.instance({ ...store.instance(), tool: 'select', selectedIds: [], editingId: null }))
       return
     }
-    // single-key tool shortcuts (tldraw-style)
+    // single-key tool shortcuts (whiteboard-style)
     if (!mod) {
       const map: Record<string, Tool> = { v: 'select', h: 'hand', d: 'draw', p: 'draw', r: 'rectangle', o: 'ellipse', l: 'line', a: 'arrow', t: 'text', n: 'note', e: 'eraser' }
       const tool = map[e.key.toLowerCase()]
@@ -653,7 +653,7 @@ export function attachInteraction(container: HTMLElement): () => void {
   }
 
   // Double-click: edit an existing text/note/geo/line label, or drop a new text
-  // shape on empty canvas (tldraw-style).
+  // shape on empty canvas (whiteboard-style).
   const onDblClick = (e: MouseEvent) => {
     const tool = store.instance().tool
     if (tool !== 'select' && tool !== 'text') return

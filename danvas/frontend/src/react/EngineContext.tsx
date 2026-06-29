@@ -1,11 +1,11 @@
 // The reactivity shims that let the ported Preact panel components talk to the
-// engine exactly as they talked to tldraw:
+// engine exactly as they talked to the original board API:
 //
 //   useEditor()                       -> the single engine `editor` handle
 //   useValue(key, selector, deps)     -> re-renders when the signals the selector
 //                                        reads actually change value
 //
-// tldraw's useValue is a memoised reactive selector; we reproduce it with an
+// The original useValue is a memoised reactive selector; we reproduce it with an
 // alien-signals effect (which tracks exactly the signals the selector reads) plus
 // a Preact state bump, gated by an Object.is equality check so a write that
 // doesn't change the selected value never re-renders.

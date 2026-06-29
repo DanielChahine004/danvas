@@ -224,7 +224,7 @@ export function SelectionOverlay() {
 
 // A small size badge (W × H in page units) below a selected panel / box-shape.
 // Rendered ungated so it stays visible AND updates live while the shape is resized
-// (tldraw-style). Lines/arrows/ink have no box, so they're skipped.
+// (whiteboard-style). Lines/arrows/ink have no box, so they're skipped.
 function DimensionBadge({ id }: { id: string }) {
   const rec = useValue('dim:' + id, () => store.get(id), [id])
   // Camera read untracked — parent re-renders on zoom and pan-translates the layer.
@@ -287,7 +287,7 @@ function BindAnchorDot() {
   )
 }
 
-// Outlines the shape an arrow endpoint is about to bind to (tldraw-style), driven
+// Outlines the shape an arrow endpoint is about to bind to (whiteboard-style), driven
 // by the bindHighlight signal set while drawing/dragging an arrow end.
 function BindHighlight() {
   const id = useValue('bind-hl', () => bindHighlight(), [])
@@ -400,7 +400,7 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
   const lockH = isPanel ? !!(rec as any).props.autoH : false
   const lockW = isPanel ? !!(rec as any).props.autoW : false
 
-  // A text drawing scales its FONT when resized vertically (tldraw-style) instead
+  // A text drawing scales its FONT when resized vertically (whiteboard-style) instead
   // of just stretching the box; horizontal-only drags change the wrap width.
   const isText = drawType === 'text'
   const origFont = isText ? (r.props.fontSize ?? FONT_PX[r.props.size as string] ?? 20) : 0
@@ -500,7 +500,7 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
       style={{ position: 'absolute', left: tl.x, top: tl.y, width: w, height: h, pointerEvents: 'none', transform: rotation ? `rotate(${rotation}rad)` : undefined, transformOrigin: 'center' }}
     >
       <div style={{ position: 'absolute', inset: 0, border: `1.5px solid ${accent}`, borderRadius: 6, boxSizing: 'border-box' }} />
-      {/* tldraw-style rotation: invisible zones just OUTSIDE each corner; hover
+      {/* whiteboard-style rotation: invisible zones just OUTSIDE each corner; hover
           shows a curved double-arrow cursor, drag rotates. Rendered before the
           resize handles so the (smaller) corner handles sit on top for resizing. */}
       {resizable &&

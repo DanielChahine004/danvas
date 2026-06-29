@@ -24,7 +24,7 @@ status = canvas.label("status", value="idle", x=80, y=200)
 def on_speed(value):
     status.update("running" if value else "idle")
 
-canvas.set_view(ui=False)  # hide tldraw's toolbars/menus
+canvas.set_view(ui=False)  # hide the canvas's toolbars/menus
 
 # Build when run with python; run in a window when launched as the executable.
 canvas.bake(name="MiniConsole", window_size=(1000, 700))

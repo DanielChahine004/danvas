@@ -1,6 +1,6 @@
 """Configure the canvas as a fixed UI instead of a free creative workspace.
 
-The ``view`` option on ``serve`` controls how tldraw is presented and navigated:
+The ``view`` option on ``serve`` controls how the canvas is presented and navigated:
 where the camera starts and how zoomed, whether the viewer may pan/zoom, and
 whether the toolbars are shown. Here we frame two panels and lock the view down
 into a kiosk-style dashboard.
@@ -26,6 +26,6 @@ canvas.serve(
         "y": 160,
         "zoom": 1.0,     # ...at 100% zoom
         "locked": True,  # no panning or zooming — a fixed frame
-        "ui": False,     # hide tldraw's toolbars/menus
+        "ui": False,     # hide the canvas's toolbars/menus
     },
 )

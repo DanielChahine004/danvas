@@ -23,7 +23,7 @@ A browser-based spatial canvas controlled entirely from Python.
 Panels are **bidirectional** — Python pushes data to them and reads user
 input back in real time over one WebSocket.
 
-Built on tldraw + React (frontend) and FastAPI + WebSockets (backend).
+Built on a custom Preact canvas (frontend) and FastAPI + WebSockets (backend).
 The frontend ships pre-built; you never touch Node or npm.
 
 > Scroll down — each section matches a README heading.

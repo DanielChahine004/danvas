@@ -36,7 +36,7 @@ const SIZES: [string, string][] = [
   ['xl', 'XL'],
 ]
 const FONT_PX: Record<string, number> = { s: 14, m: 20, l: 28, xl: 40 } // text px per size
-// Discrete opacity stops for the stepped slider (tldraw-style), low→high.
+// Discrete opacity stops for the stepped slider (whiteboard-style), low→high.
 const OPACITY_STEPS = [0.1, 0.25, 0.5, 0.75, 1]
 const FILLS: [string, string][] = [
   ['none', 'fillNone'],
@@ -114,7 +114,7 @@ export function StylePanel() {
       const r = store.get(id) as any
       if (!r) return null
       const isArr = r.typeName === 'arrow'
-      // connector arrows carry tldraw string heads (arrowheadStart/End), defaulting
+      // connector arrows carry string heads (arrowheadStart/End), defaulting
       // to an END head; user lines carry boolean arrowStart/arrowEnd.
       const hs = isArr ? (r.props.arrowheadStart !== undefined ? r.props.arrowheadStart !== 'none' : !!r.props.arrowStart) : !!r.props.arrowStart
       const he = isArr ? (r.props.arrowheadEnd !== undefined ? r.props.arrowheadEnd !== 'none' : (r.props.arrowEnd ?? true)) : !!(r.props.arrowEnd ?? r.props.arrow)
