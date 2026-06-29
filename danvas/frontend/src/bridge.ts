@@ -11,8 +11,9 @@
 import { generateKeyBetween } from 'fractional-indexing'
 import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
-import { applyCameraFrom, scheduleInitialFit, resetInitialFit, setNavigationMode, zoomCanvasAtClient } from './engine/camera'
+import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient } from './engine/camera'
 import { toImage } from './engine/export'
+import { measuredTextSize } from './react/measure'
 import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType } from './engine/types'
 import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
 
@@ -541,6 +542,12 @@ function onWelcome(msg: any): void {
     clearManaged()
     clearPeerCursors() // stale peers from the previous run shouldn't linger
   }
+  // A hot reload restarts the worker but the browser stays live — the user's
+  // camera (and any pan/zoom they did) is still in the store. clearManaged()
+  // above re-armed the once-per-load auto-fit; cancel it again so the panels
+  // re-registering don't yank the view back to a fit. Toggling serve(view={ui:})
+  // goes through this path, so the chrome shows/hides without moving the camera.
+  if (msg.reload) markInitialFitDone()
   if (msg.runId) lastRunId = msg.runId
   setIdentity(msg.you || null)
   setUiInspectorEnabled(!!msg.uiInspector)
@@ -917,10 +924,56 @@ function removeComponent(id: string): void {
 }
 
 // --- Python-managed canvas shapes (canvas.geo/text/line/frame/...) -----------
+// A code-made canvas.text() ships no w/h (only the browser knows the font
+// metrics), so its stored bounding box would stay 0×0 — breaking the selection
+// outline, the dimension badge, and hit-testing even though the text renders via
+// DrawingLayer's `w || 160` fallback. Measure it the same way the inline editor
+// does (page units, matching DRAW_FONT/line-height) and fold the result into the
+// record's props so the box hugs the text. auto-width fits both axes; a
+// fixed-width box (autoSize:false, explicit w) keeps its w and only grows in h.
+const TEXT_FONT: Record<string, number> = { s: 14, m: 20, l: 28, xl: 40 }
+function measuredTextProps(props: any): { w: number; h: number } | null {
+  if (typeof document === 'undefined') return null
+  const fontPx = props.fontSize ?? TEXT_FONT[props.size as string] ?? 20
+  const fixedW = props.autoSize === false && props.w ? props.w : undefined
+  const m = measuredTextSize(props.text || '', fontPx, fixedW)
+  return { w: fixedW ?? Math.max(m.w, fontPx), h: Math.max(m.h, fontPx * 1.3) }
+}
+
+// DRAW_FONT prefers 'Inter Variable', which loads async; a measure taken before
+// it lands uses the narrower fallback (Segoe UI) and leaves the box short of the
+// text. document.fonts.ready alone isn't enough — it resolves immediately if
+// nothing has requested Inter yet, so we explicitly force the fetch first, then
+// re-measure on the real Inter metrics. Belt-and-suspenders: also wait on ready.
+const fontsReady: Promise<unknown> =
+  typeof document !== 'undefined' && (document as any).fonts?.load
+    ? (document as any).fonts
+        .load("16px 'Inter Variable'")
+        .catch(() => {})
+        .then(() => (document as any).fonts.ready)
+        .catch(() => {})
+    : Promise.resolve()
+
+function remeasureTextWhenFontsReady(shapeId: string): void {
+  fontsReady.then(() => {
+    const rec = store.peek(shapeId) as DrawingRecord | undefined
+    if (!rec || rec.shapeType !== 'text') return
+    const size = measuredTextProps(rec.props)
+    if (!size) return
+    if (Math.abs((rec.props.w || 0) - size.w) < 0.5 && Math.abs((rec.props.h || 0) - size.h) < 0.5) return
+    applyRemote(() => store.patch(shapeId, { props: size }))
+  })
+}
+
 function createManagedShape(msg: any): void {
   const shapeId = createShapeId(msg.id)
   managedIds.add(shapeId)
   if (store.has(shapeId)) return // reconnect
+  const props = { ...(msg.props || {}) }
+  if (msg.shapeType === 'text') {
+    const size = measuredTextProps(props)
+    if (size) Object.assign(props, size)
+  }
   const rec: DrawingRecord = {
     typeName: 'drawing',
     id: shapeId,
@@ -930,21 +983,30 @@ function createManagedShape(msg: any): void {
     rotation: msg.rotation ?? 0,
     opacity: msg.opacity ?? 1,
     index: nextIndex(),
-    props: { ...(msg.props || {}) },
+    props,
   }
   applyRemote(() => store.put(rec))
+  if (msg.shapeType === 'text') remeasureTextWhenFontsReady(shapeId)
 }
 
 function updateManagedShape(msg: any): void {
   const shapeId = createShapeId(msg.id)
-  if (!store.has(shapeId)) return
+  const existing = store.peek(shapeId) as DrawingRecord | undefined
+  if (!existing) return
   const patch: any = {}
   if (msg.x != null) patch.x = msg.x
   if (msg.y != null) patch.y = msg.y
   if (msg.rotation != null) patch.rotation = msg.rotation
   if (msg.opacity != null) patch.opacity = msg.opacity
   if (msg.props && Object.keys(msg.props).length) patch.props = { ...msg.props }
+  // A text change re-measures the box (text/size/font may all have moved it),
+  // unless this update already pins explicit w/h (e.g. a user resize echo).
+  if (existing.shapeType === 'text' && patch.props && patch.props.w == null && patch.props.h == null) {
+    const size = measuredTextProps({ ...existing.props, ...patch.props })
+    if (size) Object.assign(patch.props, size)
+  }
   applyRemote(() => store.patch(shapeId, patch))
+  if (existing.shapeType === 'text') remeasureTextWhenFontsReady(shapeId)
 }
 
 // A connector arrow bound to two existing shapes (panels or managed shapes). The
