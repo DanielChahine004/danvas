@@ -113,6 +113,19 @@ cust = canvas.custom(
     name="cust", label="Custom", color=AMBER, below=chat,
 )
 
+# ── A handler, so the dispatch-trace panel has something to show ─────────────────
+# The catalogue is otherwise display-only. Wire one interaction so the Inspector's
+# "Trace" button demonstrates the live call tree: moving the slider runs this
+# handler, which calls a helper — deep tracing indents the nested call.
+def describe_brightness(v):
+    return "dim" if v < 33 else "bright" if v > 66 else "medium"
+
+
+@slider.on_change
+def _(v):
+    lbl.update(f"brightness {v:.0f} ({describe_brightness(v)})")
+
+
 # ── Live-plot feed ───────────────────────────────────────────────────────────
 @canvas.background
 def tick():
@@ -150,14 +163,30 @@ def webcam():
     except ImportError:
         print("[catalogue] webcam disabled — `pip install danvas[video]` for OpenCV")
         return
+    # Quiet OpenCV's backend so a missing/busy camera doesn't spam the terminal with
+    # per-frame "can't grab frame" warnings from its C++ videoio layer.
+    try:
+        cv2.setLogLevel(getattr(cv2, "LOG_LEVEL_ERROR", 3))
+    except Exception:
+        pass
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[catalogue] webcam disabled — no camera at index 0")
         return
+    misses = 0
     while True:
         ok, frame = cap.read()
         if ok:
+            misses = 0
             cam.update(frame)
+        else:
+            # The device opened but won't deliver frames (busy or unavailable);
+            # don't spin and spam — give up after ~1s and release it.
+            misses += 1
+            if misses >= 30:
+                print("[catalogue] webcam disabled — opened but returned no frames")
+                cap.release()
+                return
         time.sleep(1 / 30)
 
 
