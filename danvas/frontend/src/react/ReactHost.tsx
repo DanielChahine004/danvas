@@ -8,6 +8,7 @@
 import { transform as transformJsx } from 'sucrase'
 import React from 'preact/compat'
 import { useEditor, useValue } from './EngineContext'
+import { paintFrameStream, type PaintFrameOpts } from './frame'
 import {
   sendInput,
   sendBinary,
@@ -208,6 +209,18 @@ export default function ReactHost({ shape }: { shape: any }) {
         framesRef.current.add(cb)
         return () => framesRef.current.delete(cb)
       },
+      // Off-main-thread image-frame rendering: decode each binary frame via
+      // createImageBitmap and blit it to `target` (a <canvas>), coalescing bursts.
+      // Built-in VideoFeed uses this; any custom panel streaming image bytes can too.
+      paintFrame: (target: HTMLCanvasElement, paintOpts?: PaintFrameOpts) =>
+        paintFrameStream(
+          (cb) => {
+            framesRef.current.add(cb)
+            return () => framesRef.current.delete(cb)
+          },
+          target,
+          paintOpts || {},
+        ),
       chat: {
         send: (text: string) => sendChat(text),
         setName: (name: string) => setMyName(name),

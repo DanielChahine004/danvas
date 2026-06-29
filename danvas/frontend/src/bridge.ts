@@ -649,8 +649,22 @@ function updateComponent(id: string, payload: any): void {
   const shapeId = createShapeId(id)
   const shape = store.peek(shapeId)
   if (!shape) return
-  const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, frameColor, ...props } = payload
+  const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, frameColor, data_patch, ...props } = payload
   const patch: any = { props: { ...props } }
+  // data_patch carries only the changed props (React.update sends a delta, not the
+  // whole blob). Merge it into the panel's current data — preferring a same-message
+  // full `data` if one is also present (rare) — keeping props.data the full JSON the
+  // store/persistence/reconnect path expects.
+  if (data_patch && typeof data_patch === 'object') {
+    const baseStr = typeof (props as any).data === 'string' ? (props as any).data : (shape as any).props?.data
+    let base: any = {}
+    try {
+      base = baseStr ? JSON.parse(baseStr) : {}
+    } catch {
+      base = {}
+    }
+    patch.props.data = JSON.stringify({ ...base, ...data_patch })
+  }
   if (typeof x === 'number') patch.x = x
   if (typeof y === 'number') patch.y = y
   if (typeof rotation === 'number') patch.rotation = rotation
@@ -694,6 +708,11 @@ function flushGeometry(): void {
       rotation: shape.rotation, // radians
       w: shape.props.w,
       h: shape.props.h,
+      // Carry the content-fit flags so a manual resize that PINS an auto axis
+      // (autoH/autoW → false; see SelectionOverlay) sticks in Python and reaches
+      // other viewers, instead of the content-fit re-asserting itself.
+      ...(typeof shape.props.autoH === 'boolean' ? { autoH: shape.props.autoH } : {}),
+      ...(typeof shape.props.autoW === 'boolean' ? { autoW: shape.props.autoW } : {}),
     })
   }
   dirtyShapes.clear()

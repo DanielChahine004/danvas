@@ -385,6 +385,8 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
   (replayed on reconnect). The `canvas` prop is the bridge handle:
   `send(data)` (→ `@on`/`@on_message`), `request(data)` (awaitable, → `@on_request`),
   `onFrame(cb)` (subscribe to `push` with no re-render; `ArrayBuffer` for binary),
+  `paintFrame(canvasEl)` (blit streamed image bytes to a `<canvas>`, decoded off the
+  main thread — what `VideoFeed` uses),
   `viewport(cb)` / `setView({x,y,zoom})` (read/move the camera), `chat` (the shared room).
 - `push_binary(bytes)` → `onFrame` as a zero-copy `ArrayBuffer` (React can receive
   binary but not send it — use `Custom` for browser→Python binary).

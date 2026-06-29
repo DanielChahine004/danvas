@@ -27,16 +27,36 @@ const DOT = COARSE ? 8 : 6 // endpoint / circle handle radius
 const BOX_HANDLE = COARSE ? 12 : 9 // resize-handle square size
 const ROTATE_ZONE = COARSE ? 30 : 22 // invisible corner rotation hit-area
 const FONT_PX: Record<string, number> = { s: 14, m: 20, l: 28, xl: 40 } // text px per size
-// A slightly-arced double-pointed arrow rotate cursor (a shallow bow with an
-// arrowhead at each end), white stroke + black halo so it reads on any
-// background, hot-spot centred.
-const ROT_PATHS = "<path d='M5 18 Q 14 8 23 18'/><path d='M5 11 L5 18 L11.5 18'/><path d='M23 11 L23 18 L16.5 18'/>"
-const ROTATE_CURSOR =
-  "url(\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><g fill='none' stroke='black' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'>" +
-  ROT_PATHS +
-  "</g><g fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
-  ROT_PATHS +
-  "</g></svg>\") 14 14, grab"
+// tldraw's rotate cursor: a curved arc with an arrowhead (white halo over a black
+// glyph so it reads on any background). The path + drop-shadow wrapper are taken
+// verbatim from tldraw's useCursor (ROTATE_CORNER_SVG / getCursorCss); we rotate it
+// per corner via a `tr` offset PLUS the shape's own rotation, so the arrow always
+// points tangent to the rotation — exactly how tldraw orients it.
+// White body with a black halo (tldraw's dark-mode variant): fills swapped vs the
+// default so the glyph reads with a light body. Path 1 = the arrow body, path 2 =
+// the surrounding outline ring.
+const ROTATE_CORNER_SVG =
+  '<path d="M22.4789 9.45728L25.9935 12.9942L22.4789 16.5283V14.1032C18.126 14.1502 14.6071 17.6737 14.5675 22.0283H17.05L13.513 25.543L9.97889 22.0283H12.5674C12.6071 16.5691 17.0214 12.1503 22.4789 12.1031L22.4789 9.45728Z" fill="white"/>' +
+  '<path fill-rule="evenodd" clip-rule="evenodd" d="M21.4789 7.03223L27.4035 12.9945L21.4789 18.9521V15.1868C18.4798 15.6549 16.1113 18.0273 15.649 21.0284H19.475L13.5128 26.953L7.55519 21.0284H11.6189C12.1243 15.8155 16.2679 11.6677 21.4789 11.1559L21.4789 7.03223ZM22.4789 12.1031C17.0214 12.1503 12.6071 16.5691 12.5674 22.0284H9.97889L13.513 25.543L17.05 22.0284H14.5675C14.5705 21.6896 14.5947 21.3558 14.6386 21.0284C15.1157 17.4741 17.9266 14.6592 21.4789 14.1761C21.8063 14.1316 22.1401 14.1069 22.4789 14.1032V16.5284L25.9935 12.9942L22.4789 9.45729L22.4789 12.1031Z" fill="black"/>'
+// Per-corner base rotation (degrees), clockwise from the top-left, matching
+// tldraw's nwse/nesw/senw/swne-rotate entries.
+const ROTATE_TR: Record<'nw' | 'ne' | 'se' | 'sw', number> = { nw: 0, ne: 90, se: 180, sw: 270 }
+// Build the CSS cursor value for the rotate handle at base offset `tr`, with the
+// shape rotated `r` degrees. Mirrors tldraw's getCursorCss (incl. the angle-tracking
+// drop shadow); hot-spot centred at 16,16.
+function rotateCursorCss(r: number, tr: number): string {
+  const a = (-tr - r) * (Math.PI / 180)
+  const dx = Math.cos(a) - Math.sin(a)
+  const dy = Math.sin(a) + Math.cos(a)
+  return (
+    "url(\"data:image/svg+xml,<svg height='32' width='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg' style='color: black;'>" +
+    "<defs><filter id='shadow' y='-40%' x='-40%' width='180px' height='180%' color-interpolation-filters='sRGB'>" +
+    `<feDropShadow dx='${dx.toFixed(3)}' dy='${dy.toFixed(3)}' stdDeviation='1.2' flood-opacity='.5'/></filter></defs>` +
+    `<g fill='none' transform='rotate(${r + tr} 16 16)' filter='url(%23shadow)'>` +
+    ROTATE_CORNER_SVG.replace(/"/g, "'") +
+    "</g></svg>\") 16 16, pointer"
+  )
+}
 const fullSvg: any = { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }
 
 // Screen-space box covering a line/arrow's rendered caption, so the text itself is
@@ -397,8 +417,13 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
   // resizable when single-selected and the shape has a real box (not line/draw).
   const resizable =
     single && !(rec as any).meta?.lockResize && (isPanel || ['geo', 'note', 'text', 'frame', 'image'].includes(drawType))
-  const lockH = isPanel ? !!(rec as any).props.autoH : false
-  const lockW = isPanel ? !!(rec as any).props.autoW : false
+  // Content-fitting panels (h="auto" / w="auto") still get full resize handles: a
+  // manual drag of the auto axis PINS it (autoH/autoW → false in onMove) so the
+  // user's size wins over the content fit, like resizing any other shape. An axis
+  // that's auto but NOT being dragged is left to fitNative (writing it here would
+  // fight the async content measure and flicker the box).
+  const autoH = isPanel && !!(rec as any).props.autoH
+  const autoW = isPanel && !!(rec as any).props.autoW
 
   // A text drawing scales its FONT when resized vertically (whiteboard-style) instead
   // of just stretching the box; horizontal-only drags change the wrap width.
@@ -411,6 +436,8 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
     store.beginGroup()
     const start = { x: e.clientX, y: e.clientY }
     const orig = { x: (rec as any).x, y: (rec as any).y, w: b.w, h: b.h }
+    const dragsW = handle.includes('e') || handle.includes('w')
+    const dragsH = handle.includes('n') || handle.includes('s')
     const onMove = (ev: PointerEvent) => {
       const z = store.camera().z
       const dx = (ev.clientX - start.x) / z
@@ -419,14 +446,14 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
         ny = orig.y,
         nw = orig.w,
         nh = orig.h
-      if (handle.includes('e') && !lockW) nw = orig.w + dx
-      if (handle.includes('w') && !lockW) nw = orig.w - dx
-      if (handle.includes('s') && !lockH) nh = orig.h + dy
-      if (handle.includes('n') && !lockH) nh = orig.h - dy
+      if (handle.includes('e')) nw = orig.w + dx
+      if (handle.includes('w')) nw = orig.w - dx
+      if (handle.includes('s')) nh = orig.h + dy
+      if (handle.includes('n')) nh = orig.h - dy
       nw = Math.max(MIN, nw)
       nh = Math.max(MIN, nh)
-      if (handle.includes('w') && !lockW) nx = orig.x + (orig.w - nw)
-      if (handle.includes('n') && !lockH) ny = orig.y + (orig.h - nh)
+      if (handle.includes('w')) nx = orig.x + (orig.w - nw)
+      if (handle.includes('n')) ny = orig.y + (orig.h - nh)
       // Text box resize: a SIDE handle (left/right) sets the wrap WIDTH and the text
       // reflows — font unchanged; the height re-measures to fit the wrapped lines. A
       // CORNER scales the whole text uniformly (font + box). Top/bottom handles are
@@ -452,7 +479,24 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
         store.transact('local', () => store.patch(id, { x: fx, y: fy, props: { w: fw, h: fh, fontSize: nf } }))
         return
       }
-      store.transact('local', () => store.patch(id, { x: nx, y: ny, props: { w: nw, h: nh } }))
+      // Write each axis only when the gesture drags it OR it isn't content-fit. A
+      // content-fit axis that isn't being dragged stays owned by fitNative — writing
+      // it here every frame would fight the async measure and flicker the box. A
+      // content-fit axis that IS dragged gets pinned (auto → false), so the manual
+      // size sticks (synced to Python via the geometry read-back) instead of the
+      // content fit snapping it back.
+      const patch: any = { props: {} }
+      if (dragsW || !autoW) {
+        patch.props.w = nw
+        if (handle.includes('w')) patch.x = nx
+        if (dragsW && autoW) patch.props.autoW = false
+      }
+      if (dragsH || !autoH) {
+        patch.props.h = nh
+        if (handle.includes('n')) patch.y = ny
+        if (dragsH && autoH) patch.props.autoH = false
+      }
+      store.transact('local', () => store.patch(id, patch))
     }
     const onUp = () => {
       store.endGroup()
@@ -463,15 +507,14 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
     window.addEventListener('pointerup', onUp)
   }
 
-  const usable = (hd: Handle) => {
-    const changesW = hd.includes('e') || hd.includes('w')
-    const changesH = hd.includes('n') || hd.includes('s')
-    return (changesW && !lockW) || (changesH && !lockH)
-  }
+  // Every resizable shape (panels included, even content-fit ones) offers all eight
+  // handles; dragging the auto axis pins it (see onMove). Text is the only special
+  // case, trimmed in the handle filter below.
 
   // Rotate around the shape centre; hold Shift to snap to 15°. The selection box
   // itself is rotated to match, so the box + handles track the rotated shape.
   const rotation = (rec as any).rotation || 0
+  const rotationDeg = (rotation * 180) / Math.PI
   const startRotate = (e: PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -505,24 +548,28 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
           resize handles so the (smaller) corner handles sit on top for resizing. */}
       {resizable &&
         (['nw', 'ne', 'se', 'sw'] as const).map((c) => {
+          // Sit the rotation zone just OUTSIDE the corner (flush), so it no longer
+          // pokes into the box interior where the resize handle's grab area lives —
+          // rotation is grabbed from the ring beyond the corner, resize from on it.
           const z = ROTATE_ZONE
-          const pos: any = { position: 'absolute', width: z, height: z, cursor: ROTATE_CURSOR, pointerEvents: 'all' }
-          if (c === 'nw') Object.assign(pos, { left: -z + 4, top: -z + 4 })
-          if (c === 'ne') Object.assign(pos, { right: -z + 4, top: -z + 4 })
-          if (c === 'se') Object.assign(pos, { right: -z + 4, bottom: -z + 4 })
-          if (c === 'sw') Object.assign(pos, { left: -z + 4, bottom: -z + 4 })
+          const pos: any = { position: 'absolute', width: z, height: z, cursor: rotateCursorCss(rotationDeg, ROTATE_TR[c]), pointerEvents: 'all' }
+          if (c === 'nw') Object.assign(pos, { left: -z, top: -z })
+          if (c === 'ne') Object.assign(pos, { right: -z, top: -z })
+          if (c === 'se') Object.assign(pos, { right: -z, bottom: -z })
+          if (c === 'sw') Object.assign(pos, { left: -z, bottom: -z })
           return <div key={'rot-' + c} data-pc-rotate={c} onPointerDown={startRotate as any} style={pos} />
         })}
       {resizable &&
         HANDLES.filter((hd) => {
-          if (!usable(hd)) return false
           // text: corners (scale) + left/right (wrap width) always; never top/bottom
           // (height is content-driven), and ignore cornersOnly so a short single-line
           // box still offers the side handles.
           if (isText) return hd !== 'n' && hd !== 's'
           return !cornersOnly || hd.length === 2
         }).map((hd) => (
-          <div key={hd} data-pc-handle={hd} onPointerDown={onHandleDown(hd) as any} style={handleStyle(hd)} />
+          <div key={hd} data-pc-handle={hd} onPointerDown={onHandleDown(hd) as any} style={handleStyle(hd)}>
+            <div style={handleSquareStyle} />
+          </div>
         ))}
     </div>
   )
@@ -761,10 +808,24 @@ function EraserTrail() {
   )
 }
 
+// The grab target is a larger TRANSPARENT box centred on the handle point, with a
+// small visible square (handleSquareStyle) inside it. The hit area is much bigger
+// than the dot so corners are easy to grab; rendered after the rotate zones, it
+// also wins the overlap with them — so aiming at a corner resizes rather than
+// accidentally rotating. (Rotation stays grabbable in the ring just outside.)
+const HIT = COARSE ? 28 : 20
 function handleStyle(hd: Handle): any {
-  const S = BOX_HANDLE
-  const half = S / 2
-  const base: any = { position: 'absolute', width: S, height: S, background: '#fff', border: `1.5px solid ${accent}`, borderRadius: 2, boxSizing: 'border-box', pointerEvents: 'all' }
+  const half = HIT / 2
+  const base: any = {
+    position: 'absolute',
+    width: HIT,
+    height: HIT,
+    background: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'all',
+  }
   const mid = `calc(50% - ${half}px)`
   const map: Record<Handle, any> = {
     nw: { left: -half, top: -half, cursor: 'nwse-resize' },
@@ -777,4 +838,14 @@ function handleStyle(hd: Handle): any {
     w: { left: -half, top: mid, cursor: 'ew-resize' },
   }
   return { ...base, ...map[hd] }
+}
+// The visible square in the centre of each handle's (larger) hit area.
+const handleSquareStyle: any = {
+  width: BOX_HANDLE,
+  height: BOX_HANDLE,
+  background: '#fff',
+  border: `1.5px solid ${accent}`,
+  borderRadius: 2,
+  boxSizing: 'border-box',
+  pointerEvents: 'none',
 }

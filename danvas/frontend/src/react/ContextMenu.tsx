@@ -4,7 +4,7 @@
 import { useEffect } from 'preact/hooks'
 import { contextMenu, closeContextMenu } from '../engine/contextmenu'
 import { store } from '../engine/store'
-import { exportRecordsToFile, copyRecordsToClipboard } from '../engine/export'
+import { exportRecordsToFile, copyRecordsToClipboard, copyRecordsToClipboardSvg } from '../engine/export'
 import { arrangeSelection, duplicateSelection, groupSelection, ungroupSelection, selectionHasGroup } from '../engine/interaction'
 import { useValue } from './EngineContext'
 import { Icon } from './icons'
@@ -86,6 +86,7 @@ export function ContextMenu() {
       >
         <style>{CSS}</style>
         {item('Copy as PNG', run(() => void copyRecordsToClipboard(ids)), 'copy')}
+        {item('Copy as SVG', run(() => void copyRecordsToClipboardSvg(ids)), 'copy')}
         {item('Export as PNG', run(() => void exportRecordsToFile(ids, 'png')), 'image')}
         {item('Export as SVG', run(() => void exportRecordsToFile(ids, 'svg')), 'image')}
         {divider}

@@ -2,47 +2,38 @@
 
 Rendered as a native React panel (mounted by ReactHost): each frame rides a
 *binary* WebSocket frame (no base64, no JSON, no shape-prop churn) and the panel
-paints it with ``canvas.onFrame`` — wrapping each ``ArrayBuffer`` in a Blob ->
-object URL -> ``<img>`` and revoking the previous URL once the next frame paints,
-so the stream can't leak memory and never triggers a React re-render. The Python
-side (OpenCV JPEG encoding, or pre-encoded bytes) is unchanged.
+paints it with ``canvas.paintFrame`` — the shared image-frame fast path that
+decodes each ``ArrayBuffer`` off the main thread (``createImageBitmap``) and blits
+it to a ``<canvas>`` with the GPU ``bitmaprenderer`` context, coalescing bursts so
+a slow tab catches up to the newest frame instead of queuing stale ones. No React
+re-render per frame. The Python side (OpenCV JPEG encoding, or pre-encoded bytes)
+is unchanged.
 """
 
 from . import _theme
 from .react import React
 from ..bridge import BINARY_VIDEO  # noqa: F401 – re-exported for bake.py discovery
 
-# The panel: subscribe to the binary push stream and paint each JPEG frame to an
-# <img>. ``onFrame`` delivers each frame as a zero-copy ArrayBuffer (no React
-# re-render); we revoke the prior frame's object URL once the next one paints.
+# The panel: subscribe to the binary push stream via canvas.paintFrame, which
+# decodes each JPEG off-thread and blits it to a <canvas>. ``onActive`` flips the
+# placeholder off after the first frame paints.
 # Authored as a plain string so its JSX braces survive — nothing is substituted.
 _VIDEO_SOURCE = r"""
 function Component({ canvas }) {
-  const imgRef = React.useRef(null);
-  const urlRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
   const [live, setLive] = React.useState(false);
   React.useEffect(() => {
-    const off = canvas.onFrame((d) => {
-      if (!(d instanceof ArrayBuffer)) return;
-      const el = imgRef.current;
-      if (!el) return;
-      const url = URL.createObjectURL(new Blob([d], { type: "image/jpeg" }));
-      const prev = urlRef.current;
-      // Revoke the prior frame's URL only after the new one has painted.
-      el.onload = () => { if (prev) URL.revokeObjectURL(prev); };
-      urlRef.current = url;
-      el.src = url;
-      setLive(true);  // React bails if already true, so this is cheap per frame
-    });
-    return () => {
-      off();
-      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; }
-    };
+    const el = canvasRef.current;
+    if (!el) return;
+    // canvas.paintFrame decodes frames off the main thread (createImageBitmap) and
+    // blits them with the GPU-fast bitmaprenderer context, coalescing bursts so a
+    // slow tab catches up to the newest frame rather than queuing stale ones.
+    return canvas.paintFrame(el, { onActive: () => setLive(true) });
   }, [canvas]);
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
       background: "var(--pc-video-bg, #000)", borderRadius: 4, overflow: "hidden", height: "100%" }}>
-      <img ref={imgRef} draggable={false}
+      <canvas ref={canvasRef}
         style={{ width: "100%", height: "100%", objectFit: "contain",
           pointerEvents: "none", display: live ? "block" : "none" }} />
       {!live && <span style={{ color: "var(--pc-muted)", fontSize: 13 }}>no signal</span>}

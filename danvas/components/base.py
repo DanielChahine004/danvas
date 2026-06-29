@@ -790,6 +790,13 @@ class BaseComponent:
             fields["h"] = msg["h"]
         if msg.get("rotation") is not None:
             fields["rotation"] = math.degrees(msg["rotation"])
+        # A manual height/width drag in the browser pins a content-fit panel: the
+        # frontend flips autoH/autoW off and reports it here so the content fit
+        # stops re-asserting itself (and the flag round-trips to other viewers).
+        if "autoH" in msg and hasattr(self, "_auto_h"):
+            self._auto_h = bool(msg["autoH"])
+        if "autoW" in msg and hasattr(self, "_auto_w"):
+            self._auto_w = bool(msg["autoW"])
         viewer = viewer or {}
         role = viewer.get("role")
         cid = viewer.get("id")

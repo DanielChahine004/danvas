@@ -195,6 +195,34 @@ export function copyRecordsToClipboard(ids: string[]): Promise<{ ok: boolean; er
   })
 }
 
+// Copy the records to the clipboard as a (transparent-bg) SVG. domToSvg returns a
+// data URL; we decode the markup and put it on the clipboard. Vector-aware targets
+// (Figma, Illustrator, Inkscape, editors) accept `image/svg+xml`; we also write the
+// raw markup as `text/plain` so a plain paste yields the SVG source. Browsers that
+// reject the `image/svg+xml` clipboard type fall back to a text-only write.
+export function copyRecordsToClipboardSvg(ids: string[]): Promise<{ ok: boolean; error?: string }> {
+  return withExport(ids, true, async (mod, layer, common) => {
+    const dataUrl: string = await mod.domToSvg(layer, common)
+    const svg = await (await fetch(dataUrl)).text()
+    if (!navigator.clipboard) throw new Error('clipboard unsupported')
+    const CI = (window as any).ClipboardItem
+    if (CI) {
+      try {
+        await navigator.clipboard.write([
+          new CI({
+            'image/svg+xml': new Blob([svg], { type: 'image/svg+xml' }),
+            'text/plain': new Blob([svg], { type: 'text/plain' }),
+          }),
+        ])
+        return
+      } catch {
+        // Some browsers reject the image/svg+xml clipboard type — fall back to text.
+      }
+    }
+    await navigator.clipboard.writeText(svg)
+  })
+}
+
 // --- snapshot (user free-form drawings) -------------------------------------
 // The drawing layer lands in M8; until then there are no free-form drawings, so
 // get returns nothing and put is a no-op. Panels/arrows are recreated from Python

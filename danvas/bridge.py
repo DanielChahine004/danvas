@@ -1416,7 +1416,7 @@ class Bridge:
         if msg.get("auto") and comp.x is not None:
             effective_msg = {k: v for k, v in msg.items() if k not in ("x", "y", "auto")}
         comp._apply_remote_layout(effective_msg, self._viewers.get(ws, {}))
-        geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation")
+        geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation", "autoH", "autoW")
                 if msg.get(k) is not None}
         if geom:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom},
@@ -1758,7 +1758,17 @@ class Bridge:
         """
         if existing is None:
             return {**new_msg, "payload": dict(new_msg.get("payload") or {})}
-        existing.setdefault("payload", {}).update(new_msg.get("payload") or {})
+        ep = existing.setdefault("payload", {})
+        npl = new_msg.get("payload") or {}
+        # ``data_patch`` carries only the keys that changed (React.update). A plain
+        # replace would drop the earlier patch's keys when two updates conflate, so
+        # accumulate them: shared key/value props, newest value wins.
+        if isinstance(npl.get("data_patch"), dict) and isinstance(ep.get("data_patch"), dict):
+            merged_patch = {**ep["data_patch"], **npl["data_patch"]}
+            ep.update(npl)
+            ep["data_patch"] = merged_patch
+        else:
+            ep.update(npl)
         for k, v in new_msg.items():
             if k != "payload":
                 existing[k] = v

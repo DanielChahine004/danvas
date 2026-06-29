@@ -51,9 +51,10 @@ def test_update_for_role_sends_merged_props_to_role():
 def test_update_for_does_not_change_shared_props():
     panel, bridge = make()
     panel.update_for(role="user", b=2)
-    # A later broadcast update must not carry the per-viewer override.
+    # A later broadcast update sends only the changed key (a delta) and must NOT
+    # carry the per-viewer override (b); the frontend merges it onto shared state.
     panel.update(c=3)
-    assert _data(bridge.broadcasts[0]) == {"a": 1, "c": 3}
+    assert bridge.broadcasts[0]["payload"]["data_patch"] == {"c": 3}
 
 
 def test_update_for_client_id():

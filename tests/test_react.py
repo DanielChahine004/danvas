@@ -32,13 +32,28 @@ def test_register_props_carries_source_and_json_props():
     assert json.loads(props["data"]) == {"label": "Taps"}
 
 
-def test_update_merges_props_and_sends_json():
+def test_update_sends_delta_but_replays_full():
     panel = _panel(props={"label": "Taps"})
-    panel.update(label="Hits", extra=1)
-    # Merge semantics: untouched keys survive.
+    panel.update(label="Hits")
+    # The wire carries ONLY the changed key (a delta), not the whole props blob.
+    assert panel._bridge.plain[-1]["payload"] == {"data_patch": {"label": "Hits"}}
+    panel.update(extra=1)
+    assert panel._bridge.plain[-1]["payload"] == {"data_patch": {"extra": 1}}
+    # But the full state is retained and replays on (re)connect via register_props,
+    # so a late joiner still gets every key (merge semantics: untouched keys survive).
     assert json.loads(panel.register_props()["data"]) == {"label": "Hits", "extra": 1}
-    sent = json.loads(panel._bridge.plain[-1]["payload"]["data"])
-    assert sent == {"label": "Hits", "extra": 1}
+
+
+def test_conflation_accumulates_data_patch_deltas():
+    # A `latest`-queue panel conflates pending updates; deltas must ACCUMULATE so no
+    # changed key is lost when two updates collapse into one (newest value wins).
+    from danvas.bridge import Bridge
+
+    mk = lambda patch: {"type": "update", "id": "x", "payload": {"data_patch": patch}}
+    merged = Bridge._merge_update(Bridge._merge_update(None, mk({"a": 1})), mk({"b": 2}))
+    assert merged["payload"]["data_patch"] == {"a": 1, "b": 2}
+    merged = Bridge._merge_update(merged, mk({"a": 9}))
+    assert merged["payload"]["data_patch"] == {"a": 9, "b": 2}
 
 
 def test_on_request_routes_by_event_and_returns_value():

@@ -46,10 +46,11 @@ def test_update_changes_the_face_text_live_and_persists():
 
     btn.update("Pause")
 
-    # Pushed to the browser as a React props (`data`) update...
+    # Pushed to the browser as a React props delta (`data_patch`, only the changed
+    # key) — the frontend merges it into the panel's current props...
     assert bridge.sent[-1]["type"] == "update"
     assert bridge.sent[-1]["id"] == "b1"
-    assert json.loads(bridge.sent[-1]["payload"]["data"])["text"] == "Pause"
+    assert bridge.sent[-1]["payload"]["data_patch"]["text"] == "Pause"
     # ...and stored, so a reconnecting client replays the current face.
     assert _face(btn) == "Pause"
 

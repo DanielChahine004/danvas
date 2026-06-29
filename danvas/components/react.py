@@ -24,6 +24,12 @@ The ``canvas`` handle exposes:
   * ``onFrame(cb)`` — subscribe (in a ``useEffect``) to the :meth:`push` /
     :meth:`push_binary` stream without re-rendering; ``cb`` gets each value (an
     ``ArrayBuffer`` for binary). Use this *or* the ``value`` prop, not both;
+  * ``paintFrame(canvasEl, {onActive})`` — the image-frame fast path: for a panel
+    streaming encoded image bytes (JPEG/PNG/WebP via :meth:`push_binary`), paints
+    each frame to a ``<canvas>`` decoded **off the main thread**
+    (``createImageBitmap`` + GPU ``bitmaprenderer``), coalescing bursts to the
+    newest frame. Returns an unsubscribe; style the ``<canvas>`` with CSS
+    (``object-fit``) for layout. Built-in VideoFeed uses this;
   * ``viewport(cb)`` — ``cb`` is called now and on every camera move with the live
     ``{ x, y, zoom }`` of the canvas centre (the numbers ``serve(view=…)`` takes);
   * ``setView({ x, y, zoom })`` — the write-twin of ``viewport``: pan/zoom the canvas
@@ -393,10 +399,19 @@ class React(_EventRouter, BaseComponent):
         everyone. ``roles``/``client_id`` are reserved, so a prop can't use those
         names (rename the prop if needed).
         """
+        # Shared (broadcast) updates — the high-volume path — keep the full state in
+        # ``_data`` (so a reconnecting viewer replays every prop via
+        # ``register_props``) but put only the CHANGED keys on the wire as
+        # ``data_patch``; the frontend merges them into the panel's current data. A
+        # 1000-row table updated one cell at a time no longer re-serializes and
+        # re-broadcasts every row each tick. (Conflated ``latest`` panels accumulate
+        # patches in _merge_update so none are dropped.)
         if roles is None and client_id is None:
             self._data.update(props)
-            self._send_update({"data": json.dumps(self._data)})
+            self._send_update({"data_patch": dict(props)})
             return self
+        # Scoped (per-viewer) updates are infrequent personalisation; they send the
+        # full merged view for that viewer, unchanged.
         if roles is not None:
             for r in ([roles] if isinstance(roles, str) else roles):
                 self._role_data.setdefault(r, {}).update(props)
