@@ -47,7 +47,7 @@ canvas.connect(gain, status, name="monitor", text="monitor", dash="dashed")
 
 # A control panel that stays draggable, plus a toggle to lock/unlock the stages.
 lock = canvas.insert(
-    danvas.Toggle("lock", options=["locked", "unlocked"]),
+    danvas.Toggle(["locked", "unlocked"], name="lock"),
     x=80, y=300, draggable=False, resizable=False,
 )
 

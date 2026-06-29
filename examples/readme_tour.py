@@ -95,7 +95,7 @@ Bidirectional: `table`, `chat`, `react`, `custom`.
 with col.row(gap=GAP):
     speed_sl   = canvas.slider("speed",   min=0, max=100, default=50,
                                 label="Speed", w=300)
-    enabled_tg = canvas.toggle("enabled", ["off", "on"], default="on",
+    enabled_tg = canvas.toggle(["off", "on"], name="enabled", default="on",
                                 label="Enabled", w=160)
     reset_bt   = canvas.button("reset",   text="Reset", w=112)
 
@@ -123,7 +123,7 @@ automatically so hover, active and focus states all follow the theme.
 
 with col.row(gap=GAP):
     canvas.button("go_btn",   text="Launch",   color="#10b981", w=136)
-    canvas.toggle("mode_tg",  ["A", "B", "C"], color=(168, 85, 247), w=216)
+    canvas.toggle(["A", "B", "C"], name="mode_tg", color=(168, 85, 247), w=216)
     canvas.slider("heat_sl",  min=0, max=100, default=35, color="#f59e0b", w=268)
     canvas.text_field("tag_fld", placeholder="search…", color="#06b6d4", w=196)
 

@@ -22,7 +22,7 @@ canvas = danvas.Canvas()
 # shorter -- see hello_world.py and sensor_dashboard.py.
 servo_1 = canvas.insert(danvas.Slider("servo_1", min=0, max=180, default=90))
 servo_2 = canvas.insert(danvas.Slider("servo_2", min=0, max=180, default=45))
-mode = canvas.insert(danvas.Toggle("mode", options=["manual", "vision"]))
+mode = canvas.insert(danvas.Toggle(["manual", "vision"], name="mode"))
 status = canvas.insert(danvas.Label("status", value="idle"))
 plot = canvas.insert(
     danvas.LivePlot(

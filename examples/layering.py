@@ -44,7 +44,7 @@ for i, (letter, color) in enumerate(CARDS):
     )
 
 # Pick which card the layering buttons act on.
-target = canvas.toggle("target", options=["A", "B", "C"], default="A",
+target = canvas.toggle(["A", "B", "C"], name="target", default="A",
                        x=160, y=440, label="target card")
 
 # One button per stacking operation, laid out in a row under the cards.
