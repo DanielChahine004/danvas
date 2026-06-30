@@ -65,9 +65,12 @@
 
 /* Hand (grab) tool, used as the default on touch kiosks: like pc-draw-passthrough
  * the host goes pointer-transparent so a one-finger drag on empty panel space
- * falls through to the stable panel card and the camera pans reliably. Unlike
- * drawing, controls stay usable — they opt back in below. */
-.pc-hand {
+ * falls through to the stable panel card and the camera pans reliably. The `*`
+ * is required so SVG/canvas content (e.g. Plotly's own drag layers, which set
+ * their own pointer-events and don't inherit) can't grab the gesture. Controls
+ * stay usable — they opt back in below, winning on specificity. */
+.pc-hand,
+.pc-hand * {
   pointer-events: none !important;
 }
 .pc-hand button,

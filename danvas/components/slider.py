@@ -59,6 +59,7 @@ function Component({ canvas, value, props }) {
       <div className="pc-slider" style={_th}>
         <input type="range" min={props.min} max={props.max} step={props.step}
           value={v}
+          onPointerDown={(e) => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} }}
           onChange={(e) => {
             const n = Number(e.target.value);
             setV(n);

@@ -9,6 +9,7 @@ import { transform as transformJsx } from 'sucrase'
 import React from 'preact/compat'
 import { useEditor, useValue } from './EngineContext'
 import { paintFrameStream, type PaintFrameOpts } from './frame'
+import { navMode } from '../engine/camera'
 import {
   sendInput,
   sendBinary,
@@ -334,6 +335,11 @@ export default function ReactHost({ shape }: { shape: any }) {
   const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
   const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
   const handMode = useValue('pc-hand-tool', () => editor.getCurrentToolId() === 'hand', [editor])
+  // In a scroll/document mode panels stay fully interactive (no pc-hand): the
+  // webpage-style scroll rule lives in input.ts — a touch that starts on interactive
+  // content gives that content the gesture, otherwise the page scrolls — so nothing
+  // here needs to be made touch-transparent. (Draw tools still pass through to ink.)
+  const scrollDoc = useValue('pc-scrolldoc', () => navMode() !== 'free', [])
   const nonPanelHovered = useValue(
     'pc-hover',
     () => {
@@ -364,7 +370,17 @@ export default function ReactHost({ shape }: { shape: any }) {
     <div
       ref={hostRef}
       className={
-        ghost ? undefined : handMode ? 'pc-hand' : !toolIsSelect || nonPanelHovered ? 'pc-draw-passthrough' : undefined
+        ghost
+          ? undefined
+          : scrollDoc
+            ? toolIsSelect || handMode
+              ? undefined // document mode: panels interactive (scroll rule is in input.ts)
+              : 'pc-draw-passthrough' // a draw tool still passes through to the ink layer
+            : handMode
+              ? 'pc-hand'
+              : !toolIsSelect || nonPanelHovered
+                ? 'pc-draw-passthrough'
+                : undefined
       }
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: ghost ? 'none' : 'all' }}
       onMouseDownCapture={

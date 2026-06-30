@@ -3,9 +3,10 @@
 // writes, the union-of-panels bounds, fit-to-bounds, centre-on-a-point, and the
 // once-per-load initial auto-fit. Ports bridge.js's fitCameraToBounds /
 // applyCameraFrom / scheduleInitialFit and App.jsx's camera math.
+import { signal } from 'alien-signals'
 import { store } from './store'
 import { editor } from './editor'
-import type { Camera, PanelRecord } from './types'
+import type { Camera, PanelRecord, WriteSignal } from './types'
 
 const FIT_PAD = 80 // px of breathing room around panels on first fit
 
@@ -15,17 +16,81 @@ const FIT_PAD = 80 // px of breathing room around panels on first fit
 // this to switch behaviour.
 export type ScrollMode = 'free' | 'scroll_x' | 'scroll_y'
 let scrollMode: ScrollMode = 'free'
+// Reactive mirror of the mode so the React layer (ReactHost) can make panels
+// touch-transparent in a scroll mode — see the `pc-hand`-style passthrough.
+export const navMode = signal<ScrollMode>('free') as WriteSignal<ScrollMode>
 
 export function getScrollMode(): ScrollMode {
   return scrollMode
 }
 
+const SCROLL_PAD = 12 // px margin beside the content column in a scroll mode
+let scrollZoom = 1 // the configured max zoom for the active scroll mode
+let scrollSettled = false // first valid scroll layout done (then resizes preserve scroll)
+let scrollFitZoom = 1 // the zoom that fits the column to the viewport (pinch lower bound)
+
+// The zoom at which the document column exactly fits the viewport — the lower bound
+// for pinch-zoom in a scroll mode (you can zoom IN, but not OUT past the start view).
+export function getScrollFitZoom(): number {
+  return scrollFitZoom
+}
+
 export function setNavigationMode(mode: ScrollMode, zoom = 1): void {
   scrollMode = mode || 'free'
+  navMode(scrollMode)
+  scrollSettled = false
   if (scrollMode === 'free') return
-  // Lock to the requested zoom at the origin; we own the camera from here.
-  markInitialFitDone()
-  store.camera({ x: 0, y: 0, z: zoom })
+  scrollZoom = zoom || 1
+  // Lock the requested zoom now (first paint). Then fit + centre the content
+  // column (see centerForScroll). On a live switch panels already exist so this
+  // applies immediately; at connect they arrive after, and runInitialFit centres
+  // once they do. Re-applied on resize from input.ts.
+  store.camera({ x: 0, y: 0, z: scrollZoom })
+  relayoutScroll()
+}
+
+// Re-fit + centre the document column when conditions are ready. Called on entry,
+// when panels first arrive (runInitialFit), and on every viewport resize (input.ts).
+// The first valid pass aligns the content to the top (resetScroll); later ones keep
+// the current scroll position. Guards against running before the viewport/panels
+// exist (which was leaving the column off-centre on a phone until the first drag).
+export function relayoutScroll(): void {
+  if (scrollMode === 'free') return
+  const vsb = editor.getViewportScreenBounds()
+  if (!vsb || vsb.w <= 1 || vsb.h <= 1) return
+  if (!currentPageBounds()) return
+  centerForScroll(!scrollSettled)
+  scrollSettled = true
+}
+
+// Lay out the content as a document column for a scroll mode: fit the zoom so the
+// column fills the cross-axis (width for scroll_y, height for scroll_x) — capped at
+// the configured zoom, so it scales DOWN to fit a narrow phone but never blows up
+// past 1:1 on a wide desktop — and centre it on that axis. `resetScroll` also aligns
+// the content start (top/left) to a small margin; on a resize we keep the current
+// scroll position and only refit + re-centre.
+export function centerForScroll(resetScroll = false): void {
+  if (scrollMode === 'free') return
+  const b = currentPageBounds()
+  if (!b || b.w <= 0 || b.h <= 0) return
+  const vsb = editor.getViewportScreenBounds()
+  if (!vsb || vsb.w <= 1 || vsb.h <= 1) return
+  const inst = store.instance()
+  const cam = store.camera()
+  const clampZ = (z: number) => Math.max(inst.zoomLimits.min, Math.min(inst.zoomLimits.max, z))
+  if (scrollMode === 'scroll_y') {
+    const z = clampZ(Math.min(scrollZoom, (vsb.w - SCROLL_PAD * 2) / b.w))
+    scrollFitZoom = z
+    const x = vsb.w / (2 * z) - (b.x + b.w / 2)
+    const y = resetScroll ? SCROLL_PAD / z - b.y : cam.y
+    setCamera({ x, y, z }, { force: true })
+  } else {
+    const z = clampZ(Math.min(scrollZoom, (vsb.h - SCROLL_PAD * 2) / b.h))
+    scrollFitZoom = z
+    const y = vsb.h / (2 * z) - (b.y + b.h / 2)
+    const x = resetScroll ? SCROLL_PAD / z - b.x : cam.x
+    setCamera({ x, y, z }, { force: true })
+  }
 }
 
 // Clamp z to the configured limits and refuse to move a locked camera (unless
@@ -122,6 +187,7 @@ export function markInitialFitDone(): void {
 // Re-arm on a run change so the new run's panels get framed.
 export function resetInitialFit(): void {
   initialFitDone = false
+  scrollSettled = false
   if (initialFitTimer) {
     clearTimeout(initialFitTimer)
     initialFitTimer = null
@@ -143,5 +209,8 @@ function runInitialFit(): void {
   const bounds = currentPageBounds()
   if (!bounds) return // no panels yet; a later register reschedules
   initialFitDone = true
-  fitCameraToBounds(bounds)
+  // In a scroll mode, don't fit-to-bounds (that would override the locked zoom);
+  // lay the content out as a centred document column at the configured zoom.
+  if (scrollMode !== 'free') relayoutScroll()
+  else fitCameraToBounds(bounds)
 }

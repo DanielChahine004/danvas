@@ -5,6 +5,7 @@
 // "drawing on top" is stubbed (no drawing layer until M8), so under the select
 // tool a panel claims the pointer exactly as before.
 import { useEditor, useValue } from './EngineContext'
+import { navMode } from '../engine/camera'
 
 // Derive tinted frame CSS variables from an accent hex (frameColor).
 function deriveFrameVars(fc: string, isDark: boolean): Record<string, string> {
@@ -167,6 +168,10 @@ export function Card({
   const editor = useEditor()
   const isDark = useValue('pc-dark', () => editor.user.getIsDarkMode(), [editor])
   const toolIsSelect = useValue('pc-tool', () => editor.getCurrentToolId() === 'select', [editor])
+  // In a scroll/document layout panels can't be repositioned, so the drag-handle grip
+  // is pointless — and its grab cursor makes a short panel (a label) read as
+  // interactive, blocking page scroll. Hide it there.
+  const scrollDoc = useValue('pc-card-scroll', () => navMode() !== 'free', [])
   const nonPanelHovered = useValue(
     'pc-hover',
     () => {
@@ -195,7 +200,7 @@ export function Card({
       }
     >
       {children}
-      {toolIsSelect && handle && !noGrab && !blockInput && <DragHandle />}
+      {toolIsSelect && handle && !noGrab && !blockInput && !scrollDoc && <DragHandle />}
       {toolIsSelect && grab && !noGrab && !selected && !blockInput && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'all', cursor: 'grab' }} />
       )}

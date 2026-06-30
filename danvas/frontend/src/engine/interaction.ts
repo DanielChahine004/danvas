@@ -9,6 +9,7 @@
 import { signal } from 'alien-signals'
 import { store } from './store'
 import { editor, screenToPage } from './editor'
+import { navMode } from './camera'
 import { hitTestDrawing, hitTestErase, hitTestArrow, hitTestLabel, labelParamAt, recordsInRect, recordBBox, bindTargetAt } from './hittest'
 import { copyRecordsToClipboard } from './export'
 import { gesturing } from './gesture'
@@ -316,6 +317,11 @@ export function attachInteraction(container: HTMLElement): () => void {
     if (gesturing()) return // a two-finger pinch owns the gesture
     clearInteracting() // a fresh canvas interaction brings the selection box back
     const tool = store.instance().tool
+    // In a scroll/document mode a touch is either scrolling the page (camera) or a tap
+    // on panel content — never a canvas marquee/panel-move. Bail so the press reaches
+    // the content (the deferred scroll in input.ts handles drag-to-scroll). Mouse and
+    // the draw tools are unaffected.
+    if (e.pointerType === 'touch' && tool === 'select' && navMode() !== 'free') return
     // Capture the pointer for gestures we own (marquee/move/draw/erase) so a Custom
     // panel's iframe under the cursor can't swallow the move/up events mid-drag —
     // which froze a marquee the moment it crossed an iframe. Released automatically
