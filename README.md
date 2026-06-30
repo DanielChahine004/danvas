@@ -181,7 +181,7 @@ canvas.insert(s, x=80, y=80)
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `filename=` |
 | `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)` |
-| `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`, `.update(**props)`, `.push(data)`, `css=` |
+| `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
 
 Most `color=` panels expose `.color` (and most accept `lock`/`chrome` flags) —
@@ -294,7 +294,7 @@ plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" la
 | `@upload.on_upload` | Upload | `(file)` | file received (`file.data` or `file.path`) |
 | `@panel.on_layout` | any | `(comp)` | user drags/resizes the panel |
 | `@panel.on("event")` / `on_message` | Custom, React | `(msg)` | `canvas.send(...)` from the panel |
-| `@panel.on_binary` | Custom | `(data: bytes)` | `canvas.sendBinary(buf)` from the iframe |
+| `@panel.on_binary` | Custom, React | `(data: bytes)` | `canvas.sendBinary(buf)` from the panel |
 | `@panel.on_request("event")` | Custom, React | `(req)` | `await canvas.request(...)` — return resolves the Promise |
 | `@panel.on_error` | Custom, React | `(msg)` | JS error in the panel |
 
@@ -397,12 +397,13 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
 - `value` is the latest `push(data)`; `props` is the `update(**props)` dict
   (replayed on reconnect). The `canvas` prop is the bridge handle:
   `send(data)` (→ `@on`/`@on_message`), `request(data)` (awaitable, → `@on_request`),
+  `sendBinary(buf)` (an `ArrayBuffer` *up* to Python → `@on_binary`, zero-copy),
   `onFrame(cb)` (subscribe to `push` with no re-render; `ArrayBuffer` for binary),
   `paintFrame(canvasEl)` (blit streamed image bytes to a `<canvas>`, decoded off the
   main thread — what `VideoFeed` uses),
   `viewport(cb)` / `setView({x,y,zoom})` (read/move the camera), `chat` (the shared room).
-- `push_binary(bytes)` → `onFrame` as a zero-copy `ArrayBuffer` (React can receive
-  binary but not send it — use `Custom` for browser→Python binary).
+- `push_binary(bytes)` → `onFrame` as a zero-copy `ArrayBuffer` (down); `canvas.sendBinary(buf)`
+  → `@on_binary` is the up direction (binary travels both ways, like `Custom`).
 - `scope=["d3"]` loads ESM libs from a CDN as the `libs` global (friendly names
   like `d3`/`lodash`/`framer-motion`/`lucide` are pinned builds).
 - `wasm_path="sim.wasm"` (or `wasm=bytes`) embeds a module, reached as
@@ -447,11 +448,13 @@ def handle(msg):
   `ArrayBuffer`. Honours `queue="latest"` for video/sensor streams.
 - **`canvas.sendBinary(buf)`** transfers an `ArrayBuffer` *up* to Python with zero
   overhead → `@panel.on_binary` (mark it `threaded=True` if it decodes/computes).
+  (React panels have `sendBinary` too — binary is bidirectional on both.)
 - **`canvas.requestCamera(opts)`** / **`requestMicrophone(opts)`** capture the
   webcam/mic from the **parent page** (browsers block `getUserMedia` in a sandboxed
   iframe), relaying frames up to `@on_binary` and back into the iframe via
-  `onPush`. *(These three are Custom-only — they need direct socket access the
-  React subtree doesn't expose.)*
+  `onPush`. *(These two are Custom-only — capturing a device from the sandboxed
+  iframe needs the parent page's `getUserMedia`; the rest of the handle, binary
+  included, is shared with React.)*
 - `forward_wheel=False` keeps wheel events inside the panel instead of forwarding
   them to the canvas (default `True` zooms the canvas, matching the bare canvas).
   Set it for content that does its own wheel handling — a 3D viewer zooming its

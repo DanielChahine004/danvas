@@ -28,6 +28,9 @@ The ``canvas`` handle exposes:
   * ``request(data)`` — the **awaitable** twin of ``send``: returns a Promise that
     resolves with the return value of the matching :meth:`on_request` handler
     (``const r = await canvas.request({event:'…', …})``);
+  * ``sendBinary(buf)`` — send an ``ArrayBuffer`` *up* to Python (zero-copy) →
+    ``@panel.on_binary``. Binary is bidirectional on a React panel — this is the up
+    direction, :meth:`push_binary` / ``onFrame`` the down;
   * ``onFrame(cb)`` — the streaming end of the receive channel: subscribe (in a
     ``useEffect``) to the :meth:`push` / :meth:`push_binary` stream WITHOUT
     re-rendering; ``cb`` gets each value (an ``ArrayBuffer`` for binary). While an
