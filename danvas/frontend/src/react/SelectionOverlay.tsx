@@ -3,7 +3,8 @@
 // handles when exactly one resizable shape is selected. Handles patch the record;
 // for panels the autoH/autoW axis is locked (content-driven).
 import { store } from '../engine/store'
-import { pageToScreen, screenToPage } from '../engine/editor'
+import { pageToScreen, pageToScreenAt, screenToPage } from '../engine/editor'
+import type { Camera } from '../engine/types'
 import { marquee, eraseTrail, snapGuides, bindHighlight, bindAnchorDot, bindAnchorAt, connectorPoints, interacting } from '../engine/interaction'
 import { recordBBox, bindTargetAt } from '../engine/hittest'
 import { linePathD, bendFromApex, clipConnector, clipArrow, polyPointAt, nearestPolyParam, elbowSegments, collapseElbowCoords, elbowDefaultAxis, elbowRoutePts, type ArrowKind } from '../engine/lineGeo'
@@ -181,9 +182,9 @@ const straightenOf = (id: string) => (e: any) => {
 // the full rectilinear route (cA→cB in PAGE space, honouring elbowCoords/axis) and
 // maps each corner to screen, so the dotted guide overlays the right-angle arrow it
 // belongs to. Other kinds fall back to linePathD on the screen-space anchors.
-function elbowSkeletonD(kind: ArrowKind, cA: { x: number; y: number }, cB: { x: number; y: number }, split: number, coords: number[] | undefined, axis: 'h' | 'v' | undefined, cAs: { x: number; y: number }, cBs: { x: number; y: number }, bz: number): string {
+function elbowSkeletonD(kind: ArrowKind, cA: { x: number; y: number }, cB: { x: number; y: number }, split: number, coords: number[] | undefined, axis: 'h' | 'v' | undefined, cAs: { x: number; y: number }, cBs: { x: number; y: number }, bz: number, base: Camera): string {
   if (kind !== 'elbow') return linePathD(cAs, cBs, bz, kind, split)
-  const pts = elbowRoutePts(cA, cB, split, coords, axis).map(pageToScreen)
+  const pts = elbowRoutePts(cA, cB, split, coords, axis).map((p) => pageToScreenAt(p, base))
   return 'M ' + pts.map((p) => `${p.x},${p.y}`).join(' L ')
 }
 
@@ -201,11 +202,16 @@ export function SelectionOverlay() {
   const single = selectedIds.length === 1 ? selectedIds[0] : null
 
   // The pan-follow layer for the (idle-selection) boxes + badge. Its children are
-  // positioned in screen space at the camera captured on the last render (baseRef);
-  // an effect translates the whole layer by the live pan delta so it tracks a pan
-  // without a React render. Reset to identity after each render (base just moved).
+  // positioned in screen space at the camera captured on THIS render (`base`, also
+  // stored in baseRef for the pan effect); an effect translates the whole layer by
+  // the live pan delta so it tracks a pan without a React render. Reset to identity
+  // after each render (base just moved). The children lay out against `base` (not
+  // the live camera) so that a child re-rendering mid-pan — a live panel whose
+  // record changes — stays consistent with the layer translate instead of
+  // double-counting the pan.
   const boxLayerRef = useRef<HTMLDivElement>(null)
-  const baseRef = useRef(store.camera())
+  const base = store.camera()
+  const baseRef = useRef(base)
   useLayoutEffect(() => {
     baseRef.current = store.camera()
     if (boxLayerRef.current) boxLayerRef.current.style.transform = ''
@@ -229,10 +235,10 @@ export function SelectionOverlay() {
       <div ref={boxLayerRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
         {!busy &&
           selectedIds.map((id) => (
-            <SelectionBox key={id} id={id} single={id === single} />
+            <SelectionBox key={id} id={id} single={id === single} base={base} />
           ))}
         {/* size badge — NOT gated by `busy`, so it stays (and updates) while resizing */}
-        {single && <DimensionBadge id={single} />}
+        {single && <DimensionBadge id={single} base={base} />}
       </div>
       <SnapGuides />
       <BindHighlight />
@@ -246,16 +252,18 @@ export function SelectionOverlay() {
 // A small size badge (W × H in page units) below a selected panel / box-shape.
 // Rendered ungated so it stays visible AND updates live while the shape is resized
 // (whiteboard-style). Lines/arrows/ink have no box, so they're skipped.
-function DimensionBadge({ id }: { id: string }) {
+function DimensionBadge({ id, base }: { id: string; base: Camera }) {
   const rec = useValue('dim:' + id, () => store.get(id), [id])
-  // Camera read untracked — parent re-renders on zoom and pan-translates the layer.
+  // Camera taken from `base` (the parent's render camera), not the live one: this
+  // badge sits in the pan-translated layer, so a mid-pan re-render must lay out
+  // against the same base or it would double-count the pan.
   if (!rec) return null
   const r = rec as any
   const isBox = r.typeName === 'panel' || (r.typeName === 'drawing' && ['geo', 'note', 'text', 'frame', 'image'].includes(r.shapeType))
   if (!isBox) return null
   const b = recordBBox(r)
   if (!b) return null
-  const z = store.camera().z
+  const z = base.z
   const rot = r.rotation || 0
   // Position the badge under the ROTATED shape's lowest point but keep it HORIZONTAL
   // (it must not rotate with the shape): take the shape centre's screen x and the
@@ -266,10 +274,10 @@ function DimensionBadge({ id }: { id: string }) {
   const sin = Math.sin(rot)
   let maxY = -Infinity
   for (const [px, py] of [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]] as const) {
-    const s = pageToScreen({ x: cx + (px - cx) * cos - (py - cy) * sin, y: cy + (px - cx) * sin + (py - cy) * cos })
+    const s = pageToScreenAt({ x: cx + (px - cx) * cos - (py - cy) * sin, y: cy + (px - cx) * sin + (py - cy) * cos }, base)
     if (s.y > maxY) maxY = s.y
   }
-  const center = pageToScreen({ x: cx, y: cy })
+  const center = pageToScreenAt({ x: cx, y: cy }, base)
   return (
     <div
       style={{
@@ -401,10 +409,12 @@ function Marquee() {
   )
 }
 
-function SelectionBox({ id, single }: { id: string; single: boolean }) {
-  // Camera read UNTRACKED (no pan re-render): the parent re-renders us on zoom
-  // (sel-z) and pan-translates our layer, so subscribing here would be redundant.
-  const cam = store.camera()
+function SelectionBox({ id, single, base }: { id: string; single: boolean; base: Camera }) {
+  // Camera = `base` (the parent's render camera), NOT the live one: the parent
+  // re-renders us on zoom (sel-z) and pan-translates our layer imperatively. Laying
+  // out against `base` keeps a mid-pan re-render (a live panel whose record changes)
+  // consistent with that translate instead of double-counting the pan.
+  const cam = base
   const rec = useValue('sel-rec:' + id, () => store.get(id), [id])
   // While this shape is being text-edited, show only the caret (TextEditor) — no
   // box/handles. The box returns when it's merely selected.
@@ -413,20 +423,20 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
   const r = rec as any
   // Freehand ink hugs the stroke outline rather than a bounding rectangle.
   if (r.typeName === 'drawing' && (r.shapeType === 'draw' || r.shapeType === 'highlight')) {
-    return <FreehandOutline rec={r} z={cam.z} />
+    return <FreehandOutline rec={r} base={base} />
   }
   // Lines/arrows show draggable endpoint handles instead of a box.
   if (r.typeName === 'drawing' && r.shapeType === 'line') {
-    return <LineSelection rec={r} z={cam.z} single={single} />
+    return <LineSelection rec={r} base={base} single={single} />
   }
   // Connector arrows (canvas.connect) get the same handles, routed off the panels
   // they bind to — so they're as controllable as a user-drawn arrow.
   if (r.typeName === 'arrow') {
-    return <ArrowSelection rec={r} z={cam.z} single={single} />
+    return <ArrowSelection rec={r} base={base} single={single} />
   }
   const b = recordBBox(rec)
   if (!b) return null
-  const tl = pageToScreen({ x: b.x, y: b.y })
+  const tl = pageToScreenAt({ x: b.x, y: b.y }, base)
   const w = b.w * cam.z
   const h = b.h * cam.z
   // When the shape is small on screen (zoomed out / tiny), drop the edge handles
@@ -599,11 +609,12 @@ function SelectionBox({ id, single }: { id: string; single: boolean }) {
 // A selection indicator that traces a freehand stroke's outline (with a small
 // constant-screen margin) instead of a rectangle. `z` is passed only to force a
 // re-render on zoom; pageToScreen reads the live camera.
-function FreehandOutline({ rec, z }: { rec: any; z: number }) {
+function FreehandOutline({ rec, base }: { rec: any; base: Camera }) {
+  const z = base.z
   const raw = Array.isArray(rec.props.points) ? rec.props.points : rec.props.points ? Object.values(rec.props.points) : []
   if (!raw.length) return null
   const screenPts = (raw as any[]).map((p) => {
-    const s = pageToScreen({ x: rec.x + p.x, y: rec.y + p.y })
+    const s = pageToScreenAt({ x: rec.x + p.x, y: rec.y + p.y }, base)
     return [s.x, s.y] as [number, number]
   })
   const size = (STROKE[rec.props.size as string] || 3.5) * 2.2 * z + 9
@@ -620,7 +631,11 @@ function FreehandOutline({ rec, z }: { rec: any; z: number }) {
 
 // Selection UI for a line/arrow: the curved highlight, draggable endpoint handles,
 // a bend handle at the apex (drag to curve), and the label handle (drag along).
-function LineSelection({ rec, z, single }: { rec: any; z: number; single: boolean }) {
+function LineSelection({ rec, base, single }: { rec: any; base: Camera; single: boolean }) {
+  // Lay out against `base` (the overlay's render camera), not the live one, so a
+  // mid-pan re-render stays in step with the layer's pan-translate (see SelectionBox).
+  const z = base.z
+  const p2s = (p: { x: number; y: number }) => pageToScreenAt(p, base)
   // Same centre-to-centre clip as connectors so the selection matches the rendered
   // (perimeter-clipped) arrow: skeleton + endpoints at the anchors, highlight = arc.
   const clip = clipArrow(rec)
@@ -630,17 +645,17 @@ function LineSelection({ rec, z, single }: { rec: any; z: number; single: boolea
   const bend = rec.props.bend || 0
   const split = typeof rec.props.elbowSplit === 'number' ? rec.props.elbowSplit : 0.5
   const bound = !!(rec.props.bindStart || rec.props.bindEnd)
-  const cAs = pageToScreen(clip.cA)
-  const cBs = pageToScreen(clip.cB)
-  const visS = clip.visible.map(pageToScreen)
+  const cAs = p2s(clip.cA)
+  const cBs = p2s(clip.cB)
+  const visS = clip.visible.map(p2s)
   const bz = bend * z
   // The skeleton is the UNCLIPPED centre-to-centre guide. For an elbow it must trace
   // the SAME rectilinear route the visible arrow uses (honouring elbowCoords/axis),
   // not linePathD's simple single-bend route — otherwise the dotted guide diverges
   // from the right-angle arrow it belongs to.
-  const skeletonD = elbowSkeletonD(kind, clip.cA, clip.cB, split, rec.props.elbowCoords, rec.props.elbowAxis, cAs, cBs, bz)
+  const skeletonD = elbowSkeletonD(kind, clip.cA, clip.cB, split, rec.props.elbowCoords, rec.props.elbowAxis, cAs, cBs, bz, base)
   const highlightD = visS.length >= 2 ? 'M ' + visS.map((p: { x: number; y: number }) => `${p.x},${p.y}`).join(' L ') : ''
-  const apex = pageToScreen(clip.apex)
+  const apex = p2s(clip.apex)
   const endHandles = [
     { key: entries[0]?.[0] || 'a1', s: cAs, which: 'start' as const },
     { key: entries[entries.length - 1]?.[0] || 'a2', s: cBs, which: 'end' as const },
@@ -730,7 +745,13 @@ function LineSelection({ rec, z, single }: { rec: any; z: number; single: boolea
 // different panel/shape to re-route it — i.e. control like a user-drawn arrow.
 // (Edits are local: there's no wire message to push an arrow's appearance back to
 // Python, so they reset on reload.)
-function ArrowSelection({ rec, z, single }: { rec: any; z: number; single: boolean }) {
+function ArrowSelection({ rec, base, single }: { rec: any; base: Camera; single: boolean }) {
+  // Lay out against `base` (the overlay's render camera), not the live one, so a
+  // mid-pan re-render stays in step with the layer's pan-translate (see SelectionBox).
+  // A connector bound to a live panel re-renders here when that panel's record
+  // changes — which is exactly the case that double-counted the pan.
+  const z = base.z
+  const p2s = (p: { x: number; y: number }) => pageToScreenAt(p, base)
   const startRec = useValue('as-s:' + rec.id, () => (rec.start ? store.get(rec.start) : undefined), [rec.start])
   const endRec = useValue('as-e:' + rec.id, () => (rec.end ? store.get(rec.end) : undefined), [rec.end])
   if (!startRec || !endRec) return null
@@ -740,13 +761,13 @@ function ArrowSelection({ rec, z, single }: { rec: any; z: number; single: boole
   const bend = rec.props.bend || 0
   const split = typeof rec.props.elbowSplit === 'number' ? rec.props.elbowSplit : 0.5
   // skeleton = centre-to-centre (faint guide + endpoints); highlight = clipped arc
-  const cAs = pageToScreen(clip.cA)
-  const cBs = pageToScreen(clip.cB)
-  const visS = clip.visible.map(pageToScreen)
+  const cAs = p2s(clip.cA)
+  const cBs = p2s(clip.cB)
+  const visS = clip.visible.map(p2s)
   const bz = bend * z
-  const skeletonD = elbowSkeletonD(kind, clip.cA, clip.cB, split, rec.props.elbowCoords, rec.props.elbowAxis, cAs, cBs, bz)
+  const skeletonD = elbowSkeletonD(kind, clip.cA, clip.cB, split, rec.props.elbowCoords, rec.props.elbowAxis, cAs, cBs, bz, base)
   const highlightD = visS.length >= 2 ? 'M ' + visS.map((p) => `${p.x},${p.y}`).join(' L ') : ''
-  const apex = pageToScreen(clip.apex)
+  const apex = p2s(clip.apex)
   const lt = Math.max(0, Math.min(1, rec.props.labelPosition ?? 0.5))
   const lp = visS.length >= 2 ? polyPointAt(visS, lt) : apex
   const live = () => clipConnector(store.peek((store.peek(rec.id) as any)?.start), store.peek((store.peek(rec.id) as any)?.end), store.peek(rec.id))

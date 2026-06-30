@@ -37,6 +37,18 @@ export function pageToScreen(page: { x: number; y: number }): { x: number; y: nu
   return { x: (page.x + c.x) * c.z + vsb.x, y: (page.y + c.y) * c.z + vsb.y }
 }
 
+// As pageToScreen, but against a SPECIFIC camera rather than the live one. The
+// selection overlay's pan-follow layer (SelectionOverlay) positions its children
+// at the camera captured on its last render and then imperatively translates the
+// whole layer by the live pan delta. A child that re-renders mid-pan (e.g. a live
+// panel whose record changes) must therefore lay out against that SAME captured
+// camera — using the live one would double-count the pan (the layer translate
+// plus a fresh live position).
+export function pageToScreenAt(page: { x: number; y: number }, c: Camera): { x: number; y: number } {
+  const vsb = viewportScreenBounds()
+  return { x: (page.x + c.x) * c.z + vsb.x, y: (page.y + c.y) * c.z + vsb.y }
+}
+
 function viewportPageBounds() {
   const c = store.camera()
   const vsb = viewportScreenBounds()
