@@ -24,6 +24,66 @@ def test_insert_rejects_bad_queue():
         canvas.label("status", queue="newest")
 
 
+# -- decorative: the floating-overlay convenience ---------------------------
+
+def test_decorative_composes_the_three_overlay_flags():
+    canvas = danvas.Canvas()
+    orb = canvas.custom(name="orb", html="<b>x</b>", decorative=True)
+    # decorative == grabbable=False + operable=False + frame=False.
+    assert (orb.grabbable, orb.operable, orb.frame) == (False, False, False)
+
+
+def test_decorative_lets_an_explicit_flag_override_it():
+    canvas = danvas.Canvas()
+    # Pinning a flag explicitly wins over the decorative default for that flag,
+    # leaving the other two composed.
+    orb = canvas.custom(name="orb", html="<b>x</b>", decorative=True, frame=True)
+    assert orb.frame is True
+    assert (orb.grabbable, orb.operable) == (False, False)
+
+
+def test_non_decorative_panels_keep_the_flag_defaults():
+    canvas = danvas.Canvas()
+    lbl = canvas.label("plain", value="hi")
+    assert (lbl.grabbable, lbl.operable, lbl.frame) == (True, True, True)
+
+
+def test_explicit_grabbable_false_without_decorative_still_applies():
+    # The None-default refactor must not change the plain explicit path.
+    canvas = danvas.Canvas()
+    btn = canvas.button("b", grabbable=False)
+    assert btn.grabbable is False
+    assert (btn.operable, btn.frame) == (True, True)
+
+
+# -- component namespace: canvas[name] is the canonical accessor -------------
+
+def test_getitem_resolves_a_shadowing_name_that_attr_access_cannot():
+    canvas = danvas.Canvas()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")            # the shadow warning is expected
+        insp = canvas.inspector(name="inspector")  # name collides with the method
+    # canvas.inspector returns the METHOD (shadowed); canvas["inspector"] the panel.
+    assert callable(canvas.inspector)
+    assert canvas["inspector"] is insp
+
+
+def test_in_operator_reports_membership_by_name():
+    canvas = danvas.Canvas()
+    canvas.label("status", value="hi")
+    assert "status" in canvas
+    assert "nope" not in canvas
+
+
+def test_getitem_unknown_name_lists_available():
+    canvas = danvas.Canvas()
+    canvas.label("status", value="hi")
+    with pytest.raises(KeyError) as ei:
+        canvas["ghost"]
+    msg = str(ei.value)
+    assert "ghost" in msg and "status" in msg     # names the miss + what's available
+
+
 def test_below_and_right_of_derive_position():
     canvas = danvas.Canvas()
     a = canvas.label("a", x=100, y=200, w=300, h=80)

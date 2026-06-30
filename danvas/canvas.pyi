@@ -111,6 +111,7 @@ class Canvas:
         operable: bool = ...,
         grabbable: bool = ...,
         frame: bool = ...,
+        decorative: bool = ...,
         name: str | None = ...,
         queue: Literal["fifo", "latest"] | None = ...,
         below: BaseComponent | str | None = ...,
@@ -359,3 +360,4 @@ class Canvas:
     # -- attribute / item access ----------------------------------------------
     def __getattr__(self, name: str) -> BaseComponent | Arrow: ...
     def __getitem__(self, name: str) -> BaseComponent | Arrow: ...
+    def __contains__(self, name: str) -> bool: ...

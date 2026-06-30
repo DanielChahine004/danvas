@@ -69,6 +69,7 @@ class Place(TypedDict, total=False):
     operable: bool
     grabbable: bool
     frame: bool
+    decorative: bool      # sugar: grabbable=False + operable=False + frame=False
 
 
 _NAV_MODES = frozenset(("free", "scroll_y", "scroll_x"))
@@ -619,8 +620,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return self.insert(insp, x=x, y=y, component_id=name)
 
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
-               locked=False, draggable=True, resizable=True, operable=True,
-               grabbable=True, frame=True, name=None, queue=None,
+               locked=False, draggable=True, resizable=True, operable=None,
+               grabbable=None, frame=None, decorative=False, name=None, queue=None,
                below=None, above=None, right_of=None, left_of=None, gap=16,
                width=None, height=None, roles=None, lock_for=None,
                component_id=None):
@@ -670,6 +671,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
           rectangle — so the component's content appears to sit directly on
           the canvas (toggle with ``component.frame``). Pair with
           ``grabbable=False`` if clicking the content should never select it.
+
+        - ``decorative=True`` is the one-liner for a purely visual overlay that
+          floats on the canvas: no chrome, never selectable, and click-through to
+          whatever sits beneath it (a label, a slider, the canvas itself). It is
+          exactly ``grabbable=False, operable=False, frame=False`` composed — use
+          it instead of spelling out all three. Any of the three can still be
+          pinned by passing it explicitly (the explicit value wins). Ideal for
+          cursor-following badges, watermarks, and HUD glyphs.
 
         Use ``draggable=False, resizable=False`` (or ``component.pin()``) to pin an
         interactive panel in place. Python ``move()``/``resize()`` still work
@@ -916,6 +925,28 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         }
         if rotation is not None:
             component._rotation = rotation
+        # ``decorative=True`` is sugar for a non-interactive floating overlay: no
+        # card chrome, never selectable, and click-through to whatever is beneath
+        # (e.g. the cursor orbs in examples/moving_widget). It just composes three
+        # real flags — grabbable=False, operable=False, frame=False — each of which
+        # the caller can still pin explicitly (an explicit value wins; these three
+        # are left ``None`` in the signature precisely so an override is
+        # distinguishable from "unset").
+        if decorative:
+            if grabbable is None:
+                grabbable = False
+            if operable is None:
+                operable = False
+            if frame is None:
+                frame = False
+        # Resolve any flag the caller left unset to the shared default before the
+        # apply loop (it treats a value differing from the default as an override).
+        if operable is None:
+            operable = LAYOUT_FLAGS["operable"].default
+        if grabbable is None:
+            grabbable = LAYOUT_FLAGS["grabbable"].default
+        if frame is None:
+            frame = LAYOUT_FLAGS["frame"].default
         # Apply each lock/chrome flag only when it differs from the default, so
         # the stored attribute matches what set_layout/register would send. The
         # names and backing attributes come from the shared LAYOUT_FLAGS table.
@@ -1824,15 +1855,37 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return bool(self._bridge._connections)
 
     def __getattr__(self, name):
-        # Only reached when normal attribute lookup fails. _named is set in
-        # __init__, but guard against lookups during unpickling/early init.
+        # ``canvas.<name>`` is the ergonomic accessor — sugar for ``canvas[name]``.
+        # It only reaches here when normal attribute lookup fails, so a name that
+        # collides with a real method/property (``inspector``, ``components``, …)
+        # returns that attribute instead and never resolves to the component; the
+        # insert-time warning flags the collision and points to ``canvas[name]``,
+        # which always works. (_named is set in __init__; guard early/unpickle.)
         named = self.__dict__.get("_named", {})
         if name in named:
             return named[name]
         raise AttributeError(name)
 
     def __getitem__(self, name):
-        return self._named[name]
+        """The canonical way to reach a component by its ``name=``.
+
+        ``canvas["status"]`` always resolves to the component, even when the name
+        shadows a Canvas attribute (where ``canvas.status`` would not). Prefer this
+        form for names that might collide with a method; ``canvas.<name>`` stays a
+        convenient shorthand for the rest.
+        """
+        try:
+            return self._named[name]
+        except KeyError:
+            avail = ", ".join(map(repr, sorted(self._named))) or "none yet"
+            raise KeyError(
+                f"no component named {name!r} on this canvas; available names: "
+                f"{avail}"
+            ) from None
+
+    def __contains__(self, name):
+        """``"status" in canvas`` — True when a component has that ``name=``."""
+        return name in self._named
 
     # Keys accepted in a ``view`` config, each paired with the coercion applied
     # before it is sent to the browser. Unknown keys are rejected so a typo

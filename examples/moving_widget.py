@@ -27,16 +27,10 @@ speed = canvas.slider("speed", min=0.1, max=30, step=0.1, default=10, x=40, y=40
 
 
 def _orb_html(emoji):
-    # The orb is purely decorative — see the custom() call below, which makes the
-    # panel itself click-through (grabbable=False + operable=False). user-select
-    # none just stops the emoji being highlightable as you drag past it.
-    return f"""
-      <style>html,body{{margin:0;overflow:hidden}}</style>
-      <div style="width:100%;height:100%;display:flex;align-items:center;
-                  justify-content:center;font-size:34px;
-                  filter:drop-shadow(0 0 10px #38bdf8);
-                  user-select:none;-webkit-user-select:none;">{emoji}</div>
-    """
+    # The orb is purely decorative — see the custom() call below (decorative=True),
+    # which makes the panel click-through and unselectable. A bare fragment is
+    # enough: Custom centres it and applies the base reset, so no <style> boilerplate.
+    return f'<div style="font-size:34px;filter:drop-shadow(0 0 10px #38bdf8)">{emoji}</div>'
 
 
 # Per-viewer state, owned by the orbit loop: id -> panel, id -> emoji.
@@ -73,7 +67,7 @@ def orbit():
             if panel is None:                 # first sighting -> spawn their emoji
                 panel = canvas.custom(
                     name=f"orb_{vid}", x=x, y=y, w=ORB, h=ORB,
-                    frame=False, grabbable=False, operable=False,
+                    decorative=True,           # no chrome, unselectable, click-through
                     html=_orb_html(_emoji_for(vid)),
                 )
                 panels[vid] = panel

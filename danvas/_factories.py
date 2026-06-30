@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 # table; ``queue`` lives here so all factories accept it uniformly.
 _INSERT_KEYS = ("x", "y", "w", "h", "width", "height", "rotation", "queue",
                 "below", "above", "right_of", "left_of", "gap",
-                "roles", "lock_for", *LAYOUT_FLAGS)
+                "roles", "lock_for", "decorative", *LAYOUT_FLAGS)
 
 
 class _FactoryMixin:

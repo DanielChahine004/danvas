@@ -95,7 +95,9 @@ canvas.unhide(panel)      # show again at last position
 canvas.clear()            # remove every panel + arrow at once
 canvas.connect(a, b, text="x2", color="blue")   # arrow bound between two panels (or shapes)
 canvas.disconnect(arrow)
-canvas.servo_1            # reach any panel by name (canvas["servo_1"] also works)
+canvas["servo_1"]         # reach any panel by its name= (the canonical accessor)
+canvas.servo_1            # same, as sugar — but canvas["..."] always wins if a name
+                          # collides with a Canvas method (e.g. "inspector"); "x" in canvas works
 canvas.components         # list of every panel (visible and hidden)
 canvas.arrows             # list of arrows
 panel.visible             # True if currently shown
@@ -282,7 +284,7 @@ plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" la
 | `@panel.on_layout` | any | `(comp)` | user drags/resizes the panel |
 | `@panel.on("event")` / `on_message` | Custom, React | `(msg)` | `canvas.send(...)` from the panel |
 | `@panel.on_binary` | Custom | `(data: bytes)` | `canvas.sendBinary(buf)` from the iframe |
-| `@panel.on_request("event")` | React | `(req)` | `await canvas.request(...)` — return resolves the Promise |
+| `@panel.on_request("event")` | Custom, React | `(req)` | `await canvas.request(...)` — return resolves the Promise |
 | `@panel.on_error` | Custom, React | `(msg)` | JS error in the panel |
 
 These are plain registration methods, so `@panel.on_change` and
@@ -418,8 +420,13 @@ def handle(msg):
     panel.push("clicked")  # → canvas.onPush in the iframe
 ```
 
-- `html`/`css`/`js` may be separate strings (handy for pasted snippets).
+- `html`/`css`/`js` may be separate strings (handy for pasted snippets). A bare
+  fragment is wrapped with a base reset (sane margins, `box-sizing`, centred), so
+  you don't hand-write a `<style>` reset; a complete `<html>` page is left as-is.
   `update(html)` swaps the whole document; `push(data)` streams without reloading.
+- The iframe's `canvas` handle **mirrors the React panel's**, so the two panel
+  kinds share one mental model: `send` / `onPush`, plus `request(data)` (awaitable,
+  → `@on_request`), `viewport(cb)` and `setView({x,y,zoom})` (read/move the camera).
 - `push_binary(bytes)` streams raw bytes (no base64); `canvas.onPush` gets an
   `ArrayBuffer`. Honours `queue="latest"` for video/sensor streams.
 - **`canvas.sendBinary(buf)`** transfers an `ArrayBuffer` *up* to Python with zero
@@ -564,9 +571,19 @@ servo.lock(); servo.unlock()
 
 `operable=False` blocks the *user* while your code keeps driving; `locked=True`
 freezes everything. `grabbable=False` (content-heavy panels) drops the
-click-to-select cover so the widget is live immediately. `frame=False` strips card
-chrome (background/border/shadow/padding/label) so content sits on the canvas —
-pair with `grabbable=False` for a free-floating widget.
+click-to-select cover so the widget is live immediately — and the panel becomes
+invisible to selection (no click, no marquee). `frame=False` strips card chrome
+(background/border/shadow/padding/label) so content sits on the canvas.
+
+**`decorative=True`** is the one-liner for a purely visual overlay: it composes
+`grabbable=False + operable=False + frame=False`, so the panel has no chrome, never
+selects, and is **click-through** to whatever sits beneath it (a slider, the
+canvas). Reach for it for cursor-following glyphs, watermarks, and HUDs; any of the
+three flags can still be pinned explicitly.
+
+```python
+canvas.custom(name="orb", html="🛸", decorative=True)   # floats, ignores the pointer
+```
 
 # Canvas shapes
 
