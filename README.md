@@ -180,7 +180,7 @@ canvas.insert(s, x=80, y=80)
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `filename=` |
-| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)` |
+| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True` |
 | `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
 
@@ -381,8 +381,11 @@ def adapt(viewer):
 
 Two factories ship your own UI from Python. **`react`** mounts JSX as a real React
 subtree (native, theme-aware, interactive from first hover — reach for this
-first); **`custom`** drops HTML/CSS/JS into a sandboxed iframe. Both are
-bidirectional: `canvas.send(...)` posts up to Python, `push`/`update` send down.
+first); **`custom`** drops HTML/CSS/JS into a sandboxed iframe. They share the
+**same `canvas` handle** — `send`/`request`/`onFrame`/`sendBinary`/`viewport`/
+`setView`/`chat` — so the two are interchangeable in capability (the iframe just
+adds a `postMessage` hop and needs `themed=True` to follow the theme). Both are
+bidirectional: `canvas.send(...)`/`request(...)` go up, `push`/`update` send down.
 
 ### React
 
