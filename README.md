@@ -903,6 +903,20 @@ the values a user set on input controls (sliders, toggles, text fields), and the
 free-form drawings. The panels themselves come back by re-running your script
 (behaviour is code), matched to the saved state by name.
 
+A hand-built `react`/`custom` panel can opt into the *same* value-persistence the
+built-in controls get — `panel.persist(get, set)`: `get()` returns a JSON-able
+snapshot, `set(snapshot)` re-applies it on load/restart (restore your Python state
+and push it back to the panel). So a custom slider you built survives a restart
+just like the built-in one:
+
+```python
+state = {"value": 50}
+slider = canvas.react(MY_SLIDER_JSX, props={"value": 50}, name="vol")
+@slider.on_message
+def _(m): state["value"] = m["value"]
+slider.persist(lambda: state, lambda s: (state.update(s), slider.update(**s)))
+```
+
 **Automatic persistence** — `serve(persist=...)` is the hands-off twin: it loads
 the saved state on startup and re-saves on every change, so a canvas survives
 restarts with no `save`/`load` of your own.

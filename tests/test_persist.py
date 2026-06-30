@@ -216,3 +216,48 @@ def test_persist_restores_values_on_startup(tmp_path):
     s2, _, _ = _controls(c2)
     c2._persist_setup(path)             # file exists -> loads it, restoring 8
     assert s2.value == 8
+
+
+# -- panel.persist(): custom panels opt into the same persistence -----------
+
+def test_custom_panel_persist_round_trips_via_save_load(tmp_path):
+    # A hand-built react() panel persists arbitrary state across a save/load,
+    # exactly like a built-in input control — proving the public persist() hook.
+    path = str(tmp_path / "board.json")
+
+    def _make(canvas):
+        state = {"value": 0}
+        panel = canvas.react("function Component(){return null}",
+                             name="myslider", props={"value": 0})
+        panel.persist(lambda: dict(state),
+                      lambda s: (state.update(s), panel.update(**s)))
+        return panel, state
+
+    c1 = danvas.Canvas()
+    _p1, st1 = _make(c1)
+    st1["value"] = 73                      # user moved it
+    c1.save(path)
+
+    c2 = danvas.Canvas()                   # same code, fresh defaults
+    _p2, st2 = _make(c2)
+    assert st2["value"] == 0
+    c2.load(path)
+    assert st2["value"] == 73              # restored into Python state
+
+
+def test_persist_is_chainable_and_validates():
+    import pytest
+    c = danvas.Canvas()
+    p = c.react("function Component(){return null}", name="p")
+    assert p.persist(lambda: {}, lambda s: None) is p     # returns the panel
+    with pytest.raises(TypeError):
+        p.persist(1, 2)                                    # non-callables rejected
+
+
+def test_persist_snapshot_is_captured_in_layout():
+    c = danvas.Canvas()
+    p = c.react("function Component(){return null}", name="p")
+    box = {"n": 5}
+    p.persist(lambda: box, lambda s: box.update(s))
+    item = next(i for i in c._layout()["components"] if i["name"] == "p")
+    assert item["state"] == {"state": {"n": 5}}

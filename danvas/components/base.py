@@ -460,6 +460,51 @@ class BaseComponent:
         """Apply a dict produced by :meth:`_persist_state` (default: no-op)."""
         return
 
+    def persist(self, get, set):
+        """Opt a custom panel into ``save``/``load``/``serve(persist=)`` state.
+
+        ``get()`` returns a JSON-able snapshot of the panel's *restorable* state;
+        ``set(snapshot)`` re-applies it on load / a restart — restore your Python
+        state **and** push it back to the panel so the UI reflects it again
+        (typically with ``update()``/``push()``). The built-in input controls
+        (Slider/Toggle/TextField) persist their value automatically; this is the
+        *same* mechanism, exposed so a hand-built ``react()``/``custom()`` panel
+        can match them — its value survives a restart instead of resetting.
+
+        Matched across runs by the panel's ``name``, so keep it stable. The
+        snapshot must be JSON-serialisable; a restore that raises is logged and
+        skipped (a bad/obsolete snapshot never breaks a load). Returns the panel,
+        so it chains off the factory::
+
+            state = {"value": 50}                       # the panel's Python state
+            slider = canvas.react(MY_SLIDER_JSX, props={"value": 50})
+            @slider.on_message
+            def _(m): state["value"] = m["value"]       # browser -> Python
+            slider.persist(lambda: state,               # -> the saved snapshot
+                           lambda s: (state.update(s),  # <- restore Python state
+                                      slider.update(**s)))  # <- and the panel UI
+        """
+        if not callable(get) or not callable(set):
+            raise TypeError("persist(get, set) takes two callables")
+
+        def _persist():
+            return {"state": get()}
+
+        def _restore(saved):
+            if not isinstance(saved, dict) or "state" not in saved:
+                return
+            try:
+                set(saved["state"])
+            except Exception:
+                # An obsolete/invalid snapshot must never break a load — skip it,
+                # loudly (same policy as the built-in _ValuePersist restore).
+                traceback.print_exc()
+
+        # Override the per-instance hooks the save/load/serve(persist=) path calls.
+        self._persist_state = _persist
+        self._restore_state = _restore
+        return self
+
     # -- write (Python -> browser) -------------------------------------------
     def update(self, *args, **kwargs):  # pragma: no cover - overridden
         raise NotImplementedError
