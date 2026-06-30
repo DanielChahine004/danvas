@@ -364,6 +364,17 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         h = place.pop("h", place.pop("height", 340))
         panel = React(source=_trace.PANEL_JSX, name=name, label=label,
                       props={"history": self.trace_history()}, w=w, h=h)
+        # The panel seeds its view from props["history"] on mount, but that seed
+        # was frozen here at open time. The live ring keeps growing, so anything
+        # that re-mounts the panel from the server's props — a page reload, a
+        # reconnect, a second viewer — would re-seed from the stale (often empty)
+        # snapshot and drop every action recorded since. Refresh the seed from the
+        # live history each time the panel's props are composed for (re)register,
+        # so a fresh mount always starts from what's actually happened so far.
+        def _register_props_for(role=None, client_id=None, _orig=panel.register_props_for):
+            panel._data["history"] = self.trace_history()
+            return _orig(role, client_id)
+        panel.register_props_for = _register_props_for
         self.insert(panel, **place)
         if deep:
             self.trace_calls(True)

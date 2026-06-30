@@ -442,6 +442,34 @@ def test_trace_panel_seeds_from_history():
     assert panel.validate() == []
 
 
+def test_trace_panel_reregister_reseeds_from_current_history():
+    # The seed prop is frozen at open time, but a reload / reconnect / second
+    # viewer re-registers the panel from the server's props. That replay must
+    # carry the CURRENT history (everything recorded since it opened), not the
+    # stale snapshot — otherwise a reload wipes the trace clean.
+    canvas, btn = _armed_button()
+
+    @btn.on_click
+    def _():
+        pass
+
+    panel = canvas.trace(deep=False)               # opened with empty history
+    assert panel.register_props_for()  # reachable
+
+    import json
+    seed_at_open = json.loads(panel.register_props_for()["data"])["history"]
+    assert seed_at_open == []                       # nothing recorded yet
+
+    btn._handle_input({})                           # an action runs *after* open
+    btn._handle_input({})
+
+    # A re-register (the wire path for reload/reconnect/new viewer) now reflects
+    # the live history rather than the empty open-time snapshot.
+    reseed = json.loads(panel.register_props_for()["data"])["history"]
+    assert len(reseed) == 2
+    assert reseed == canvas.trace_history()
+
+
 # -- ephemeral panels close on delete instead of going to the graveyard -----
 
 def test_ephemeral_panels_close_instead_of_graveyarding():
