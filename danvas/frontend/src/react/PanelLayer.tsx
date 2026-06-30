@@ -54,6 +54,13 @@ function Panel({ id }: { id: string }) {
   if (!shape) return null
   const { x, y, rotation, opacity, props } = shape
   const show = (exportSet ? exportSet.has(id) : false) || visible
+  // A decorative ghost panel (grabbable=False + operable=False) is fully
+  // click-through: its Card + content already set pointer-events:none, but this
+  // wrapper would still catch the click over the panel's box (it has no handler,
+  // so the click is just swallowed and never reaches a panel beneath). Drop the
+  // wrapper out of hit-testing too so the gesture falls through to whatever is
+  // under it — e.g. a slider the orb is floating over.
+  const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
   return (
     <div
       ref={ref}
@@ -70,6 +77,7 @@ function Panel({ id }: { id: string }) {
         // unaffected; rotated panels now spin about their middle.
         transformOrigin: 'center',
         opacity,
+        pointerEvents: ghost ? 'none' : undefined,
         // the UI inspector floats above the drawing SVG (a positive z-index beats
         // the later-in-DOM, z-auto DrawingLayer in this stacking context).
         zIndex: shape.meta?.topmost ? 50 : undefined,

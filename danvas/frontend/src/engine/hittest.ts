@@ -258,6 +258,9 @@ export function recordsInRect(rect: Box): Id[] {
   for (const id of store.ids()) {
     const r = store.peek(id) as any
     if (!r) continue
+    // grabbable=False panels are invisible to selection (matching the body-click
+    // guard in interaction.ts) — a marquee must never catch them either.
+    if (r.meta?.noGrab) continue
     if (r.typeName === 'arrow') {
       // test the RENDERED (edge-to-edge, curved/elbow/bent) path, not the straight
       // centre-to-centre chord — otherwise a marquee over a bent arrow misses it.
