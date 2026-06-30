@@ -24,9 +24,16 @@ from danvas._flags import LAYOUT_FLAGS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BRIDGE_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "bridge.ts")
+_CUSTOM_VIEW_TSX = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
+                                "CustomView.tsx")
+_CUSTOM_PY = os.path.join(_ROOT, "danvas", "components", "custom.py")
 _GEN_JS = os.path.join(_ROOT, "danvas", "frontend", "src",
                        "protocol.generated.js")
 _GEN_SCRIPT = os.path.join(_ROOT, "scripts", "gen_protocol.py")
+
+# Every ``__danvas*`` token: the bare key plus the underscored variants. The keys
+# are all lowercase/underscore, so this never matches a camelCase identifier.
+_IFRAME_KEY_RE = re.compile(r"__danvas[a-z_]*")
 
 
 def _read(path):
@@ -99,6 +106,32 @@ def test_message_types_in_match_bridge_py_dispatch():
         "MESSAGE_TYPES_IN disagrees with Bridge._on_message; "
         f"only in _on_message: {handled - set(_protocol.MESSAGE_TYPES_IN)}, "
         f"only in _protocol: {set(_protocol.MESSAGE_TYPES_IN) - handled}")
+
+
+# -- iframe postMessage keys match the canonical set on both sides -----------
+# There's no structured frame for the Custom-iframe channel — the __danvas_* key
+# IS the message type — so a key on one side that the other never names silently
+# drops the message. Scan the producer (the Python shim) and the consumers (the
+# frontend relay + CustomView) and require each side's key set to equal the
+# canonical IFRAME_MESSAGE_KEYS exactly: an extra key (typo / undeclared) or a
+# missing one (declared but unused on a side) both fail here.
+def test_iframe_keys_python_side_match_protocol():
+    canonical = set(_protocol.IFRAME_MESSAGE_KEYS.values())
+    used = set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_PY)))
+    assert used == canonical, (
+        "custom.py iframe keys disagree with _protocol.IFRAME_MESSAGE_KEYS; "
+        f"only in custom.py: {used - canonical}, "
+        f"only in _protocol: {canonical - used}")
+
+
+def test_iframe_keys_frontend_side_match_protocol():
+    canonical = set(_protocol.IFRAME_MESSAGE_KEYS.values())
+    used = set(_IFRAME_KEY_RE.findall(_read(_BRIDGE_TS)))
+    used |= set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_VIEW_TSX)))
+    assert used == canonical, (
+        "frontend iframe keys (bridge.ts + CustomView.tsx) disagree with "
+        f"_protocol.IFRAME_MESSAGE_KEYS; only in frontend: {used - canonical}, "
+        f"only in _protocol: {canonical - used}")
 
 
 # -- the generated JS module is not stale ------------------------------------

@@ -3,11 +3,15 @@
 The backend (this package) and the frontend (``danvas/frontend/src/*.js``)
 speak a small, hand-maintained protocol over one WebSocket: numeric codes for
 binary media frames, string ``type`` tags for JSON frames, and the lock/chrome
-flag *wire* keys. A change to one side that doesn't reach the other silently
-desyncs them — the "protocol drift" failure mode that has no loud symptom (a
-wrong binary code just routes a frame to the wrong handler; a wrong wire key
-just corrupts a panel's lock meta). This module is the canonical definition; the
-two sides are wired back to it so they can't drift:
+flag *wire* keys. A *second*, separate channel exists too: a sandboxed Custom
+panel and the parent page talk over ``window.postMessage`` with the
+``__danvas_*`` discriminator keys (no WebSocket — the iframe can't open one). A
+change to one side that doesn't reach the other silently desyncs them — the
+"protocol drift" failure mode that has no loud symptom (a wrong binary code just
+routes a frame to the wrong handler; a wrong wire key just corrupts a panel's
+lock meta; a wrong postMessage key just drops the message). This module is the
+canonical definition for both channels; the two sides are wired back to it so
+they can't drift:
 
 1.  Everything is declared here, once.
 2.  ``scripts/gen_protocol.py`` renders it to
@@ -76,6 +80,41 @@ MESSAGE_TYPES_IN = (
 )
 
 
+# -- Custom-panel iframe postMessage protocol -------------------------------
+# A *sandboxed* Custom iframe and the parent page can't share a typed channel, so
+# they talk over ``window.postMessage`` with these discriminator keys: the key
+# present on the message object IS the message type. The iframe half is built as a
+# string in :mod:`danvas.components.custom` (the injected ``window.canvas`` shim);
+# the parent half lives in the frontend's ``bridge.ts`` (the global relay) and
+# ``react/CustomView.tsx`` (push + theme). Because there's no structured frame, a
+# key typed differently on the two sides *silently drops the message* — the same
+# drift failure the wire codes above have. Declared once here (symbolic name ->
+# wire key); ``gen_protocol.py`` exports it as ``IFRAME_MSG`` and
+# ``test_protocol_sync.py`` scans both sides and fails if either uses a key that
+# isn't in this set, or omits one.
+IFRAME_MESSAGE_KEYS = {
+    "SEND": "__danvas",                          # iframe->parent send / parent->iframe push (onPush)
+    "BINARY": "__danvas_binary",                 # iframe->parent sendBinary
+    "REQUEST": "__danvas_request",               # iframe->parent request(data)
+    "RESPONSE": "__danvas_response",             # parent->iframe request reply
+    "SETVIEW": "__danvas_setview",               # iframe->parent setView()
+    "VIEWPORT": "__danvas_viewport",             # iframe<->parent viewport sub + value push
+    "CHAT": "__danvas_chat",                     # iframe->parent chat actions
+    "CHAT_REPLY": "__danvas_chat_reply",         # parent->iframe chat history() reply
+    "CHAT_MSG": "__danvas_chat_msg",             # parent->iframe new chat line
+    "CHAT_IDENTITY": "__danvas_chat_identity",   # parent->iframe identity change
+    "CAMERA": "__danvas_camera",                 # iframe->parent requestCamera/release
+    "MIC": "__danvas_mic",                       # iframe->parent requestMicrophone/release
+    "ERROR": "__danvas_error",                   # iframe->parent JS error report
+    "WHEEL": "__danvas_wheel",                   # iframe->parent wheel -> canvas zoom
+    "PAN": "__danvas_pan",                       # iframe->parent pan delta
+    "MENU": "__danvas_menu",                     # iframe->parent context-menu request
+    "KEY": "__danvas_key",                       # iframe->parent tool-shortcut key
+    "FIT": "__danvas_fit",                       # iframe->parent content-fit size
+    "THEME": "__danvas_theme",                   # parent->iframe theme vars + dark flag
+}
+
+
 def as_dict():
     """The whole protocol as one plain dict — what the JS generator renders."""
     return {
@@ -83,4 +122,5 @@ def as_dict():
         "flag_wire_keys": dict(FLAG_WIRE_KEYS),
         "message_types_out": list(MESSAGE_TYPES_OUT),
         "message_types_in": list(MESSAGE_TYPES_IN),
+        "iframe_message_keys": dict(IFRAME_MESSAGE_KEYS),
     }

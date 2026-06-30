@@ -14,3 +14,5 @@ export const FLAG_WIRE_KEYS = Object.freeze({"locked": "locked", "draggable": "m
 
 export const MESSAGE_TYPES_OUT = Object.freeze(["register", "arrow", "shape", "shape_update", "update", "order", "remove", "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot", "draw", "presence", "cursor", "cursor_gone", "view", "welcome", "graveyard_update", "shared", "chat", "response"])
 export const MESSAGE_TYPES_IN = Object.freeze(["heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout", "graveyard", "restore", "draw", "request", "panel_error", "snapshot", "image"])
+
+export const IFRAME_MSG = Object.freeze({"SEND": "__danvas", "BINARY": "__danvas_binary", "REQUEST": "__danvas_request", "RESPONSE": "__danvas_response", "SETVIEW": "__danvas_setview", "VIEWPORT": "__danvas_viewport", "CHAT": "__danvas_chat", "CHAT_REPLY": "__danvas_chat_reply", "CHAT_MSG": "__danvas_chat_msg", "CHAT_IDENTITY": "__danvas_chat_identity", "CAMERA": "__danvas_camera", "MIC": "__danvas_mic", "ERROR": "__danvas_error", "WHEEL": "__danvas_wheel", "PAN": "__danvas_pan", "MENU": "__danvas_menu", "KEY": "__danvas_key", "FIT": "__danvas_fit", "THEME": "__danvas_theme"})

@@ -55,6 +55,12 @@ def render():
     lines.append("export const MESSAGE_TYPES_IN = Object.freeze("
                  + json.dumps(p["message_types_in"]) + ")")
     lines.append("")
+    # Custom-panel iframe postMessage keys (symbolic name -> __danvas_* wire key),
+    # so the frontend can reference IFRAME_MSG.SEND etc. instead of re-typing the
+    # string literals the iframe shim emits.
+    lines.append("export const IFRAME_MSG = Object.freeze("
+                 + json.dumps(p["iframe_message_keys"]) + ")")
+    lines.append("")
     return "\n".join(lines)
 
 
