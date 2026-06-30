@@ -219,12 +219,23 @@ notebook deciding how to render `Out[...]`, but in plain scripts too:
 canvas.show(df)                        # DataFrame / records / list-of-lists → Table
 canvas.show({"lr": 3e-4, "epochs": 40})# flat dict → key/value Table
 canvas.show(arr_uint8)                 # NumPy uint8 / RGB array → Image
-canvas.show(fig)                       # Matplotlib / Plotly → Image / Plot
+canvas.show(fig)                       # Matplotlib / seaborn / Plotly → Image / Plot
+canvas.show(sns.relplot(...))          # any seaborn grid (it carries a figure)
 canvas.show({"nested": {"a": 1}})      # nested dict/list → collapsible JSON tree
 canvas.show("use **bold**")            # Markdown syntax → rendered text
 canvas.show("report.csv")              # existing file → Table; "photo.png" → Image
-canvas.show(model)                     # _repr_html_/_repr_png_ → its rich view
+canvas.show(altair_chart)              # _repr_mimebundle_ / _repr_html_ → its rich view
 ```
+
+There's no per-library special-casing — it rests on **two universal rules**, so a
+package danvas has never heard of still renders: (1) **the notebook display
+protocol** — anything with `_repr_mimebundle_` / `_repr_html_` / `_repr_png_` /
+`_repr_svg_` renders exactly as it would inline (altair, bokeh, folium, graphviz,
+sympy, styled DataFrames, `IPython.display.*`, …), and in a notebook the live
+IPython formatter is consulted first; (2) **the figure it carries** — anything
+built on Matplotlib (seaborn, `df.plot()`, …) is detected by the `Figure` it *is*
+or holds (`savefig` / `get_figure` / `.figure` / `.fig`), not by its package. The
+same applies to `update()`, so re-rendering a fresh figure each loop is one call.
 
 Dispatch is conservative (a single `*italic*` isn't Markdown; a path must be a
 real file). No `name` → a fresh panel each call; `name=` replaces in place.

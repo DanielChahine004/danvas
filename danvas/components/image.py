@@ -71,19 +71,19 @@ def _to_data_uri(src):
             return _bytes_uri(f.read())
     if isinstance(src, (bytes, bytearray, memoryview)):
         return _bytes_uri(bytes(src))
-    # Matplotlib axes -> its figure; figure -> savefig to PNG.
-    fig = getattr(src, "get_figure", None)
-    if callable(fig):
-        src = fig()
-    if hasattr(src, "savefig"):
+    # Matplotlib and everything built on it (seaborn grids, pandas .plot(), …):
+    # render the figure the object IS or CARRIES. Structural, not per-package, so
+    # one rule covers the whole family — see _matplotlib_figure.
+    figure = _matplotlib_figure(src)
+    if figure is not None:
         buf = io.BytesIO()
-        src.savefig(buf, format="png", bbox_inches="tight")
+        figure.savefig(buf, format="png", bbox_inches="tight")
         # Release the figure from pyplot's global registry, which would
         # otherwise keep every figure alive — a leak when update(fig) runs in a
         # loop. The figure object itself stays usable (savefig still works).
         plt = sys.modules.get("matplotlib.pyplot")
         if plt is not None:
-            plt.close(src)
+            plt.close(figure)
         return _bytes_uri(buf.getvalue(), "image/png")
     # Anything exposing the IPython PNG hook (e.g. some plotting objects).
     png = getattr(src, "_repr_png_", None)
@@ -118,6 +118,39 @@ def _to_data_uri(src):
         _PILImage.fromarray(src).save(buf, format="PNG")
         return _bytes_uri(buf.getvalue(), "image/png")
     raise TypeError(f"can't render {type(src).__name__} as an image")
+
+
+def _matplotlib_figure(obj):
+    """The matplotlib ``Figure`` an object IS or CARRIES, else ``None``.
+
+    Duck-typed on structure, never on package name, so a single rule renders the
+    whole matplotlib family: a ``Figure`` has ``savefig``; an ``Axes`` exposes
+    ``get_figure()``; a wrapper that draws onto a figure but isn't one (a seaborn
+    ``FacetGrid``/``JointGrid``/``PairGrid``, a pandas plot helper, …) carries it
+    on ``.figure`` or ``.fig``. New libraries built on matplotlib are covered
+    without any change here, as long as they follow that near-universal
+    convention of holding their figure on one of those attributes."""
+    try:
+        if hasattr(obj, "savefig"):
+            return obj                                   # a Figure
+    except Exception:
+        return None
+    get = getattr(obj, "get_figure", None)
+    if callable(get):
+        try:
+            fig = get()
+            if fig is not None and hasattr(fig, "savefig"):
+                return fig                               # an Axes -> its Figure
+        except Exception:
+            pass
+    for attr in ("figure", "fig"):                       # a grid/wrapper -> its Figure
+        try:
+            fig = getattr(obj, attr, None)
+        except Exception:
+            fig = None
+        if fig is not None and fig is not obj and hasattr(fig, "savefig"):
+            return fig
+    return None
 
 
 def _bytes_uri(data, mime=None):

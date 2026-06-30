@@ -23,6 +23,7 @@ from urllib.parse import unquote as _unquote
 
 from .components import BaseComponent, Custom, Image, Label, Markdown, Plot, Table
 from .components._doc import document
+from .components.image import _matplotlib_figure
 
 
 def _filtered_kw(cls, kw):
@@ -287,9 +288,12 @@ def _is_tabular(obj):
 
 
 def _is_image_like(obj):
+    # The whole matplotlib family — matplotlib itself, seaborn grids, pandas
+    # .plot(), anything built on it — detected by the figure it IS or CARRIES,
+    # not by the object's own package (so it covers libraries we've never named).
+    if _matplotlib_figure(obj) is not None:
+        return True
     mod = type(obj).__module__ or ""
-    if mod.startswith("matplotlib"):
-        return hasattr(obj, "savefig") or hasattr(obj, "get_figure")
     if mod.startswith("PIL"):
         return hasattr(obj, "save") and hasattr(obj, "mode")
     if mod.startswith("numpy") and hasattr(obj, "shape"):
@@ -528,10 +532,10 @@ def _image_dims(src):
         # PIL image: .size + .mode.
         if hasattr(src, "size") and hasattr(src, "mode"):
             return (int(src.size[0]), int(src.size[1]))
-        # Matplotlib axes -> figure -> inches * dpi.
-        fig = getattr(src, "get_figure", None)
-        if callable(fig):
-            src = fig()
+        # Matplotlib family (figure / axes / grid wrapper) -> figure -> inches*dpi.
+        figure = _matplotlib_figure(src)
+        if figure is not None:
+            src = figure
         if hasattr(src, "get_size_inches"):
             w_in, h_in = src.get_size_inches()
             dpi = getattr(src, "dpi", None) or 100

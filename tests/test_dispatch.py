@@ -169,3 +169,77 @@ def test_show_inserts_with_unique_names_and_replaces():
     first = c.show("one", name="slot")
     second = c.show("two", name="slot")
     assert first not in c._components and second in c._components
+
+
+# -- the universal matplotlib-family rule: detect the figure an object IS or ----
+#    CARRIES, by structure (savefig / get_figure / .figure / .fig), never by
+#    package name. Uses fakes so it needs no matplotlib/seaborn installed; a real
+#    seaborn FacetGrid has exactly this shape (a .figure that is a Figure).
+
+import struct
+import zlib
+
+
+def _tiny_png():
+    """A minimal valid 1x1 PNG, so a fake savefig emits real image bytes."""
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff))
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b"\x00\xff\x00\x00")
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
+
+
+class _FakeFigure:
+    def savefig(self, buf, format=None, bbox_inches=None):
+        buf.write(_tiny_png())
+
+
+class _FakeAxes:               # like a matplotlib Axes / seaborn axes-level return
+    def __init__(self, fig):
+        self._fig = fig
+
+    def get_figure(self):
+        return self._fig
+
+
+class _FakeGrid:               # like a seaborn FacetGrid/JointGrid (carries .figure)
+    def __init__(self, fig):
+        self.figure = fig
+
+
+def _src(panel):
+    return json.loads(panel.register_props()["data"])["src"]
+
+
+def test_dispatch_renders_a_bare_figure():
+    p = panel_for(_FakeFigure(), name="fig")
+    assert isinstance(p, Image)
+    assert _src(p).startswith("data:image/png")
+
+
+def test_dispatch_renders_an_axes_via_get_figure():
+    p = panel_for(_FakeAxes(_FakeFigure()), name="ax")
+    assert isinstance(p, Image)
+    assert _src(p).startswith("data:image/png")
+
+
+def test_dispatch_renders_a_figure_carrier_like_a_seaborn_grid():
+    # The case that used to slip through: the object isn't a matplotlib type and
+    # has no _repr_*, it just CARRIES a figure on .figure (seaborn's grids).
+    p = panel_for(_FakeGrid(_FakeFigure()), name="grid")
+    assert isinstance(p, Image)
+    assert _src(p).startswith("data:image/png")
+
+
+def test_image_update_accepts_a_figure_carrier():
+    img = danvas.Image(_FakeFigure(), name="im")
+    img.update(_FakeGrid(_FakeFigure()))          # the refresh path covers it too
+    assert _src(img).startswith("data:image/png")
+
+
+def test_figure_rule_does_not_swallow_non_images():
+    # A plain dict/list/string must not be mistaken for a figure carrier.
+    assert isinstance(panel_for({"a": 1, "b": 2}, name="d"), Table)
+    assert isinstance(panel_for("hello world", name="s"), Label)
