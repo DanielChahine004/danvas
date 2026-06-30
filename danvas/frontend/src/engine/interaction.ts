@@ -615,10 +615,17 @@ export function attachInteraction(container: HTMLElement): () => void {
         const a2 = r?.props?.points?.a2
         if (a2) {
           const endPt = { x: r.x + a2.x, y: r.y + a2.y }
+          const startBind = r?.props?.bindStart
           const tgt = bindTargetAt(endPt, id)
-          if (tgt) {
+          if (tgt && tgt !== startBind) {
             const ea = bindAnchorAt(endPt, tgt)
             store.transact('local', () => store.patch(id, { props: { bindEnd: tgt, bindEndAnchor: ea?.anchor } }))
+          } else if (tgt && tgt === startBind) {
+            // Both ends landed on the same shape (e.g. a line drawn across one
+            // panel). Binding both to it would collapse the line onto that shape's
+            // anchor and it'd vanish — so drop the start binding and keep it a free
+            // annotation line on top. (A true connector joins two *different* shapes.)
+            store.transact('local', () => store.patch(id, { props: { bindStart: undefined, bindStartAnchor: undefined } }))
           }
         }
         // Each end keeps the connection point the user snapped to (centre → undefined

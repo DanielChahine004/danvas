@@ -1756,6 +1756,10 @@ if (typeof window !== 'undefined') {
       panFromIframe(d.__danvas_pan)
     } else if (d.__danvas_menu) {
       menuFromIframe(e.source, d.__danvas_menu)
+    } else if (d.__danvas_key) {
+      // A canvas tool shortcut pressed while a Custom iframe had focus — replay it
+      // on the parent window so the engine's keydown handler (interaction.ts) runs.
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: d.__danvas_key.key, bubbles: true }))
     } else if (d.__danvas_fit) {
       fitFromIframe(e.source, d.__danvas_fit)
     } else if (d.__danvas) {

@@ -187,6 +187,20 @@ class Custom(_EventRouter, BaseComponent):
             "if(_pm<=4)parent.postMessage({__danvas_menu:{x:e.clientX,y:e.clientY}},'*');}"
             "},true);"
             "window.addEventListener('contextmenu',function(e){e.preventDefault();},true);"
+            # Canvas tool shortcuts (v/h/d/r/o/l/a/t/n/e/p + Escape) don't reach the
+            # parent once the iframe has keyboard focus (clicking/orbiting inside it
+            # focuses the iframe's own document). Forward just those keys — never
+            # while typing in a field, never with a modifier — so pressing `v` to
+            # switch back to the select tool works over a panel like anywhere else.
+            "var _shortcuts='vhdrolatnep';"
+            "window.addEventListener('keydown',function(e){"
+            "if(e.ctrlKey||e.metaKey||e.altKey)return;"
+            "var t=e.target||{};var tn=(t.tagName||'');"
+            "if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT'||t.isContentEditable)return;"
+            "var k=e.key.length===1?e.key.toLowerCase():e.key;"
+            "if(k==='Escape'||_shortcuts.indexOf(k)>=0)"
+            "parent.postMessage({__danvas_key:{key:e.key}},'*');"
+            "});"
             "</script>"
         )
         if self._auto_h or self._auto_w:

@@ -51,7 +51,16 @@ export function Toolbar() {
       <div class="pc-toolbar">
         {TOOLS.flatMap(({ tool: t, title, divider }) => {
         const btn = (
-          <button key={t} class={tool === t ? 'pc-tool-btn pc-active' : 'pc-tool-btn'} data-pc-tool={t} title={title} onClick={() => set(t)}>
+          <button
+            key={t}
+            class={tool === t ? 'pc-tool-btn pc-active' : 'pc-tool-btn'}
+            data-pc-tool={t}
+            title={title}
+            // Blur after clicking so the button doesn't keep DOM focus: its focus
+            // ring lingered and read as "still highlighted" after switching tools
+            // with a keyboard shortcut.
+            onClick={(e) => { set(t); (e.currentTarget as HTMLElement).blur() }}
+          >
             <Icon name={t} size={23} />
           </button>
         )
