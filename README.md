@@ -426,7 +426,12 @@ def handle(msg):
   `update(html)` swaps the whole document; `push(data)` streams without reloading.
 - The iframe's `canvas` handle **mirrors the React panel's**, so the two panel
   kinds share one mental model: `send` / `onPush`, plus `request(data)` (awaitable,
-  → `@on_request`), `viewport(cb)` and `setView({x,y,zoom})` (read/move the camera).
+  → `@on_request`), `viewport(cb)` and `setView({x,y,zoom})` (read/move the camera),
+  and `chat` (the shared room: `send`/`setName`/`history`/`subscribe`/`identity`).
+- **`themed=True`** makes the iframe follow the canvas theme — danvas forwards the
+  live `--pc-*` variables and dark/light flag in, so the panel's CSS can use
+  `var(--pc-bg)` / `var(--pc-text)` / `var(--pc-accent)` and track dark mode, the
+  way an inline React panel does (a sandboxed iframe is otherwise theme-isolated).
 - `push_binary(bytes)` streams raw bytes (no base64); `canvas.onPush` gets an
   `ArrayBuffer`. Honours `queue="latest"` for video/sensor streams.
 - **`canvas.sendBinary(buf)`** transfers an `ArrayBuffer` *up* to Python with zero

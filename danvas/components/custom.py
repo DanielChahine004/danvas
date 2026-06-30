@@ -19,7 +19,12 @@ panel's ``canvas`` handle so the two panel kinds share one mental model:
     with the matching :meth:`on_request` handler's return value)
   * ``canvas.viewport(cb)``        — ``cb({x, y, zoom})`` now and on every camera move
   * ``canvas.setView({x, y, zoom})`` — pan/zoom the canvas to centre a point
+  * ``canvas.chat``                — the shared room: ``send(text)``, ``setName(name)``,
+    ``history()`` (a Promise), ``subscribe(cb)`` and ``identity(cb)`` (both return an unsubscribe)
   * ``canvas.sendBinary(buf)`` / ``requestCamera`` / ``requestMicrophone`` — as before
+
+Set ``themed=True`` to have the panel follow the canvas theme (its CSS can then use
+``var(--pc-bg)`` / ``var(--pc-text)`` / ``var(--pc-accent)`` … and track dark mode).
 
 On the Python side, register handlers with ``@panel.on("event")`` to route by an
 ``event`` field, ``@panel.on_message`` to receive every message, or
@@ -52,7 +57,7 @@ class Custom(_EventRouter, BaseComponent):
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, color=None, event_key="event",
-                 permissions=None, forward_wheel=True):
+                 permissions=None, forward_wheel=True, themed=False):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -93,6 +98,13 @@ class Custom(_EventRouter, BaseComponent):
         # canvas. Set False for panels whose content does its own wheel handling
         # (e.g. a 3D viewer that zooms its own camera) so the canvas stays put.
         self._forward_wheel = forward_wheel
+        # ``themed=True`` makes the iframe follow the canvas theme: the frontend
+        # forwards the live ``--pc-*`` CSS variables and the dark/light flag into the
+        # document, so the panel's CSS can use ``var(--pc-bg)`` / ``var(--pc-text)``
+        # / ``var(--pc-accent)`` etc. and track dark-mode toggles — the same theme a
+        # React panel inherits for free. Off by default (a sandboxed iframe is
+        # otherwise theme-isolated), so existing panels are unaffected.
+        self._themed = bool(themed)
         # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
         # with React via _EventRouter; override event_key if your HTML tags
         # messages with a different field.
@@ -151,6 +163,34 @@ class Custom(_EventRouter, BaseComponent):
             "return function(){window.removeEventListener('message',h);"
             f"parent.postMessage({{__danvas_viewport:{cid},action:'unsub'}},'*');}};"
             "},"
+            # chat: the canvas-wide shared room, mirroring the React panel's
+            # canvas.chat — send(text), setName(name), history() (a Promise here,
+            # since the log lives across the iframe boundary), subscribe(cb) (each
+            # new line; returns an unsubscribe) and identity(cb) (this viewer's
+            # id/name/colour now and on change). Chat is global, so these messages
+            # carry no panel id.
+            "chat:{"
+            "send:function(text){parent.postMessage({__danvas_chat:{action:'send',text:text}},'*');},"
+            "setName:function(name){parent.postMessage({__danvas_chat:{action:'setName',name:name}},'*');},"
+            "history:function(){return new Promise(function(res){"
+            "var rid='c'+Math.random().toString(36).slice(2)+Date.now();"
+            "function h(e){if(e.data&&e.data.__danvas_chat_reply===rid){"
+            "window.removeEventListener('message',h);res(e.data.log||[]);}}"
+            "window.addEventListener('message',h);"
+            "parent.postMessage({__danvas_chat:{action:'history',reqId:rid}},'*');});},"
+            "subscribe:function(cb){"
+            "function h(e){if(e.data&&e.data.__danvas_chat_msg!==undefined){cb(e.data.__danvas_chat_msg);}}"
+            "window.addEventListener('message',h);"
+            "parent.postMessage({__danvas_chat:{action:'sub'}},'*');"
+            "return function(){window.removeEventListener('message',h);"
+            "parent.postMessage({__danvas_chat:{action:'unsub'}},'*');};},"
+            "identity:function(cb){"
+            "function h(e){if(e.data&&e.data.__danvas_chat_identity!==undefined){cb(e.data.__danvas_chat_identity);}}"
+            "window.addEventListener('message',h);"
+            "parent.postMessage({__danvas_chat:{action:'idsub'}},'*');"
+            "return function(){window.removeEventListener('message',h);"
+            "parent.postMessage({__danvas_chat:{action:'idunsub'}},'*');};}"
+            "},"
             # requestCamera / releaseCamera: getUserMedia cannot run inside a
             # sandboxed iframe (null origin blocks the permission grant even with
             # allow="camera"). These methods ask the parent page to open the
@@ -178,6 +218,16 @@ class Custom(_EventRouter, BaseComponent):
             f"parent.postMessage({{__danvas_mic:{cid},action:'stop'}},'*');"
             "}"
             "};"
+            # themed=True: the parent forwards the canvas's live --pc-* variables and
+            # dark/light flag (on load and on every theme toggle). Apply them to
+            # :root so the panel's CSS can use var(--pc-bg) etc. and track dark mode,
+            # exactly like an inline React panel. A no-op for an un-themed panel (the
+            # parent never sends it).
+            "window.addEventListener('message',function(e){"
+            "if(e.data&&e.data.__danvas_theme){"
+            "var t=e.data.__danvas_theme,r=document.documentElement;"
+            "for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}"
+            "r.style.colorScheme=t.dark?'dark':'light';}});"
             # JS errors and unhandled promise rejections are reported back to
         # Python via postMessage so they surface in the terminal.
         "window.onerror=function(msg,src,line,col,err){"
@@ -375,6 +425,7 @@ class Custom(_EventRouter, BaseComponent):
         props = dict(self._props)  # label, w, h
         props["html"] = self._wrap(self._document())
         props["permissions"] = self._permissions
+        props["themed"] = self._themed
         return props
 
     def update(self, html=None, css=None, js=None):

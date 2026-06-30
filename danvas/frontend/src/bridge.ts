@@ -1767,6 +1767,20 @@ function addViewportSub(win: Window | null) {
 function removeViewportSub(win: Window | null) {
   if (win) _viewportSubs.delete(win)
 }
+
+// Custom-iframe chat subscribers (canvas.chat): an iframe that subscribed to the
+// shared room gets each new line / identity change forwarded over postMessage.
+// Each channel keeps the live unsubscribe keyed by frame, so 'unsub' tears it down
+// and a gone frame is pruned the first time posting throws.
+const _chatSubs = new Map<Window, () => void>()
+const _idSubs = new Map<Window, () => void>()
+function _chatPost(win: Window, msg: any, drop: () => void) {
+  try {
+    win.postMessage(msg, '*')
+  } catch {
+    drop()
+  }
+}
 if (typeof window !== 'undefined') {
   // Push the live viewport to every subscribed Custom iframe on each camera move.
   effect(() => {
@@ -1824,6 +1838,31 @@ if (typeof window !== 'undefined') {
       // camera effect above).
       if (d.action === 'sub') addViewportSub(e.source as Window | null)
       else if (d.action === 'unsub') removeViewportSub(e.source as Window | null)
+    } else if (d.__danvas_chat) {
+      // canvas.chat from a Custom iframe — the shared-room twin of the React
+      // panel's chat handle.
+      const win = e.source as Window | null
+      const a = d.__danvas_chat.action
+      if (a === 'send') sendChat(String(d.__danvas_chat.text ?? ''))
+      else if (a === 'setName') setMyName(String(d.__danvas_chat.name ?? ''))
+      else if (a === 'history' && win) _chatPost(win, { __danvas_chat_reply: d.__danvas_chat.reqId, log: getChatLog() }, () => {})
+      else if (a === 'sub' && win) {
+        if (!_chatSubs.has(win)) {
+          _chatSubs.set(win, subscribeChat((entry) => _chatPost(win, { __danvas_chat_msg: entry }, () => {
+            const u = _chatSubs.get(win); if (u) { u(); _chatSubs.delete(win) }
+          })))
+        }
+      } else if (a === 'unsub' && win) {
+        const u = _chatSubs.get(win); if (u) { u(); _chatSubs.delete(win) }
+      } else if (a === 'idsub' && win) {
+        if (!_idSubs.has(win)) {
+          _idSubs.set(win, subscribeIdentity((v) => _chatPost(win, { __danvas_chat_identity: v }, () => {
+            const u = _idSubs.get(win); if (u) { u(); _idSubs.delete(win) }
+          })))
+        }
+      } else if (a === 'idunsub' && win) {
+        const u = _idSubs.get(win); if (u) { u(); _idSubs.delete(win) }
+      }
     }
   })
 }

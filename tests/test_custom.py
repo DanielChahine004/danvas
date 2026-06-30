@@ -130,3 +130,26 @@ def test_custom_on_request_catch_all_and_missing():
     q = _panel()
     with pytest.raises(LookupError):
         q._handle_request({"event": "whatever"})
+
+
+# -- themed=True: follow the canvas theme inside the sandboxed iframe ---------
+
+def test_themed_panel_wires_prop_and_theme_listener():
+    p = danvas.Custom(html="<div></div>", name="t", themed=True)
+    props = p.register_props()
+    assert props["themed"] is True
+    # The shim carries the listener that applies forwarded --pc-* vars to :root.
+    assert "__danvas_theme" in props["html"]
+
+
+def test_themed_defaults_off():
+    p = danvas.Custom(html="<div></div>", name="t")
+    assert p.register_props()["themed"] is False
+
+
+def test_custom_shim_exposes_chat_parity():
+    p = danvas.Custom(html="<div></div>", name="chatty")
+    shim = p.register_props()["html"]
+    assert "chat:{" in shim
+    for action in ("'send'", "'setName'", "'history'", "'sub'", "'idsub'"):
+        assert f"action:{action}" in shim, f"chat shim missing action {action}"
