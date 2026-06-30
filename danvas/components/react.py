@@ -11,7 +11,14 @@ Python with no ``npm`` build.
 The component must be named ``Component`` and receives three props:
 
   * ``canvas`` — the bridge handle (see below);
-  * ``value``  — the latest :meth:`push` data: Python → panel, no reload;
+  * ``value``  — the latest :meth:`push` data: Python → panel, no reload. This is
+    the *simple* receive channel — reading ``value`` re-renders the component, so
+    it's right for occasional state (a status, a row of numbers). For a high-rate
+    stream (video, telemetry), use ``canvas.onFrame`` instead, which delivers each
+    push WITHOUT a re-render. The two are one channel with two ends: registering an
+    ``onFrame`` subscriber routes pushes there and ``value`` then stops updating —
+    that is the deliberate opt-out of per-push re-rendering, not a conflict. Pick
+    one end by how fast the data arrives;
   * ``props``  — the dict from :meth:`update` / the ``props=`` arg: Python → panel,
     replayed on reconnect.
 
@@ -21,9 +28,12 @@ The ``canvas`` handle exposes:
   * ``request(data)`` — the **awaitable** twin of ``send``: returns a Promise that
     resolves with the return value of the matching :meth:`on_request` handler
     (``const r = await canvas.request({event:'…', …})``);
-  * ``onFrame(cb)`` — subscribe (in a ``useEffect``) to the :meth:`push` /
-    :meth:`push_binary` stream without re-rendering; ``cb`` gets each value (an
-    ``ArrayBuffer`` for binary). Use this *or* the ``value`` prop, not both;
+  * ``onFrame(cb)`` — the streaming end of the receive channel: subscribe (in a
+    ``useEffect``) to the :meth:`push` / :meth:`push_binary` stream WITHOUT
+    re-rendering; ``cb`` gets each value (an ``ArrayBuffer`` for binary). While an
+    ``onFrame`` subscriber is registered the ``value`` prop stays put (pushes go
+    here instead) — so reach for ``onFrame`` for fast streams and ``value`` for
+    simple state, not both at once;
   * ``paintFrame(canvasEl, {onActive})`` — the image-frame fast path: for a panel
     streaming encoded image bytes (JPEG/PNG/WebP via :meth:`push_binary`), paints
     each frame to a ``<canvas>`` decoded **off the main thread**
@@ -160,13 +170,10 @@ class React(_EventRouter, BaseComponent):
         # frontend as `wheelLocal` meta and the engine's wheel handler bails when
         # the cursor is over it. See [[iframe-custom-panel-pattern]].
         self._forward_wheel = forward_wheel
-        # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
-        # with Custom via _EventRouter; this seeds the table (+ on_change catch-alls).
+        # Inbound ``canvas.send`` routing (on / on_message / dispatch) AND the
+        # request/response table (on_request / canvas.request) are shared with
+        # Custom via _EventRouter; this seeds them (+ on_change catch-alls).
         self._init_routing(event_key)
-        # Request/response handlers for ``canvas.request(data)`` (see on_request):
-        # event value -> the single handler whose *return value* is the reply.
-        # Unlike ``_routes`` exactly one handler answers, so it's not a list.
-        self._request_routes = {}
         # Auto-height is the default: a React panel fits its rendered content
         # unless the caller pins a numeric height (``h is None`` → auto-fit; a
         # number → fixed). Width stays fixed by default (opt in with w="auto").
@@ -616,47 +623,6 @@ class React(_EventRouter, BaseComponent):
         return []
 
     # -- input routing (panel -> Python) -------------------------------------
-    # on() / on_message() / _handle_input() come from _EventRouter (shared with
-    # Custom). React adds request/response routing below.
-    def on_request(self, event=None):
-        """Decorator: *answer* a panel's ``await canvas.request(data)`` call.
-
-        Where :meth:`on` is fire-and-forget, this is request/response: the handler
-        receives the request ``data`` and its **return value** is sent back to
-        resolve the panel's Promise — for ask-Python-and-use-the-answer flows
-        (validate a field, fetch a row, compute server-side). Routed by
-        ``data[event_key]`` like :meth:`on` (``@panel.on_request("validate")``);
-        ``@panel.on_request()`` is the catch-all. Exactly one handler answers (the
-        keyed one, else the catch-all), so registering the same key again replaces
-        it. A handler that raises rejects the Promise with the error; the return
-        value must be JSON-serialisable. Declare a second parameter
-        (``def _(req, viewer)``) to also receive the requester's identity, as with
-        :meth:`on` / ``on_change``.
-
-            @panel.on_request("factorize")
-            def _(req): return {"factors": factorize(req["n"])}
-            # in JSX:  const { factors } = await canvas.request({event:'factorize', n})
-        """
-        def deco(fn):
-            self._request_routes[event] = fn
-            return fn
-        return deco
-
-    def _handle_request(self, data, viewer=None):
-        """Resolve a ``canvas.request`` payload to a reply value (bridge entry).
-
-        Returns the matching handler's value; raises if none is registered — the
-        bridge turns the return into a ``response`` (resolving the panel's Promise)
-        and an exception into an error ``response`` (rejecting it). A handler that
-        declares a second parameter (``def fn(req, viewer)``) is given the
-        requester's viewer identity, mirroring ``on_change`` / ``on``.
-        """
-        event = data.get(self._event_key) if isinstance(data, dict) else None
-        handler = self._request_routes.get(event)
-        if handler is None:
-            handler = self._request_routes.get(None)
-        if handler is None:
-            raise LookupError(f"no on_request handler for event {event!r}")
-        if self._accepts_viewer(handler, 1):
-            return handler(data, viewer or {})
-        return handler(data)
+    # on() / on_message() / _handle_input() AND request/response (on_request /
+    # _handle_request, answering canvas.request) all come from _EventRouter, shared
+    # verbatim with Custom — so the two panel kinds route identically.

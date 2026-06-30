@@ -66,3 +66,67 @@ def test_push_streams_without_reload():
     panel = _panel()
     panel.push({"deg": 90})
     assert panel._bridge.plain[-1]["payload"] == {"post": {"deg": 90}}
+
+
+# -- base reset is applied to html-only fragments (not just css/js panels) ---
+
+def test_html_only_fragment_gets_base_reset():
+    # An html-only fragment used to be returned raw, forcing callers to hand-write
+    # their own <style> reset. It now gets the same base reset (and centring) that
+    # css/js panels already get.
+    p = danvas.Custom(html="<div>hi</div>", name="frag")
+    doc = p._document()
+    assert "box-sizing" in doc          # the reset is present
+    assert "justify-content" in doc     # content is centred, like css/js panels
+
+
+def test_full_document_is_left_untouched():
+    page = "<!doctype html><html><body><h1>x</h1></body></html>"
+    p = danvas.Custom(html=page, name="page")
+    assert p._document() == page        # owns its own document; no reset injected
+
+
+def test_css_js_path_still_composes_unchanged():
+    p = danvas.Custom(html="<div>hi</div>", css="div{color:red}", name="styled")
+    doc = p._document()
+    assert "box-sizing" in doc and "color:red" in doc
+
+
+# -- Custom <-> React shim parity (request/viewport/setView) -----------------
+
+def test_custom_shim_exposes_react_parity_methods():
+    p = danvas.Custom(html="<div></div>", name="parity")
+    shim = p.register_props()["html"]
+    # The iframe `canvas` handle mirrors the React panel's: ask-Python +
+    # camera-awareness, not just send/onPush.
+    for token in ("request:function", "setView:function", "viewport:function",
+                  "send:function", "onPush:function", "sendBinary:function"):
+        assert token in shim, f"shim missing {token}"
+
+
+def test_custom_answers_on_request_like_react():
+    # on_request / _handle_request are shared via _EventRouter, so a Custom panel
+    # resolves canvas.request the same way a React panel does.
+    p = _panel()
+
+    @p.on_request("double")
+    def _(req):
+        return {"doubled": req["n"] * 2}
+
+    assert p._handle_request({"event": "double", "n": 21}) == {"doubled": 42}
+
+
+def test_custom_on_request_catch_all_and_missing():
+    import pytest
+    p = _panel()
+
+    @p.on_request()                       # catch-all
+    def _(req):
+        return req.get("n", 0) + 1
+
+    assert p._handle_request({"n": 4}) == 5
+    # No handler for a keyed event with no catch-all match still routes to the
+    # catch-all here; remove it to prove the unhandled path raises.
+    q = _panel()
+    with pytest.raises(LookupError):
+        q._handle_request({"event": "whatever"})

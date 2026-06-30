@@ -9,6 +9,7 @@
 // fill the stubbed handlers (arrow/shape/order/container_sync/reflow/draw/
 // snapshot/image/cursor/graveyard/chat/view-camera).
 import { generateKeyBetween } from 'fractional-indexing'
+import { effect } from 'alien-signals'
 import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
 import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera } from './engine/camera'
@@ -1742,6 +1743,40 @@ function stopMicCapture(compId: string): void {
   _micPanels.delete(compId)
 }
 
+// Custom-iframe viewport subscribers (canvas.viewport): each subscribed frame is
+// pushed the canvas centre + zoom on every camera move — the postMessage twin of
+// the React panel's viewport(). A frame that's gone (panel unmounted) is pruned
+// the first time posting to it throws.
+const _viewportSubs = new Set<Window>()
+function _viewportValue() {
+  const c = editor.getViewportPageBounds().center
+  return { x: Math.round(c.x), y: Math.round(c.y), zoom: editor.getZoomLevel() }
+}
+function _pushViewport(win: Window, v: any) {
+  try {
+    win.postMessage({ __danvas_viewport: v }, '*')
+  } catch {
+    _viewportSubs.delete(win)
+  }
+}
+function addViewportSub(win: Window | null) {
+  if (!win) return
+  _viewportSubs.add(win)
+  _pushViewport(win, _viewportValue()) // prime now, like React's viewport()
+}
+function removeViewportSub(win: Window | null) {
+  if (win) _viewportSubs.delete(win)
+}
+if (typeof window !== 'undefined') {
+  // Push the live viewport to every subscribed Custom iframe on each camera move.
+  effect(() => {
+    store.camera() // track pan/zoom
+    if (!_viewportSubs.size) return
+    const v = _viewportValue()
+    for (const win of Array.from(_viewportSubs)) _pushViewport(win, v)
+  })
+}
+
 // --- the global relay: messages from every Custom iframe --------------------
 if (typeof window !== 'undefined') {
   // Non-iframe Custom usage (top-level page).
@@ -1772,6 +1807,23 @@ if (typeof window !== 'undefined') {
     } else if (d.__danvas_mic) {
       if (d.action === 'start') startMicCapture(d.__danvas_mic, d.opts || {})
       else if (d.action === 'stop') stopMicCapture(d.__danvas_mic)
+    } else if (d.__danvas_request) {
+      // canvas.request(data) from a Custom iframe: run the matching @on_request
+      // handler (same wire path as a React panel) and post the result back to the
+      // requesting frame, matched by reqId.
+      const src = e.source as Window | null
+      const reqId = d.reqId
+      requestData(d.__danvas_request, d.data)
+        .then((r) => src && src.postMessage({ __danvas_response: reqId, ok: true, data: r }, '*'))
+        .catch((err) => src && src.postMessage({ __danvas_response: reqId, ok: false, error: String((err && err.message) || err) }, '*'))
+    } else if (d.__danvas_setview) {
+      // canvas.setView({x,y,zoom}) — pan/zoom the canvas to centre a point.
+      applyCameraFrom(d.__danvas_setview || {})
+    } else if (d.__danvas_viewport) {
+      // canvas.viewport(cb) subscribe/unsubscribe (the value is pushed back by the
+      // camera effect above).
+      if (d.action === 'sub') addViewportSub(e.source as Window | null)
+      else if (d.action === 'unsub') removeViewportSub(e.source as Window | null)
     }
   })
 }

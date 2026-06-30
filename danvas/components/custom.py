@@ -8,22 +8,35 @@ page::
 
     panel = canvas.custom(html=markup, css=styles, js=behaviour)
 
-A small ``canvas`` helper is injected into the iframe with a symmetric two-way
-channel:
+A small ``canvas`` helper is injected into the iframe. It mirrors the React
+panel's ``canvas`` handle so the two panel kinds share one mental model:
 
-  * ``canvas.send(data)``   -> Python   (delivered to your handlers)
-  * ``canvas.onPush(fn)``   <- Python   (``panel.push(data)`` calls ``fn(data)``)
+  * ``canvas.send(data)``          -> Python   (delivered to your handlers)
+  * ``canvas.onPush(fn)``          <- Python   (``panel.push(data)`` calls ``fn``;
+    the callback receive channel — a Custom panel updates its own DOM, so there is
+    just this one end, equivalent to a React panel's ``onFrame``)
+  * ``canvas.request(data)``       -> Promise  (awaitable twin of ``send``; resolves
+    with the matching :meth:`on_request` handler's return value)
+  * ``canvas.viewport(cb)``        — ``cb({x, y, zoom})`` now and on every camera move
+  * ``canvas.setView({x, y, zoom})`` — pan/zoom the canvas to centre a point
+  * ``canvas.sendBinary(buf)`` / ``requestCamera`` / ``requestMicrophone`` — as before
 
 On the Python side, register handlers with ``@panel.on("event")`` to route by an
-``event`` field, or ``@panel.on_message`` to receive every message.
+``event`` field, ``@panel.on_message`` to receive every message, or
+``@panel.on_request`` to answer :meth:`request` calls.
 """
 
 import json
+import re
 import traceback
 
 from .base import BaseComponent
 from ._routing import _EventRouter
 from ..bridge import BINARY_CUSTOM
+
+# A panel's ``html`` is treated as a complete page (left untouched, no base reset)
+# only when it brings its own document shell; otherwise it's a fragment we wrap.
+_FULL_DOCUMENT_RE = re.compile(r"<\s*(?:!doctype|html|body)\b", re.IGNORECASE)
 
 
 class Custom(_EventRouter, BaseComponent):
@@ -111,6 +124,33 @@ class Custom(_EventRouter, BaseComponent):
             "onPush:function(fn){window.addEventListener('message',function(e){"
             "if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}"
             "});},"
+            # request(data) -> Promise: the awaitable twin of send(). The parent
+            # runs the matching @on_request handler and posts its return value back,
+            # matched by a per-call reqId — the postMessage equivalent of a React
+            # panel's canvas.request(). Mirrors that API exactly.
+            "request:function(data){return new Promise(function(res,rej){"
+            "var rid='r'+Math.random().toString(36).slice(2)+Date.now();"
+            "function h(e){if(e.data&&e.data.__danvas_response===rid){"
+            "window.removeEventListener('message',h);"
+            "if(e.data.ok){res(e.data.data);}else{rej(new Error(e.data.error||'request failed'));}}}"
+            "window.addEventListener('message',h);"
+            f"parent.postMessage({{__danvas_request:{cid},reqId:rid,data:data}},'*');"
+            "});},"
+            # setView({x,y,zoom}): pan/zoom the canvas to centre a point (any subset
+            # of the keys; omitted axes stay put) — the write-twin of viewport().
+            "setView:function(view){"
+            f"parent.postMessage({{__danvas_setview:view||{{}}}},'*');"
+            "},"
+            # viewport(cb): cb is called now and on every camera move with the live
+            # {x,y,zoom} of the canvas centre. Returns an unsubscribe. Same shape and
+            # semantics as the React panel's canvas.viewport().
+            "viewport:function(cb){"
+            "function h(e){if(e.data&&e.data.__danvas_viewport!==undefined){cb(e.data.__danvas_viewport);}}"
+            "window.addEventListener('message',h);"
+            f"parent.postMessage({{__danvas_viewport:{cid},action:'sub'}},'*');"
+            "return function(){window.removeEventListener('message',h);"
+            f"parent.postMessage({{__danvas_viewport:{cid},action:'unsub'}},'*');}};"
+            "},"
             # requestCamera / releaseCamera: getUserMedia cannot run inside a
             # sandboxed iframe (null origin blocks the permission grant even with
             # allow="camera"). These methods ask the parent page to open the
@@ -317,11 +357,19 @@ class Custom(_EventRouter, BaseComponent):
         )
 
     def _document(self):
-        """The full document for the iframe: composed only when css/js exist,
-        so a complete page passed as ``html`` alone is left untouched."""
+        """The full document for the iframe.
+
+        A *fragment* — the common case — is wrapped with the shared base reset
+        (sane margins, ``box-sizing``, a transparent background, content centred)
+        whether it came as ``html`` alone or as ``css``/``js``, so an html-only
+        panel no longer has to hand-write its own ``<style>`` reset. A *complete
+        page* (one that brings its own ``<html>``/``<body>``/``<!doctype>``) owns
+        its whole document and is left untouched."""
         if self._css or self._js:
             return self.compose(self._html, self._css, self._js)
-        return self._html
+        if _FULL_DOCUMENT_RE.search(self._html or ""):
+            return self._html
+        return self.compose(self._html)
 
     def register_props(self):
         props = dict(self._props)  # label, w, h

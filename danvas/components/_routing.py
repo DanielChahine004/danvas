@@ -3,8 +3,10 @@
 Both :class:`~danvas.components.react.React` and
 :class:`~danvas.components.custom.Custom` accept arbitrary browser messages and
 fan them out to ``@panel.on(event)`` / ``@panel.on_message`` handlers, keyed by a
-configurable field. That dispatch table is identical for both, so it lives here as
-a mixin; React layers request/response routing (``on_request``) on top.
+configurable field, **and** answer ``canvas.request(...)`` calls via
+``@panel.on_request``. Both the fire-and-forget dispatch table and the
+request/response table are identical for the two panel kinds, so they live here as
+one mixin — React and Custom route identically.
 """
 
 import sys
@@ -45,6 +47,9 @@ class _EventRouter:
         self._event_key = event_key
         self._routes = {None: list(self._callbacks)}
         self._binary_handlers = []
+        # Request/response handlers for ``canvas.request(data)`` (see on_request):
+        # exactly one answers each call, keyed by event (None = catch-all).
+        self._request_routes = {}
 
     def on(self, event=None, *, fields=None, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handle inbound ``canvas.send`` messages.
@@ -170,6 +175,52 @@ class _EventRouter:
     def _receive_binary(self, data: bytes, viewer=None):
         """Called by the bridge when an inbound binary frame arrives for this panel."""
         self._dispatch_callbacks(list(self._binary_handlers), (data,), viewer)
+
+    def on_request(self, event=None):
+        """Decorator: *answer* a panel's ``await canvas.request(data)`` call.
+
+        Where :meth:`on` is fire-and-forget, this is request/response: the handler
+        receives the request ``data`` and its **return value** is sent back to
+        resolve the panel's Promise — for ask-Python-and-use-the-answer flows
+        (validate a field, fetch a row, compute server-side). Routed by
+        ``data[event_key]`` like :meth:`on` (``@panel.on_request("validate")``);
+        ``@panel.on_request()`` is the catch-all. Exactly one handler answers (the
+        keyed one, else the catch-all), so registering the same key again replaces
+        it. A handler that raises rejects the Promise with the error; the return
+        value must be JSON-serialisable. Declare a second parameter
+        (``def _(req, viewer)``) to also receive the requester's identity, as with
+        :meth:`on` / ``on_change``.
+
+        Works the same on a React panel (``canvas.request`` in JSX) and a Custom
+        panel (``canvas.request`` in the iframe)::
+
+            @panel.on_request("factorize")
+            def _(req): return {"factors": factorize(req["n"])}
+            # in the panel:  const { factors } = await canvas.request({event:'factorize', n})
+        """
+        def deco(fn):
+            self._request_routes[event] = fn
+            return fn
+        return deco
+
+    def _handle_request(self, data, viewer=None):
+        """Resolve a ``canvas.request`` payload to a reply value (bridge entry).
+
+        Returns the matching handler's value; raises if none is registered — the
+        bridge turns the return into a ``response`` (resolving the panel's Promise)
+        and an exception into an error ``response`` (rejecting it). A handler that
+        declares a second parameter (``def fn(req, viewer)``) is given the
+        requester's viewer identity, mirroring ``on_change`` / ``on``.
+        """
+        event = data.get(self._event_key) if isinstance(data, dict) else None
+        handler = self._request_routes.get(event)
+        if handler is None:
+            handler = self._request_routes.get(None)
+        if handler is None:
+            raise LookupError(f"no on_request handler for event {event!r}")
+        if self._accepts_viewer(handler, 1):
+            return handler(data, viewer or {})
+        return handler(data)
 
     def _handle_input(self, payload, viewer=None):
         with self._lock:
