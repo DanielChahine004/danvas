@@ -262,6 +262,21 @@ class Canvas:
         **props: Any,
     ) -> Arrow: ...
     def disconnect(self, arrow: Arrow | str) -> Arrow | None: ...
+    def serve_bytes(
+        self,
+        data: bytes | bytearray | memoryview | str,
+        filename: str = ...,
+        ttl: float = ...,
+        role: str | None = ...,
+    ) -> str: ...
+    def receive_files(
+        self,
+        on_file: Callable[..., Any],
+        *,
+        dest: str | None = ...,
+        max_size: int | None = ...,
+        role: str | None = ...,
+    ) -> str: ...
 
     # -- layout containers ----------------------------------------------------
     def grid(

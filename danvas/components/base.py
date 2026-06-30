@@ -177,6 +177,9 @@ class BaseComponent:
         self._roles = []
         self._lock_for = []
         self._bridge = None
+        # The owning Canvas, set by insert(); used by panels that reach canvas-level
+        # primitives (e.g. Download -> canvas.serve_bytes). None until inserted.
+        self._canvas = None
         # True once the component has been inserted on the canvas and is
         # currently visible to browsers. Set to False before insert and by
         # canvas.hide(); restored to True by canvas.show(). While False,

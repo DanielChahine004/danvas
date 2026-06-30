@@ -1068,40 +1068,43 @@ class Bridge:
             self._chat_sinks.remove(fn)
 
     # -- file downloads (Download panel <-> /__download__ route) --------------
-    def register_download(self, filename, source, ttl=300):
+    def register_download(self, filename, source, ttl=300, role=None):
         """Stash ``source`` under a fresh token and return it (any-thread safe).
 
         ``source`` is a filesystem path or ``bytes``; the ``/__download__/<token>``
         route streams it to the browser as an attachment named ``filename``. The
         token is unguessable and expires after ``ttl`` seconds, so a leaked URL
-        can't be replayed indefinitely. Expired tokens are purged opportunistically
-        on each register/consume.
+        can't be replayed indefinitely. ``role`` (when set) restricts the download
+        to viewers holding that login role — the route rejects anyone else even
+        though the URL is otherwise behind the shared auth gate. Expired tokens are
+        purged opportunistically on each register/consume.
         """
         token = secrets.token_urlsafe(24)
         with self._download_lock:
             self._purge_downloads()
-            self._downloads[token] = (filename, source, time.monotonic() + ttl)
+            self._downloads[token] = (filename, source, time.monotonic() + ttl, role)
         return token
 
     def take_download(self, token):
-        """Resolve a download token to ``(filename, source)`` or ``None``.
+        """Resolve a download token to ``(filename, source, role)`` or ``None``.
 
-        Returns ``None`` if the token is unknown or has expired. Not single-use:
-        the entry stays until its TTL lapses, so a browser that issues a HEAD then
-        GET (or retries) still succeeds.
+        Returns ``None`` if the token is unknown or has expired. ``role`` is the
+        login role required to fetch it (``None`` = any authorised viewer); the
+        route enforces it. Not single-use: the entry stays until its TTL lapses, so
+        a browser that issues a HEAD then GET (or retries) still succeeds.
         """
         with self._download_lock:
             self._purge_downloads()
             item = self._downloads.get(token)
         if item is None:
             return None
-        filename, source, _exp = item
-        return filename, source
+        filename, source, _exp, role = item
+        return filename, source, role
 
     def _purge_downloads(self):
         """Drop expired download tokens. Call with ``_download_lock`` held."""
         now = time.monotonic()
-        expired = [t for t, (_, _, exp) in self._downloads.items() if exp <= now]
+        expired = [t for t, (_, _, exp, _r) in self._downloads.items() if exp <= now]
         for t in expired:
             self._downloads.pop(t, None)
 

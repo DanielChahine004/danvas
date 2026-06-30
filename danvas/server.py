@@ -455,12 +455,17 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     # Sits behind the auth gate above, so a password/role-protected canvas
     # protects its downloads too.
     @app.get("/__download__/{token}")
-    async def download(token: str):
+    async def download(token: str, request: Request):
         item = bridge.take_download(token)
         if item is None:
             return PlainTextResponse("download expired or not found",
                                      status_code=404)
-        filename, source = item
+        filename, source, role = item
+        # Per-token role gate (canvas.serve_bytes(role=...)): the shared auth gate
+        # above already requires a valid session; this further restricts a download
+        # to one login role.
+        if role is not None and _role_of(request) != role:
+            return PlainTextResponse("forbidden", status_code=403)
         if isinstance(source, (bytes, bytearray)):
             return Response(content=bytes(source),
                             media_type="application/octet-stream",
@@ -505,6 +510,12 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
         comp = bridge.upload_component(token)
         if comp is None:
             return PlainTextResponse("unknown upload target", status_code=404)
+        # Per-endpoint role gate (canvas.receive_files(role=...) / Upload(role=...)):
+        # the shared auth gate already requires a session; this restricts the
+        # endpoint to one login role.
+        target_role = getattr(comp, "_role", None)
+        if target_role is not None and _role_of(request) != target_role:
+            return PlainTextResponse("forbidden", status_code=403)
         max_size = getattr(comp, "_max_size", None)
         # Reject early when the declared length already blows the cap.
         clen = request.headers.get("content-length")

@@ -30,10 +30,46 @@ the canvas theme and needs no ``npm`` build.
         print(viewer["name"], "uploaded", file.name)
 """
 
+import inspect
 import os
 import secrets
+import traceback
 
 from .react import React
+
+
+class _UploadTarget:
+    """A panel-less upload endpoint behind :meth:`Canvas.receive_files`.
+
+    Exposes the same attributes the upload route reads off an :class:`Upload`
+    panel (``_dest``/``_max_size``/``_role``) and the same ``_receive_upload``
+    entry point, so the one ``/__upload__/<token>`` route + bridge registry serve
+    both a built-in panel and a user-built recipe — there is no second path. Each
+    received file becomes an :class:`UploadedFile` handed to ``on_file`` (which may
+    take an optional second ``viewer`` argument, like every other handler)."""
+
+    def __init__(self, on_file, dest=None, max_size=None, role=None):
+        self._on_file = on_file
+        self._dest = os.path.realpath(dest) if dest else None
+        self._max_size = max_size
+        self._role = role
+        if self._dest is not None:
+            os.makedirs(self._dest, exist_ok=True)
+
+    def _receive_upload(self, info, viewer=None):
+        # Runs on the bridge's input-dispatch thread (deliver_upload), so a slow or
+        # raising handler can't stall the loop or other viewers — guard it here.
+        file = UploadedFile(**info)
+        try:
+            params = [p for p in inspect.signature(self._on_file).parameters.values()
+                      if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+            wants_viewer = len(params) >= 2
+        except (TypeError, ValueError):
+            wants_viewer = False
+        try:
+            self._on_file(file, viewer or {}) if wants_viewer else self._on_file(file)
+        except Exception:
+            traceback.print_exc()
 
 
 class UploadedFile:
@@ -190,10 +226,13 @@ class Upload(React):
     default_h = 120
 
     def __init__(self, name="upload", text=None, label=None, dest=None, accept=None,
-                 multiple=False, max_size=None, color=None):
+                 multiple=False, max_size=None, color=None, role=None):
         caption = text if text is not None else (label if label is not None else name)
         # The token is the upload target; minted now so it's a stable prop, and
-        # registered with the bridge in ``_bind`` once there is one.
+        # registered with the bridge in ``_bind`` once there is one. The panel is
+        # its own upload target (same _dest/_max_size/_role/_receive_upload the
+        # /__upload__ route reads off a _UploadTarget from canvas.receive_files —
+        # one route, one registry, for both the panel and a hand-built recipe).
         self._token = secrets.token_urlsafe(24)
         super().__init__(source=_UPLOAD_SOURCE, name=name, label=label,
                          props={"text": caption,
@@ -203,6 +242,7 @@ class Upload(React):
         self._init_color(color)
         self._dest = os.path.realpath(dest) if dest else None
         self._max_size = max_size
+        self._role = role
         self._upload_cbs = []
         if self._dest is not None:
             os.makedirs(self._dest, exist_ok=True)

@@ -494,6 +494,21 @@ def got(file, viewer):               # .name .size .data/.path; viewer optional
     table.update(list(csv.DictReader(io.StringIO(file.data.decode()))))
 ```
 
+**File endpoints (the primitive)** — `Download` and `Upload` are thin recipes over
+two public Python endpoints you can use directly to build your own file UI on a
+`custom`/`react` panel:
+
+```python
+url = canvas.serve_bytes(make_report(), "report.pdf", role="admin")  # transient,
+#   unguessable, auth-gated download URL (bytes or a path); hand it to a panel.
+endpoint = canvas.receive_files(on_file, dest="uploads/", max_size=5_000_000)
+#   an upload URL; each POSTed file fires on_file(file[, viewer]); the filename is
+#   sandboxed inside dest. `role=` restricts either to one login role.
+```
+
+Both ride the same auth-gated routes the built-in panels use — a hand-built file
+panel is a first-class peer of `Download`/`Upload`. See `examples/file_endpoints.py`.
+
 **Audio** — `AudioFeed` streams PCM via Web Audio (capture needs `[audio]`;
 playback needs nothing). Each viewer clicks **Enable audio** once.
 

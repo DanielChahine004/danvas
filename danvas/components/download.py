@@ -102,7 +102,7 @@ class Download(React):
     default_h = 84
 
     def __init__(self, name="download", source=None, filename=None, text=None, label=None,
-                 color=None):
+                 color=None, role=None):
         # ``text`` is the button face; defaults to the label/name so naming the
         # download is enough to caption it.
         caption = text if text is not None else (label if label is not None else name)
@@ -115,6 +115,9 @@ class Download(React):
         self._content = source
         self._filename = filename
         self._provider = None
+        # Optional login role required to fetch the file (passed through to the
+        # per-token gate on canvas.serve_bytes).
+        self._role = role
         # One inbound action: a click asks Python to mint a download URL.
         self.on_request()(self._on_download)
 
@@ -174,9 +177,14 @@ class Download(React):
         return (filename or os.path.basename(path) or self.name), path
 
     def _on_download(self, _req):
-        """Answer a click: stash the resolved content and return its URL."""
-        if self._bridge is None:
+        """Answer a click: stash the resolved content and return its URL.
+
+        A thin recipe over the public :meth:`Canvas.serve_bytes` primitive — the
+        panel adds the button + the host-chooses-what-to-serve semantics on top of
+        it, nothing more."""
+        canvas = self._canvas
+        if canvas is None:
             raise RuntimeError("download is not attached to a serving canvas")
         filename, payload = self._resolve()
-        token = self._bridge.register_download(filename, payload)
-        return {"url": f"/__download__/{token}", "filename": filename}
+        url = canvas.serve_bytes(payload, filename=filename, role=self._role)
+        return {"url": url, "filename": filename}

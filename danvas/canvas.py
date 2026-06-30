@@ -1497,6 +1497,62 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         arrow._bridge = None
         return arrow
 
+    # -- HTTP endpoints (the primitives the file panels are built on) ---------
+    def serve_bytes(self, data, filename="download.bin", ttl=300, role=None):
+        """Mint a one-off, auth-gated URL that serves ``data`` as a file download.
+
+        ``data`` is ``bytes`` or a filesystem path; the returned URL streams it to
+        the browser as an attachment named ``filename`` when fetched. The URL is
+        relative (same origin as the canvas) and carries an **unguessable** token
+        that **expires after ``ttl`` seconds**, so it can't be replayed
+        indefinitely; it sits behind the canvas's auth gate, and ``role`` (a login
+        role from ``serve(passwords=)``) further restricts it to that role.
+
+        This is the primitive behind :class:`~danvas.Download` — hand the URL to a
+        panel (set ``window.location`` to it, or an ``<a href>``) to trigger the
+        save. Build whatever download UI you like on top::
+
+            @btn.on_request
+            def _(req):
+                return {"url": canvas.serve_bytes(make_report(), "report.pdf")}
+            # in the panel:  const { url } = await canvas.request({}); location = url
+        """
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            payload = bytes(data)
+        else:
+            payload = os.fspath(data)
+            if not os.path.isfile(payload):
+                raise FileNotFoundError(f"serve_bytes: no such file: {payload}")
+        token = self._bridge.register_download(filename, payload, ttl=ttl, role=role)
+        return f"/__download__/{token}"
+
+    def receive_files(self, on_file, *, dest=None, max_size=None, role=None):
+        """Mint an auth-gated upload URL; each received file calls ``on_file``.
+
+        Returns a relative URL a panel POSTs files to (raw body, ``?name=`` in the
+        query — see the built-in :class:`~danvas.Upload`'s JSX for the client
+        half). Each file fires ``on_file(file)`` — or ``on_file(file, viewer)`` to
+        also get the uploader's identity — with an :class:`~danvas.UploadedFile`.
+
+        ``dest`` streams uploads to that directory (the browser-supplied filename
+        is **sandboxed inside it** — no ``..`` escape — and ``file.path`` is set);
+        omit it to receive the bytes in memory (``file.data``). ``max_size``
+        (bytes) rejects oversized uploads — always set it on a public/tunnelled
+        canvas. ``role`` restricts the endpoint to one login role. The handler runs
+        on the dispatch thread like every other callback.
+
+        This is the primitive behind :class:`~danvas.Upload`; both register the
+        same kind of target on the same ``/__upload__`` route, so a hand-built
+        upload panel is a first-class peer of the built-in one.
+        """
+        from .components.upload import _UploadTarget
+        import secrets as _secrets
+
+        target = _UploadTarget(on_file, dest=dest, max_size=max_size, role=role)
+        token = _secrets.token_urlsafe(24)
+        self._bridge.register_upload(token, target)
+        return f"/__upload__/{token}"
+
     # -- save / load ----------------------------------------------------------
     def describe(self):
         """A plain-data inventory of the canvas — for an LLM (or a log) to read.
