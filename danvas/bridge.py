@@ -708,6 +708,10 @@ class Bridge:
         fc = getattr(component, "_frame_color", None)
         if fc is not None:
             msg["frameColor"] = fc
+        # Keep wheel local to the panel content (no canvas zoom) — sent only when
+        # opted out of the default. Custom handles this inside its iframe instead.
+        if not getattr(component, "_forward_wheel", True):
+            msg["wheelLocal"] = True
         # Per-viewer layout overlay (set_layout(roles=) / a drag written to the
         # viewer's own layer): merge it on top of the base geometry. x/y/rotation
         # and the lock flags are top-level register fields; w/h are shape props.

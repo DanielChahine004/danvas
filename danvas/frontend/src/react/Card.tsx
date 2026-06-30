@@ -190,6 +190,10 @@ export function Card({
 
   return (
     <div
+      // forward_wheel=False: the engine's wheel handler bails over this subtree
+      // (see input.ts) so wheel reaches the panel content instead of zooming the
+      // canvas. Absent attribute = default canvas-zoom behaviour.
+      data-wheel-local={shape.meta?.wheelLocal ? '' : undefined}
       className={nonPanelHovered ? 'pc-card pc-draw-passthrough' : 'pc-card'}
       style={
         ghost || !toolIsSelect || nonPanelHovered

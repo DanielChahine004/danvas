@@ -20,6 +20,7 @@ export interface PanelMeta {
   noGrab?: boolean      // grabbable=False -> never hover/select by body click
   noFrame?: boolean     // frame=False -> strip card chrome
   frameColor?: string   // tint card chrome to an accent hex
+  wheelLocal?: boolean  // forward_wheel=False -> wheel stays in the panel, no canvas zoom
   topmost?: boolean     // render above the drawing layer (the UI inspector panel)
 }
 

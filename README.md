@@ -401,6 +401,9 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
   sees only their slice, replayed on reconnect (unlike one-shot `push`). See [Roles](#views-navigation--roles).
 - **`panel.watch(path=…, css_path=…)`** dev hot-reloads the JSX/CSS on save;
   **`panel.validate()`** is a fast structural lint.
+- `forward_wheel=False` lets the panel's content keep the wheel (scroll a list,
+  pan a map, zoom a 3D canvas) instead of zooming the canvas — the same option
+  as on `Custom`. Default `True` keeps the canvas-zoom behaviour.
 
 ### Custom
 
@@ -426,6 +429,11 @@ def handle(msg):
   iframe), relaying frames up to `@on_binary` and back into the iframe via
   `onPush`. *(These three are Custom-only — they need direct socket access the
   React subtree doesn't expose.)*
+- `forward_wheel=False` keeps wheel events inside the panel instead of forwarding
+  them to the canvas (default `True` zooms the canvas, matching the bare canvas).
+  Set it for content that does its own wheel handling — a 3D viewer zooming its
+  camera, a scrollable region — so scrolling over the panel no longer zooms the
+  canvas underneath.
 
 ## Specific panels
 

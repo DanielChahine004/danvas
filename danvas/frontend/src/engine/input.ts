@@ -316,6 +316,10 @@ function enableRightDragPan(el: HTMLElement): () => void {
 // the one exception: they lock zoom and pan one axis.
 function enableWheelZoom(el: HTMLElement): () => void {
   const onWheel = (e: WheelEvent) => {
+    // A panel marked wheel-local (React forward_wheel=False) keeps the wheel for
+    // its own content — a scroll region, a map, a 3D viewer zooming its camera —
+    // so don't preventDefault/stopPropagation; let the event reach the content.
+    if ((e.target as Element | null)?.closest?.('[data-wheel-local]')) return
     const mode = getScrollMode()
     if (mode !== 'free') {
       e.preventDefault()

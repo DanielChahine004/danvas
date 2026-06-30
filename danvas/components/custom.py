@@ -39,7 +39,7 @@ class Custom(_EventRouter, BaseComponent):
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, color=None, event_key="event",
-                 permissions=None):
+                 permissions=None, forward_wheel=True):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -75,6 +75,11 @@ class Custom(_EventRouter, BaseComponent):
         if isinstance(permissions, (list, tuple)):
             permissions = "; ".join(permissions)
         self._permissions = permissions or ""
+        # When True (default), wheel events inside the iframe are forwarded to the
+        # parent so scroll-to-zoom over a panel zooms the canvas, matching the bare
+        # canvas. Set False for panels whose content does its own wheel handling
+        # (e.g. a 3D viewer that zooms its own camera) so the canvas stays put.
+        self._forward_wheel = forward_wheel
         # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
         # with React via _EventRouter; override event_key if your HTML tags
         # messages with a different field.
@@ -151,9 +156,12 @@ class Custom(_EventRouter, BaseComponent):
             # don't wheel-scroll their content either, so this just makes Custom
             # panels consistent.) Capture phase so we win over any content (e.g.
             # Plotly) wheel handler.
-            "window.addEventListener('wheel',function(e){e.preventDefault();"
-            "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');"
-            "},{passive:false,capture:true});"
+            + (
+                "window.addEventListener('wheel',function(e){e.preventDefault();"
+                "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');"
+                "},{passive:false,capture:true});"
+                if self._forward_wheel else ""
+            ) +
             # Right-drag inside the iframe pans the canvas: the parent can't see these
             # events (cross-document), so forward the deltas. Pointer-capture keeps the
             # drag alive if the cursor leaves the frame. A right-click that didn't drag

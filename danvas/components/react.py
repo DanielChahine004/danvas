@@ -74,7 +74,7 @@ class React(_EventRouter, BaseComponent):
     def __init__(self, source=None, path=None, jsx=None, css=None, css_path=None,
                  name="react", label=None, w=None, h=None, color=None, props=None,
                  scope=None, event_key="event", queue="fifo",
-                 wasm=None, wasm_path=None):
+                 wasm=None, wasm_path=None, forward_wheel=True):
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         self._path = path   # remembered so watch() can reload it
@@ -153,6 +153,13 @@ class React(_EventRouter, BaseComponent):
         # the one-shot ``push``).
         self._role_data = {}
         self._client_data = {}
+        # When False, wheel over this panel is left to the panel's own content
+        # (a scroll region, a map, a 3D viewer zooming its camera) instead of
+        # zooming the canvas. Unlike Custom (which forwards from inside its
+        # iframe), a React panel renders in the canvas DOM, so this rides to the
+        # frontend as `wheelLocal` meta and the engine's wheel handler bails when
+        # the cursor is over it. See [[iframe-custom-panel-pattern]].
+        self._forward_wheel = forward_wheel
         # Inbound ``canvas.send`` routing (on / on_message / dispatch) is shared
         # with Custom via _EventRouter; this seeds the table (+ on_change catch-alls).
         self._init_routing(event_key)

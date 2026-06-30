@@ -334,6 +334,7 @@ function lockMeta(
   selectable?: boolean,
   frame?: boolean,
   frameColor?: string,
+  wheelLocal?: boolean,
 ): PanelRecord['meta'] {
   const meta = { ...(base || {}) }
   if (typeof movable === 'boolean') meta.lockMove = !movable
@@ -342,6 +343,7 @@ function lockMeta(
   if (typeof selectable === 'boolean') meta.noGrab = !selectable
   if (typeof frame === 'boolean') meta.noFrame = !frame
   if (typeof frameColor === 'string') meta.frameColor = frameColor
+  if (typeof wheelLocal === 'boolean') meta.wheelLocal = wheelLocal
   return meta
 }
 
@@ -352,7 +354,8 @@ function hasLockFlags(m: any): boolean {
     typeof m.interactive === 'boolean' ||
     typeof m.selectable === 'boolean' ||
     typeof m.frame === 'boolean' ||
-    typeof m.frameColor === 'string'
+    typeof m.frameColor === 'string' ||
+    typeof m.wheelLocal === 'boolean'
   )
 }
 
@@ -590,7 +593,7 @@ function registerComponent(msg: any): void {
     index: nextIndex(),
     props: { ...getDefaultProps(shapeType), ...props },
     meta: hasLockFlags(msg)
-      ? lockMeta({}, msg.movable, msg.resizable, msg.interactive, msg.selectable, msg.frame, msg.frameColor)
+      ? lockMeta({}, msg.movable, msg.resizable, msg.interactive, msg.selectable, msg.frame, msg.frameColor, msg.wheelLocal)
       : {},
   }
   // The native UI inspector + the dispatch-trace panel float above the drawing
@@ -650,7 +653,7 @@ function updateComponent(id: string, payload: any): void {
   const shapeId = createShapeId(id)
   const shape = store.peek(shapeId)
   if (!shape) return
-  const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, frameColor, data_patch, ...props } = payload
+  const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, frameColor, wheelLocal, data_patch, ...props } = payload
   const patch: any = { props: { ...props } }
   // data_patch carries only the changed props (React.update sends a delta, not the
   // whole blob). Merge it into the panel's current data — preferring a same-message
@@ -672,7 +675,7 @@ function updateComponent(id: string, payload: any): void {
   if (typeof opacity === 'number') patch.opacity = opacity
   if (typeof locked === 'boolean') patch.isLocked = locked
   if (hasLockFlags(payload)) {
-    patch.meta = lockMeta((shape as any).meta, movable, resizable, interactive, selectable, frame, frameColor)
+    patch.meta = lockMeta((shape as any).meta, movable, resizable, interactive, selectable, frame, frameColor, wheelLocal)
   }
   if (typeof x === 'number' && typeof y === 'number') flowItems.delete(shapeId)
   applyRemote(() => store.patch(shapeId, patch))
