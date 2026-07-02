@@ -21,7 +21,7 @@ class StubBridge:
     def send_to_client(self, client_id, msg):
         self.to_client.append((client_id, msg))
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.broadcasts.append(msg)
 
 

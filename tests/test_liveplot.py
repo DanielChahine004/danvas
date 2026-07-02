@@ -90,11 +90,11 @@ class _CaptureBridge:
     def __init__(self):
         self.sent = []  # (coalesce, payload)
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.sent.append((None, msg["payload"]))  # not used by LivePlot streaming
 
     def broadcast_conflated(self, comp_id, *, msg=None, data=None,
-                            exclude=None, tap=True, coalesce=False):
+                            exclude=None, tap=True, coalesce=False, **_kw):
         self.sent.append((coalesce, msg["payload"]))
 
 
@@ -289,7 +289,7 @@ def test_push_uses_coalescing_for_fifo_and_replace_for_latest():
 
     class Bridge2:
         def broadcast_conflated(self, cid, *, msg=None, data=None,
-                                exclude=None, tap=True, coalesce=False):
+                                exclude=None, tap=True, coalesce=False, **_kw):
             seen["coalesce"] = coalesce
 
     p = danvas.LivePlot("m", traces=["a"])

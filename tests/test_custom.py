@@ -5,10 +5,10 @@ class FakeBridge:
     def __init__(self):
         self.plain = []
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.plain.append(msg)
 
-    def broadcast_binary(self, data):
+    def broadcast_binary(self, data, **_kw):
         pass
 
 

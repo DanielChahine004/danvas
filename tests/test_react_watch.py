@@ -11,7 +11,7 @@ class RecordingBridge:
     def __init__(self):
         self.updates = []
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.updates.append(msg)
 
 

@@ -242,11 +242,14 @@ def run_calls(bridge, cb, args, meta, traceable=is_user_code):
     makes, the handler itself being depth 0. Re-raises whatever ``cb`` raises —
     the caller (``_traced``) emits the handler-level ``error`` event and does the
     console logging, exactly as on the shallow path. The previously-installed
-    profiler (if any) is always restored."""
+    profiler (if any) is always restored. Returns ``cb``'s result — an ``async
+    def`` handler returns its coroutine here, which the caller schedules (the
+    probe is per-thread, so it can't follow into the async loop; such a handler's
+    awaited part is traced shallowly)."""
     tracer = _CallTracer(bridge, meta, traceable)
     prev = sys.getprofile()
     sys.setprofile(tracer)
     try:
-        cb(*args)
+        return cb(*args)
     finally:
         sys.setprofile(prev)

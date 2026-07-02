@@ -30,7 +30,7 @@ def test_set_css_sends_live_update():
     p = danvas.React(source="function Component(){return null}")
 
     class B:
-        def broadcast(self, msg, exclude=None):
+        def broadcast(self, msg, exclude=None, **_kw):
             sent.append(msg)
     p._bind("p1", B())
     p.set_css(".y{margin:0}")

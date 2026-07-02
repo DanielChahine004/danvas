@@ -16,10 +16,10 @@ class FakeBridge:
         self.sent = []
         self.uploads = {}
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.sent.append(msg)
 
-    def broadcast_binary(self, data):
+    def broadcast_binary(self, data, **_kw):
         pass
 
     def register_upload(self, token, component):

@@ -7,6 +7,7 @@ schedules the actual send onto the server's asyncio event loop.
 
 import asyncio
 import copy
+import inspect
 import itertools
 import json
 import logging
@@ -28,7 +29,7 @@ from fastapi import WebSocketDisconnect
 
 from ._flags import LAYOUT_FLAGS
 from ._protocol import BINARY_FRAME_CODES
-from .kernel import Kernel, spawn
+from .kernel import AsyncKernel, Kernel, spawn
 
 # JSON codec for the wire. orjson, when installed, encodes our frames ~10x
 # faster than stdlib json (it's the dominant per-broadcast CPU cost on the
@@ -542,6 +543,12 @@ class Bridge:
         if type_code == BINARY_INPUT:
             comp = self._components.get(comp_id)
             if comp is not None:
+                # Same authorization as JSON input: binary frames are user
+                # interaction too (canvas.sendBinary / camera / mic relays).
+                if not self._may_operate(comp, self._viewer_of(ws)):
+                    _log.debug("dropped binary input for %s: viewer not "
+                               "authorized", comp_id)
+                    return
                 self._dispatch.submit(
                     lambda c=comp, d=payload: self._dispatch_binary_input(c, d, ws)
                 )
@@ -1191,6 +1198,55 @@ class Bridge:
             except Exception:
                 traceback.print_exc()
 
+    # -- inbound authorization -------------------------------------------------
+    # The browser hides/disables what a viewer may not touch, but a hand-crafted
+    # frame doesn't go through the browser's UI — so the same rules are enforced
+    # here, where the trusted session role lives. Everything a viewer may not
+    # see, they may not address; controls locked *for* them stay locked against
+    # forged input too. Drops are logged at debug level (a malicious client
+    # could otherwise spam the console).
+
+    def _viewer_of(self, ws):
+        return self._viewers.get(ws) or {}
+
+    def _may_see(self, comp, viewer):
+        """Whether this viewer's role may see ``comp`` at all — the same rule
+        the register replay applies (empty ``_roles`` means everyone)."""
+        roles = getattr(comp, "_roles", None)
+        return not roles or viewer.get("role") in roles
+
+    def _effective_flag(self, comp, viewer, name):
+        """A lock/chrome flag as this viewer's browser renders it: the shared
+        base value overlaid by any per-role / per-client ``set_layout``
+        override (precedence shared < role < client, like everything else)."""
+        flag = LAYOUT_FLAGS[name]
+        value = getattr(comp, flag.attr, flag.default)
+        overlay = (comp._layout_overlay_for(viewer.get("role"), viewer.get("id"))
+                   if hasattr(comp, "_layout_overlay_for") else {})
+        if name in overlay:
+            value = bool(overlay[name])
+        return value
+
+    def _may_operate(self, comp, viewer):
+        """Server-side twin of the browser's interaction gating for ``input`` /
+        ``request`` / binary-input frames.
+
+        False when the viewer can't see the panel (role filter), when the panel
+        is fully ``locked`` or ``operable=False`` for them (base or overlay),
+        or when their role is in the panel's ``lock_for`` list. The layout
+        message path deliberately checks only visibility — move/resize frames
+        also carry machine-generated reports (auto-flow slots, content-fit
+        heights, container repacks) that must keep flowing for panels whose
+        *user* gestures are locked.
+        """
+        if not self._may_see(comp, viewer):
+            return False
+        if self._effective_flag(comp, viewer, "locked"):
+            return False
+        if viewer.get("role") in getattr(comp, "_lock_for", ()):
+            return False
+        return self._effective_flag(comp, viewer, "operable")
+
     def _on_message(self, ws, raw):
         try:
             msg = _loads(raw)
@@ -1252,6 +1308,12 @@ class Bridge:
         if kind == "input":
             comp = self._components.get(msg.get("id"))
             if comp is not None:
+                # Authorize before dispatch: the browser disables locked controls,
+                # but a forged frame doesn't go through the browser's UI.
+                if not self._may_operate(comp, self._viewer_of(ws)):
+                    _log.debug("dropped input for %s: viewer not authorized",
+                               msg.get("id"))
+                    return
                 payload = msg.get("payload") or {}
                 # Run the (user-authored) handler on the dispatch thread, never on
                 # the event loop -- a blocking callback can't stall rendering or
@@ -1264,6 +1326,13 @@ class Bridge:
             cid = msg.get("id")
             comp = self._components.get(cid)
             if comp is not None:
+                # Visibility gate only (see _may_operate for why the lock flags
+                # aren't enforced here): a viewer who can't see the panel has no
+                # legitimate layout frames for it — its shape never registered
+                # in their browser.
+                if not self._may_see(comp, self._viewer_of(ws)):
+                    _log.debug("dropped layout for %s: viewer not authorized", cid)
+                    return
                 self._dispatch.submit(
                     lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
@@ -1277,10 +1346,25 @@ class Bridge:
             # User deleted a danvas-managed object (panel / shape / arrow). All go
             # to the graveyard (restorable) and off the live canvas — anything
             # placed programmatically is treated uniformly, just like panels.
-            self._graveyard(msg.get("id"))
+            # Role-gated like input: a viewer can't delete a panel they can't see
+            # (shapes/arrows carry no roles and pass the check trivially).
+            cid = msg.get("id")
+            target = (self._components.get(cid) or self._shapes.get(cid)
+                      or self._arrows.get(cid))
+            if target is not None and not self._may_see(target, self._viewer_of(ws)):
+                _log.debug("dropped graveyard for %s: viewer not authorized", cid)
+                return
+            self._graveyard(cid)
         elif kind == "restore":
             # User clicked Restore in the graveyard panel; bring the object back to
             # the live canvas (route by the kind recorded when it was graveyarded).
+            # Same role gate as graveyard — an unauthorized viewer can't resurrect
+            # a panel their role may not see.
+            comp = self._graveyarded.get(msg.get("id"))
+            if comp is not None and not self._may_see(comp, self._viewer_of(ws)):
+                _log.debug("dropped restore for %s: viewer not authorized",
+                           msg.get("id"))
+                return
             comp = self._graveyarded.pop(msg.get("id"), None)
             if comp is not None:
                 comp._graveyarded = False
@@ -1306,15 +1390,31 @@ class Bridge:
             # keystroke arrives after newer ones and `applyDiff` reverts them (the
             # cursor jumps / characters vanish). Instant on localhost, so it only
             # bit non-host devices. (Replay to fresh clients still uses _drawings.)
+            # A read_only view blocks the drawing tools in the browser; enforce
+            # the same rule here so a forged draw frame from a read-only viewer
+            # (by role, client, or the global view) is dropped too.
+            viewer = self._viewer_of(ws)
+            view = self._view_for(viewer.get("id"), viewer.get("role")) or {}
+            if view.get("read_only"):
+                _log.debug("dropped draw: viewer's view is read_only")
+                return
             diff = msg.get("diff") or {}
             self._apply_draw(diff)
             self.broadcast({"type": "draw", "diff": diff}, exclude=ws)
         elif kind == "request":
             # A panel's ``canvas.request(data)`` — the awaitable twin of input.
             # Answer it off the loop (a slow handler can't stall rendering) and
-            # reply correlated by reqId.
+            # reply correlated by reqId. Authorized like input: request *is*
+            # interaction, so a locked/invisible panel rejects it (the error
+            # reply keeps the panel's Promise from hanging).
             comp = self._components.get(msg.get("id"))
             if comp is not None:
+                if not self._may_operate(comp, self._viewer_of(ws)):
+                    _log.debug("dropped request for %s: viewer not authorized",
+                               msg.get("id"))
+                    self._reply(msg.get("reqId"),
+                                error="not authorized for this panel", ws=ws)
+                    return
                 self._dispatch.submit(
                     lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
                     self._dispatch_request(c, r, d, ws)
@@ -1355,7 +1455,8 @@ class Bridge:
         state = comp.state_payload()
         if state:
             self.broadcast(
-                {"type": "update", "id": comp.id, "payload": state}, exclude=ws
+                {"type": "update", "id": comp.id, "payload": state}, exclude=ws,
+                roles=getattr(comp, "_roles", None) or None,
             )
         # A committed input is user-set state too (Slider/Toggle/TextField persist
         # their value via _layout). Arm the same debounced autosave a drag/draw
@@ -1366,37 +1467,68 @@ class Bridge:
     def _dispatch_request(self, comp, req_id, data, ws=None):
         """Answer a panel's ``canvas.request`` (off the loop) and reply by reqId.
 
-        Runs the component's request handler on the dispatch thread, then
-        broadcasts a ``response`` correlated by ``reqId`` — the requesting tab
-        resolves its Promise; other tabs (which don't hold that reqId) ignore it.
-        The requester's viewer identity is passed through so an ``on_request``
-        handler that declares a second parameter learns who asked. A panel with no
-        request handler, a handler that raises, or a return value that isn't
-        JSON-serialisable all come back as an ``error`` (rejecting the Promise)
-        rather than hanging the caller.
+        Runs the component's request handler on the dispatch thread, then sends a
+        ``response`` correlated by ``reqId`` to the requesting socket — the tab
+        resolves its Promise. The requester's viewer identity is passed through
+        so an ``on_request`` handler that declares a second parameter learns who
+        asked. A panel with no request handler, a handler that raises, or a
+        return value that isn't JSON-serialisable all come back as an ``error``
+        (rejecting the Promise) rather than hanging the caller.
+
+        An ``async def`` request handler returns a coroutine; it is run on the
+        shared :class:`~danvas.kernel.AsyncKernel` loop (freeing the dispatch
+        thread while it awaits) and the reply is sent when it completes.
         """
         handle = getattr(comp, "_handle_request", None)
         if handle is None:
-            self._reply(req_id, error="this panel does not accept requests")
+            self._reply(req_id, error="this panel does not accept requests", ws=ws)
             return
         viewer = self._viewers.get(ws, {})
         try:
             result = handle(data, viewer)
+        except Exception as exc:
+            traceback.print_exc()
+            self._reply(req_id, error=repr(exc), ws=ws)
+            return
+        if inspect.iscoroutine(result):
+            def _finish(fut, req_id=req_id, ws=ws):
+                try:
+                    value = fut.result()
+                    json.dumps(value)  # non-serialisable reply -> clean error
+                except Exception as exc:
+                    traceback.print_exc()
+                    self._reply(req_id, error=repr(exc), ws=ws)
+                    return
+                self._reply(req_id, result=value, ws=ws)
+            AsyncKernel.get().submit(result).add_done_callback(_finish)
+            return
+        try:
             json.dumps(result)  # surface a non-serialisable reply as a clean error
         except Exception as exc:
             traceback.print_exc()
-            self._reply(req_id, error=repr(exc))
+            self._reply(req_id, error=repr(exc), ws=ws)
             return
-        self._reply(req_id, result=result)
+        self._reply(req_id, result=result, ws=ws)
 
-    def _reply(self, req_id, result=None, error=None):
-        """Broadcast a ``response`` for ``req_id`` (the frontend correlates it)."""
+    def _reply(self, req_id, result=None, error=None, ws=None):
+        """Send a ``response`` for ``req_id`` to the requesting socket.
+
+        The reqId is minted by the requesting tab, so the response is
+        meaningless — and private — to every other viewer; earlier builds
+        broadcast it (other tabs ignored it by reqId), which leaked one viewer's
+        reply to all connected sockets. ``ws=None`` (no known requester, e.g. a
+        caller poking the method directly) falls back to broadcast.
+        """
         msg = {"type": "response", "reqId": req_id}
         if error is not None:
             msg["error"] = error
         else:
             msg["result"] = result
-        self.broadcast(msg)
+        if ws is not None:
+            self._tap_frame("out", msg)
+            self._emit((ws,), msg)
+        else:
+            self.broadcast(msg)
 
     def _dispatch_layout(self, comp, msg, ws=None):
         """Apply a user move/resize (off the loop) and relay the new geometry.
@@ -1427,7 +1559,8 @@ class Bridge:
                 if msg.get(k) is not None}
         if geom:
             self.broadcast({"type": "update", "id": comp.id, "payload": geom},
-                           exclude=ws)
+                           exclude=ws,
+                           roles=getattr(comp, "_roles", None) or None)
         if "h" in msg and old_h is not None and comp.h != old_h:
             dh = comp.h - old_h
             # Auto-height measurement arrives with h only (no x/y from a drag).
@@ -1660,16 +1793,33 @@ class Bridge:
                 *(self._safe_send_text(ws, text) for ws in targets),
                 return_exceptions=True)
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, roles=None):
         """Send ``msg`` to every connected client. Safe to call from any thread.
 
         ``exclude`` skips one connection (the originator of a change), used to
         avoid echoing a browser's own input straight back to it.
+
+        ``roles`` (a non-empty list of role names) restricts delivery to viewers
+        connected under one of those roles — the egress twin of the register
+        replay's role filter, so a role-restricted panel's live updates never
+        cross the wire to a viewer who may not see the panel. ``None``/empty
+        means everyone (the default, and the meaning of an empty ``_roles``).
         """
         if self._loop is None:
             return  # not serving yet; connection replay will carry the state
         self._tap_frame("out", msg)
-        self._emit([ws for ws in list(self._connections) if ws is not exclude], msg)
+        self._emit(self._role_targets(roles, exclude), msg)
+
+    def _role_targets(self, roles, exclude=None):
+        """The connections a role-filtered send goes to (all, when ``roles`` is
+        falsy). Snapshots the maps so a concurrent connect/disconnect on the
+        loop thread can't mutate them mid-iteration."""
+        if not roles:
+            return [ws for ws in list(self._connections) if ws is not exclude]
+        connected = self._connections
+        return [ws for ws, v in list(self._viewers.items())
+                if ws is not exclude and ws in connected
+                and v.get("role") in roles]
 
     async def _safe_send(self, ws, msg):
         try:
@@ -1686,17 +1836,18 @@ class Bridge:
             self._connections.discard(ws)
             self._send_locks.pop(ws, None)
 
-    def broadcast_binary(self, data, exclude=None):
+    def broadcast_binary(self, data, exclude=None, roles=None):
         """Send a pre-encoded binary frame to every client. Any-thread safe.
 
-        Mirrors :meth:`broadcast` but for ``bytes`` (high-rate media). A client
-        that hasn't mounted the target panel yet simply has no handler for the
-        frame and drops it — the next frame lands once it's ready.
+        Mirrors :meth:`broadcast` but for ``bytes`` (high-rate media), including
+        the ``roles`` egress filter. A client that hasn't mounted the target
+        panel yet simply has no handler for the frame and drops it — the next
+        frame lands once it's ready.
         """
         if self._loop is None:
             return
         self._tap_binary(data)
-        targets = [ws for ws in list(self._connections) if ws is not exclude]
+        targets = self._role_targets(roles, exclude)
         if targets:
             asyncio.run_coroutine_threadsafe(
                 self._fanout_bytes(targets, data), self._loop)
@@ -1856,7 +2007,7 @@ class Bridge:
                     tr["y"] = tr["y"][-mx:]
 
     def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None,
-                            tap=True, coalesce=False):
+                            tap=True, coalesce=False, roles=None):
         """Broadcast an update under the ``latest`` queue policy.
 
         Keeps only the most recent pending value per viewer for this component,
@@ -1875,6 +2026,7 @@ class Bridge:
         client that can only paint a handful.
 
         Pass exactly one of ``msg`` (a dict to JSON-send) or ``data`` (bytes).
+        ``roles`` applies the same egress filter as :meth:`broadcast`.
         """
         if self._loop is None:
             return
@@ -1886,9 +2038,7 @@ class Bridge:
             else:
                 self._tap_frame("out", msg)
         kind = "bin" if data is not None else "msg"
-        for ws in list(self._connections):
-            if ws is exclude:
-                continue
+        for ws in self._role_targets(roles, exclude):
             key = (ws, comp_id, kind)
             with self._conflate_lock:
                 if kind == "bin":

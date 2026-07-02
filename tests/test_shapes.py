@@ -38,7 +38,7 @@ class _FakeBridge:
         self._drawings = {}
         self._loop = object()  # non-None → broadcast won't early-exit
 
-    def broadcast(self, msg):
+    def broadcast(self, msg, **_kw):
         self.broadcasts.append(dict(msg))
 
     def remove_shape(self, shape_id):

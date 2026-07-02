@@ -7,7 +7,7 @@ class FakeBridge:
     def __init__(self):
         self.sent = []
 
-    def broadcast(self, msg):
+    def broadcast(self, msg, **_kw):
         self.sent.append(msg)
 
 

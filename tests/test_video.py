@@ -15,13 +15,13 @@ class FakeBridge:
         self.binary = []      # (comp_id, data) via broadcast_binary (fifo)
         self.conflated = []   # (comp_id, data) via broadcast_conflated (latest)
 
-    def broadcast(self, msg):
+    def broadcast(self, msg, **_kw):
         pass
 
-    def broadcast_binary(self, data):
+    def broadcast_binary(self, data, **_kw):
         self.binary.append(data)
 
-    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None):
+    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None, **_kw):
         self.conflated.append((comp_id, data))
 
 

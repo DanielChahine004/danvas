@@ -9,13 +9,13 @@ class FakeBridge:
         self.sent = []
         self.binary = []
 
-    def broadcast(self, msg):
+    def broadcast(self, msg, **_kw):
         self.sent.append(msg)
 
-    def broadcast_binary(self, data):
+    def broadcast_binary(self, data, **_kw):
         self.binary.append(data)
 
-    def broadcast_conflated(self, key, data):
+    def broadcast_conflated(self, key, data, **_kw):
         self.binary.append(data)
 
 

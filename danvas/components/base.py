@@ -11,7 +11,7 @@ import warnings
 
 from .. import _trace
 from .._flags import LAYOUT_FLAGS
-from ..kernel import DedicatedKernel, spawn
+from ..kernel import AsyncKernel, DedicatedKernel, spawn
 from . import _theme
 
 
@@ -34,6 +34,32 @@ def _mark_threaded(fn):
 
 
 _HANDLER_QUEUES = ("fifo", "latest")
+
+
+def _run_handler(fn, args, wait=False):
+    """Invoke a handler, transparently supporting ``async def``.
+
+    Detection is on the *returned* coroutine, not ``iscoroutinefunction`` on the
+    callable — the routing/tracing wrappers around a handler (``_with_fields``,
+    ``_traced``) are plain functions that *return* the inner coroutine, so only
+    the result reliably reveals an async handler.
+
+    A coroutine is run on the shared :class:`~danvas.kernel.AsyncKernel` loop.
+    ``wait=True`` blocks until it finishes and re-raises its exception (used by
+    the ``threaded``/``dedicated`` modes, whose thread *is* the concurrency /
+    serialisation unit); ``wait=False`` schedules it and returns immediately
+    with failures logged (the inline mode — this is what frees the shared
+    dispatch thread while an async handler awaits).
+    """
+    result = fn(*args)
+    if inspect.iscoroutine(result):
+        kernel = AsyncKernel.get()
+        if wait:
+            kernel.submit(result).result()
+        else:
+            kernel.spawn(result)
+        return None
+    return result
 
 
 def _mark_dedicated(fn, queue_mode="fifo"):
@@ -182,7 +208,7 @@ class BaseComponent:
         self._canvas = None
         # True once the component has been inserted on the canvas and is
         # currently visible to browsers. Set to False before insert and by
-        # canvas.hide(); restored to True by canvas.show(). While False,
+        # canvas.hide(); restored to True by canvas.unhide(). While False,
         # _send_update and _send_binary are no-ops so a hidden panel never
         # sends live updates to the browser.
         self._visible = False
@@ -513,11 +539,16 @@ class BaseComponent:
         if self._bridge is None or not self._visible:
             return
         msg = {"type": "update", "id": self.id, "payload": payload}
+        # A role-restricted panel's live updates go only to viewers whose role may
+        # see it — the same filter its register replay applies. Without this the
+        # content still crossed the wire to every authenticated socket (dropped
+        # client-side for lack of a registered shape, but readable in devtools).
+        roles = self._roles or None
         if self._queue == "latest":
             # Drop stale pending updates; merge newest-per-key (see bridge).
-            self._bridge.broadcast_conflated(self.id, msg=msg)
+            self._bridge.broadcast_conflated(self.id, msg=msg, roles=roles)
         else:
-            self._bridge.broadcast(msg)
+            self._bridge.broadcast(msg, roles=roles)
 
     def _send_update_to(self, payload, role=None, client_id=None):
         """Send an update to specific viewers only, leaving broadcast state alone.
@@ -567,10 +598,13 @@ class BaseComponent:
             return
         from ..bridge import encode_binary_frame
         frame = encode_binary_frame(type_code, self.id, payload)
+        # Same role egress filter as _send_update: a restricted panel's media
+        # frames reach only the viewers who may see the panel.
+        roles = self._roles or None
         if self._queue == "latest":
-            self._bridge.broadcast_conflated(self.id, data=frame)
+            self._bridge.broadcast_conflated(self.id, data=frame, roles=roles)
         else:
-            self._bridge.broadcast_binary(frame)
+            self._bridge.broadcast_binary(frame, roles=roles)
 
     # -- live layout (Python -> browser) -------------------------------------
     def move(self, x, y):
@@ -907,6 +941,20 @@ class BaseComponent:
           dropping any that piled up in between.
 
         ``threaded`` and ``dedicated`` are mutually exclusive.
+
+        **``async def`` handlers** are supported on every ``on_*`` registration:
+        the coroutine runs on a shared asyncio loop (its own daemon thread, not
+        the server's), so an awaiting handler never blocks the dispatch thread
+        and many async handlers can be in flight at once::
+
+            @fetch.on_click
+            async def _():
+                async with httpx.AsyncClient() as client:
+                    table.update((await client.get(url)).json())
+
+        Combined with ``dedicated=True`` the coroutine is *awaited to
+        completion* on that handler's own thread, so it stays serialised;
+        with ``threaded=True`` each call awaits on its own thread.
         """
         def register(f):
             return self._register_callback(self._callbacks, f, threaded, dedicated, queue)
@@ -965,7 +1013,15 @@ class BaseComponent:
         execution and concurrent (``threaded=True``) handlers report overlapping
         runs. It swallows the handler's exception (after emitting ``error`` and
         printing the traceback) so the inline/spawn/kernel error handling doesn't
-        also log it."""
+        also log it.
+
+        An ``async def`` handler returns a coroutine from ``cb(*args)`` without
+        doing its work yet; ``run`` then returns a *wrapper* coroutine that emits
+        ``done``/``error`` when the awaited handler actually finishes, so the
+        trace reports the real duration rather than the microseconds it took to
+        create the coroutine. (Deep tracing can't follow onto the async loop —
+        its ``sys.setprofile`` probe is per-thread — so the awaited part is
+        traced shallowly.)"""
         def run(*args):
             t0 = time.perf_counter()
             if traceable is None:
@@ -973,9 +1029,9 @@ class BaseComponent:
                                        "t": t0})
             try:
                 if traceable is None:
-                    cb(*args)
+                    result = cb(*args)
                 else:
-                    _trace.run_calls(bridge, cb, args, meta, traceable)
+                    result = _trace.run_calls(bridge, cb, args, meta, traceable)
             except Exception as exc:
                 bridge._emit_dispatch({
                     **meta, "phase": "error", "depth": 0,
@@ -983,12 +1039,30 @@ class BaseComponent:
                     "dur_ms": (time.perf_counter() - t0) * 1000.0,
                     "error": repr(exc)})
                 traceback.print_exc()
-                return
+                return None
+            if inspect.iscoroutine(result):
+                async def traced_coro():
+                    try:
+                        await result
+                    except Exception as exc:
+                        bridge._emit_dispatch({
+                            **meta, "phase": "error", "depth": 0,
+                            "t": time.perf_counter(),
+                            "dur_ms": (time.perf_counter() - t0) * 1000.0,
+                            "error": repr(exc)})
+                        traceback.print_exc()
+                        return
+                    bridge._emit_dispatch({
+                        **meta, "phase": "done", "depth": 0,
+                        "t": time.perf_counter(),
+                        "dur_ms": (time.perf_counter() - t0) * 1000.0})
+                return traced_coro()
             if traceable is None:
                 bridge._emit_dispatch({
                     **meta, "phase": "done", "depth": 0,
                     "t": time.perf_counter(),
                     "dur_ms": (time.perf_counter() - t0) * 1000.0})
+            return None
         return run
 
     def _dispatch_callbacks(self, callbacks, call_args, viewer, event=None):
@@ -1054,21 +1128,29 @@ class BaseComponent:
                                        "t": time.perf_counter()})
                 run = self._traced(bridge, cb, meta,
                                    _trace.is_user_code if deep else None)
+            # Every mode goes through _run_handler so an ``async def`` handler
+            # works under all three. threaded/dedicated *wait* on the coroutine —
+            # their thread is the concurrency/serialisation unit, so a dedicated
+            # async handler stays serialised and a threaded one keeps its
+            # run-to-completion-per-thread semantics. The inline default
+            # schedules it and returns, freeing the shared dispatch thread while
+            # the handler awaits (its failures are logged by AsyncKernel.spawn).
             if dedicated:
                 k = self._dedicated_kernels.get(id(cb))
                 if k is None:
                     mode = getattr(cb, "_danvas_handler_queue", "fifo")
                     k = DedicatedKernel(mode=mode)
                     self._dedicated_kernels[id(cb)] = k
-                k.submit(lambda c=run, a=args: c(*a))
+                k.submit(lambda c=run, a=args: _run_handler(c, a, wait=True))
             elif threaded:
                 # Run on its own daemon thread so a slow handler doesn't hold up
                 # the rest; spawn() logs any exception (default-arg capture so
                 # the loop variable isn't shared across iterations).
-                spawn(lambda c=run, a=args: c(*a), name=f"danvas-handler-{self.name}")
+                spawn(lambda c=run, a=args: _run_handler(c, a, wait=True),
+                      name=f"danvas-handler-{self.name}")
             else:
                 try:
-                    run(*args)
+                    _run_handler(run, args)
                 except Exception:
                     traceback.print_exc()
 

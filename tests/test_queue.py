@@ -9,13 +9,13 @@ class FakeBridge:
         self.plain = []       # msgs via broadcast (fifo)
         self.conflated = []   # (comp_id, msg, data) via broadcast_conflated
 
-    def broadcast(self, msg, exclude=None):
+    def broadcast(self, msg, exclude=None, **_kw):
         self.plain.append(msg)
 
-    def broadcast_binary(self, data):
+    def broadcast_binary(self, data, **_kw):
         pass
 
-    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None):
+    def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None, **_kw):
         self.conflated.append((comp_id, msg, data))
 
 

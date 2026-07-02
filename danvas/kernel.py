@@ -1,5 +1,6 @@
 """Threading utilities: daemon thread spawning and serial execution queues."""
 
+import asyncio
 import queue
 import threading
 import traceback
@@ -59,6 +60,83 @@ class Kernel:
                 fn()
             except Exception:
                 traceback.print_exc()
+
+
+class AsyncKernel:
+    """One asyncio event loop on a daemon thread — where ``async def`` handlers
+    and background workers run.
+
+    A single loop is shared process-wide (lazily started on first use), so every
+    async handler interleaves on it: concurrency comes from ``await``, not from a
+    thread per handler. This is deliberately *not* the server's own event loop —
+    a user handler that blocks between awaits can then never stall rendering or
+    the WebSocket, only other async handlers (the same isolation the sync
+    dispatch thread provides).
+
+    :meth:`submit` schedules a coroutine and returns its
+    ``concurrent.futures.Future`` (the caller owns error handling — an
+    unretrieved failure would vanish silently); :meth:`spawn` is the
+    fire-and-forget form that logs any exception, mirroring :func:`spawn` for
+    threads.
+    """
+
+    _instance = None
+    _instance_lock = threading.Lock()
+
+    @classmethod
+    def get(cls):
+        """The process-wide kernel, created (and its thread started) on first use."""
+        inst = cls._instance
+        if inst is None:
+            with cls._instance_lock:
+                inst = cls._instance
+                if inst is None:
+                    inst = cls._instance = cls()
+        return inst
+
+    def __init__(self):
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run, name="danvas-async",
+                                        daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def submit(self, coro):
+        """Schedule ``coro`` on the loop; return its ``concurrent.futures.Future``.
+
+        Thread-safe (any thread may call it). The caller must consume the
+        future — ``result()`` to wait/re-raise, or a done-callback — or use
+        :meth:`spawn` instead so a failure isn't dropped on the floor.
+        """
+        return asyncio.run_coroutine_threadsafe(coro, self._loop)
+
+    def spawn(self, coro):
+        """Fire-and-forget :meth:`submit`: run ``coro``, log any exception.
+
+        The async twin of :func:`spawn` — same contract (never raises into the
+        caller, failures reach the console), for coroutines instead of threads.
+        Returns the future so a caller may still observe completion.
+        """
+        fut = self.submit(coro)
+
+        def _log(f):
+            if f.cancelled():
+                return
+            exc = f.exception()
+            if exc is not None:
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+        fut.add_done_callback(_log)
+        return fut
+
+    def is_current_thread(self):
+        """True when called from the async kernel's own loop thread (so a
+        blocking wait there would deadlock the loop — mirror of
+        :meth:`Kernel.is_current_thread`)."""
+        return threading.current_thread() is self._thread
 
 
 class DedicatedKernel:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -188,6 +189,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Returns ``fn`` so it can be used as a decorator. ``*args``/``**kwargs``
         are forwarded to ``fn`` when the thread starts.
+
+        ``fn`` may be an ``async def``: it then runs as a task on the shared
+        asyncio loop the async handlers use (its own daemon thread, not the
+        server's loop), so an ``await asyncio.sleep(...)``-paced producer costs
+        no thread of its own.
         """
         self._background.append((fn, args, kwargs))
         return fn
@@ -200,9 +206,15 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         input handlers — a daemon thread that lives as long as the worker runs
         (a producer loop runs for the app's lifetime), so neither blocks
         interpreter shutdown / a reload's teardown, and a crash is logged.
+        An ``async def`` worker becomes a task on the shared AsyncKernel loop
+        instead (same lifetime/logging contract, no thread per worker).
         """
+        from .kernel import AsyncKernel
         for fn, args, kwargs in self._background:
-            spawn(fn, *args, name="danvas-background", **kwargs)
+            if inspect.iscoroutinefunction(fn):
+                AsyncKernel.get().spawn(fn(*args, **kwargs))
+            else:
+                spawn(fn, *args, name="danvas-background", **kwargs)
 
     @property
     def components(self):
@@ -619,6 +631,17 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # reflect its open/closed state.
         return self.insert(insp, x=x, y=y, component_id=name)
 
+    @staticmethod
+    def _default_component_name(component):
+        """The default ``name=`` of this component type (from its constructor
+        signature), or ``None`` when it has no introspectable default. Used to
+        exempt default-named panels from the attribute-shadow warning."""
+        try:
+            return inspect.signature(type(component).__init__) \
+                .parameters["name"].default
+        except (ValueError, TypeError, KeyError):
+            return None
+
     def insert(self, component, x=None, y=None, w=None, h=None, rotation=None,
                locked=False, draggable=True, resizable=True, operable=None,
                grabbable=None, frame=None, decorative=False, name=None, queue=None,
@@ -869,8 +892,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # ``components``…) would be silently unreachable that way (``__getattr__``
         # only fires when normal lookup fails). Warn, since the handle still works
         # through ``canvas["<name>"]``. ``hasattr`` on the class reads the
-        # descriptor without invoking any property getter.
-        if isinstance(name, str) and hasattr(type(self), name):
+        # descriptor without invoking any property getter. The component type's
+        # *default* name is exempt — an unnamed ``canvas.slider()`` is named
+        # "slider" and inevitably shadows its own factory; the user holds the
+        # returned handle, so warning on every default-named panel is pure noise.
+        if isinstance(name, str) and hasattr(type(self), name) \
+                and name != self._default_component_name(component):
             warnings.warn(
                 f"component name {name!r} shadows a Canvas attribute; reach it "
                 f"with canvas[{name!r}] (canvas.{name} stays the method/property)",
