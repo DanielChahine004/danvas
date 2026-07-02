@@ -79,6 +79,24 @@ MESSAGE_TYPES_IN = (
     "image",
 )
 
+# -- merge control-plane tags (browser <-> merge server) --------------------
+# A *separate* channel from the canvas protocol above: these ride between a
+# browser and the standing *merge server* (danvas.merge), not a normal canvas.
+# The merge server relays a per-connection set of source canvases and speaks this
+# small control vocabulary on top of the base canvas frames it forwards (register/
+# update/remove/arrow going down; input/layout going up — those stay in the lists
+# above). Kept off ``MESSAGE_TYPES_*`` so ``test_protocol_sync`` still checks those
+# against ``Bridge._on_message`` / ``bridge.ts handle()``; the merge set is checked
+# against ``MergeBridge._route_from_browser`` (inbound) and the merge server's own
+# emit sites + the frontend merge handler (outbound). Inbound = browser -> merge
+# server; outbound = merge server -> browser.
+MERGE_MESSAGE_TYPES_IN = (
+    "merge_add", "merge_auth", "merge_remove", "merge_toggle",
+)
+MERGE_MESSAGE_TYPES_OUT = (
+    "merge_sources", "merge_auth_required", "merge_auth_failed",
+)
+
 
 # -- Custom-panel iframe postMessage protocol -------------------------------
 # A *sandboxed* Custom iframe and the parent page can't share a typed channel, so
@@ -122,5 +140,7 @@ def as_dict():
         "flag_wire_keys": dict(FLAG_WIRE_KEYS),
         "message_types_out": list(MESSAGE_TYPES_OUT),
         "message_types_in": list(MESSAGE_TYPES_IN),
+        "merge_message_types_out": list(MERGE_MESSAGE_TYPES_OUT),
+        "merge_message_types_in": list(MERGE_MESSAGE_TYPES_IN),
         "iframe_message_keys": dict(IFRAME_MESSAGE_KEYS),
     }

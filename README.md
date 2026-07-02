@@ -820,6 +820,7 @@ budget) on the fly.
 | `password` | – | gate the whole canvas behind one password (session cookie) |
 | `passwords` | – | `{role: password}` for role-based access |
 | `login_message` | – | host note on the password page |
+| `merge_server` | – | URL of a standing merge server; adds a **Merge…** button to this canvas |
 | `tunnel` | `False` | expose publicly through a tunnel |
 | `tunnel_provider` | `"cloudflared"` | `"cloudflared"` / `"localtunnel"` |
 | `persist` | `False` | auto-save/restore the canvas; `True` or a path |
@@ -911,22 +912,44 @@ canvas = danvas.Canvas().serve(port=8000, block=False)
 servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
 ```
 
-**Merging canvases** — a *merge host* connects to several running canvases (as a
-client), composites their panels onto one port, and routes interactions back to
-the owning canvas — computation stays sharded:
+**Merging canvases** — a *standing merge server* connects to several running
+canvases (as a client), composites their panels onto one port, and routes
+interactions back to the owning canvas, so computation stays sharded. Each browser
+that opens the merge server picks **its own** set of sources, so different viewers
+can compose different combinations from one server:
 
 ```bash
-python -m danvas.merge :8001 :8002 host3:8003 --port 8080
+python -m danvas.merge --port 8080          # standing server; browsers choose sources
+#   then open  http://localhost:8080/?sources=127.0.0.1:8001,127.0.0.1:8002
+
+python -m danvas.merge :8001 :8002 --port 8080   # seed a default set (back-compat)
+python -m danvas.merge :8001 --auth 127.0.0.1:8001=secret   # a protected source
 ```
 
 ```python
 from danvas import Merge
-Merge([8001, 8002]).serve(port=8080)
+Merge().serve(port=8080)                     # standing server, per-connection sources
+Merge([8001, 8002]).serve(port=8080)         # or seed a default set
 ```
 
-Sources overlay by default (`region_width` spreads them side-by-side); a source
-going offline drops its panels until it reconnects. Free-form drawings aren't
-composited.
+**Merge from the UI, not just the CLI.** On the merge server's page a **🧩 Merge**
+panel lists the composed sources (with a live/offline dot), takes a canvas URL to
+**add** one on the fly, an **eye** toggle to hide/show each source's panels, and
+an **✕** to drop one. And any canvas served with `serve(merge_server="http://host:8080")`
+grows its own **Merge…** button that collects other canvas URLs and opens the merge
+view pre-seeded with itself — so merging is reachable from inside a canvas.
+
+**Password-protected sources merge too.** Adding a protected canvas prompts for
+*its* password in the merge panel; the merge server runs that canvas's login and
+connects as the matching **role**, so the merged view shows exactly the panels and
+interactions that role is allowed — the merge server itself has no password and
+never sees a source's other roles. (The role egress/ingress filtering that gates a
+normal viewer applies to the merge server's connection just the same.)
+
+Sources overlay by default (`region_width` spreads a seeded set side-by-side); a
+source going offline drops its panels until it reconnects. Free-form drawings and
+binary media (video/audio feeds) aren't composited, and cross-canvas arrows aren't
+supported.
 
 # Persistence, inspection & packaging
 

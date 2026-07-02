@@ -2013,7 +2013,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="danvas",
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
-              namespace=None, tldraw_license_key=None, watch=None):
+              namespace=None, tldraw_license_key=None, watch=None,
+              merge_server=None):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -2178,6 +2179,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # Optional note rendered on the password page (e.g. which password each
         # kind of viewer should enter). Stored on the bridge; create_app reads it.
         self._bridge._login_message = login_message
+        # Optional standing merge server (serve(merge_server=...)): advertised in
+        # the welcome frame so this canvas's UI shows a "Merge…" button that
+        # navigates there, pre-seeded with this canvas. ``_self_url`` is the
+        # address the merge server dials back to reach this canvas — the loopback
+        # for a local bind, else the LAN IP (a tunneled self-merge would need the
+        # public URL, which isn't known here, so merge_server suits a LAN/local
+        # canvas). Both are None when merge_server isn't set (no button shown).
+        if merge_server:
+            if host in ("127.0.0.1", "localhost", ""):
+                self._bridge._self_url = f"127.0.0.1:{port}"
+            else:
+                from .server import _lan_ip
+                self._bridge._self_url = f"{_lan_ip() or host}:{port}"
+            self._bridge._merge_server = merge_server
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
         # — Windows consoles often run cp1252, which can't print "▼"/"▲".

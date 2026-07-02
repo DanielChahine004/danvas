@@ -402,12 +402,18 @@ export function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   let url = `${proto}://${location.host}/ws`
   const me = loadStoredIdentity()
+  const q = new URLSearchParams()
   if (me && me.id) {
-    const q = new URLSearchParams({ vid: me.id })
+    q.set('vid', me.id)
     if (me.name) q.set('vname', me.name)
     if (me.color) q.set('vcolor', me.color)
-    url += `?${q.toString()}`
   }
+  // Merge view: forward the page's ?sources= so the standing merge server composes
+  // this browser's chosen set (a plain canvas has no ?sources= and ignores it).
+  const pageSources = new URLSearchParams(location.search).get('sources')
+  if (pageSources) q.set('sources', pageSources)
+  const qs = q.toString()
+  if (qs) url += `?${qs}`
   ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
 
@@ -537,6 +543,15 @@ function handle(msg: any): void {
     case 'chat':
       ingestChat(msg)
       break
+    case 'merge_sources':
+      setMergeSources(msg.sources || [])
+      break
+    case 'merge_auth_required':
+      addMergeAuthPrompt(msg.uri, msg.label || msg.uri)
+      break
+    case 'merge_auth_failed':
+      markMergeAuthFailed(msg.uri, msg.label || msg.uri)
+      break
     default:
       break
   }
@@ -561,6 +576,11 @@ function onWelcome(msg: any): void {
   setAuthEnabled(!!msg.auth)
   setCursorsEnabled(!!msg.cursors)
   setViewConfig(msg.view || null)
+  // Merge server advertises mergeHost (this page IS a merge view → show the merge
+  // panel); a plain canvas advertises mergeServer + selfUrl (→ show a Merge button
+  // that navigates to that server pre-seeded with this canvas). See the merge block.
+  setMergeHost(!!msg.mergeHost)
+  setMergeLaunch(msg.mergeServer || null, msg.selfUrl || null)
 }
 
 // === register / update / remove ==============================================
@@ -1400,6 +1420,70 @@ export function toggleGraveyard(): void {
 }
 export function sendRestore(id: string): void {
   sendRaw({ type: 'restore', id })
+}
+
+// === merge (the standing merge server's control plane) ======================
+// On a merge view (welcome.mergeHost), the server sends `merge_sources` (the
+// roster of this connection's composed sources, each with a stable `sid`, live/
+// offline status, and hidden flag) and, when a protected canvas is added,
+// `merge_auth_required` / `merge_auth_failed`. The UI (overlays.tsx MergeHostPanel)
+// subscribes here and drives it back with merge_add / merge_auth / merge_remove /
+// merge_toggle. A plain canvas gets `mergeServer` + `selfUrl` instead, which the
+// Merge button (MergeLaunchButton) uses to navigate to the merge view.
+let mergeState = {
+  isHost: false,
+  sources: [] as any[],
+  prompts: [] as any[], // { uri, label, error? } for canvases awaiting a password
+  server: null as string | null, // a plain canvas's configured merge server URL
+  selfUrl: null as string | null, // this canvas's own reachable URL (a source)
+}
+const mergeListeners = new Set<(s: any) => void>()
+function emitMerge(): void {
+  for (const cb of mergeListeners) cb(mergeState)
+}
+export function subscribeMerge(cb: (s: any) => void): () => void {
+  mergeListeners.add(cb)
+  cb(mergeState)
+  return () => mergeListeners.delete(cb)
+}
+function setMergeHost(on: boolean): void {
+  mergeState = { ...mergeState, isHost: on }
+  emitMerge()
+}
+function setMergeLaunch(server: string | null, selfUrl: string | null): void {
+  mergeState = { ...mergeState, server, selfUrl }
+  emitMerge()
+}
+function setMergeSources(list: any[]): void {
+  // A source that authenticated now appears here → drop its pending password prompt.
+  const uris = new Set(list.map((s) => s.uri))
+  mergeState = { ...mergeState, sources: list, prompts: mergeState.prompts.filter((p) => !uris.has(p.uri)) }
+  emitMerge()
+}
+function addMergeAuthPrompt(uri: string, label: string): void {
+  if (mergeState.prompts.some((p) => p.uri === uri)) return
+  mergeState = { ...mergeState, prompts: [...mergeState.prompts, { uri, label }] }
+  emitMerge()
+}
+function markMergeAuthFailed(uri: string, label: string): void {
+  const has = mergeState.prompts.some((p) => p.uri === uri)
+  const prompts = has
+    ? mergeState.prompts.map((p) => (p.uri === uri ? { ...p, error: true } : p))
+    : [...mergeState.prompts, { uri, label, error: true }]
+  mergeState = { ...mergeState, prompts }
+  emitMerge()
+}
+export function mergeAdd(uri: string): void {
+  sendRaw({ type: 'merge_add', uri })
+}
+export function mergeAuth(uri: string, password: string): void {
+  sendRaw({ type: 'merge_auth', uri, password })
+}
+export function mergeRemove(sid: string): void {
+  sendRaw({ type: 'merge_remove', sid })
+}
+export function mergeToggle(sid: string, hidden: boolean): void {
+  sendRaw({ type: 'merge_toggle', sid, hidden })
 }
 
 // === auth (sign-out on a password-protected canvas) =========================

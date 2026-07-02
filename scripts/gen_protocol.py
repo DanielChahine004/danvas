@@ -55,6 +55,13 @@ def render():
     lines.append("export const MESSAGE_TYPES_IN = Object.freeze("
                  + json.dumps(p["message_types_in"]) + ")")
     lines.append("")
+    # Merge control-plane tags (browser <-> the standing merge server), a separate
+    # channel from the canvas protocol above.
+    lines.append("export const MERGE_MESSAGE_TYPES_OUT = Object.freeze("
+                 + json.dumps(p["merge_message_types_out"]) + ")")
+    lines.append("export const MERGE_MESSAGE_TYPES_IN = Object.freeze("
+                 + json.dumps(p["merge_message_types_in"]) + ")")
+    lines.append("")
     # Custom-panel iframe postMessage keys (symbolic name -> __danvas_* wire key),
     # so the frontend can reference IFRAME_MSG.SEND etc. instead of re-typing the
     # string literals the iframe shim emits.

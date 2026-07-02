@@ -259,6 +259,11 @@ class Bridge:
         # Optional host note shown on the password page (serve(login_message=...));
         # read by server.create_app. None = the default prompt only.
         self._login_message = None
+        # serve(merge_server=...): the standing merge server this canvas offers a
+        # "Merge…" button for, and this canvas's own reachable address (the source
+        # the button pre-seeds). Both ride the welcome frame; None = no button.
+        self._merge_server = None
+        self._self_url = None
         # When True, browsers report their pointer position (in canvas/page
         # coords) so Python can read it off the roster as ``viewer["cursor"]``.
         # Advertised in the welcome frame; gated like ``_ui_inspector`` (default
@@ -827,7 +832,9 @@ class Bridge:
                                   "cursors": self._cursors,
                                   "view": view_for_client,
                                   "runId": self._run_id,
-                                  "reload": self._reload})
+                                  "reload": self._reload,
+                                  "mergeServer": self._merge_server,
+                                  "selfUrl": self._self_url})
             # Replay the shared React assets (canvas.define / canvas.style) before
             # any panel registers, so a React panel mounts with its shared
             # components and the global stylesheet already in place.

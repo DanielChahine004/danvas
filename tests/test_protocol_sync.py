@@ -20,6 +20,7 @@ import re
 
 import danvas.bridge as bridge
 from danvas import _protocol
+from danvas import merge as merge_mod
 from danvas._flags import LAYOUT_FLAGS
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,7 +90,11 @@ def test_message_types_out_match_bridge_ts_dispatch():
     src = _read(_BRIDGE_TS)
     m = re.search(r"function handle\(msg[^)]*\)[^{]*\{(.*?)\n\}", src, re.DOTALL)
     assert m, "couldn't find the handle(msg) dispatch in bridge.ts"
-    handled = set(re.findall(r"case '(\w+)':", m.group(1)))
+    # The same switch also dispatches the separate merge control channel
+    # (case 'merge_*'); those are checked against MERGE_MESSAGE_TYPES_OUT
+    # elsewhere, so exclude them from the canvas-protocol comparison here.
+    handled = {c for c in re.findall(r"case '(\w+)':", m.group(1))
+               if not c.startswith("merge_")}
     assert handled == set(_protocol.MESSAGE_TYPES_OUT), (
         "MESSAGE_TYPES_OUT disagrees with bridge.ts handle(); "
         f"only in JS: {handled - set(_protocol.MESSAGE_TYPES_OUT)}, "
@@ -106,6 +111,41 @@ def test_message_types_in_match_bridge_py_dispatch():
         "MESSAGE_TYPES_IN disagrees with Bridge._on_message; "
         f"only in _on_message: {handled - set(_protocol.MESSAGE_TYPES_IN)}, "
         f"only in _protocol: {set(_protocol.MESSAGE_TYPES_IN) - handled}")
+
+
+# -- merge control-plane tags match the merge server's dispatch/emit ---------
+# The merge channel is separate from the canvas protocol (see _protocol.py), so
+# it's guarded here against the merge server's own code: inbound tags must be the
+# merge_* kinds MergeBridge._route_from_browser handles, and outbound tags must be
+# exactly the merge_* frames the merge server emits. The frontend's consumption of
+# the outbound tags is checked below.
+def test_merge_message_types_in_match_route_from_browser():
+    body = inspect.getsource(merge_mod.MergeBridge._route_from_browser)
+    handled = {k for k in re.findall(r'kind == "(\w+)"', body)
+               if k.startswith("merge_")}
+    assert handled == set(_protocol.MERGE_MESSAGE_TYPES_IN), (
+        "MERGE_MESSAGE_TYPES_IN disagrees with MergeBridge._route_from_browser; "
+        f"only in handler: {handled - set(_protocol.MERGE_MESSAGE_TYPES_IN)}, "
+        f"only in _protocol: {set(_protocol.MERGE_MESSAGE_TYPES_IN) - handled}")
+
+
+def test_merge_message_types_out_match_merge_server_emit():
+    src = inspect.getsource(merge_mod)
+    produced = set(re.findall(r'"type":\s*"(merge_\w+)"', src))
+    assert produced == set(_protocol.MERGE_MESSAGE_TYPES_OUT), (
+        "MERGE_MESSAGE_TYPES_OUT disagrees with merge.py's emit sites; "
+        f"only in merge.py: {produced - set(_protocol.MERGE_MESSAGE_TYPES_OUT)}, "
+        f"only in _protocol: {set(_protocol.MERGE_MESSAGE_TYPES_OUT) - produced}")
+
+
+def test_merge_message_types_out_consumed_by_frontend():
+    # The browser side of the merge channel: bridge.ts's handle() switch must
+    # dispatch on every outbound merge tag (added with the merge UI). Guards the
+    # server->browser direction the same way MESSAGE_TYPES_OUT does for the canvas.
+    src = _read(_BRIDGE_TS)
+    for tag in _protocol.MERGE_MESSAGE_TYPES_OUT:
+        assert f"case '{tag}':" in src, (
+            f"bridge.ts handle() never dispatches the merge tag {tag!r}")
 
 
 # -- iframe postMessage keys match the canonical set on both sides -----------

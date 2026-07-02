@@ -18,6 +18,11 @@ import {
   sendRestore,
   subscribeAuth,
   signOut,
+  subscribeMerge,
+  mergeAdd,
+  mergeAuth,
+  mergeRemove,
+  mergeToggle,
 } from '../bridge'
 
 // --- peer cursors ------------------------------------------------------------
@@ -411,6 +416,157 @@ function GraveyardPanel({ items }: { items: any[] }) {
     </div>
   )
 }
+
+// --- merge: the standing merge server's source panel ------------------------
+// Shown on a merge view (welcome.mergeHost). Lists this connection's composed
+// sources (live/offline, with an eye toggle + remove), takes a canvas URL to add,
+// and prompts for a password when a source reports it's protected.
+export function MergeHostPanel() {
+  const [state, setState] = useState<any>({ isHost: false, sources: [], prompts: [] })
+  const [open, setOpen] = useState(true)
+  const [addUrl, setAddUrl] = useState('')
+  useEffect(() => subscribeMerge(setState), [])
+  if (!state.isHost) return null
+  const count = state.sources.length
+  const submitAdd = () => {
+    const u = addUrl.trim()
+    if (u) {
+      mergeAdd(u)
+      setAddUrl('')
+    }
+  }
+  return (
+    <>
+      <button
+        data-pc-merge-btn=""
+        class="pc-chrome-merge"
+        onClick={() => setOpen((o) => !o)}
+        title={open ? 'Close the merge panel' : 'Add or hide merged canvases'}
+        style={btnStyle({ background: open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: open ? '#fff' : 'var(--ui-fg)' })}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🧩</span>
+        Merge{count > 0 ? ` (${count})` : ''}{open ? ' ✕' : ''}
+      </button>
+      {open && (
+        <div class="pc-merge-panel" style={mergePanelStyle}>
+          <div style={mergeHeaderStyle}>Merged canvases</div>
+          {state.sources.length === 0 && state.prompts.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ui-muted)', fontStyle: 'italic' }}>No sources yet — add a canvas URL below.</div>
+          ) : null}
+          {state.sources.map((s: any) => (
+            <div key={s.sid} style={mergeRowStyle}>
+              <span title={s.status} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: s.status === 'live' ? '#22c55e' : '#9ca3af' }} />
+              <span style={{ flex: 1, fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: s.hidden ? 0.5 : 1 }}>{s.label}</span>
+              <button title={s.hidden ? 'Show' : 'Hide'} onClick={() => mergeToggle(s.sid, !s.hidden)} style={mergeIconBtnStyle}>{s.hidden ? '🙈' : '👁'}</button>
+              <button title="Remove" onClick={() => mergeRemove(s.sid)} style={mergeIconBtnStyle}>✕</button>
+            </div>
+          ))}
+          {state.prompts.map((p: any) => (
+            <MergeAuthPrompt key={p.uri} prompt={p} />
+          ))}
+          <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: '1px solid var(--ui-divider)' }}>
+            <input
+              value={addUrl}
+              onInput={(e: any) => setAddUrl(e.currentTarget.value)}
+              onKeyDown={(e: any) => e.key === 'Enter' && submitAdd()}
+              placeholder="canvas URL (host:port)"
+              style={mergeInputStyle}
+            />
+            <button onClick={submitAdd} style={mergeAddBtnStyle}>Add</button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function MergeAuthPrompt({ prompt }: { prompt: any }) {
+  const [pw, setPw] = useState('')
+  const submit = () => {
+    if (pw) mergeAuth(prompt.uri, pw)
+  }
+  return (
+    <div style={{ ...mergeRowStyle, flexWrap: 'wrap' }}>
+      <span style={{ flex: '1 1 100%', fontSize: 12 }}>
+        🔒 {prompt.label}
+        {prompt.error ? <span style={{ color: '#f87171', marginLeft: 6 }}>wrong password</span> : null}
+      </span>
+      <input
+        type="password"
+        value={pw}
+        onInput={(e: any) => setPw(e.currentTarget.value)}
+        onKeyDown={(e: any) => e.key === 'Enter' && submit()}
+        placeholder="password"
+        style={mergeInputStyle}
+      />
+      <button onClick={submit} style={mergeAddBtnStyle}>Unlock</button>
+    </div>
+  )
+}
+
+// --- merge: the launch button on a plain canvas -----------------------------
+// Shown on a canvas that was served with serve(merge_server=...). Collects other
+// canvas URLs and navigates to the merge server, pre-seeded with this canvas + the
+// pasted ones, so merging is reachable from within a canvas (not just the CLI).
+export function MergeLaunchButton() {
+  const [state, setState] = useState<any>({ server: null, selfUrl: null })
+  const [open, setOpen] = useState(false)
+  const [urls, setUrls] = useState('')
+  useEffect(() => subscribeMerge(setState), [])
+  if (!state.server || !state.selfUrl) return null
+  const go = () => {
+    const others = urls.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+    const params = new URLSearchParams()
+    params.set('sources', [state.selfUrl, ...others].join(','))
+    window.location.href = `${String(state.server).replace(/\/+$/, '')}/?${params.toString()}`
+  }
+  return (
+    <>
+      <button
+        data-pc-merge-launch=""
+        class="pc-chrome-merge"
+        onClick={() => setOpen((o) => !o)}
+        title="Merge this canvas with others on the merge server"
+        style={btnStyle({ background: open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: open ? '#fff' : 'var(--ui-fg)' })}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🧩</span>
+        Merge{open ? ' ✕' : '…'}
+      </button>
+      {open && (
+        <div class="pc-merge-panel" style={mergePanelStyle}>
+          <div style={mergeHeaderStyle}>Merge with…</div>
+          <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--ui-muted)' }}>
+            Other canvas URLs (one per line or comma-separated). This canvas is included.
+          </div>
+          <textarea
+            value={urls}
+            onInput={(e: any) => setUrls(e.currentTarget.value)}
+            placeholder="127.0.0.1:8002&#10;https://friend.loca.lt"
+            rows={3}
+            style={{ ...mergeInputStyle, margin: '0 12px', width: 'calc(100% - 24px)', resize: 'vertical', fontFamily: 'ui-monospace, monospace' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 12px' }}>
+            <button onClick={go} style={mergeAddBtnStyle}>Open merged view</button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+const mergePanelStyle: any = {
+  position: 'absolute', left: 8, zIndex: 299, width: 300, maxHeight: 360, overflowY: 'auto',
+  background: 'var(--ui-bg)', border: '1px solid var(--ui-border)', borderRadius: 10,
+  boxShadow: 'var(--ui-shadow)', backdropFilter: 'blur(6px)', fontFamily: 'system-ui, sans-serif', color: 'var(--ui-fg)',
+}
+const mergeHeaderStyle: any = {
+  padding: '8px 12px 6px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+  textTransform: 'uppercase', color: 'var(--ui-label)', borderBottom: '1px solid var(--ui-divider)',
+}
+const mergeRowStyle: any = { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--ui-divider)' }
+const mergeIconBtnStyle: any = { flexShrink: 0, padding: '2px 6px', fontSize: 12, cursor: 'pointer', background: 'transparent', color: 'var(--ui-fg)', border: 'none', borderRadius: 4 }
+const mergeInputStyle: any = { flex: 1, minWidth: 0, padding: '5px 8px', fontSize: 12, borderRadius: 6, border: '1px solid var(--ui-border)', background: 'var(--ui-bg)', color: 'var(--ui-fg)', boxSizing: 'border-box' }
+const mergeAddBtnStyle: any = { flexShrink: 0, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6 }
 
 // --- kiosk hand tool (touch, ui:false) --------------------------------------
 // Under a chrome-free view a touch user is stuck on select (one finger drags the
