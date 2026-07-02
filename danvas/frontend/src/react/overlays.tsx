@@ -423,7 +423,7 @@ function GraveyardPanel({ items }: { items: any[] }) {
 // and prompts for a password when a source reports it's protected.
 export function MergeHostPanel() {
   const [state, setState] = useState<any>({ isHost: false, sources: [], prompts: [] })
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)   // starts closed — just the button shows
   const [addUrl, setAddUrl] = useState('')
   useEffect(() => subscribeMerge(setState), [])
   if (!state.isHost) return null
