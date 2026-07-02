@@ -173,12 +173,12 @@
    (not inline) so a mobile media query can lift them clear of the toolbar. */
 .pc-chrome-inspector { bottom: 54px; left: 8px; }
 .pc-chrome-graveyard { bottom: 90px; left: 8px; }
-/* the graveyard list sits ABOVE its toggle button so it never covers it */
-.pc-graveyard-panel { bottom: 132px; }
-/* merge chrome (a merge view's source panel, or a canvas's launch button) stacks
-   above the graveyard slot so it never overlaps on a canvas that has both. */
 .pc-chrome-merge { bottom: 126px; left: 8px; }
-.pc-merge-panel { bottom: 168px; }
+/* The graveyard + merge flyouts are mutually exclusive (openChrome), so they share
+   one slot that clears the whole button column (topmost button = merge at 126) —
+   the open panel floats above every button and covers none of them. */
+.pc-graveyard-panel { bottom: 164px; }
+.pc-merge-panel { bottom: 164px; }
 /* floating style-panel toggle: phones only (desktop shows the panel always). It
    floats ABOVE the toolbar's right end so it never overlaps the toolbar. */
 .pc-style-toggle { display: none; right: 10px; bottom: calc(env(safe-area-inset-bottom, 0px) + 80px); }
@@ -205,9 +205,9 @@
     height: 46px !important;
     border-radius: 12px !important;
   }
-  .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); }
   .pc-chrome-merge { bottom: calc(env(safe-area-inset-bottom, 0px) + 140px); }
-  .pc-merge-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 184px); }
+  .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 178px); }
+  .pc-merge-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 178px); }
   /* whiteboard-style: the panel floats bottom-right, ABOVE the toggle + toolbar */
   [data-pc-stylepanel] {
     top: auto !important;
