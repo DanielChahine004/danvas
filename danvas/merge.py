@@ -35,10 +35,17 @@ updates that password's *role* is allowed to see (its own egress filtering does 
 work), so a merged viewer sees exactly that role's canvas -- the merge server never
 interprets the source's roles.
 
-Limitations (unchanged from before): free-form user drawings are not composited,
-binary media (video/audio feeds) is not relayed through the merge, cross-canvas
-arrows are not supported, and rearranging panels in the merged view is local to the
-merge server. A source going offline drops its panels until it reconnects.
+**Free-form drawings composite too.** A source's user-drawn ink is relayed into the
+merged view (namespaced per source, so multiple sources' ink coexists, and hidden/
+shown with the source's eye toggle); editing or erasing a source stroke from the
+merged view routes back to the owning canvas; and fresh strokes drawn on the merged
+view are the merge server's own shared annotation layer (visible to every merge
+viewer, not pushed to any source).
+
+Limitations: binary media (video/audio feeds) is not relayed through the merge,
+cross-canvas arrows are not supported (an arrow binds by panel id within one
+canvas), and rearranging panels in the merged view is local to the merge server. A
+source going offline drops its panels (and its ink) until it reconnects.
 """
 
 import argparse
@@ -163,6 +170,7 @@ class _Upstream:
         self.registers = {}   # nsid -> register msg
         self.updates = {}     # nsid -> accumulated payload dict
         self.arrows = {}      # nsid -> arrow msg
+        self.drawings = {}    # nsid -> free-form drawing record (the "after" state)
 
     async def send(self, msg):
         ws = self.ws
@@ -179,6 +187,10 @@ class _Upstream:
         for nsid, payload in self.updates.items():
             yield {"type": "update", "id": nsid, "payload": payload}
         yield from self.arrows.values()
+        if self.drawings:
+            # The source's free-form ink, replayed as one "added" draw diff.
+            yield {"type": "draw",
+                   "diff": {"added": dict(self.drawings), "updated": {}, "removed": {}}}
 
     def cached_ids(self):
         return list(self.registers) + list(self.arrows)
@@ -229,6 +241,55 @@ class MergeBridge(Bridge):
         source id that itself contains a colon round-trips intact."""
         tag, _, rest = str(nsid).partition(":")
         return tag, rest
+
+    # -- free-form drawing id remapping --------------------------------------
+    @staticmethod
+    def _remap_record(rec, fn):
+        """Apply ``fn`` to a drawing record's own id and any panel bindings, so a
+        source's ink can be namespaced down and a merge viewer's edit stripped up
+        (a bound user-drawn arrow keeps pointing at the same panel either way)."""
+        if not isinstance(rec, dict):
+            return rec
+        out = dict(rec)
+        if isinstance(out.get("id"), str):
+            out["id"] = fn(out["id"])
+        props = out.get("props")
+        if isinstance(props, dict):
+            p = dict(props)
+            for k in ("bindStart", "bindEnd"):
+                if isinstance(p.get(k), str):
+                    p[k] = fn(p[k])
+            out["props"] = p
+        return out
+
+    @classmethod
+    def _remap_draw_diff(cls, diff, fn):
+        """Rewrite every record id + diff key in a ``draw`` diff through ``fn``
+        (``updated`` entries are ``[before, after]`` pairs)."""
+        out = {}
+        for bucket in ("added", "updated", "removed"):
+            b = diff.get(bucket)
+            if not isinstance(b, dict):
+                continue
+            nb = {}
+            for rid, val in b.items():
+                nk = fn(rid) if isinstance(rid, str) else rid
+                if isinstance(val, (list, tuple)) and len(val) == 2:
+                    nb[nk] = [cls._remap_record(val[0], fn), cls._remap_record(val[1], fn)]
+                else:
+                    nb[nk] = cls._remap_record(val, fn)
+            out[bucket] = nb
+        return out
+
+    @staticmethod
+    def _fold_draw(store, diff):
+        """Fold a draw diff into a ``{id: record}`` cache (the replay material)."""
+        for rid, rec in (diff.get("added") or {}).items():
+            store[rid] = rec
+        for rid, pair in (diff.get("updated") or {}).items():
+            store[rid] = pair[1] if isinstance(pair, (list, tuple)) and len(pair) == 2 else pair
+        for rid in (diff.get("removed") or {}):
+            store.pop(rid, None)
 
     # -- inbound from a source (downstream) ----------------------------------
     async def _run_upstream(self, up):
@@ -310,18 +371,36 @@ class MergeBridge(Bridge):
             up.updates.pop(cid, None)
             up.arrows.pop(cid, None)
             self._fanout_upstream(up, {"type": "remove", "id": cid})
+        elif kind == "draw":
+            # Free-form ink drawn on the source (or its on-connect replay): namespace
+            # every record id by the source tag so sources can't collide, cache it
+            # for replay, and fan it out to the browsers viewing this source.
+            ns_diff = self._remap_draw_diff(msg.get("diff") or {},
+                                            lambda i: self._ns(up.tag, i))
+            self._fold_draw(up.drawings, ns_diff)
+            self._fanout_upstream(up, {"type": "draw", "diff": ns_diff})
+
+    def _send_source_teardown(self, ws, up):
+        """Remove a source's panels (``remove`` frames) AND its free-form ink (a
+        draw ``removed`` diff — user drawings live under their own id, not the
+        ``shape:`` id a ``remove`` frame targets) from one browser."""
+        for cid in up.cached_ids():
+            self._loop.create_task(self._safe_send(ws, {"type": "remove", "id": cid}))
+        if up.drawings:
+            removed = {rid: {} for rid in up.drawings}
+            self._loop.create_task(self._safe_send(
+                ws, {"type": "draw", "diff": {"added": {}, "updated": {}, "removed": removed}}))
 
     def _on_upstream_down(self, up):
-        """A source dropped: remove its panels from the interested browsers and
-        clear its caches, then mark it offline in their rosters."""
-        ids = up.cached_ids()
+        """A source dropped: remove its panels + ink from the interested browsers
+        and clear its caches, then mark it offline in their rosters."""
         up.status = "offline"
         for conn in self._interested(up):
-            for cid in ids:
-                self._loop.create_task(self._safe_send(conn.ws, {"type": "remove", "id": cid}))
+            self._send_source_teardown(conn.ws, up)
         up.registers.clear()
         up.updates.clear()
         up.arrows.clear()
+        up.drawings.clear()
         self._emit_sources_to_interested(up)
 
     # -- fan-out -------------------------------------------------------------
@@ -367,8 +446,7 @@ class MergeBridge(Bridge):
         up = self._upstreams.get(key)
         if up is None:
             return
-        for cid in up.cached_ids():
-            self._loop.create_task(self._safe_send(conn.ws, {"type": "remove", "id": cid}))
+        self._send_source_teardown(conn.ws, up)
         up.refs -= 1
         if up.refs <= 0:
             if up._task is not None:
@@ -457,6 +535,11 @@ class MergeBridge(Bridge):
                 for spec, offset in self._default_sources:
                     _u, _h, label = _parse_source(spec)
                     self._loop.create_task(self._add_default_source(conn, spec, offset, label))
+            # Replay the merged view's own annotation ink (drawn by merge viewers,
+            # not owned by any source) to this fresh viewer.
+            if self._drawings:
+                await self._send(ws, {"type": "draw", "diff": {
+                    "added": dict(self._drawings), "updated": {}, "removed": {}}})
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":
@@ -475,6 +558,41 @@ class MergeBridge(Bridge):
             self._viewers.pop(ws, None)
             self._last_seen.pop(ws, None)
             self._broadcast_roster()
+
+    def _handle_merge_draw(self, conn, diff):
+        """Route a merged-view draw diff: source-owned records (namespaced id) go
+        back up to the owning canvas, stripped; merge-native records (bare id) are
+        stored on the merge server and relayed to the other merge viewers.
+
+        Splitting per record keeps a mixed diff correct: a viewer erasing a source
+        stroke while adding a fresh one sends one diff carrying both.
+        """
+        per_source = {}
+        local = {"added": {}, "updated": {}, "removed": {}}
+        for bucket in ("added", "updated", "removed"):
+            b = diff.get(bucket)
+            if not isinstance(b, dict):
+                continue
+            for rid, val in b.items():
+                tag = self._strip(rid)[0] if isinstance(rid, str) else None
+                up = self._tag_to_upstream.get(tag)
+                if up is not None:
+                    per_source.setdefault(up, {"added": {}, "updated": {}, "removed": {}})[bucket][rid] = val
+                else:
+                    local[bucket][rid] = val
+        # Source-owned edits: strip the namespace and forward to the owning canvas.
+        # The source applies + re-broadcasts, which comes back down to every viewer,
+        # so they converge (no local apply here — that would double it).
+        for up, sd in per_source.items():
+            stripped = self._remap_draw_diff(sd, lambda i: self._strip(i)[1])
+            self._loop.create_task(up.send({"type": "draw", "diff": stripped}))
+        # Merge-native ink: fold into the merge server's own drawing set (so a fresh
+        # viewer replays it) and relay to the OTHER merge viewers.
+        if any(local[bucket] for bucket in ("added", "updated", "removed")):
+            self._apply_draw(local)
+            for other in list(self._conns.values()):
+                if other is not conn:
+                    self._loop.create_task(self._safe_send(other.ws, {"type": "draw", "diff": local}))
 
     async def _add_default_source(self, conn, spec, offset, label):
         """Attach a CLI-seeded default source, honouring its ``--auth`` password
@@ -534,13 +652,18 @@ class MergeBridge(Bridge):
                 self._release(conn, up.key)
                 self._emit_sources(conn)
             return
+        if kind == "draw":
+            # Free-form ink drawn on the merged view. A stroke on a SOURCE's ink
+            # (namespaced id) routes back to that canvas; a fresh stroke (bare id)
+            # is the merged view's own annotation layer, shared among merge viewers.
+            self._handle_merge_draw(conn, msg.get("diff") or {})
+            return
         if kind == "merge_toggle":
             up = self._tag_to_upstream.get(msg.get("sid"))
             if up is not None and up.key in conn.sources:
                 if msg.get("hidden"):
                     conn.hidden.add(up.key)
-                    for cid in up.cached_ids():
-                        await self._safe_send(conn.ws, {"type": "remove", "id": cid})
+                    self._send_source_teardown(conn.ws, up)
                 else:
                     conn.hidden.discard(up.key)
                     for frame in up.cached_frames():

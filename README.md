@@ -946,10 +946,16 @@ interactions that role is allowed — the merge server itself has no password an
 never sees a source's other roles. (The role egress/ingress filtering that gates a
 normal viewer applies to the merge server's connection just the same.)
 
+**Free-form drawings composite too.** A source's user-drawn ink appears in the
+merged view (namespaced per source, hidden/shown with its eye toggle); editing or
+erasing a source stroke from the merged view routes back to the owning canvas; and
+strokes drawn *on* the merged view are its own shared annotation layer (visible to
+every merge viewer, not pushed to any source).
+
 Sources overlay by default (`region_width` spreads a seeded set side-by-side); a
-source going offline drops its panels until it reconnects. Free-form drawings and
-binary media (video/audio feeds) aren't composited, and cross-canvas arrows aren't
-supported.
+source going offline drops its panels and ink until it reconnects. Binary media
+(video/audio feeds) isn't composited, and cross-canvas arrows aren't supported (an
+arrow binds by panel id within one canvas).
 
 # Persistence, inspection & packaging
 

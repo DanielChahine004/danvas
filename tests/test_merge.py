@@ -207,6 +207,7 @@ def test_eye_toggle_hides_and_reshows_a_source():
         ws.sent.clear()
         await b._route_from_browser(conn, json.dumps(
             {"type": "merge_toggle", "sid": up.tag, "hidden": True}))
+        await _settle()                             # teardown removes are scheduled
         assert any(m["type"] == "remove" and m["id"] == f"{up.tag}:p" for m in ws.sent)
         assert up.key in conn.hidden
         ws.sent.clear()
@@ -215,6 +216,104 @@ def test_eye_toggle_hides_and_reshows_a_source():
         await _settle()
         assert any(m["type"] == "register" and m["id"] == f"{up.tag}:p" for m in ws.sent)
         assert up.key not in conn.hidden
+    asyncio.run(run())
+
+
+# -- free-form drawing relay --------------------------------------------------
+
+def test_source_ink_relays_down_namespaced_and_cached():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        ws, conn = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        b._attach(conn, up)
+        b._ingest(up, json.dumps({"type": "draw", "diff": {
+            "added": {"d1": {"id": "d1", "props": {"points": []}}}, "updated": {}, "removed": {}}}))
+        await _settle()
+        draws = [m for m in ws.sent if m.get("type") == "draw"]
+        assert draws and f"{up.tag}:d1" in draws[-1]["diff"]["added"]
+        # the namespaced record's own id was rewritten too, and it's cached for replay
+        assert draws[-1]["diff"]["added"][f"{up.tag}:d1"]["id"] == f"{up.tag}:d1"
+        assert f"{up.tag}:d1" in up.drawings
+    asyncio.run(run())
+
+
+def test_editing_a_source_stroke_routes_back_up_stripped():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        ws, conn = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        up.ws = FakeUpstreamWS()
+        b._attach(conn, up)
+        # erase a source stroke (its id is namespaced in the merged view)
+        await b._route_from_browser(conn, json.dumps({"type": "draw", "diff": {
+            "removed": {f"{up.tag}:d1": {}}}}))
+        await _settle()
+        assert up.ws.sent == [{"type": "draw", "diff": {"added": {}, "updated": {}, "removed": {"d1": {}}}}]
+    asyncio.run(run())
+
+
+def test_merge_native_ink_is_shared_among_viewers_not_sent_upstream():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        wsA, connA = _browser(b)
+        wsB, connB = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        up.ws = FakeUpstreamWS()
+        b._attach(connA, up)
+        b._attach(connB, up)
+        # a fresh stroke on the merged view has a BARE id (not owned by any source)
+        await b._route_from_browser(connA, json.dumps({"type": "draw", "diff": {
+            "added": {"dX": {"id": "dX", "props": {}}}, "updated": {}, "removed": {}}}))
+        await _settle()
+        assert "dX" in b._drawings                      # stored on the merge server
+        assert up.ws.sent == []                         # never pushed to a source
+        b_draws = [m for m in wsB.sent if m.get("type") == "draw"]
+        a_draws = [m for m in wsA.sent if m.get("type") == "draw"]
+        assert b_draws and "dX" in b_draws[-1]["diff"]["added"]  # relayed to the peer
+        assert not a_draws                              # not echoed to the drawer
+    asyncio.run(run())
+
+
+def test_hiding_a_source_tears_down_its_ink():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        ws, conn = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        b._attach(conn, up)
+        b._ingest(up, json.dumps({"type": "draw", "diff": {
+            "added": {"d1": {"id": "d1", "props": {}}}, "updated": {}, "removed": {}}}))
+        await _settle()
+        ws.sent.clear()
+        await b._route_from_browser(conn, json.dumps({"type": "merge_toggle", "sid": up.tag, "hidden": True}))
+        await _settle()
+        removed = [m for m in ws.sent if m.get("type") == "draw" and m["diff"]["removed"]]
+        assert removed and f"{up.tag}:d1" in removed[-1]["diff"]["removed"]
+    asyncio.run(run())
+
+
+def test_attach_replays_cached_source_ink():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        b._ingest(up, json.dumps({"type": "draw", "diff": {
+            "added": {"d1": {"id": "d1", "props": {}}}, "updated": {}, "removed": {}}}))
+        await _settle()
+        ws, conn = _browser(b)
+        b._attach(conn, up)               # a browser joining later gets the cached ink
+        await _settle()
+        draws = [m for m in ws.sent if m.get("type") == "draw"]
+        assert draws and f"{up.tag}:d1" in draws[-1]["diff"]["added"]
     asyncio.run(run())
 
 
