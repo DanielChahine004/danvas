@@ -559,7 +559,18 @@ export function attachInteraction(container: HTMLElement): () => void {
       bindHighlight(tgt || null)
       bindAnchorDot(tgt ? bindAnchorAt(pt, tgt)?.dot || null : null)
     } else if (drag.kind === 'draw') {
-      drag.pts.push({ x: pt.x - drag.sx, y: pt.y - drag.sy })
+      const lx = pt.x - drag.sx
+      const ly = pt.y - drag.sy
+      // Decimate: skip a point within ~2 screen px of the last kept one. A slow
+      // drag otherwise pushes a point per pointermove (up to 120Hz) and re-renders
+      // the whole perfect-freehand path over the growing array each time — O(n^2)
+      // over the stroke's life, and the full list is synced to Python + persisted.
+      // The threshold is in page units (screen px ÷ zoom) so fidelity is constant
+      // on screen at any zoom.
+      const last = drag.pts[drag.pts.length - 1]
+      const minD = 2 / store.camera().z
+      if (last && Math.hypot(lx - last.x, ly - last.y) < minD) return
+      drag.pts.push({ x: lx, y: ly })
       const id = drag.id
       const pts = drag.pts
       store.transact('local', () => store.patch(id, { props: { points: pts.slice() } }))

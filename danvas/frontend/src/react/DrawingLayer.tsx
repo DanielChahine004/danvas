@@ -108,14 +108,27 @@ export function DrawingLayer({ below = false }: { below?: boolean }) {
   if (!ids.length) return null
   return (
     <svg data-pc-drawings={below ? 'below' : ''} style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', userSelect: 'none' }}>
+      {ids.map((id) => (
+        <Drawn key={id} id={id} />
+      ))}
+    </svg>
+  )
+}
+
+// The shared arrowhead marker. Rendered ONCE (PanelLayer), not per DrawingLayer:
+// there are two layers (below/above the panels) and each used to emit its own
+// <marker id="pc-arrowhead">, so two identical-id elements coexisted in the
+// document. `url(#pc-arrowhead)` resolves document-wide, so a single hidden defs
+// svg serves the paths in both layers; `fill="context-stroke"` still picks up
+// each referencing path's own stroke colour.
+export function ArrowMarkerDefs() {
+  return (
+    <svg width={0} height={0} aria-hidden="true" style={{ position: 'absolute' }}>
       <defs>
         <marker id="pc-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
         </marker>
       </defs>
-      {ids.map((id) => (
-        <Drawn key={id} id={id} />
-      ))}
     </svg>
   )
 }

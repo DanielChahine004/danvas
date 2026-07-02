@@ -20,7 +20,7 @@ import { setupCursorReporting } from '../bridge'
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
 import { SelectionOverlay } from './SelectionOverlay'
-import { DrawingLayer } from './DrawingLayer'
+import { DrawingLayer, ArrowMarkerDefs } from './DrawingLayer'
 
 // Unmount a panel's content once it's more than ~half a viewport outside the
 // visible area, so a canvas of hundreds of panels only pays for the visible ones.
@@ -180,6 +180,10 @@ export function PanelLayer() {
         userSelect: 'none',
       }}
     >
+      {/* The arrowhead marker, defined once for both drawing layers (see
+          ArrowMarkerDefs) — a marker renders in the referencing path's own
+          coordinate space, so it needn't sit inside the camera transform. */}
+      <ArrowMarkerDefs />
       <div
         ref={camLayerRef}
         data-pc-camera-layer=""

@@ -72,6 +72,32 @@ function libUrl(name: string): string {
 const moduleCache = new Map<string, Promise<any>>()
 const wasmCache = new Map<string, Promise<any>>()
 
+// CDN libraries (scope=[...]) are fetched from esm.sh at runtime. Without a
+// ceiling a slow/unreachable CDN — a baked desktop app offline, esm.sh down, a
+// LAN with no internet — leaves the panel stuck on "loading libraries…" forever.
+// Reject after this long so the failure surfaces as an ErrorBox (and a
+// panel_error) instead of hanging.
+const LIB_TIMEOUT_MS = 15000
+
+function withTimeout<T>(p: Promise<T>, ms: number, name: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`timed out loading "${name}" after ${ms / 1000}s — is the network reachable?`)),
+      ms,
+    )
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
+
 function loadWasm(b64: string): Promise<any> {
   if (!wasmCache.has(b64)) {
     wasmCache.set(
@@ -102,7 +128,13 @@ function loadLib(name: string): Promise<any> {
   }
   const url = libUrl(name)
   if (!moduleCache.has(url)) {
-    moduleCache.set(url, import(/* @vite-ignore */ url))
+    // Evict a failed/timed-out load from the cache so a later re-mount retries
+    // instead of replaying the same rejected promise forever.
+    const p = withTimeout(import(/* @vite-ignore */ url), LIB_TIMEOUT_MS, name).catch((e) => {
+      moduleCache.delete(url)
+      throw e
+    })
+    moduleCache.set(url, p)
   }
   return moduleCache.get(url)!
 }
