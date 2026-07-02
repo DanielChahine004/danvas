@@ -197,6 +197,12 @@ class Bridge:
         self._draw_taps = []
         self._tap_guard = threading.local()
         self._connections = set()
+        # Connections that asked (via ?proxy=1) not to be excluded from a change's
+        # own echo. A normal browser is the "mover" of its own input and already
+        # applied it locally, so it's excluded from the state echo; a merge server
+        # connects as a proxy for many browsers, so it NEEDS the echo (to keep its
+        # replay cache current and fan the change to its other viewers).
+        self._proxy_conns = set()
         self._any_connected = threading.Event()  # set while ≥1 client is connected
         # One asyncio.Lock per live connection. The websockets legacy protocol
         # forbids concurrent writes (its drain() has no internal lock — two
@@ -814,6 +820,10 @@ class Bridge:
         qp = getattr(ws, "query_params", {})
         requested = {"id": qp.get("vid"), "name": qp.get("vname"),
                      "color": qp.get("vcolor")}
+        # A merge server connects with ?proxy=1 so its own input echoes reach it
+        # (it fronts many browsers; see _proxy_conns / _dispatch_input).
+        if qp.get("proxy"):
+            self._proxy_conns.add(ws)
         # Classify the connecting device from the handshake User-Agent (no client
         # cooperation needed) so a handler can adapt the layout to mobile.
         headers = getattr(ws, "headers", {})
@@ -934,6 +944,7 @@ class Bridge:
                 traceback.print_exc(file=sys.__stderr__)
         finally:
             self._connections.discard(ws)
+            self._proxy_conns.discard(ws)
             if not self._connections:
                 self._any_connected.clear()
             self._send_locks.pop(ws, None)
@@ -1461,8 +1472,14 @@ class Bridge:
         comp._handle_input(payload, viewer)
         state = comp.state_payload()
         if state:
+            # Echo the resulting state to the other clients. A normal browser (the
+            # mover) already applied it locally, so it's excluded; a proxy (merge
+            # server) is NOT excluded — it needs the echo to keep its cache current
+            # and relay to its own viewers.
+            echo_exclude = None if ws in self._proxy_conns else ws
             self.broadcast(
-                {"type": "update", "id": comp.id, "payload": state}, exclude=ws,
+                {"type": "update", "id": comp.id, "payload": state},
+                exclude=echo_exclude,
                 roles=getattr(comp, "_roles", None) or None,
             )
         # A committed input is user-set state too (Slider/Toggle/TextField persist

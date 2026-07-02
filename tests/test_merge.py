@@ -13,7 +13,9 @@ import json
 
 import pytest
 
+import danvas
 from danvas import merge as merge_mod
+from danvas.bridge import Bridge
 from danvas.merge import MergeBridge, _Conn, _parse_source
 
 
@@ -248,23 +250,63 @@ def test_layout_through_merge_is_cached_and_reaches_other_viewers():
     asyncio.run(run())
 
 
-def test_input_value_through_merge_is_cached():
+def test_input_forwards_and_the_source_state_echo_is_cached_not_rubber_banded():
+    # Input isn't reflected from the raw payload (a slider's display state is a
+    # {post: v} push, not the {value: v} it sends up). Instead the source echoes
+    # its authoritative state to the proxy; the merge caches that and fans it to
+    # OTHER viewers, excluding the one who drove the input (no drag rubber-band).
     async def run():
         b = MergeBridge()
         b._loop = asyncio.get_running_loop()
-        ws, conn = _browser(b)
+        wsA, connA = _browser(b)
+        wsB, connB = _browser(b)
         up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
         _park(b, up)
         up.ws = FakeUpstreamWS()
-        b._attach(conn, up)
+        b._attach(connA, up)
+        b._attach(connB, up)
         nsid = f"{up.tag}:slider1"
-        await b._route_from_browser(conn, json.dumps(
+        await b._route_from_browser(connA, json.dumps(
             {"type": "input", "id": nsid, "payload": {"value": 7}}))
         await _settle()
-        # forwarded to the source, and the value cached so a hide/show keeps it
         assert up.ws.sent == [{"type": "input", "id": "slider1", "payload": {"value": 7}}]
-        assert up.updates[nsid] == {"value": 7}
+        assert b._recent_input_mover(nsid) is connA          # mover recorded
+        # the source echoes its real state (a slider uses {post: v})
+        b._ingest(up, json.dumps({"type": "update", "id": "slider1", "payload": {"post": 7}}))
+        await _settle()
+        assert up.updates[nsid] == {"post": 7}               # cached for hide/show
+        b_up = [m for m in wsB.sent if m.get("type") == "update" and m["id"] == nsid]
+        a_up = [m for m in wsA.sent if m.get("type") == "update" and m["id"] == nsid]
+        assert b_up and b_up[-1]["payload"] == {"post": 7}   # the other viewer sees it
+        assert not a_up                                      # the mover does not (no rubber-band)
     asyncio.run(run())
+
+
+# -- base Bridge: a proxy connection is NOT excluded from its own input echo ---
+
+def test_bridge_does_not_exclude_a_proxy_from_input_echo():
+    class _WS:
+        pass
+    b = Bridge()
+    b._loop = object()
+    calls = []
+    b._emit = lambda targets, msg: calls.append((list(targets), msg))
+    proxy, other = _WS(), _WS()
+    b._connections = {proxy, other}
+    b._viewers = {proxy: {"id": "p", "role": None}, other: {"id": "o", "role": None}}
+    b._proxy_conns = {proxy}
+    sld = danvas.Slider("s")
+    sld._bind("c1", b)
+    b.add_component(sld)
+    # the proxy is the mover -> its echo is NOT excluded (it needs the state)
+    b._dispatch_input(sld, {"value": 7}, proxy)
+    echo = [c for c in calls if c[1].get("type") == "update"]
+    assert echo and proxy in echo[-1][0]
+    # a normal browser mover IS excluded from its own echo (as before)
+    calls.clear()
+    b._dispatch_input(sld, {"value": 3}, other)
+    echo = [c for c in calls if c[1].get("type") == "update"]
+    assert echo and other not in echo[-1][0] and proxy in echo[-1][0]
 
 
 # -- free-form drawing relay --------------------------------------------------

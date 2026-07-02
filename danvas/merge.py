@@ -224,6 +224,10 @@ class MergeBridge(Bridge):
         self._tag_to_upstream = {}    # tag -> _Upstream
         self._conns = {}              # ws -> _Conn
         self._tag_seq = 0
+        # nsid -> (conn, expiry): the viewer who last drove input on a panel, so
+        # the source's echo of that change isn't fanned back to them (it would fight
+        # their live drag). Short-lived; a stale entry just means one missed echo.
+        self._input_movers = {}
 
     # -- startup -------------------------------------------------------------
     def set_loop(self, loop):
@@ -299,10 +303,14 @@ class MergeBridge(Bridge):
         then cancelled). On every drop, the source's panels are removed from the
         interested browsers and its caches cleared, so a restart heals cleanly.
         """
+        # ?proxy=1 tells the source not to exclude this connection from its own
+        # input echoes (see Bridge._proxy_conns) — the merge fronts many browsers,
+        # so it needs the source's authoritative state to cache + relay.
+        proxy_uri = up.ws_uri + ("&" if "?" in up.ws_uri else "?") + "proxy=1"
         while True:
             try:
                 headers = ({"Cookie": f"pc_session={up.cookie}"} if up.cookie else None)
-                async with connect(up.ws_uri, max_size=None,
+                async with connect(proxy_uri, max_size=None,
                                    additional_headers=headers) as ws:
                     up.ws = ws
                     up.status = "live"
@@ -355,7 +363,12 @@ class MergeBridge(Bridge):
                 if payload.get("y") is not None:
                     payload["y"] += oy
             up.updates.setdefault(cid, {}).update(payload)
-            self._fanout_upstream(up, {"type": "update", "id": cid, "payload": payload})
+            # If this echo is the result of a viewer's own input, don't fan it back
+            # to that viewer (they already have it locally; re-applying a streamed
+            # value fights their drag). Others still get it, and it's cached above
+            # so a hide/show replays the current state.
+            self._fanout_upstream(up, {"type": "update", "id": cid, "payload": payload},
+                                  exclude=self._recent_input_mover(cid))
         elif kind == "arrow":
             cid = self._ns(up.tag, msg.get("id"))
             msg["id"] = cid
@@ -409,9 +422,23 @@ class MergeBridge(Bridge):
         return [c for c in self._conns.values()
                 if up.key in c.sources and up.key not in c.hidden]
 
-    def _fanout_upstream(self, up, msg):
+    def _fanout_upstream(self, up, msg, exclude=None):
         for conn in self._interested(up):
+            if conn is exclude:
+                continue
             self._loop.create_task(self._safe_send(conn.ws, msg))
+
+    def _recent_input_mover(self, nsid):
+        """The viewer who drove input on ``nsid`` within the last second, else
+        ``None`` (evicting an expired entry)."""
+        entry = self._input_movers.get(nsid)
+        if entry is None:
+            return None
+        conn, expiry = entry
+        if time.monotonic() > expiry:
+            self._input_movers.pop(nsid, None)
+            return None
+        return conn
 
     # -- upstream pool -------------------------------------------------------
     def _get_or_create_upstream(self, ws_uri, http_parts, label, cookie, offset):
@@ -692,33 +719,33 @@ class MergeBridge(Bridge):
         if isinstance(out.get("end"), str):
             out["end"] = self._strip(out["end"])[1]
         await up.send(out)
-        # Reflect the change in the merge's own cache + the OTHER viewers. The
-        # source applies and persists it, but it echoes the result to every client
-        # EXCEPT this proxy connection (the "mover"), so the merge would otherwise
-        # never see a change made through the merged view — and a hide/show (cache
-        # replay) would snap the panel back to its pre-change state. Cache it under
-        # the namespaced id in merged coords, and fan it to the other viewers
-        # (the mover already applied it locally, so excluding them avoids
-        # mid-gesture rubber-banding). Only value-state input is reflected (a
-        # built-in control's value == its state); a React/Custom panel's state
-        # arrives via its handler's own update(), which the source DOES broadcast
-        # to the proxy, so it's cached through the normal update path.
-        reflected = None
+        # Keep the merge's cache current for changes made THROUGH the merged view,
+        # so a hide/show (cache replay) doesn't snap the panel back:
+        #
+        # * layout — the geometry is fully described by the frame itself and is
+        #   represented directly (top-level x/y, props w/h), so fold it into the
+        #   cache and fan it to the OTHER viewers (the mover already applied it, so
+        #   excluding them avoids rubber-banding). The source still excludes the
+        #   proxy from layout echoes, so this is the only copy.
+        # * input — a control's *display* state isn't the raw input payload (a
+        #   slider's value rides a {post: v} push, not {value: v}), and it's
+        #   component-specific, so we DON'T guess it here. Instead the source echoes
+        #   its authoritative state to the proxy (see ?proxy=1), which the update
+        #   path above caches and relays. We only record who moved it, so that
+        #   echo isn't fanned back to them.
         if kind == "layout":
-            reflected = {k: msg[k] for k in
-                         ("x", "y", "w", "h", "rotation", "autoH", "autoW")
-                         if msg.get(k) is not None}
+            geom = {k: msg[k] for k in
+                    ("x", "y", "w", "h", "rotation", "autoH", "autoW")
+                    if msg.get(k) is not None}
+            if geom:
+                up.updates.setdefault(cid, {}).update(geom)
+                fan = {"type": "update", "id": cid, "payload": geom}
+                for other in list(self._conns.values()):
+                    if (other is not conn and up.key in other.sources
+                            and up.key not in other.hidden):
+                        self._loop.create_task(self._safe_send(other.ws, fan))
         elif kind == "input":
-            payload = msg.get("payload")
-            if isinstance(payload, dict) and "value" in payload:
-                reflected = {"value": payload["value"]}
-        if reflected:
-            up.updates.setdefault(cid, {}).update(reflected)
-            fan = {"type": "update", "id": cid, "payload": reflected}
-            for other in list(self._conns.values()):
-                if (other is not conn and up.key in other.sources
-                        and up.key not in other.hidden):
-                    self._loop.create_task(self._safe_send(other.ws, fan))
+            self._input_movers[cid] = (conn, time.monotonic() + 1.0)
 
 
 class Merge:
