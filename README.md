@@ -927,40 +927,36 @@ canvas.serve(port=8000)              # a normal canvas that can ALSO merge other
 canvas.serve(port=8000, merge=False) # opt out (hide the merge panel)
 ```
 
-There's also a **standing merge server** — a neutral aggregator that holds no
-components of its own — for when you don't want the hub to be one of the canvases.
-It connects to several running canvases (as a client), composites their panels onto
-one port, and routes interactions back to the owning canvas. Each browser that
-opens it picks **its own** set of sources, so different viewers can compose
-different combinations from one server:
+The **🧩 Merge** panel lists the composed sources (with a live/offline dot), takes
+a canvas URL to **add** one on the fly, an **eye** toggle to hide/show each source's
+panels (client-side only — the source keeps running untouched), and an **✕** to drop
+one. Adding sources via `?sources=127.0.0.1:8001,127.0.0.1:8002` on the hub's URL
+pre-composes a set (a refresh restores it).
+
+**The CLI aggregator** — for a scriptless, component-less version of the same thing,
+`python -m danvas.merge` serves a bare hub that holds no panels of its own and can
+pre-seed a source set from the command line. Everything below (per-connection
+sources, auth, drawings) is identical; reach for it when you don't want to write a
+one-line script or when the aggregator shouldn't itself be one of the canvases:
 
 ```bash
-python -m danvas.merge --port 8080          # standing server; browsers choose sources
-#   then open  http://localhost:8080/?sources=127.0.0.1:8001,127.0.0.1:8002
-
-python -m danvas.merge :8001 :8002 --port 8080   # seed a default set (back-compat)
+python -m danvas.merge --port 8080                # bare hub; browsers choose sources
+python -m danvas.merge :8001 :8002 --port 8080    # seed a default set
 python -m danvas.merge :8001 --auth 127.0.0.1:8001=secret   # a protected source
 ```
 
 ```python
 from danvas import Merge
-Merge().serve(port=8080)                     # standing server, per-connection sources
-Merge([8001, 8002]).serve(port=8080)         # or seed a default set
+Merge().serve(port=8080)                          # same, from Python
+Merge([8001, 8002]).serve(port=8080)              # or seed a default set
 ```
 
-**Merge from the UI, not just the CLI.** On the merge server's page a **🧩 Merge**
-panel lists the composed sources (with a live/offline dot), takes a canvas URL to
-**add** one on the fly, an **eye** toggle to hide/show each source's panels, and
-an **✕** to drop one. And any canvas served with `serve(merge_server="http://host:8080")`
-grows its own **Merge…** button that collects other canvas URLs and opens the merge
-view pre-seeded with itself — so merging is reachable from inside a canvas.
-
 **Password-protected sources merge too.** Adding a protected canvas prompts for
-*its* password in the merge panel; the merge server runs that canvas's login and
-connects as the matching **role**, so the merged view shows exactly the panels and
-interactions that role is allowed — the merge server itself has no password and
-never sees a source's other roles. (The role egress/ingress filtering that gates a
-normal viewer applies to the merge server's connection just the same.)
+*its* password in the merge panel; the hub runs that canvas's login and connects as
+the matching **role**, so the merged view shows exactly the panels and interactions
+that role is allowed — the hub itself has no password and never sees a source's
+other roles. (The role egress/ingress filtering that gates a normal viewer applies
+to the hub's connection just the same.)
 
 **Free-form drawings composite too.** A source's user-drawn ink appears in the
 merged view (namespaced per source, hidden/shown with its eye toggle); editing or
