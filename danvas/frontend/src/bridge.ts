@@ -1436,6 +1436,8 @@ let mergeState = {
   prompts: [] as any[], // { uri, label, error? } for canvases awaiting a password
   server: null as string | null, // a plain canvas's configured merge server URL
   selfUrl: null as string | null, // this canvas's own reachable URL (a source)
+  hidden: [] as string[], // sids hidden in this view (mirrors hiddenSourceTags so
+  // the merge panel re-renders on toggle — the signal alone drives PanelLayer)
 }
 const mergeListeners = new Set<(s: any) => void>()
 function emitMerge(): void {
@@ -1464,7 +1466,11 @@ function setMergeSources(list: any[]): void {
   const sids = new Set(list.map((s) => s.sid))
   const cur = hiddenSourceTags()
   const pruned = new Set([...cur].filter((t) => sids.has(t)))
-  if (pruned.size !== cur.size) hiddenSourceTags(pruned)
+  if (pruned.size !== cur.size) {
+    hiddenSourceTags(pruned)
+    mergeState = { ...mergeState, hidden: [...pruned] }
+    emitMerge()
+  }
 }
 
 // Per-source visibility in the merged view is PURELY CLIENT-SIDE: hiding a source
@@ -1479,8 +1485,11 @@ export function setSourceHidden(sid: string, hidden: boolean): void {
   const next = new Set(hiddenSourceTags())
   if (hidden) next.add(sid)
   else next.delete(sid)
-  hiddenSourceTags(next)
-  emitMerge() // refresh the panel's eye icon
+  hiddenSourceTags(next) // drives PanelLayer / DrawingLayer (via useValue)
+  // Mirror into mergeState with a NEW reference so the merge panel re-renders and
+  // its eye icon + the click handler's captured `hidden` stay current.
+  mergeState = { ...mergeState, hidden: [...next] }
+  emitMerge()
 }
 export function isSourceTagHidden(tag: string): boolean {
   return hiddenSourceTags().has(tag)

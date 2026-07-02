@@ -23,7 +23,6 @@ import {
   mergeAuth,
   mergeRemove,
   setSourceHidden,
-  isSourceTagHidden,
 } from '../bridge'
 
 // --- peer cursors ------------------------------------------------------------
@@ -455,7 +454,7 @@ export function MergeHostPanel() {
             <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ui-muted)', fontStyle: 'italic' }}>No sources yet — add a canvas URL below.</div>
           ) : null}
           {state.sources.map((s: any) => {
-            const hidden = isSourceTagHidden(s.sid)
+            const hidden = (state.hidden || []).includes(s.sid)
             return (
               <div key={s.sid} style={mergeRowStyle}>
                 <span title={s.status} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: s.status === 'live' ? '#22c55e' : '#9ca3af' }} />
