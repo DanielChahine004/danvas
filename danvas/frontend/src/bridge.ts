@@ -1459,6 +1459,23 @@ function setMergeSources(list: any[]): void {
   const uris = new Set(list.map((s) => s.uri))
   mergeState = { ...mergeState, sources: list, prompts: mergeState.prompts.filter((p) => !uris.has(p.uri)) }
   emitMerge()
+  syncMergeUrl(list)
+}
+
+// Keep the page URL's ?sources= in step with the live composed set, so a REFRESH
+// re-seeds the same sources (sources added via the merge panel would otherwise be
+// lost — only the initial ?sources= survived a reload). Protected sources still
+// re-prompt for their password on reload (passwords are never put in the URL).
+function syncMergeUrl(list: any[]): void {
+  if (!mergeState.isHost || typeof window === 'undefined' || !window.history?.replaceState) return
+  try {
+    const url = new URL(window.location.href)
+    if (list.length) url.searchParams.set('sources', list.map((s) => s.uri).join(','))
+    else url.searchParams.delete('sources')
+    window.history.replaceState(null, '', url.toString())
+  } catch {
+    /* older browser / opaque origin — refresh just won't restore, no worse than before */
+  }
 }
 function addMergeAuthPrompt(uri: string, label: string): void {
   if (mergeState.prompts.some((p) => p.uri === uri)) return

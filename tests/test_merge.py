@@ -219,6 +219,54 @@ def test_eye_toggle_hides_and_reshows_a_source():
     asyncio.run(run())
 
 
+# -- changes made THROUGH the merged view stay in the cache (hide/show) --------
+
+def test_layout_through_merge_is_cached_and_reaches_other_viewers():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        wsA, connA = _browser(b)
+        wsB, connB = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        up.ws = FakeUpstreamWS()
+        b._attach(connA, up)
+        b._attach(connB, up)
+        nsid = f"{up.tag}:panel1"
+        # viewer A drags the panel in the merged view
+        await b._route_from_browser(connA, json.dumps(
+            {"type": "layout", "id": nsid, "x": 300, "y": 120, "w": 250, "h": 90}))
+        await _settle()
+        # forwarded to the source (stripped), and cached so hide/show replays it
+        assert up.ws.sent and up.ws.sent[0]["id"] == "panel1" and up.ws.sent[0]["x"] == 300
+        assert up.updates[nsid]["x"] == 300 and up.updates[nsid]["y"] == 120
+        # the OTHER viewer sees it; the mover does not get it echoed back
+        b_geo = [m for m in wsB.sent if m.get("type") == "update" and m["id"] == nsid]
+        a_geo = [m for m in wsA.sent if m.get("type") == "update" and m["id"] == nsid]
+        assert b_geo and b_geo[-1]["payload"]["x"] == 300
+        assert not a_geo
+    asyncio.run(run())
+
+
+def test_input_value_through_merge_is_cached():
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        ws, conn = _browser(b)
+        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(b, up)
+        up.ws = FakeUpstreamWS()
+        b._attach(conn, up)
+        nsid = f"{up.tag}:slider1"
+        await b._route_from_browser(conn, json.dumps(
+            {"type": "input", "id": nsid, "payload": {"value": 7}}))
+        await _settle()
+        # forwarded to the source, and the value cached so a hide/show keeps it
+        assert up.ws.sent == [{"type": "input", "id": "slider1", "payload": {"value": 7}}]
+        assert up.updates[nsid] == {"value": 7}
+    asyncio.run(run())
+
+
 # -- free-form drawing relay --------------------------------------------------
 
 def test_source_ink_relays_down_namespaced_and_cached():

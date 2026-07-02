@@ -692,6 +692,33 @@ class MergeBridge(Bridge):
         if isinstance(out.get("end"), str):
             out["end"] = self._strip(out["end"])[1]
         await up.send(out)
+        # Reflect the change in the merge's own cache + the OTHER viewers. The
+        # source applies and persists it, but it echoes the result to every client
+        # EXCEPT this proxy connection (the "mover"), so the merge would otherwise
+        # never see a change made through the merged view — and a hide/show (cache
+        # replay) would snap the panel back to its pre-change state. Cache it under
+        # the namespaced id in merged coords, and fan it to the other viewers
+        # (the mover already applied it locally, so excluding them avoids
+        # mid-gesture rubber-banding). Only value-state input is reflected (a
+        # built-in control's value == its state); a React/Custom panel's state
+        # arrives via its handler's own update(), which the source DOES broadcast
+        # to the proxy, so it's cached through the normal update path.
+        reflected = None
+        if kind == "layout":
+            reflected = {k: msg[k] for k in
+                         ("x", "y", "w", "h", "rotation", "autoH", "autoW")
+                         if msg.get(k) is not None}
+        elif kind == "input":
+            payload = msg.get("payload")
+            if isinstance(payload, dict) and "value" in payload:
+                reflected = {"value": payload["value"]}
+        if reflected:
+            up.updates.setdefault(cid, {}).update(reflected)
+            fan = {"type": "update", "id": cid, "payload": reflected}
+            for other in list(self._conns.values()):
+                if (other is not conn and up.key in other.sources
+                        and up.key not in other.hidden):
+                    self._loop.create_task(self._safe_send(other.ws, fan))
 
 
 class Merge:
