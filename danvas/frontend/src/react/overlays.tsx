@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { pageToScreen } from '../engine/editor'
 import { store } from '../engine/store'
-import { stylePanelOpen } from './uistate'
+import { stylePanelOpen, openChrome, toggleChrome } from './uistate'
 import { snapEnabled, setSnapEnabled, duplicateSelection } from '../engine/interaction'
 import { Icon } from './icons'
 import { useEditor, useValue } from './EngineContext'
@@ -14,7 +14,6 @@ import {
   subscribeUiInspector,
   toggleUiInspector,
   subscribeGraveyard,
-  toggleGraveyard,
   sendRestore,
   subscribeAuth,
   signOut,
@@ -351,6 +350,10 @@ export function SignOutButton() {
 export function GraveyardButton() {
   const [state, setState] = useState({ enabled: false, open: false, items: [] as any[] })
   useEffect(() => subscribeGraveyard(setState), [])
+  // Expansion is coordinated with the merge panel (mutually exclusive, see
+  // openChrome) so their bottom-left flyouts never overlap; the bridge's own
+  // open flag is ignored for rendering.
+  const open = useValue('gy-open', () => openChrome() === 'graveyard', [])
   if (!state.enabled) return null
   const count = state.items.length
   return (
@@ -359,15 +362,15 @@ export function GraveyardButton() {
         data-pc-graveyard-btn=""
         data-pc-graveyard-count={count}
         class="pc-chrome-graveyard"
-        onClick={toggleGraveyard}
-        title={state.open ? 'Close the graveyard panel' : 'Show panels deleted from the canvas'}
-        style={btnStyle({ background: state.open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: state.open ? '#fff' : 'var(--ui-fg)' })}
+        onClick={() => toggleChrome('graveyard')}
+        title={open ? 'Close the graveyard panel' : 'Show panels deleted from the canvas'}
+        style={btnStyle({ background: open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: open ? '#fff' : 'var(--ui-fg)' })}
       >
         <span style={{ fontSize: 14, lineHeight: 1 }}>🗑️</span>
         Graveyard{count > 0 ? ` (${count})` : ''}
-        {state.open ? ' ✕' : ''}
+        {open ? ' ✕' : ''}
       </button>
-      {state.open && <GraveyardPanel items={state.items} />}
+      {open && <GraveyardPanel items={state.items} />}
     </>
   )
 }
@@ -423,9 +426,11 @@ function GraveyardPanel({ items }: { items: any[] }) {
 // and prompts for a password when a source reports it's protected.
 export function MergeHostPanel() {
   const [state, setState] = useState<any>({ isHost: false, sources: [], prompts: [] })
-  const [open, setOpen] = useState(false)   // starts closed — just the button shows
   const [addUrl, setAddUrl] = useState('')
   useEffect(() => subscribeMerge(setState), [])
+  // Starts closed; mutually exclusive with the graveyard flyout (see openChrome)
+  // so their bottom-left panels never overlap.
+  const open = useValue('merge-open', () => openChrome() === 'merge', [])
   if (!state.isHost) return null
   const count = state.sources.length
   const submitAdd = () => {
@@ -440,7 +445,7 @@ export function MergeHostPanel() {
       <button
         data-pc-merge-btn=""
         class="pc-chrome-merge"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => toggleChrome('merge')}
         title={open ? 'Close the merge panel' : 'Add or hide merged canvases'}
         style={btnStyle({ background: open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: open ? '#fff' : 'var(--ui-fg)' })}
       >
