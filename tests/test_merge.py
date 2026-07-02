@@ -442,7 +442,46 @@ def test_two_passwords_for_one_source_make_two_upstreams(monkeypatch):
 def test_canvas_serve_enables_merge_host_by_default():
     c = danvas.Canvas()
     assert c._bridge._merge is None                  # off until served
-    # emulate serve()'s enable step without binding a port
     from danvas.merge import _MergeHost as _MH
     c._bridge._merge = _MH(c._bridge)
     assert isinstance(c._bridge._merge, _MergeHost)
+
+
+# -- the code API: canvas.merge / unmerge / merges -----------------------------
+
+def test_canvas_merge_queues_before_serve_and_reads_back():
+    c = danvas.Canvas()
+    c.merge("127.0.0.1:8001")
+    c.merge("127.0.0.1:8002", password="x")
+    assert c.merges == ["127.0.0.1:8001", "127.0.0.1:8002"]
+    c.unmerge("127.0.0.1:8001")
+    assert c.merges == ["127.0.0.1:8002"]
+
+
+def test_canvas_merge_is_canvas_wide_and_live(monkeypatch):
+    # A shared source added while serving attaches to every connected browser and
+    # is what a fresh connection is seeded with — the canvas-wide twin of a UI add.
+    async def _noop(self, up):
+        return
+    monkeypatch.setattr(_MergeHost, "_run_upstream", _noop)
+    monkeypatch.setattr(merge_mod, "_authenticate", lambda parts, pw: "tok")
+
+    async def run():
+        b, h = _host()
+        ws, conn = _browser(b, h)          # a browser already connected
+        h.add_source("127.0.0.1:8001")     # code merge, live
+        await _settle()
+        assert conn.sources                 # attached to the live browser
+        assert h.shared_specs() == ["127.0.0.1:8001"]
+        # a fresh browser is seeded with the shared source on connect
+        ws2 = FakeWS()
+        b._connections.add(ws2)
+        h.on_connect(ws2, {})              # registers its own _Conn
+        await _settle()
+        conn2 = h._conns[ws2]
+        assert conn2.sources
+        # remove it -> released from everyone
+        h.remove_source("127.0.0.1:8001")
+        await _settle()
+        assert not conn.sources and not conn2.sources and h.shared_specs() == []
+    asyncio.run(run())

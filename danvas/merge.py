@@ -223,10 +223,15 @@ class _MergeHost:
 
     def __init__(self, bridge, default_sources=None, default_auth=None, region_width=0):
         self.bridge = bridge
-        # Specs (+ offsets) seeded for a connection that doesn't pass ?sources=.
-        self._default_sources = list(default_sources or [])   # [(spec, (ox,oy))]
-        self._default_auth = dict(default_auth or {})          # label -> password
-        self._region_width = region_width
+        # Canvas-wide ("shared") sources: EVERY connection gets these, on top of
+        # whatever it adds itself via ?sources= / the UI panel. Set by the code API
+        # (Canvas.merge) and the CLI's seeded set. Each is {spec, offset, password}.
+        self._shared_sources = []
+        for spec, offset in list(default_sources or []):
+            _u, _h, label = _parse_source(spec)
+            self._shared_sources.append(
+                {"spec": spec, "offset": offset,
+                 "password": (default_auth or {}).get(label)})
         self._upstreams = {}          # key -> _Upstream
         self._tag_to_upstream = {}    # tag -> _Upstream
         self._conns = {}              # ws -> _Conn
@@ -235,6 +240,34 @@ class _MergeHost:
         # the source's echo of that change isn't fanned back to them (it would fight
         # their live drag). Short-lived; a stale entry just means one missed echo.
         self._input_movers = {}
+
+    # -- canvas-wide sources (the Canvas.merge code API) ---------------------
+    def add_source(self, url, password=None, offset=(0, 0)):
+        """Merge ``url`` for EVERY viewer (now and future). Idempotent by url."""
+        if any(s["spec"] == url for s in self._shared_sources):
+            return
+        src = {"spec": url, "offset": offset, "password": password}
+        self._shared_sources.append(src)
+        if self._loop is not None:  # serving — attach it to everyone live
+            for conn in list(self._conns.values()):
+                self._loop.create_task(self._add_shared_source_for_conn(conn, src))
+
+    def remove_source(self, url):
+        """Un-merge a canvas-wide ``url`` from every viewer."""
+        self._shared_sources = [s for s in self._shared_sources if s["spec"] != url]
+        try:
+            ws_uri, _h, _l = _parse_source(url)
+        except Exception:
+            return
+        if self._loop is None:
+            return
+        for conn in list(self._conns.values()):
+            for key in [k for k in conn.sources if k[0] == ws_uri]:
+                self._release(conn, key)
+                self._emit_sources(conn)
+
+    def shared_specs(self):
+        return [s["spec"] for s in self._shared_sources]
 
     # The owning Bridge supplies the event loop and the send primitives; exposing
     # them as ``self._loop`` / ``self._safe_send`` keeps the ported method bodies
@@ -553,19 +586,18 @@ class _MergeHost:
 
     # -- Bridge hooks (called from Bridge.handle_connection / _on_message) ----
     def on_connect(self, ws, qp):
-        """Register a freshly-connected browser and seed its sources (from the
-        ``?sources=`` query, else the default set). Called after the owning Bridge
-        has replayed its own state, so a hub's own panels arrive first."""
+        """Register a freshly-connected browser and seed its sources: the
+        canvas-wide (``Canvas.merge`` / CLI) set that everyone gets, PLUS any this
+        browser asked for via ``?sources=``. Called after the owning Bridge has
+        replayed its own state, so a hub's own panels arrive first."""
         conn = _Conn(ws)
         self._conns[ws] = conn
+        for src in list(self._shared_sources):
+            self._loop.create_task(self._add_shared_source_for_conn(conn, src))
         raw_sources = qp.get("sources") if qp else None
         if raw_sources:
             for spec in [s for s in raw_sources.split(",") if s]:
                 self._loop.create_task(self._add_source_for_conn(conn, spec))
-        else:
-            for spec, offset in self._default_sources:
-                _u, _h, label = _parse_source(spec)
-                self._loop.create_task(self._add_default_source(conn, spec, offset, label))
 
     def on_disconnect(self, ws):
         """Release everything a departing browser was viewing."""
@@ -617,25 +649,25 @@ class _MergeHost:
                 self.bridge._apply_draw(bare)
                 self.bridge.broadcast({"type": "draw", "diff": bare}, exclude=ws)
 
-    async def _add_default_source(self, conn, spec, offset, label):
-        """Attach a CLI-seeded default source, honouring its ``--auth`` password
-        and region offset (the browser-driven ``_add_source_for_conn`` uses no
-        offset and prompts for passwords instead)."""
+    async def _add_shared_source_for_conn(self, conn, src):
+        """Attach a canvas-wide source ``{spec, offset, password}`` to one browser,
+        authenticating with its supplied password (there's no browser to prompt for
+        a canvas-wide source, so a protected one must carry its ``password=``)."""
         if conn.ws not in self._conns:
             return
         try:
-            ws_uri, http_parts, _label = _parse_source(spec)
+            ws_uri, http_parts, label = _parse_source(src["spec"])
         except Exception:
             return
-        password = self._default_auth.get(label)
         cookie = None
-        if password is not None:
-            cookie = await self._loop.run_in_executor(None, _authenticate, http_parts, password)
+        if src.get("password") is not None:
+            cookie = await self._loop.run_in_executor(
+                None, _authenticate, http_parts, src["password"])
             if not cookie:
                 return
         if conn.ws not in self._conns:
             return
-        up = self._get_or_create_upstream(ws_uri, http_parts, label, cookie, offset)
+        up = self._get_or_create_upstream(ws_uri, http_parts, label, cookie, src["offset"])
         self._attach(conn, up)
         self._emit_sources(conn)
 

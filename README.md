@@ -927,6 +927,18 @@ canvas.serve(port=8000)              # a normal canvas that can ALSO merge other
 canvas.serve(port=8000, merge=False) # opt out (hide the merge panel)
 ```
 
+**Merge from code, too** — the exact twin of the 🧩 panel, so merging is scriptable:
+`canvas.merge("host:8001")` composes another canvas in for **every** viewer (call it
+before `serve()` to pre-compose a set, or from a handler to merge on demand),
+`canvas.unmerge(url)` drops it, and `canvas.merges` reads the set. A
+password-protected source takes its `password=`. So a button can pull in a
+pre-decided canvas:
+
+```python
+@canvas.button("bring in sensors").on_click
+def _(): canvas.merge("http://192.168.1.9:8001")   # appears for everyone, live
+```
+
 The **🧩 Merge** panel lists the composed sources (with a live/offline dot), takes
 a canvas URL to **add** one on the fly, an **eye** toggle to hide/show each source's
 panels (client-side only — the source keeps running untouched), and an **✕** to drop

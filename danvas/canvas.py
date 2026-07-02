@@ -158,6 +158,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # one places any panel inserted inside its `with` block that didn't get an
         # explicit x/y or relative anchor. Empty = panels auto-cascade as before.
         self._layout_stack = []
+        # Canvases merged in via canvas.merge() before serve() enables the merge
+        # host — applied once serving; canvas.merge() after serve goes straight to
+        # the host. See merge() / unmerge() / the merge property.
+        self._pending_merges = []   # [(url, password)]
 
     def background(self, fn, *args, **kwargs):
         """Register ``fn`` to run as a daemon thread when the canvas serves.
@@ -215,6 +219,50 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 AsyncKernel.get().spawn(fn(*args, **kwargs))
             else:
                 spawn(fn, *args, name="danvas-background", **kwargs)
+
+    # -- merging (the code twin of the UI's 🧩 panel) ------------------------
+    def merge(self, url, password=None):
+        """Merge another running canvas into this one, for every viewer.
+
+        The programmatic twin of the UI's 🧩 **add**: the canvas at ``url`` (a
+        ``host:port`` or full URL, same forms the panel accepts) composes its
+        panels in alongside this canvas's own, live — and interactions on a merged
+        panel route back to the canvas that owns it, so computation stays sharded.
+        Call it before :meth:`serve` to pre-compose a set, or from a handler to
+        merge on demand — e.g. a button that pulls in a pre-decided canvas::
+
+            @canvas.button("bring in sensors").on_click
+            def _():
+                canvas.merge("http://192.168.1.9:8001")
+
+        A password-protected source needs its ``password=`` (there's no browser to
+        prompt for a code-merged source). Idempotent per ``url``. Requires
+        ``serve(merge=...)`` left on (the default). Returns ``self``.
+        """
+        if self._bridge._merge is None:
+            self._pending_merges.append((url, password))
+        else:
+            self._bridge._merge.add_source(url, password=password)
+        return self
+
+    def unmerge(self, url):
+        """Remove a canvas merged with :meth:`merge`, for every viewer. The code
+        twin of the panel's **✕**. Returns ``self``."""
+        if self._bridge._merge is None:
+            self._pending_merges = [(u, p) for u, p in self._pending_merges if u != url]
+        else:
+            self._bridge._merge.remove_source(url)
+        return self
+
+    @property
+    def merges(self):
+        """The canvases merged into this one (their URLs), as set by :meth:`merge`.
+
+        Read-only; the per-viewer sources a browser adds through the panel are not
+        included (those are that viewer's own, not canvas-wide)."""
+        if self._bridge._merge is None:
+            return [u for u, _ in self._pending_merges]
+        return self._bridge._merge.shared_specs()
 
     @property
     def components(self):
@@ -2214,6 +2262,12 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         if merge and self._bridge._merge is None:
             from .merge import _MergeHost
             self._bridge._merge = _MergeHost(self._bridge)
+        # Apply any canvas.merge() calls made before serving (a protected source's
+        # password rides along). A no-op when merging is off.
+        if self._bridge._merge is not None and self._pending_merges:
+            for url, pw in self._pending_merges:
+                self._bridge._merge.add_source(url, password=pw)
+            self._pending_merges = []
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
         # — Windows consoles often run cp1252, which can't print "▼"/"▲".

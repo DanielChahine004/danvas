@@ -1,29 +1,36 @@
-"""Canvas-as-hub: any canvas can pull *other* running canvases in from its UI.
+"""Canvas-as-hub: pull *other* running canvases in — from the UI or from code.
 
-Every ``serve()`` is a merge hub by default (``merge=True``): a 🧩 panel appears
-bottom-left where you paste another canvas's URL and its panels compose in
-alongside this one's, live — interactions route back to the canvas that owns them.
+Every ``serve()`` is a merge hub by default (``merge=True``). Two equivalent ways
+to compose another canvas in, both live and for every viewer:
 
-Run two plain canvases in other terminals, e.g.::
+* **UI** — the 🧩 panel (bottom-left): paste a canvas URL to add it.
+* **Code** — ``canvas.merge(url)`` (its twin), e.g. from a button below, or before
+  ``serve()`` to pre-compose; ``canvas.unmerge(url)`` drops it; ``canvas.merges``
+  reads the set. A password-protected source takes ``password=``.
 
-    python examples/hello_world.py            # on :8000
-    python examples/robot_control.py          # served on another port
-
-then run this hub and, in its 🧩 panel, add ``127.0.0.1:8000`` (and the other).
-Their panels appear next to this hub's own label. An *empty* hub works too — just
-delete the label below and you have a neutral aggregator you can serve and merge
-into on the fly (no restart).
+Merged panels compose alongside this hub's own; interactions on them route back to
+the canvas that owns them. Run another canvas first, e.g.
+``python examples/hello_world.py`` (on :8000), then run this and either click the
+button or add its URL in the 🧩 panel.
 """
 import danvas
 
 canvas = danvas.Canvas()
 canvas.label(
     "hint",
-    "Merge hub — click the 🧩 panel (bottom-left) and add another canvas's URL "
-    "(e.g. 127.0.0.1:8000). Its panels appear here; drag/click them and it drives "
-    "the owning canvas.",
-    x=40, y=40, w=460, h="auto",
+    "Merge hub — click **Bring in :8000** below (or use the 🧩 panel) to compose "
+    "another running canvas in. Both do the same thing, for every viewer.",
+    x=40, y=40, w=480, h="auto",
 )
 
-# merge=True is the default; shown here only to be explicit.
-canvas.serve(port=8080, merge=True)
+pull = canvas.button("pull", text="Bring in :8000", x=40, y=170, w=200)
+
+
+@pull.on_click
+def _():
+    # the code twin of the 🧩 panel's "add" — merge a pre-decided canvas by URL
+    canvas.merge("127.0.0.1:8000")
+
+
+# You could also pre-compose before serving:  canvas.merge("127.0.0.1:8000")
+canvas.serve(port=8080)
