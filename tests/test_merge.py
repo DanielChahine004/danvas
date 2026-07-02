@@ -481,6 +481,37 @@ def test_set_offset_shifts_panels_and_leaves_source_untouched():
     asyncio.run(run())
 
 
+def test_source_ink_is_offset_down_unoffset_up_and_shifts_live():
+    async def run():
+        b, h = _host()
+        ws, conn = _browser(b, h)
+        up = h._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (100, 0))
+        _park(h, up)
+        up.ws = FakeUpstreamWS()
+        h._attach(conn, up)
+        nsid = f"{up.tag}:d1"
+        # source ink at x=5 -> relayed at x=105 (offset applied to ink too)
+        h._ingest(up, json.dumps({"type": "draw", "diff": {
+            "added": {"d1": {"id": "d1", "x": 5, "y": 5, "props": {}}}, "updated": {}, "removed": {}}}))
+        await _settle()
+        draws = [m for m in ws.sent if m.get("type") == "draw"]
+        assert draws[-1]["diff"]["added"][nsid]["x"] == 105
+        assert up.drawings[nsid]["x"] == 105
+        # editing that stroke from the merged view routes back un-offset (105 -> 5)
+        await h.route(ws, json.dumps({"type": "draw", "diff": {"updated": {
+            nsid: [{"id": nsid, "x": 105, "y": 5}, {"id": nsid, "x": 120, "y": 5}]}}}))
+        await _settle()
+        assert up.ws.sent[-1]["diff"]["updated"]["d1"][1]["x"] == 20   # 120 - 100
+        # moving the origin shifts the cached ink and re-emits it
+        ws.sent.clear()
+        h.set_offset(up.ws_uri, (200, 0))
+        await _settle()
+        assert up.drawings[nsid]["x"] == 205                          # 105 + (200-100)
+        redraw = [m for m in ws.sent if m.get("type") == "draw"]
+        assert redraw and redraw[-1]["diff"]["added"][nsid]["x"] == 205
+    asyncio.run(run())
+
+
 def test_canvas_merge_at_sets_offset():
     c = danvas.Canvas()
     c.merge("127.0.0.1:8001", at=(600, 40))

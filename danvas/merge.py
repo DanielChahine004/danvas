@@ -303,6 +303,11 @@ class _MergeHost:
                     payload["x"] += dx
                 if isinstance(payload.get("y"), (int, float)):
                     payload["y"] += dy
+            for rec in up.drawings.values():
+                if isinstance(rec.get("x"), (int, float)):
+                    rec["x"] += dx
+                if isinstance(rec.get("y"), (int, float)):
+                    rec["y"] += dy
             if self._loop is None:
                 continue
             for conn in self._interested(up):
@@ -311,6 +316,10 @@ class _MergeHost:
                         self._loop.create_task(self._safe_send(
                             conn.ws, {"type": "update", "id": nsid,
                                       "payload": {"x": reg["x"], "y": reg["y"]}}))
+                if up.drawings:   # re-place the source's ink at the new origin
+                    self._loop.create_task(self._safe_send(conn.ws, {
+                        "type": "draw", "diff": {"added": dict(up.drawings),
+                                                 "updated": {}, "removed": {}}}))
                 self._emit_sources(conn)   # refresh the roster's offset
 
     def offset_of(self, url):
@@ -398,6 +407,33 @@ class _MergeHost:
             store[rid] = pair[1] if isinstance(pair, (list, tuple)) and len(pair) == 2 else pair
         for rid in (diff.get("removed") or {}):
             store.pop(rid, None)
+
+    @staticmethod
+    def _offset_draw_diff(diff, dx, dy):
+        """Shift every record's x/y in a draw diff by ``(dx, dy)`` — used to apply a
+        source's origin offset to its ink coming down, and undo it going back up."""
+        def shift(rec):
+            if not isinstance(rec, dict):
+                return rec
+            r = dict(rec)
+            if isinstance(r.get("x"), (int, float)):
+                r["x"] = r["x"] + dx
+            if isinstance(r.get("y"), (int, float)):
+                r["y"] = r["y"] + dy
+            return r
+        out = {}
+        for bucket in ("added", "updated", "removed"):
+            b = diff.get(bucket)
+            if not isinstance(b, dict):
+                continue
+            nb = {}
+            for rid, val in b.items():
+                if isinstance(val, (list, tuple)) and len(val) == 2:
+                    nb[rid] = [shift(val[0]), shift(val[1])]
+                else:
+                    nb[rid] = shift(val)
+            out[bucket] = nb
+        return out
 
     # -- inbound from a source (downstream) ----------------------------------
     async def _run_upstream(self, up):
@@ -494,6 +530,8 @@ class _MergeHost:
             # for replay, and fan it out to the browsers viewing this source.
             ns_diff = self._remap_draw_diff(msg.get("diff") or {},
                                             lambda i: self._ns(up.tag, i))
+            if ox or oy:  # translate the source's ink with its panels
+                ns_diff = self._offset_draw_diff(ns_diff, ox, oy)
             self._fold_draw(up.drawings, ns_diff)
             self._fanout_upstream(up, {"type": "draw", "diff": ns_diff})
 
@@ -699,6 +737,9 @@ class _MergeHost:
                     bare[bucket][rid] = val
         for up, sd in per_source.items():
             stripped = self._remap_draw_diff(sd, lambda i: self._strip(i)[1])
+            ox, oy = up.offset
+            if ox or oy:   # merged coords -> the source's own coords
+                stripped = self._offset_draw_diff(stripped, -ox, -oy)
             self._loop.create_task(up.send({"type": "draw", "diff": stripped}))
         if any(bare[bucket] for bucket in ("added", "updated", "removed")):
             viewer = self.bridge._viewers.get(ws) or {}
