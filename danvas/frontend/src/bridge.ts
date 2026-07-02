@@ -9,14 +9,14 @@
 // presence, and the arrow/shape/order/container_sync/reflow/draw/snapshot/
 // image/cursor/graveyard/chat/view-camera handlers below.
 import { generateKeyBetween } from 'fractional-indexing'
-import { effect } from 'alien-signals'
+import { effect, signal } from 'alien-signals'
 import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
 import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera } from './engine/camera'
 import { openContextMenuAt } from './engine/contextmenu'
 import { toImage } from './engine/export'
 import { measuredTextSize } from './react/measure'
-import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType } from './engine/types'
+import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType, WriteSignal } from './engine/types'
 import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
 
 // --- id helpers --------------------------------------------------------------
@@ -1460,6 +1460,34 @@ function setMergeSources(list: any[]): void {
   mergeState = { ...mergeState, sources: list, prompts: mergeState.prompts.filter((p) => !uris.has(p.uri)) }
   emitMerge()
   syncMergeUrl(list)
+  // Drop hidden flags for sources that are gone, so a re-added source starts shown.
+  const sids = new Set(list.map((s) => s.sid))
+  const cur = hiddenSourceTags()
+  const pruned = new Set([...cur].filter((t) => sids.has(t)))
+  if (pruned.size !== cur.size) hiddenSourceTags(pruned)
+}
+
+// Per-source visibility in the merged view is PURELY CLIENT-SIDE: hiding a source
+// is a render filter only, so its panels stay mounted (a table's sort, a custom
+// panel's local React state, etc. survive a hide/show) and keep updating live, and
+// the merge server is never told — hide never reaches, or affects, the source
+// canvas. The set holds hidden source tags (each source's `sid`); PanelLayer /
+// DrawingLayer consult it. A panel id is `s<N>:<compId>`, so its tag is the part
+// before the first colon (a plain-canvas id is a bare uuid → never matches).
+export const hiddenSourceTags = signal(new Set<string>()) as WriteSignal<Set<string>>
+export function setSourceHidden(sid: string, hidden: boolean): void {
+  const next = new Set(hiddenSourceTags())
+  if (hidden) next.add(sid)
+  else next.delete(sid)
+  hiddenSourceTags(next)
+  emitMerge() // refresh the panel's eye icon
+}
+export function isSourceTagHidden(tag: string): boolean {
+  return hiddenSourceTags().has(tag)
+}
+export function tagOfComponentId(compId: string): string {
+  const i = compId.indexOf(':')
+  return i < 0 ? '' : compId.slice(0, i)
 }
 
 // Keep the page URL's ?sources= in step with the live composed set, so a REFRESH
@@ -1498,9 +1526,6 @@ export function mergeAuth(uri: string, password: string): void {
 }
 export function mergeRemove(sid: string): void {
   sendRaw({ type: 'merge_remove', sid })
-}
-export function mergeToggle(sid: string, hidden: boolean): void {
-  sendRaw({ type: 'merge_toggle', sid, hidden })
 }
 
 // === auth (sign-out on a password-protected canvas) =========================

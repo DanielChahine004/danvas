@@ -202,7 +202,9 @@ class _Conn:
     def __init__(self, ws):
         self.ws = ws
         self.sources = set()   # upstream.key it currently sees
-        self.hidden = set()    # upstream.key eye-toggled off (kept, not rendered)
+        # Per-source hide is purely client-side (a render filter in the browser),
+        # so the server keeps every source's frames flowing and holds no hidden
+        # state — hiding a source in the merged view never reaches the source.
 
 
 class MergeBridge(Bridge):
@@ -418,9 +420,10 @@ class MergeBridge(Bridge):
 
     # -- fan-out -------------------------------------------------------------
     def _interested(self, up):
-        """The browser connections currently rendering this upstream."""
-        return [c for c in self._conns.values()
-                if up.key in c.sources and up.key not in c.hidden]
+        """The browser connections subscribed to this upstream. (A client that
+        has the source hidden still receives its frames — hide is client-side —
+        so a hidden panel stays live and current for when it's shown again.)"""
+        return [c for c in self._conns.values() if up.key in c.sources]
 
     def _fanout_upstream(self, up, msg, exclude=None):
         for conn in self._interested(up):
@@ -469,7 +472,6 @@ class MergeBridge(Bridge):
         if key not in conn.sources:
             return
         conn.sources.discard(key)
-        conn.hidden.discard(key)
         up = self._upstreams.get(key)
         if up is None:
             return
@@ -489,7 +491,7 @@ class MergeBridge(Bridge):
             if up is None:
                 continue
             items.append({"sid": up.tag, "uri": up.ws_uri, "label": up.label,
-                          "status": up.status, "hidden": key in conn.hidden})
+                          "status": up.status})
         return {"type": "merge_sources", "sources": items}
 
     def _emit_sources(self, conn):
@@ -685,18 +687,6 @@ class MergeBridge(Bridge):
             # is the merged view's own annotation layer, shared among merge viewers.
             self._handle_merge_draw(conn, msg.get("diff") or {})
             return
-        if kind == "merge_toggle":
-            up = self._tag_to_upstream.get(msg.get("sid"))
-            if up is not None and up.key in conn.sources:
-                if msg.get("hidden"):
-                    conn.hidden.add(up.key)
-                    self._send_source_teardown(conn.ws, up)
-                else:
-                    conn.hidden.discard(up.key)
-                    for frame in up.cached_frames():
-                        await self._safe_send(conn.ws, frame)
-                self._emit_sources(conn)
-            return
         # -- interaction: forward to the owning source --
         cid = msg.get("id")
         if not isinstance(cid, str):
@@ -741,8 +731,7 @@ class MergeBridge(Bridge):
                 up.updates.setdefault(cid, {}).update(geom)
                 fan = {"type": "update", "id": cid, "payload": geom}
                 for other in list(self._conns.values()):
-                    if (other is not conn and up.key in other.sources
-                            and up.key not in other.hidden):
+                    if other is not conn and up.key in other.sources:
                         self._loop.create_task(self._safe_send(other.ws, fan))
         elif kind == "input":
             self._input_movers[cid] = (conn, time.monotonic() + 1.0)

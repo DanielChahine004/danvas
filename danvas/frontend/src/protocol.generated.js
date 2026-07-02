@@ -16,6 +16,6 @@ export const MESSAGE_TYPES_OUT = Object.freeze(["register", "arrow", "shape", "s
 export const MESSAGE_TYPES_IN = Object.freeze(["heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout", "graveyard", "restore", "draw", "request", "panel_error", "snapshot", "image"])
 
 export const MERGE_MESSAGE_TYPES_OUT = Object.freeze(["merge_sources", "merge_auth_required", "merge_auth_failed"])
-export const MERGE_MESSAGE_TYPES_IN = Object.freeze(["merge_add", "merge_auth", "merge_remove", "merge_toggle"])
+export const MERGE_MESSAGE_TYPES_IN = Object.freeze(["merge_add", "merge_auth", "merge_remove"])
 
 export const IFRAME_MSG = Object.freeze({"SEND": "__danvas", "BINARY": "__danvas_binary", "REQUEST": "__danvas_request", "RESPONSE": "__danvas_response", "SETVIEW": "__danvas_setview", "VIEWPORT": "__danvas_viewport", "CHAT": "__danvas_chat", "CHAT_REPLY": "__danvas_chat_reply", "CHAT_MSG": "__danvas_chat_msg", "CHAT_IDENTITY": "__danvas_chat_identity", "CAMERA": "__danvas_camera", "MIC": "__danvas_mic", "ERROR": "__danvas_error", "WHEEL": "__danvas_wheel", "PAN": "__danvas_pan", "MENU": "__danvas_menu", "KEY": "__danvas_key", "FIT": "__danvas_fit", "THEME": "__danvas_theme"})

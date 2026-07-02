@@ -22,7 +22,8 @@ import {
   mergeAdd,
   mergeAuth,
   mergeRemove,
-  mergeToggle,
+  setSourceHidden,
+  isSourceTagHidden,
 } from '../bridge'
 
 // --- peer cursors ------------------------------------------------------------
@@ -453,14 +454,17 @@ export function MergeHostPanel() {
           {state.sources.length === 0 && state.prompts.length === 0 ? (
             <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ui-muted)', fontStyle: 'italic' }}>No sources yet — add a canvas URL below.</div>
           ) : null}
-          {state.sources.map((s: any) => (
-            <div key={s.sid} style={mergeRowStyle}>
-              <span title={s.status} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: s.status === 'live' ? '#22c55e' : '#9ca3af' }} />
-              <span style={{ flex: 1, fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: s.hidden ? 0.5 : 1 }}>{s.label}</span>
-              <button title={s.hidden ? 'Show' : 'Hide'} onClick={() => mergeToggle(s.sid, !s.hidden)} style={mergeIconBtnStyle}>{s.hidden ? '🙈' : '👁'}</button>
-              <button title="Remove" onClick={() => mergeRemove(s.sid)} style={mergeIconBtnStyle}>✕</button>
-            </div>
-          ))}
+          {state.sources.map((s: any) => {
+            const hidden = isSourceTagHidden(s.sid)
+            return (
+              <div key={s.sid} style={mergeRowStyle}>
+                <span title={s.status} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: s.status === 'live' ? '#22c55e' : '#9ca3af' }} />
+                <span style={{ flex: 1, fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: hidden ? 0.5 : 1 }}>{s.label}</span>
+                <button title={hidden ? 'Show' : 'Hide (this view only)'} onClick={() => setSourceHidden(s.sid, !hidden)} style={mergeIconBtnStyle}>{hidden ? '🙈' : '👁'}</button>
+                <button title="Remove" onClick={() => mergeRemove(s.sid)} style={mergeIconBtnStyle}>✕</button>
+              </div>
+            )
+          })}
           {state.prompts.map((p: any) => (
             <MergeAuthPrompt key={p.uri} prompt={p} />
           ))}

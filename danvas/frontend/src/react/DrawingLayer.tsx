@@ -4,6 +4,7 @@
 // Arrows reroute reactively as their bound endpoints move. Display-only in v1
 // (pointer-transparent) — user-drawn ink + drawing tools are a later milestone.
 import { store } from '../engine/store'
+import { isSourceTagHidden, tagOfComponentId } from '../bridge'
 import { useValue } from './EngineContext'
 import { freehandStrokePath } from './freehand'
 import { colorOf, DRAW_FONT, labelEllipse, alignCss, type Align } from './palette'
@@ -137,7 +138,11 @@ function Drawn({ id }: { id: string }) {
   const rec = useValue('draw:' + id, () => store.get(id), [id])
   // dimmed while the eraser has it marked (deletes on release)
   const erasing = useValue('erasing:' + id, () => erasingIds().has(id), [id])
-  if (!rec) return null
+  // Merge eye toggle: a hidden source's ink is dropped from render (it has no
+  // local state, so unmounting is fine — it re-renders from the unchanged store
+  // record on show). Bare-uuid ids on a plain canvas → empty tag → never hidden.
+  const srcHidden = useValue('draw-src-hidden:' + id, () => isSourceTagHidden(tagOfComponentId(id)), [id])
+  if (!rec || srcHidden) return null
   let el: any = null
   if (rec.typeName === 'drawing') el = <DrawingShape rec={rec} />
   else if (rec.typeName === 'arrow') el = <ArrowShape rec={rec} />

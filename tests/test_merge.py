@@ -194,31 +194,21 @@ def test_arrow_endpoints_are_namespaced():
     asyncio.run(run())
 
 
-# -- eye toggle: hide removes, show replays -----------------------------------
+# -- eye toggle is CLIENT-SIDE: the server keeps flowing frames to a hidden src --
 
-def test_eye_toggle_hides_and_reshows_a_source():
-    async def run():
-        b = MergeBridge()
-        b._loop = asyncio.get_running_loop()
-        ws, conn = _browser(b)
-        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
-        _park(b, up)
-        b._attach(conn, up)
-        b._ingest(up, json.dumps({"type": "register", "id": "p", "component": "Slider", "props": {}}))
-        await _settle()
-        ws.sent.clear()
-        await b._route_from_browser(conn, json.dumps(
-            {"type": "merge_toggle", "sid": up.tag, "hidden": True}))
-        await _settle()                             # teardown removes are scheduled
-        assert any(m["type"] == "remove" and m["id"] == f"{up.tag}:p" for m in ws.sent)
-        assert up.key in conn.hidden
-        ws.sent.clear()
-        await b._route_from_browser(conn, json.dumps(
-            {"type": "merge_toggle", "sid": up.tag, "hidden": False}))
-        await _settle()
-        assert any(m["type"] == "register" and m["id"] == f"{up.tag}:p" for m in ws.sent)
-        assert up.key not in conn.hidden
-    asyncio.run(run())
+def test_hide_is_client_side_server_keeps_sending():
+    # There is no server-side hide: the merge server has no merge_toggle handler
+    # and no per-conn hidden state, so a source's frames keep flowing even while a
+    # browser hides it locally (so a hidden panel stays live for when it's shown).
+    assert "merge_toggle" not in "".join(
+        # no handler + no _Conn.hidden attribute
+        [str(getattr(_Conn(object()), "__dict__", {}))]
+    )
+    b = MergeBridge()
+    conn = _Conn(object())
+    assert not hasattr(conn, "hidden")
+    import inspect as _inspect
+    assert "merge_toggle" not in _inspect.getsource(MergeBridge._route_from_browser)
 
 
 # -- changes made THROUGH the merged view stay in the cache (hide/show) --------
@@ -368,25 +358,6 @@ def test_merge_native_ink_is_shared_among_viewers_not_sent_upstream():
         a_draws = [m for m in wsA.sent if m.get("type") == "draw"]
         assert b_draws and "dX" in b_draws[-1]["diff"]["added"]  # relayed to the peer
         assert not a_draws                              # not echoed to the drawer
-    asyncio.run(run())
-
-
-def test_hiding_a_source_tears_down_its_ink():
-    async def run():
-        b = MergeBridge()
-        b._loop = asyncio.get_running_loop()
-        ws, conn = _browser(b)
-        up = b._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
-        _park(b, up)
-        b._attach(conn, up)
-        b._ingest(up, json.dumps({"type": "draw", "diff": {
-            "added": {"d1": {"id": "d1", "props": {}}}, "updated": {}, "removed": {}}}))
-        await _settle()
-        ws.sent.clear()
-        await b._route_from_browser(conn, json.dumps({"type": "merge_toggle", "sid": up.tag, "hidden": True}))
-        await _settle()
-        removed = [m for m in ws.sent if m.get("type") == "draw" and m["diff"]["removed"]]
-        assert removed and f"{up.tag}:d1" in removed[-1]["diff"]["removed"]
     asyncio.run(run())
 
 

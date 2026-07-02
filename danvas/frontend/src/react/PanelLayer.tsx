@@ -16,7 +16,7 @@ import { setContainer } from '../engine/editor'
 import { attachCameraInput } from '../engine/input'
 import { attachInteraction } from '../engine/interaction'
 import { exportTargets } from '../engine/export'
-import { setupCursorReporting } from '../bridge'
+import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentId } from '../bridge'
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
 import { SelectionOverlay } from './SelectionOverlay'
@@ -51,6 +51,11 @@ function Panel({ id }: { id: string }) {
   // A screenshot force-mounts its target panels even if they're culled, so they
   // exist in the DOM to be captured.
   const exportSet = useValue('export-targets', () => exportTargets(), [])
+  // Merge eye toggle: a panel from a hidden source is display:none'd but STAYS
+  // mounted, so its local React state (a table's sort, a custom panel's useState)
+  // survives a hide/show and it keeps updating live. On a plain canvas the id is a
+  // bare uuid → empty tag → never hidden, so this is inert off a merge view.
+  const srcHidden = useValue('src-hidden:' + id, () => isSourceTagHidden(tagOfComponentId(componentIdOf(id))), [id])
   if (!shape) return null
   const { x, y, rotation, opacity, props } = shape
   const show = (exportSet ? exportSet.has(id) : false) || visible
@@ -77,6 +82,7 @@ function Panel({ id }: { id: string }) {
         // unaffected; rotated panels now spin about their middle.
         transformOrigin: 'center',
         opacity,
+        display: srcHidden ? 'none' : undefined,
         pointerEvents: ghost ? 'none' : undefined,
         // the UI inspector floats above the drawing SVG (a positive z-index beats
         // the later-in-DOM, z-auto DrawingLayer in this stacking context).
