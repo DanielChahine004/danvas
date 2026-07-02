@@ -238,24 +238,33 @@ class _FactoryMixin:
         """Insert a :class:`~danvas.Plot`. See :meth:`insert` for ``place``."""
         return self._make(Plot, name=name, label=label, **place)
 
-    def live_plot(self, name="liveplot", **kw):
-        """Insert a :class:`~danvas.LivePlot`.
+    def live_plot(self, name="liveplot", traces=None, max_points=300,
+                  mode="lines", layout=None, smoothing=0.0, label=None,
+                  color=None, **place: Unpack[Place]):
+        """Insert a :class:`~danvas.LivePlot`. See :meth:`insert` for ``place``.
 
-        Constructor kwargs (``traces``, ``max_points``, ``mode``, ``layout``,
-        ``smoothing``, ``w``, ``h``, ``label``) and :meth:`insert` placement
-        options both go in ``kw``; they don't overlap. ``traces`` only fixes the
-        legend order — pushing an unseen key adds a trace on the fly.
+        ``traces`` only fixes the legend order — pushing an unseen key adds a
+        trace on the fly. ``smoothing`` (0–1) is an EMA over each trace;
+        ``max_points`` caps the rolling window per trace.
         """
-        return self._make(LivePlot, name=name, **kw)
+        return self._make(LivePlot, name=name, traces=traces,
+                          max_points=max_points, mode=mode, layout=layout,
+                          smoothing=smoothing, label=label, color=color,
+                          **place)
 
-    def histogram(self, name="histogram", **kw):
+    def histogram(self, name="histogram", bins=30, mode="heatmap",
+                  value_range=None, max_steps=200, label=None, color=None,
+                  **place: Unpack[Place]):
         """Insert a :class:`~danvas.Histogram` — a distribution-over-time panel.
+        See :meth:`insert` for ``place``.
 
-        Constructor kwargs (``bins``, ``mode``, ``value_range``, ``max_steps``,
-        ``label``, ``w``, ``h``) and :meth:`insert` placement options both go in
-        ``kw``. Feed it with ``panel.add(values, step)``; needs ``plotly``.
+        Feed it with ``panel.add(values, step)``; needs ``plotly``. ``bins``
+        sets the resolution, ``value_range`` pins the bin edges, ``max_steps``
+        caps the rolling history, and ``mode`` is ``"heatmap"`` or ``"overlay"``.
         """
-        return self._make(Histogram, name=name, **kw)
+        return self._make(Histogram, name=name, bins=bins, mode=mode,
+                          value_range=value_range, max_steps=max_steps,
+                          label=label, color=color, **place)
 
     def inspector(self, name="inspector", refresh=1.0, source="components",
                   namespace=None, label=None, **place: Unpack[Place]):

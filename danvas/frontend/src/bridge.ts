@@ -4,10 +4,10 @@
 // board library. It invents no protocol — every frame matches danvas's existing
 // wire contract (verified against captured frames).
 //
-// M1 scope: connection + welcome/register/update/remove + the live data/style
-// channels + input/request/binary + shared assets + presence. Later milestones
-// fill the stubbed handlers (arrow/shape/order/container_sync/reflow/draw/
-// snapshot/image/cursor/graveyard/chat/view-camera).
+// Every message kind is handled here: connection + welcome/register/update/
+// remove, the live data/style channels, input/request/binary, shared assets,
+// presence, and the arrow/shape/order/container_sync/reflow/draw/snapshot/
+// image/cursor/graveyard/chat/view-camera handlers below.
 import { generateKeyBetween } from 'fractional-indexing'
 import { effect } from 'alien-signals'
 import { store } from './engine/store'
@@ -54,8 +54,9 @@ function nextIndex(): string {
 
 // --- auto-placement flow (port of bridge.js nextPosition) --------------------
 // Panels that arrive without x/y flow left-to-right, top-to-bottom, packed by
-// each panel's real size (+ a gap) so they never overlap. The full masonry
-// re-pack (content-fit driven) lands in M2; M1 just needs a sane first slot.
+// each panel's real size (+ a gap) so they never overlap. nextPosition gives a
+// sane first slot; the masonry re-pack below (relayoutFlow) settles the set
+// once content-fit sizes land.
 const FLOW_GAP = 24
 const FLOW_X0 = 80
 const FLOW_Y0 = 80
@@ -1070,8 +1071,9 @@ function clearManaged(): void {
 
 // === content-fit (h="auto" / w="auto") =======================================
 // Native ReactHost measures its content and calls this; resize the record to fit
-// and report the geometry to Python (same read-back path as a user resize). The
-// reflow/repack hooks (settleArmedReflows / autoRepackForPanel) arrive in M2.
+// and report the geometry to Python (same read-back path as a user resize),
+// then re-pack whatever layout the panel belongs to (flow / refit group /
+// container tree).
 export function fitNative(componentId: string, hostEl: HTMLElement, fit: { h?: number; w?: number }): void {
   if (!hostEl || !fit) return
   const shapeId = createShapeId(componentId)

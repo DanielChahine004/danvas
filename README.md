@@ -81,7 +81,8 @@ then [how it works](#how-it-works).
 > a blocking handler (`time.sleep`, an HTTP call, slow compute) never freezes
 > rendering or live `update()`s, and handlers run **in order**. That thread is
 > shared, so a genuinely slow handler delays other panels' handlers until it
-> returns — mark it [`threaded=True`](#receiving-input) to move it off.
+> returns — mark it [`threaded=True`](#receiving-input) to move it off, or
+> write it `async def` (it then runs on a shared asyncio loop).
 
 # The canvas
 
@@ -325,6 +326,15 @@ Gate permissions on `role` only. On an **upload** the attribution fields are
 `None` unless the uploader is still connected (the file arrives over HTTP, matched
 to the live roster by id) — read them with `.get(...)` and a fallback.
 
+The role rules are **enforced server-side, not just in the UI**: a panel's live
+updates and media frames are only sent to viewers whose role may see it, a
+`canvas.request` reply goes only to the socket that asked, and a hand-crafted
+`input`/`request`/binary frame for a panel that is role-hidden, `locked`,
+`operable=False`, or `lock_for`-locked for that viewer is dropped before any
+handler runs. Your `on_*` handlers therefore only ever fire for viewers the
+panel is live for — `role` checks inside a handler are for *app-level* rules
+(who may do what), not for re-verifying panel access.
+
 **Action routing + field validation.** `@panel.on("name")` dispatches by the
 payload's routing field, so a panel with several actions reads as one named
 handler each instead of an `if msg["action"] == …` ladder (set the field with
@@ -338,9 +348,9 @@ def _(msg):                        # msg["stock"]/["price"] are ints here
     inventory[msg["item"]] = {"stock": msg["stock"], "price": msg["price"]}
 ```
 
-**Handler threading — three modes.** Handlers run on one shared dispatch thread by
-default (off the event loop, so the UI never freezes — but a slow one holds up
-those queued behind it). Two flags move a handler off it:
+**Handler threading — three modes, plus `async def`.** Handlers run on one shared
+dispatch thread by default (off the event loop, so the UI never freezes — but a
+slow one holds up those queued behind it). Two flags move a handler off it:
 
 | Flag | Thread model | Right for |
 |---|---|---|
@@ -363,6 +373,21 @@ serialised on its own thread. `queue=` (only with `dedicated`) is `"fifo"` (run
 all in order) or `"latest"` (keep only the newest pending call). The two are
 mutually exclusive. *(This `queue=` is handler-side dispatch backpressure;
 `insert(panel, queue=…)` is the separate browser-delivery backpressure above.)*
+
+**Any handler may be `async def`** — every `on_*` registration accepts a
+coroutine function. It runs on a shared asyncio loop (its own daemon thread, not
+the server's), so an awaiting handler never blocks the dispatch thread and many
+can be in flight at once — the natural fit for `httpx`/`aiohttp`/asyncio-native
+libraries. `@panel.on_request` coroutines reply when they complete; with
+`dedicated=True` the coroutine is awaited to completion on that handler's own
+thread, so it stays serialised.
+
+```python
+@fetch.on_click
+async def _():
+    async with httpx.AsyncClient() as client:
+        table.update((await client.get(url)).json())
+```
 
 **Adapt to who connects.** `canvas.on_connect(fn)` runs `fn(viewer)` once per
 join (e.g. a mobile layout via per-viewer `client_id=`); `on_disconnect(fn)` is
@@ -612,6 +637,13 @@ click-to-select cover so the widget is live immediately — and the panel become
 invisible to selection (no click, no marquee). `frame=False` strips card chrome
 (background/border/shadow/padding/label) so content sits on the canvas.
 
+`locked` / `operable` / `lock_for` are enforced **on the server** for input:
+a forged `input`/`request`/binary frame that bypasses the browser UI is dropped
+too, so locking a control really locks it — including per-role/per-client
+overlays set with `set_layout(roles=…, locked=True)`. (Move/resize gating stays
+UI-side: the same `layout` message also carries the machine-generated auto-flow
+and content-fit reports, which must keep flowing for pinned panels.)
+
 **`decorative=True`** is the one-liner for a purely visual overlay: it composes
 `grabbable=False + operable=False + frame=False`, so the panel has no chrome, never
 selects, and is **click-through** to whatever sits beneath it (a slider, the
@@ -711,7 +743,7 @@ Pass a `view` dict to `serve` (all keys optional), and change it live with
 | `min_zoom`, `max_zoom` | clamp zoom range |
 | `ui` | `False` hides the editor chrome **and** the Inspector button |
 | `grid` | `True` shows the background grid |
-| `read_only` | `True` blocks freehand drawing |
+| `read_only` | `True` blocks freehand drawing (enforced server-side too) |
 | `navigation` | `'free'` (default), `'scroll_y'`, `'scroll_x'`, or a `(mode, zoom)` tuple |
 
 ```python
@@ -763,7 +795,10 @@ canvas.serve(port=8000, host="0.0.0.0",
              passwords={"admin": "secret-admin-pw", "viewer": "public-view-pw"})
 ```
 
-Roles can be created **after** the server starts (the `passwords=` dict is read
+Scoping is enforced on the wire in both directions — a role-restricted panel's
+updates never reach (and forged input never arrives from) a viewer outside its
+roles; see [the viewer dict](#the-viewer-dict). Roles can be created **after**
+the server starts (the `passwords=` dict is read
 live on each login); reveal a panel to a runtime role with `panel.add_role(name)`
 (`remove_role` to hide; `panel.roles` reads the allowlist). When a user drags a
 panel, the change writes back to whichever layer their layout came from. See
@@ -847,7 +882,9 @@ version for arbitrary assets.
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving
 process only*. Prefer this over a hand-started thread when using `hot_reload`, so
-a single-owner resource isn't double-grabbed across a restart.
+a single-owner resource isn't double-grabbed across a restart. An `async def`
+worker runs as a task on the same shared asyncio loop the async handlers use —
+an `await asyncio.sleep(...)`-paced producer costs no thread of its own.
 
 ```python
 feed = canvas.video("webcam")
@@ -1036,8 +1073,10 @@ replay and pushed live to matching viewers via `send_to_role` / `send_to_client`
 
 **Threading.** An asyncio event loop owns the socket; your handlers run on a single
 ordered worker thread, so a slow handler never freezes rendering (offload
-genuinely slow work with `threaded=True`). High-rate media (`VideoFeed`,
-`AudioFeed`, `push_binary`) skips JSON on a binary frame.
+genuinely slow work with `threaded=True`, or write the handler `async def` — it
+then runs on a second, handler-only asyncio loop, kept separate from the
+server's so an ill-behaved handler still can't stall the wire). High-rate media
+(`VideoFeed`, `AudioFeed`, `push_binary`) skips JSON on a binary frame.
 
 **Auth & sharing.** Roles come from the login password, carried in a signed
 session cookie (no server-side store), so a viewer stays logged in across
