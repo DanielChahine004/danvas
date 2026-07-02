@@ -91,7 +91,7 @@ MESSAGE_TYPES_IN = (
 # emit sites + the frontend merge handler (outbound). Inbound = browser -> merge
 # server; outbound = merge server -> browser.
 MERGE_MESSAGE_TYPES_IN = (
-    "merge_add", "merge_auth", "merge_remove",
+    "merge_add", "merge_auth", "merge_remove", "merge_offset",
 )
 MERGE_MESSAGE_TYPES_OUT = (
     "merge_sources", "merge_auth_required", "merge_auth_failed",

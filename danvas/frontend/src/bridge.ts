@@ -1438,6 +1438,7 @@ let mergeState = {
   selfUrl: null as string | null, // this canvas's own reachable URL (a source)
   hidden: [] as string[], // sids hidden in this view (mirrors hiddenSourceTags so
   // the merge panel re-renders on toggle — the signal alone drives PanelLayer)
+  moveSid: null as string | null, // the source whose origin dot is being positioned
 }
 const mergeListeners = new Set<(s: any) => void>()
 function emitMerge(): void {
@@ -1459,11 +1460,13 @@ function setMergeLaunch(server: string | null, selfUrl: string | null): void {
 function setMergeSources(list: any[]): void {
   // A source that authenticated now appears here → drop its pending password prompt.
   const uris = new Set(list.map((s) => s.uri))
-  mergeState = { ...mergeState, sources: list, prompts: mergeState.prompts.filter((p) => !uris.has(p.uri)) }
+  // Stop positioning a source that's no longer present.
+  const sids = new Set(list.map((s) => s.sid))
+  const moveSid = mergeState.moveSid && sids.has(mergeState.moveSid) ? mergeState.moveSid : null
+  mergeState = { ...mergeState, sources: list, moveSid, prompts: mergeState.prompts.filter((p) => !uris.has(p.uri)) }
   emitMerge()
   syncMergeUrl(list)
   // Drop hidden flags for sources that are gone, so a re-added source starts shown.
-  const sids = new Set(list.map((s) => s.sid))
   const cur = hiddenSourceTags()
   const pruned = new Set([...cur].filter((t) => sids.has(t)))
   if (pruned.size !== cur.size) {
@@ -1535,6 +1538,16 @@ export function mergeAuth(uri: string, password: string): void {
 }
 export function mergeRemove(sid: string): void {
   sendRaw({ type: 'merge_remove', sid })
+}
+// Origin positioning: setMergeMove picks which source's origin dot is draggable
+// (null = none); mergeOffset sends its new origin (canvas coords) to the hub, which
+// translates that source's whole block for every viewer (the source is untouched).
+export function setMergeMove(sid: string | null): void {
+  mergeState = { ...mergeState, moveSid: sid }
+  emitMerge()
+}
+export function mergeOffset(sid: string, x: number, y: number): void {
+  sendRaw({ type: 'merge_offset', sid, x, y })
 }
 
 // === auth (sign-out on a password-protected canvas) =========================

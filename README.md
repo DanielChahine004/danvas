@@ -941,9 +941,15 @@ def _(): canvas.merge("http://192.168.1.9:8001")   # appears for everyone, live
 
 The **🧩 Merge** panel lists the composed sources (with a live/offline dot), takes
 a canvas URL to **add** one on the fly, an **eye** toggle to hide/show each source's
-panels (client-side only — the source keeps running untouched), and an **✕** to drop
-one. Adding sources via `?sources=127.0.0.1:8001,127.0.0.1:8002` on the hub's URL
-pre-composes a set (a refresh restores it).
+panels (client-side only — the source keeps running untouched), an **✕** to drop
+one, and a **📍** to **position** it — drag the origin dot that appears to translate
+that source's whole block of panels into place, hub-wide, without moving anything in
+the source canvas. Adding sources via `?sources=127.0.0.1:8001,127.0.0.1:8002` on
+the hub's URL pre-composes a set (a refresh restores it).
+
+Positioning has code twins too: `canvas.merge(url, at=(x, y))` places a source when
+you pull it in, and `canvas.move_merge(url, x, y)` re-positions it live — so a script
+can lay out a merged wall, e.g. `canvas.merge("host:8001", at=(0, 0)); canvas.merge("host:8002", at=(700, 0))`.
 
 **The CLI aggregator** — for a scriptless, component-less version of the same thing,
 `python -m danvas.merge` serves a bare hub that holds no panels of its own and can

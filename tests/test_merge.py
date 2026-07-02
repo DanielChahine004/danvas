@@ -447,6 +447,48 @@ def test_canvas_serve_enables_merge_host_by_default():
     assert isinstance(c._bridge._merge, _MergeHost)
 
 
+# -- per-source origin offset (hub-wide translate) -----------------------------
+
+def test_set_offset_shifts_panels_and_leaves_source_untouched():
+    async def run():
+        b, h = _host()
+        ws, conn = _browser(b, h)
+        up = h._get_or_create_upstream("ws://P/ws", _parts(), "P", None, (0, 0))
+        _park(h, up)
+        up.ws = FakeUpstreamWS()
+        h._attach(conn, up)
+        h._ingest(up, json.dumps({"type": "register", "id": "p", "component": "Slider",
+                                  "props": {}, "x": 10, "y": 20}))
+        await _settle()
+        ws.sent.clear()
+        # translate the source's origin to (600, 0) — hub-wide
+        h.set_offset(up.ws_uri, (600, 0))
+        await _settle()
+        # cached register shifted (so reconnects land at the new origin)
+        assert up.registers[f"{up.tag}:p"]["x"] == 610
+        # live browsers got a position update
+        upd = [m for m in ws.sent if m.get("type") == "update" and m["id"] == f"{up.tag}:p"]
+        assert upd and upd[-1]["payload"] == {"x": 610, "y": 20}
+        assert up.offset == (600.0, 0.0)
+        # a NEW panel registers already at the new origin
+        h._ingest(up, json.dumps({"type": "register", "id": "q", "component": "Label",
+                                  "props": {}, "x": 5, "y": 5}))
+        await _settle()
+        assert up.registers[f"{up.tag}:q"]["x"] == 605
+        # a drag of a merged panel routes back MINUS the offset (source coords)
+        await h.route(ws, json.dumps({"type": "layout", "id": f"{up.tag}:p", "x": 700, "y": 20}))
+        assert up.ws.sent[-1] == {"type": "layout", "id": "p", "x": 100, "y": 20}
+    asyncio.run(run())
+
+
+def test_canvas_merge_at_sets_offset():
+    c = danvas.Canvas()
+    c.merge("127.0.0.1:8001", at=(600, 40))
+    assert c._pending_merges == [("127.0.0.1:8001", None, (600.0, 40.0))]
+    c.move_merge("127.0.0.1:8001", 120, 8)
+    assert c._pending_merges == [("127.0.0.1:8001", None, (120.0, 8.0))]
+
+
 # -- the code API: canvas.merge / unmerge / merges -----------------------------
 
 def test_canvas_merge_queues_before_serve_and_reads_back():

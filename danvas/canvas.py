@@ -160,8 +160,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._layout_stack = []
         # Canvases merged in via canvas.merge() before serve() enables the merge
         # host — applied once serving; canvas.merge() after serve goes straight to
-        # the host. See merge() / unmerge() / the merge property.
-        self._pending_merges = []   # [(url, password)]
+        # the host. See merge() / unmerge() / move_merge() / the merges property.
+        self._pending_merges = []   # [(url, password, (ox, oy))]
 
     def background(self, fn, *args, **kwargs):
         """Register ``fn`` to run as a daemon thread when the canvas serves.
@@ -221,7 +221,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 spawn(fn, *args, name="danvas-background", **kwargs)
 
     # -- merging (the code twin of the UI's 🧩 panel) ------------------------
-    def merge(self, url, password=None):
+    def merge(self, url, password=None, at=None):
         """Merge another running canvas into this one, for every viewer.
 
         The programmatic twin of the UI's 🧩 **add**: the canvas at ``url`` (a
@@ -233,23 +233,40 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
             @canvas.button("bring in sensors").on_click
             def _():
-                canvas.merge("http://192.168.1.9:8001")
+                canvas.merge("http://192.168.1.9:8001", at=(600, 0))
 
-        A password-protected source needs its ``password=`` (there's no browser to
-        prompt for a code-merged source). Idempotent per ``url``. Requires
-        ``serve(merge=...)`` left on (the default). Returns ``self``.
+        ``at=(x, y)`` places the source's origin at that canvas point, translating
+        its whole block of panels into position *in this view only* — the source
+        canvas is never moved (move it later with :meth:`move_merge`, or drag its
+        origin dot in the 🧩 panel). A password-protected source needs its
+        ``password=`` (there's no browser to prompt for a code-merged source).
+        Idempotent per ``url``. Requires ``serve(merge=...)`` on (the default).
+        Returns ``self``.
         """
+        offset = (float(at[0]), float(at[1])) if at else (0.0, 0.0)
         if self._bridge._merge is None:
-            self._pending_merges.append((url, password))
+            self._pending_merges.append((url, password, offset))
         else:
-            self._bridge._merge.add_source(url, password=password)
+            self._bridge._merge.add_source(url, password=password, offset=offset)
+        return self
+
+    def move_merge(self, url, x, y):
+        """Reposition a merged source's origin to ``(x, y)`` — the code twin of
+        dragging its origin dot. Translates the whole block for every viewer; the
+        source canvas is untouched. Returns ``self``."""
+        if self._bridge._merge is None:
+            self._pending_merges = [
+                (u, p, ((float(x), float(y)) if u == url else o))
+                for u, p, o in self._pending_merges]
+        else:
+            self._bridge._merge.set_offset(url, (x, y))
         return self
 
     def unmerge(self, url):
         """Remove a canvas merged with :meth:`merge`, for every viewer. The code
         twin of the panel's **✕**. Returns ``self``."""
         if self._bridge._merge is None:
-            self._pending_merges = [(u, p) for u, p in self._pending_merges if u != url]
+            self._pending_merges = [(u, p, o) for u, p, o in self._pending_merges if u != url]
         else:
             self._bridge._merge.remove_source(url)
         return self
@@ -261,7 +278,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         Read-only; the per-viewer sources a browser adds through the panel are not
         included (those are that viewer's own, not canvas-wide)."""
         if self._bridge._merge is None:
-            return [u for u, _ in self._pending_merges]
+            return [u for u, _p, _o in self._pending_merges]
         return self._bridge._merge.shared_specs()
 
     @property
@@ -2265,8 +2282,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # Apply any canvas.merge() calls made before serving (a protected source's
         # password rides along). A no-op when merging is off.
         if self._bridge._merge is not None and self._pending_merges:
-            for url, pw in self._pending_merges:
-                self._bridge._merge.add_source(url, password=pw)
+            for url, pw, offset in self._pending_merges:
+                self._bridge._merge.add_source(url, password=pw, offset=offset)
             self._pending_merges = []
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose

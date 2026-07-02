@@ -269,6 +269,64 @@ class _MergeHost:
     def shared_specs(self):
         return [s["spec"] for s in self._shared_sources]
 
+    def set_offset(self, url, offset):
+        """Translate a merged source's whole block of panels to a new origin, for
+        every viewer (hub-wide). The offset is applied on the way down and undone on
+        the way back, so the SOURCE canvas is never moved — this is purely how this
+        hub lays the merged content out. Shifts the replay cache (so reconnects /
+        new viewers land at the new origin) and live-nudges every viewing browser.
+        """
+        try:
+            ws_uri, _h, _l = _parse_source(url)
+        except Exception:
+            return
+        ox2, oy2 = float(offset[0]), float(offset[1])
+        for s in self._shared_sources:
+            try:
+                if _parse_source(s["spec"])[0] == ws_uri:
+                    s["offset"] = (ox2, oy2)
+            except Exception:
+                pass
+        for up in [u for u in self._upstreams.values() if u.ws_uri == ws_uri]:
+            ox, oy = up.offset
+            dx, dy = ox2 - ox, oy2 - oy
+            if dx == 0 and dy == 0:
+                continue
+            up.offset = (ox2, oy2)
+            for reg in up.registers.values():
+                if isinstance(reg.get("x"), (int, float)):
+                    reg["x"] += dx
+                if isinstance(reg.get("y"), (int, float)):
+                    reg["y"] += dy
+            for payload in up.updates.values():
+                if isinstance(payload.get("x"), (int, float)):
+                    payload["x"] += dx
+                if isinstance(payload.get("y"), (int, float)):
+                    payload["y"] += dy
+            if self._loop is None:
+                continue
+            for conn in self._interested(up):
+                for nsid, reg in up.registers.items():
+                    if isinstance(reg.get("x"), (int, float)) and isinstance(reg.get("y"), (int, float)):
+                        self._loop.create_task(self._safe_send(
+                            conn.ws, {"type": "update", "id": nsid,
+                                      "payload": {"x": reg["x"], "y": reg["y"]}}))
+                self._emit_sources(conn)   # refresh the roster's offset
+
+    def offset_of(self, url):
+        """The current (x, y) origin a source is merged at, or (0, 0)."""
+        try:
+            ws_uri = _parse_source(url)[0]
+        except Exception:
+            return (0.0, 0.0)
+        for s in self._shared_sources:
+            try:
+                if _parse_source(s["spec"])[0] == ws_uri:
+                    return tuple(s["offset"])
+            except Exception:
+                pass
+        return (0.0, 0.0)
+
     # The owning Bridge supplies the event loop and the send primitives; exposing
     # them as ``self._loop`` / ``self._safe_send`` keeps the ported method bodies
     # unchanged from when this was a Bridge subclass.
@@ -535,7 +593,7 @@ class _MergeHost:
             if up is None:
                 continue
             items.append({"sid": up.tag, "uri": up.ws_uri, "label": up.label,
-                          "status": up.status})
+                          "status": up.status, "offset": list(up.offset)})
         return {"type": "merge_sources", "sources": items}
 
     def _emit_sources(self, conn):
@@ -700,6 +758,11 @@ class _MergeHost:
             if up is not None:
                 self._release(conn, up.key)
                 self._emit_sources(conn)
+            return True
+        if kind == "merge_offset":
+            up = self._tag_to_upstream.get(msg.get("sid"))
+            if up is not None:
+                self.set_offset(up.ws_uri, (msg.get("x", 0), msg.get("y", 0)))
             return True
         if kind == "draw":
             diff = msg.get("diff") or {}

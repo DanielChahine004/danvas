@@ -2,8 +2,8 @@
 // viewer presence badge lives in App, and the Inspector / Graveyard / Sign-out
 // buttons + the kiosk hand tool. These render as siblings outside the panel host
 // (.tl-container), so they use self-contained colours rather than the --pc-* vars.
-import { useEffect, useState } from 'preact/hooks'
-import { pageToScreen } from '../engine/editor'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { pageToScreen, screenToPage } from '../engine/editor'
 import { store } from '../engine/store'
 import { stylePanelOpen, openChrome, toggleChrome } from './uistate'
 import { snapEnabled, setSnapEnabled, duplicateSelection } from '../engine/interaction'
@@ -22,6 +22,8 @@ import {
   mergeAuth,
   mergeRemove,
   setSourceHidden,
+  setMergeMove,
+  mergeOffset,
 } from '../bridge'
 
 // --- peer cursors ------------------------------------------------------------
@@ -460,10 +462,12 @@ export function MergeHostPanel() {
           ) : null}
           {state.sources.map((s: any) => {
             const hidden = (state.hidden || []).includes(s.sid)
+            const moving = state.moveSid === s.sid
             return (
               <div key={s.sid} style={mergeRowStyle}>
                 <span title={s.status} style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: s.status === 'live' ? '#22c55e' : '#9ca3af' }} />
                 <span style={{ flex: 1, fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: hidden ? 0.5 : 1 }}>{s.label}</span>
+                <button title={moving ? 'Done positioning' : 'Move origin (drag the dot on the canvas)'} onClick={() => setMergeMove(moving ? null : s.sid)} style={{ ...mergeIconBtnStyle, color: moving ? 'var(--ui-accent)' : 'var(--ui-fg)' }}>📍</button>
                 <button title={hidden ? 'Show' : 'Hide (this view only)'} onClick={() => setSourceHidden(s.sid, !hidden)} style={mergeIconBtnStyle}>{hidden ? '🙈' : '👁'}</button>
                 <button title="Remove" onClick={() => mergeRemove(s.sid)} style={mergeIconBtnStyle}>✕</button>
               </div>
@@ -508,6 +512,74 @@ function MergeAuthPrompt({ prompt }: { prompt: any }) {
         style={mergeInputStyle}
       />
       <button onClick={submit} style={mergeAddBtnStyle}>Unlock</button>
+    </div>
+  )
+}
+
+// --- merge: the draggable origin dot (position a merged source) --------------
+// Shown while a source's 📍 is active. A dot sits at that source's origin (where
+// its (0,0) lands in this canvas); dragging it translates the source's WHOLE block
+// of panels — hub-wide, for every viewer — without touching the source canvas. The
+// new origin is sent to the hub (throttled to one per frame), which re-emits the
+// panels at their new positions.
+export function MergeOriginDot() {
+  const [state, setState] = useState<any>({ sources: [], moveSid: null })
+  useEffect(() => subscribeMerge(setState), [])
+  useValue('merge-dot-cam', () => store.camera(), []) // re-place on pan/zoom
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
+  const grab = useRef<{ x: number; y: number } | null>(null)
+  const raf = useRef(0)
+  const pending = useRef<{ x: number; y: number } | null>(null)
+
+  const src = state.moveSid ? state.sources.find((s: any) => s.sid === state.moveSid) : null
+  if (!src) return null
+  const off = drag || { x: src.offset?.[0] || 0, y: src.offset?.[1] || 0 }
+  const p = pageToScreen(off)
+
+  const flush = () => {
+    raf.current = 0
+    if (pending.current) mergeOffset(state.moveSid, Math.round(pending.current.x), Math.round(pending.current.y))
+  }
+  const onDown = (e: any) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ignore */ }
+    const at = screenToPage({ x: e.clientX, y: e.clientY })
+    grab.current = { x: off.x - at.x, y: off.y - at.y } // dot-to-cursor delta
+  }
+  const onMove = (e: any) => {
+    if (!grab.current) return
+    const at = screenToPage({ x: e.clientX, y: e.clientY })
+    const nx = at.x + grab.current.x
+    const ny = at.y + grab.current.y
+    setDrag({ x: nx, y: ny })
+    pending.current = { x: nx, y: ny }
+    if (!raf.current) raf.current = requestAnimationFrame(flush)
+  }
+  const onUp = () => {
+    if (!grab.current) return
+    grab.current = null
+    if (raf.current) { cancelAnimationFrame(raf.current); raf.current = 0 }
+    if (drag) mergeOffset(state.moveSid, Math.round(drag.x), Math.round(drag.y))
+    setDrag(null)
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 260, pointerEvents: 'none' }}>
+      <div
+        data-pc-merge-origin={state.moveSid}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        title={`Drag to position ${src.label}`}
+        style={{
+          position: 'absolute', left: p.x - 11, top: p.y - 11, width: 22, height: 22,
+          borderRadius: '50%', background: 'var(--ui-accent, #2563eb)', border: '2px solid #fff',
+          boxShadow: '0 1px 6px rgba(0,0,0,0.45)', cursor: 'grab', pointerEvents: 'all', touchAction: 'none',
+        }}
+      />
+      <div style={{ position: 'absolute', left: p.x + 16, top: p.y - 9, padding: '2px 7px', borderRadius: 6, background: 'var(--ui-accent, #2563eb)', color: '#fff', fontSize: 11, fontWeight: 600, fontFamily: 'system-ui, sans-serif', whiteSpace: 'nowrap', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
+        origin · {src.label}
+      </div>
     </div>
   )
 }
