@@ -2014,7 +2014,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None, tldraw_license_key=None, watch=None,
-              merge_server=None):
+              merge_server=None, merge=True):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -2128,6 +2128,18 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ignored. Leave it ``False`` (the default) to run entirely fresh from the
         script every time, reading and writing nothing.
 
+        ``merge`` (on by default) makes this canvas a **merge hub**: a 🧩 panel
+        appears in the UI where you can pull *other* running canvases' panels in by
+        URL — composed alongside this canvas's own panels, live, with no restart —
+        and interactions on a merged panel route back to the canvas that owns it. It
+        costs nothing until you actually add a source (no upstream connections
+        before then). So an empty ``danvas.Canvas().serve()`` is a ready-to-use
+        aggregator, and any populated canvas can absorb others on the fly. Pass
+        ``merge=False`` to hide the panel and disable it. (The standalone
+        ``python -m danvas.merge`` server is still available for a neutral,
+        compute-less aggregator; ``merge_server=`` adds a button that navigates to
+        one, shown only when ``merge=False``.)
+
         ``debug=True`` logs every WebSocket frame to the console — what Python
         sends (``->``) and what each browser sends back (``<-``) — so "the panel
         isn't updating" turns into evidence: either the frame is on the wire or
@@ -2193,6 +2205,15 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 from .server import _lan_ip
                 self._bridge._self_url = f"{_lan_ip() or host}:{port}"
             self._bridge._merge_server = merge_server
+        # serve(merge=True) — on by default — turns this canvas into a hub: the 🧩
+        # merge panel appears and you can pull *other* canvases' panels in (by URL,
+        # or ?sources=) alongside this canvas's own, with no restart. It stays inert
+        # (no upstream connections, negligible overhead) until you add a source.
+        # Enabled here rather than at construction so ``import danvas`` doesn't pull
+        # in the websocket *client* stack until a canvas actually serves.
+        if merge and self._bridge._merge is None:
+            from .merge import _MergeHost
+            self._bridge._merge = _MergeHost(self._bridge)
         # Wire logging: a frame tap that prints every JSON frame (and binary
         # summaries) with the component's friendly name. ASCII arrows on purpose
         # — Windows consoles often run cp1252, which can't print "▼"/"▲".

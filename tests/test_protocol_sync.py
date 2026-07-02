@@ -120,9 +120,8 @@ def test_message_types_in_match_bridge_py_dispatch():
 # exactly the merge_* frames the merge server emits. The frontend's consumption of
 # the outbound tags is checked below.
 def test_merge_message_types_in_match_route_from_browser():
-    body = inspect.getsource(merge_mod.MergeBridge._route_from_browser)
-    handled = {k for k in re.findall(r'kind == "(\w+)"', body)
-               if k.startswith("merge_")}
+    body = inspect.getsource(merge_mod._MergeHost.route)
+    handled = set(re.findall(r'"(merge_\w+)"', body))
     assert handled == set(_protocol.MERGE_MESSAGE_TYPES_IN), (
         "MERGE_MESSAGE_TYPES_IN disagrees with MergeBridge._route_from_browser; "
         f"only in handler: {handled - set(_protocol.MERGE_MESSAGE_TYPES_IN)}, "

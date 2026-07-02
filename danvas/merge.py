@@ -207,17 +207,22 @@ class _Conn:
         # state — hiding a source in the merged view never reaches the source.
 
 
-class MergeBridge(Bridge):
-    """A :class:`Bridge` that serves a per-connection union of source canvases.
+class _MergeHost:
+    """The merge machinery a :class:`Bridge` runs to compose *other* canvases in.
 
-    Unlike a normal bridge it owns no component objects. It maintains a pool of
-    upstream client connections keyed by ``(source, credential)``, maps each
-    namespaced id back to its owning upstream for interaction routing, and fans
-    each source's frames only to the browsers that asked for it.
+    Held by a Bridge as ``bridge._merge`` (``None`` = merging off). Maintains a
+    pool of upstream client connections keyed by ``(source, credential)``, maps
+    each namespaced id back to its owning upstream for interaction routing, and
+    fans each source's frames only to the browsers that asked for it. Used both by
+    the dedicated :class:`Merge` server (a Bridge with no components of its own)
+    and by a normal :class:`~danvas.Canvas` served with ``merge=True`` — which
+    composes merged sources *alongside* its own panels (the "hub" case). The
+    owning Bridge drives it through three hooks: :meth:`on_connect`,
+    :meth:`route`, :meth:`on_disconnect`.
     """
 
-    def __init__(self, default_sources=None, default_auth=None, region_width=0):
-        super().__init__()
+    def __init__(self, bridge, default_sources=None, default_auth=None, region_width=0):
+        self.bridge = bridge
         # Specs (+ offsets) seeded for a connection that doesn't pass ?sources=.
         self._default_sources = list(default_sources or [])   # [(spec, (ox,oy))]
         self._default_auth = dict(default_auth or {})          # label -> password
@@ -231,10 +236,16 @@ class MergeBridge(Bridge):
         # their live drag). Short-lived; a stale entry just means one missed echo.
         self._input_movers = {}
 
-    # -- startup -------------------------------------------------------------
-    def set_loop(self, loop):
-        """Capture the running loop; upstreams are launched lazily per demand."""
-        super().set_loop(loop)
+    # The owning Bridge supplies the event loop and the send primitives; exposing
+    # them as ``self._loop`` / ``self._safe_send`` keeps the ported method bodies
+    # unchanged from when this was a Bridge subclass.
+    @property
+    def _loop(self):
+        return self.bridge._loop
+
+    @property
+    def _safe_send(self):
+        return self.bridge._safe_send
 
     # -- id namespacing ------------------------------------------------------
     @staticmethod
@@ -540,64 +551,51 @@ class MergeBridge(Bridge):
         self._attach(conn, up)
         self._emit_sources(conn)
 
-    # -- browser-facing server (overrides Bridge's object-based replay) ------
-    async def handle_connection(self, ws, role=None):
-        await ws.accept()
-        self._connections.add(ws)
-        self._last_seen[ws] = time.monotonic()
-        viewer = self._make_viewer()
-        self._viewers[ws] = viewer
+    # -- Bridge hooks (called from Bridge.handle_connection / _on_message) ----
+    def on_connect(self, ws, qp):
+        """Register a freshly-connected browser and seed its sources (from the
+        ``?sources=`` query, else the default set). Called after the owning Bridge
+        has replayed its own state, so a hub's own panels arrive first."""
         conn = _Conn(ws)
         self._conns[ws] = conn
-        self._broadcast_roster()
-        try:
-            await self._send(ws, {"type": "welcome", "you": viewer, "mergeHost": True})
-            for entry in self._chat_history:
-                await self._send(ws, entry)
-            # Seed the source set from ?sources= (URLs only), else the default set.
-            qp = getattr(ws, "query_params", {})
-            raw_sources = qp.get("sources") if qp else None
-            if raw_sources:
-                for spec in [s for s in raw_sources.split(",") if s]:
-                    self._loop.create_task(self._add_source_for_conn(conn, spec))
-            else:
-                for spec, offset in self._default_sources:
-                    _u, _h, label = _parse_source(spec)
-                    self._loop.create_task(self._add_default_source(conn, spec, offset, label))
-            # Replay the merged view's own annotation ink (drawn by merge viewers,
-            # not owned by any source) to this fresh viewer.
-            if self._drawings:
-                await self._send(ws, {"type": "draw", "diff": {
-                    "added": dict(self._drawings), "updated": {}, "removed": {}}})
-            while True:
-                msg = await ws.receive()
-                if msg["type"] == "websocket.disconnect":
-                    break
-                text = msg.get("text")
-                if text:
-                    await self._route_from_browser(conn, text)
-        except Exception:
-            pass
-        finally:
+        raw_sources = qp.get("sources") if qp else None
+        if raw_sources:
+            for spec in [s for s in raw_sources.split(",") if s]:
+                self._loop.create_task(self._add_source_for_conn(conn, spec))
+        else:
+            for spec, offset in self._default_sources:
+                _u, _h, label = _parse_source(spec)
+                self._loop.create_task(self._add_default_source(conn, spec, offset, label))
+
+    def on_disconnect(self, ws):
+        """Release everything a departing browser was viewing."""
+        conn = self._conns.pop(ws, None)
+        if conn is not None:
             for key in list(conn.sources):
                 self._release(conn, key)
-            self._conns.pop(ws, None)
-            self._connections.discard(ws)
-            self._send_locks.pop(ws, None)
-            self._viewers.pop(ws, None)
-            self._last_seen.pop(ws, None)
-            self._broadcast_roster()
 
-    def _handle_merge_draw(self, conn, diff):
-        """Route a merged-view draw diff: source-owned records (namespaced id) go
-        back up to the owning canvas, stripped; merge-native records (bare id) are
-        stored on the merge server and relayed to the other merge viewers.
+    # -- free-form drawing on the merged view --------------------------------
+    def _has_namespaced(self, diff):
+        """True if any record in the diff belongs to a merged source."""
+        for bucket in ("added", "updated", "removed"):
+            b = diff.get(bucket)
+            if isinstance(b, dict):
+                for rid in b:
+                    if isinstance(rid, str) and self._tag_to_upstream.get(self._strip(rid)[0]):
+                        return True
+        return False
 
-        Splitting per record keeps a mixed diff correct: a viewer erasing a source
-        stroke while adding a fresh one sends one diff carrying both.
+    def _route_draw(self, conn, ws, diff):
+        """Handle a merged-view draw diff that touches at least one source's ink:
+        source-owned records (namespaced id) are stripped and routed back to the
+        owning canvas; any bare records are the hub's own ink, applied through the
+        Bridge's normal draw path (persist + taps + relay to other viewers).
+
+        A *pure*-bare diff never reaches here — :meth:`route` lets the base handle
+        it — so this only replicates the bare path for the rare mixed diff.
         """
         per_source = {}
-        local = {"added": {}, "updated": {}, "removed": {}}
+        bare = {"added": {}, "updated": {}, "removed": {}}
         for bucket in ("added", "updated", "removed"):
             b = diff.get(bucket)
             if not isinstance(b, dict):
@@ -608,20 +606,16 @@ class MergeBridge(Bridge):
                 if up is not None:
                     per_source.setdefault(up, {"added": {}, "updated": {}, "removed": {}})[bucket][rid] = val
                 else:
-                    local[bucket][rid] = val
-        # Source-owned edits: strip the namespace and forward to the owning canvas.
-        # The source applies + re-broadcasts, which comes back down to every viewer,
-        # so they converge (no local apply here — that would double it).
+                    bare[bucket][rid] = val
         for up, sd in per_source.items():
             stripped = self._remap_draw_diff(sd, lambda i: self._strip(i)[1])
             self._loop.create_task(up.send({"type": "draw", "diff": stripped}))
-        # Merge-native ink: fold into the merge server's own drawing set (so a fresh
-        # viewer replays it) and relay to the OTHER merge viewers.
-        if any(local[bucket] for bucket in ("added", "updated", "removed")):
-            self._apply_draw(local)
-            for other in list(self._conns.values()):
-                if other is not conn:
-                    self._loop.create_task(self._safe_send(other.ws, {"type": "draw", "diff": local}))
+        if any(bare[bucket] for bucket in ("added", "updated", "removed")):
+            viewer = self.bridge._viewers.get(ws) or {}
+            view = self.bridge._view_for(viewer.get("id"), viewer.get("role")) or {}
+            if not view.get("read_only"):
+                self.bridge._apply_draw(bare)
+                self.bridge.broadcast({"type": "draw", "diff": bare}, exclude=ws)
 
     async def _add_default_source(self, conn, spec, offset, label):
         """Attach a CLI-seeded default source, honouring its ``--auth`` password
@@ -645,56 +639,50 @@ class MergeBridge(Bridge):
         self._attach(conn, up)
         self._emit_sources(conn)
 
-    async def _route_from_browser(self, conn, raw):
-        """Route a browser frame: merge control messages, chat/presence, or an
-        interaction forwarded up to the source that owns the addressed panel."""
+    async def route(self, ws, raw):
+        """The Bridge's ``_on_message`` gate: handle a merge-plane frame and return
+        ``True``, else ``False`` so the base handles it normally.
+
+        Handled here: the merge control messages (add/auth/remove), a ``draw`` that
+        touches a merged source, and any interaction (input/layout/…) addressed to
+        a merged panel (a namespaced ``s<N>:`` id) — forwarded to the owning canvas.
+        Everything else (heartbeat/chat/cursor, and interactions on the hub's OWN
+        panels, whose ids are bare) returns ``False``.
+        """
+        conn = self._conns.get(ws)
+        if conn is None:
+            return False
         try:
             msg = json.loads(raw)
         except (ValueError, TypeError):
-            return
-        self._last_seen[conn.ws] = time.monotonic()
+            return False
         kind = msg.get("type")
-        if kind == "heartbeat":
-            return
-        if kind == "set_name":
-            self._rename_viewer(conn.ws, msg.get("name"))
-            return
-        if kind == "chat":
-            self._handle_chat(conn.ws, msg.get("text"))
-            return
-        # -- merge control plane --
-        if kind == "merge_add":
+        if kind in ("merge_add", "merge_auth"):
             uri = msg.get("uri")
             if uri:
                 self._loop.create_task(
                     self._add_source_for_conn(conn, uri, msg.get("password")))
-            return
-        if kind == "merge_auth":
-            uri = msg.get("uri")
-            if uri:
-                self._loop.create_task(
-                    self._add_source_for_conn(conn, uri, msg.get("password")))
-            return
+            return True
         if kind == "merge_remove":
             up = self._tag_to_upstream.get(msg.get("sid"))
             if up is not None:
                 self._release(conn, up.key)
                 self._emit_sources(conn)
-            return
+            return True
         if kind == "draw":
-            # Free-form ink drawn on the merged view. A stroke on a SOURCE's ink
-            # (namespaced id) routes back to that canvas; a fresh stroke (bare id)
-            # is the merged view's own annotation layer, shared among merge viewers.
-            self._handle_merge_draw(conn, msg.get("diff") or {})
-            return
-        # -- interaction: forward to the owning source --
+            diff = msg.get("diff") or {}
+            if self._has_namespaced(diff):
+                self._route_draw(conn, ws, diff)
+                return True
+            return False  # pure local/native ink — the base draw path handles it
+        # -- interaction on a merged panel: forward to the owning source --
         cid = msg.get("id")
         if not isinstance(cid, str):
-            return
+            return False
         tag, orig = self._strip(cid)
         up = self._tag_to_upstream.get(tag)
         if up is None:
-            return
+            return False  # a bare id (the hub's own panel) — the base handles it
         out = dict(msg)
         out["id"] = orig
         if kind == "layout":
@@ -735,6 +723,20 @@ class MergeBridge(Bridge):
                         self._loop.create_task(self._safe_send(other.ws, fan))
         elif kind == "input":
             self._input_movers[cid] = (conn, time.monotonic() + 1.0)
+        return True
+
+
+class MergeBridge(Bridge):
+    """A :class:`Bridge` for the dedicated :class:`Merge` server: a bridge with no
+    components of its own that runs a :class:`_MergeHost`. A normal
+    :class:`~danvas.Canvas` served with ``merge=True`` runs the same host on its
+    own bridge, composing merged sources alongside its panels — this class is just
+    the component-less variant the CLI/``Merge`` entry point uses."""
+
+    def __init__(self, default_sources=None, default_auth=None, region_width=0):
+        super().__init__()
+        self._merge = _MergeHost(self, default_sources=default_sources,
+                                 default_auth=default_auth, region_width=region_width)
 
 
 class Merge:

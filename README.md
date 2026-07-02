@@ -820,7 +820,8 @@ budget) on the fly.
 | `password` | – | gate the whole canvas behind one password (session cookie) |
 | `passwords` | – | `{role: password}` for role-based access |
 | `login_message` | – | host note on the password page |
-| `merge_server` | – | URL of a standing merge server; adds a **Merge…** button to this canvas |
+| `merge` | `True` | this canvas is a merge hub (🧩 panel to pull other canvases in); `False` disables it |
+| `merge_server` | – | URL of a standing merge server; adds a **Merge…** button (only when `merge=False`) |
 | `tunnel` | `False` | expose publicly through a tunnel |
 | `tunnel_provider` | `"cloudflared"` | `"cloudflared"` / `"localtunnel"` |
 | `persist` | `False` | auto-save/restore the canvas; `True` or a path |
@@ -912,11 +913,26 @@ canvas = danvas.Canvas().serve(port=8000, block=False)
 servo = canvas.slider("servo_1", min=0, max=180, default=90)   # appears live
 ```
 
-**Merging canvases** — a *standing merge server* connects to several running
-canvases (as a client), composites their panels onto one port, and routes
-interactions back to the owning canvas, so computation stays sharded. Each browser
-that opens the merge server picks **its own** set of sources, so different viewers
-can compose different combinations from one server:
+**Merging canvases** — **any canvas is a merge hub by default** (`serve()` implies
+`merge=True`): a 🧩 panel in the UI lets you pull *other* running canvases' panels
+in by URL, composed alongside this canvas's own, live and with no restart —
+interactions on a merged panel route back to the canvas that owns it, so
+computation stays sharded. It costs nothing until you add a source, so an empty
+`danvas.Canvas().serve()` is a ready aggregator and any populated canvas can absorb
+others on the fly:
+
+```python
+danvas.Canvas().serve(port=8080)     # an empty hub — open it, click 🧩, add URLs
+canvas.serve(port=8000)              # a normal canvas that can ALSO merge others in
+canvas.serve(port=8000, merge=False) # opt out (hide the merge panel)
+```
+
+There's also a **standing merge server** — a neutral aggregator that holds no
+components of its own — for when you don't want the hub to be one of the canvases.
+It connects to several running canvases (as a client), composites their panels onto
+one port, and routes interactions back to the owning canvas. Each browser that
+opens it picks **its own** set of sources, so different viewers can compose
+different combinations from one server:
 
 ```bash
 python -m danvas.merge --port 8080          # standing server; browsers choose sources

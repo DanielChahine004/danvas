@@ -516,7 +516,10 @@ export function MergeLaunchButton() {
   const [open, setOpen] = useState(false)
   const [urls, setUrls] = useState('')
   useEffect(() => subscribeMerge(setState), [])
-  if (!state.server || !state.selfUrl) return null
+  // When this canvas is itself a hub (serve(merge=True), the default), you merge
+  // in place via the 🧩 panel — so the "navigate to a dedicated merge server"
+  // button only shows if in-place merging was turned off (serve(merge=False)).
+  if (!state.server || !state.selfUrl || state.isHost) return null
   const go = () => {
     const others = urls.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
     const params = new URLSearchParams()

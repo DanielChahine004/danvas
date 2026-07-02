@@ -270,6 +270,13 @@ class Bridge:
         # the button pre-seeds). Both ride the welcome frame; None = no button.
         self._merge_server = None
         self._self_url = None
+        # Optional merge capability (danvas.merge._MergeHost): set by
+        # serve(merge=True) or the dedicated Merge server, it lets this bridge
+        # compose *other* canvases in alongside its own components. ``None`` =
+        # merging off (the common case for a plain canvas is that it's on, since
+        # serve(merge=) defaults True, but the host stays inert until a source is
+        # added). Driven from handle_connection / _on_message via three hooks.
+        self._merge = None
         # When True, browsers report their pointer position (in canvas/page
         # coords) so Python can read it off the roster as ``viewer["cursor"]``.
         # Advertised in the welcome frame; gated like ``_ui_inspector`` (default
@@ -843,6 +850,7 @@ class Bridge:
                                   "view": view_for_client,
                                   "runId": self._run_id,
                                   "reload": self._reload,
+                                  "mergeHost": self._merge is not None,
                                   "mergeServer": self._merge_server,
                                   "selfUrl": self._self_url})
             # Replay the shared React assets (canvas.define / canvas.style) before
@@ -924,6 +932,12 @@ class Bridge:
             if self._connect_taps:
                 self._dispatch.submit(lambda v=dict(viewer): self._tap_connect(v))
 
+            # Merge hub: seed this browser's composed sources (from ?sources= or the
+            # default set) AFTER the canvas's own state, so the hub's own panels land
+            # first. Inert unless serve(merge=True) / the Merge server enabled it.
+            if self._merge is not None:
+                self._merge.on_connect(ws, qp)
+
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":
@@ -933,6 +947,11 @@ class Bridge:
                 if raw_bytes:
                     self._on_binary_input(ws, raw_bytes)
                 elif raw_text:
+                    # Merge-plane frames (merge control, a merged panel's interaction
+                    # or ink) are handled by the hub; everything else — incl. the
+                    # hub's OWN panels — falls through to the normal dispatch.
+                    if self._merge is not None and await self._merge.route(ws, raw_text):
+                        continue
                     self._on_message(ws, raw_text)
         except WebSocketDisconnect:
             pass
@@ -943,6 +962,8 @@ class Bridge:
             if sys.__stderr__ is not None:
                 traceback.print_exc(file=sys.__stderr__)
         finally:
+            if self._merge is not None:
+                self._merge.on_disconnect(ws)
             self._connections.discard(ws)
             self._proxy_conns.discard(ws)
             if not self._connections:
