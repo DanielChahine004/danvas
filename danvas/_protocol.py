@@ -30,6 +30,20 @@ they can't drift:
 
 from __future__ import annotations
 
+# -- protocol version --------------------------------------------------------
+# The frozen wire-contract version, advertised in the ``welcome`` frame so any
+# client (a browser, a merge hub, or a non-Python SDK speaking this protocol)
+# can detect a server it doesn't understand. Versioning policy (see PROTOCOL.md,
+# the human-readable spec rendered from this module):
+#
+# * ADDITIVE changes — a new message type, a new optional field on an existing
+#   frame — do NOT bump the version. Clients must ignore unknown frame types and
+#   unknown fields (both sides already do).
+# * BREAKING changes — removing/renaming a frame type or field, changing a
+#   binary code, changing the binary envelope — bump the version. These should
+#   be vanishingly rare now the protocol is frozen.
+PROTOCOL_VERSION = 1
+
 # -- binary media frame type codes ------------------------------------------
 # A binary WebSocket frame is ``[type][idLen][id bytes][payload]`` (see
 # ``bridge.encode_binary_frame``); ``type`` is one of these. Numeric and
@@ -136,6 +150,7 @@ IFRAME_MESSAGE_KEYS = {
 def as_dict():
     """The whole protocol as one plain dict — what the JS generator renders."""
     return {
+        "protocol_version": PROTOCOL_VERSION,
         "binary_frame_codes": dict(BINARY_FRAME_CODES),
         "flag_wire_keys": dict(FLAG_WIRE_KEYS),
         "message_types_out": list(MESSAGE_TYPES_OUT),

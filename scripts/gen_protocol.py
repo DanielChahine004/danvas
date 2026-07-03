@@ -41,6 +41,9 @@ def render():
     """Return the JS module text for the current protocol definition."""
     p = _protocol.as_dict()
     lines = [_HEADER]
+    # The frozen wire-contract version (see PROTOCOL.md for the change policy).
+    lines.append(f"export const PROTOCOL_VERSION = {p['protocol_version']}")
+    lines.append("")
     # Binary frame codes -> `export const BIN_VIDEO = 1` etc.
     for name, code in p["binary_frame_codes"].items():
         lines.append(f"export const BIN_{name} = {code}")

@@ -28,7 +28,7 @@ from collections import deque
 from fastapi import WebSocketDisconnect
 
 from ._flags import LAYOUT_FLAGS
-from ._protocol import BINARY_FRAME_CODES
+from ._protocol import BINARY_FRAME_CODES, PROTOCOL_VERSION
 from .kernel import AsyncKernel, Kernel, spawn
 
 # JSON codec for the wire. orjson, when installed, encodes our frames ~10x
@@ -843,6 +843,7 @@ class Bridge:
             # and prefill the editable name field.
             view_for_client = self._view_for(viewer["id"], role)
             await self._send(ws, {"type": "welcome", "you": viewer,
+                                  "protocol": PROTOCOL_VERSION,
                                   "uiInspector": self._ui_inspector,
                                   "uiGraveyard": self._ui_graveyard,
                                   "auth": self._auth,

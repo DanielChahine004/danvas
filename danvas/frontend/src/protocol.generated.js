@@ -4,6 +4,8 @@
 // keys, JSON frame type tags) lives in one place so the two sides can't
 // drift; tests/test_protocol_sync.py fails if this file is stale.
 
+export const PROTOCOL_VERSION = 1
+
 export const BIN_VIDEO = 1
 export const BIN_AUDIO = 2
 export const BIN_CUSTOM = 3
