@@ -108,17 +108,53 @@ and adds a small control vocabulary with its own browsers: `merge_add`,
 `s<N>:<id>` per source; interactions on a namespaced id route back to the
 owning source with the prefix stripped.
 
+## Dial-in sources (the polyglot on-ramp)
+
+A process can own panels on a running canvas **without serving anything**:
+connect to the canvas's own WebSocket with `?source=1&label=<name>`:
+
+```
+ws://host:8000/ws?source=1&label=telemetry
+```
+
+Every served canvas is a hub by default, so this works against a plain
+`canvas.serve()`. On such a connection:
+
+- **Down** (hub → source): the normal subscriber stream — `welcome`, then the
+  full state replay of the hub's canvas (read access), plus `input` / `layout`
+  frames for the panels this source registered (its callbacks), with the
+  `s<N>:` namespace already stripped.
+- **Up** (source → hub): `register` / `update` / `remove` / `arrow` / `draw`
+  declare and mutate this source's own panels — the hub namespaces, caches,
+  and fans them out to every browser. Anything else (`heartbeat`, an `input`
+  on a hub panel it observed) is treated as ordinary viewer traffic: a source
+  is also a subscriber that may petition.
+- **Identity is the label.** Reconnecting under the same label replaces the
+  previous life's panels; the client must re-send its registers + current
+  state on every (re)connect, exactly like the hub replays to browsers.
+- **Liveness**: send `heartbeat` every ~10 s. On disconnect the hub applies
+  its offline policy (default: panels held frozen and dimmed until the label
+  returns).
+- **Auth**: for a protected canvas, run `POST /__auth__` first and connect
+  with the `pc_session` cookie; the source then sees and may operate exactly
+  what that role allows.
+
+`danvas/source.py` (`danvas.SourceClient`) is the reference implementation —
+~200 lines, and the executable spec for an SDK in any language.
+
 ## Writing a non-Python client (the polyglot subset)
 
-A minimal *source* SDK — a process that owns panels on a hub-composed canvas —
-needs only:
+A minimal *source* SDK needs only:
 
-1. Serve the base protocol (or connect to a hub that does): emit `register`
-   for each panel, `update` for state changes, `remove` on teardown, and
-   replay all of it to any (re)connecting client.
-2. Handle inbound `input` / `layout` / `request` by invoking user callbacks,
-   and `heartbeat` by updating liveness.
+1. Dial in as above (a plain WebSocket client — no server required): emit
+   `register` for each panel, `update` for state changes, `remove` on
+   teardown, and re-send all of it on every reconnect.
+2. Handle inbound `input` / `layout` by invoking user callbacks, and send
+   `heartbeat` every ~10 s.
 3. Optionally, the binary envelope for media.
 
-Everything else (roles, overlays, containers, shapes) is optional and
-additive — a client that ignores those frames still composes correctly.
+(The *served*-source form — running a canvas server the hub dials, as Python
+canvases do — is the same frame vocabulary with the connection direction
+reversed, plus replay-to-connecting-clients duties.) Everything else (roles,
+overlays, containers, shapes) is optional and additive — a client that
+ignores those frames still composes correctly.

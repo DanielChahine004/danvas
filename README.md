@@ -969,6 +969,37 @@ Merge().serve(port=8080)                          # same, from Python
 Merge([8001, 8002]).serve(port=8080)              # or seed a default set
 ```
 
+**Dial-in sources — join a canvas from any process, any language.** The merge
+flow above has the hub dial out to canvases that *serve*. Dial-in is the
+reverse: a process connects **to** a running canvas's WebSocket with
+`?source=1&label=<name>` and registers panels over the wire — no server of its
+own, works from behind NAT, and any language that can open a WebSocket
+qualifies (the contract is [PROTOCOL.md](PROTOCOL.md)). `danvas.SourceClient`
+is the built-in Python client — use it to split an app across processes, or as
+the reference for writing a Rust/C++ SDK:
+
+```python
+from danvas import SourceClient
+
+src = SourceClient("127.0.0.1:8000", label="telemetry")   # any served canvas
+src.connect()
+src.register("temp", "Slider", props={"min": 0, "max": 100, "value": 20},
+             x=40, y=40, w=320, h=90)
+
+@src.on_input("temp")
+def moved(payload):                    # a browser operated our panel
+    print("set to", payload)
+
+src.update("temp", value=55)           # stream state; panels update live
+```
+
+The source's panels compose alongside the canvas's own for every viewer;
+interactions route back to the source process; if it dies, its panels hold
+frozen (retention, above) until the same `label` dials back in. A protected
+canvas takes `password=` — the source joins as that login's role. The
+connection also receives the hub's full state stream (`src.on_frame`), so a
+source can *read* the canvas it joined, not just write to it.
+
 **Password-protected sources merge too.** Adding a protected canvas prompts for
 *its* password in the merge panel; the hub runs that canvas's login and connects as
 the matching **role**, so the merged view shows exactly the panels and interactions

@@ -48,6 +48,7 @@ __all__ = [
     "autopanel",
     "panel_for",
     "Merge",
+    "SourceClient",
     "Slider",
     "Button",
     "Label",
@@ -84,9 +85,13 @@ __all__ = [
 
 
 def __getattr__(name):
-    # Lazily expose ``danvas.Merge`` so importing the package doesn't pull in
-    # the websocket *client* stack (only the merge aggregator needs it).
+    # Lazily expose ``danvas.Merge`` / ``danvas.SourceClient`` so importing the
+    # package doesn't pull in the websocket *client* stack (only the merge
+    # aggregator and the dial-in source client need it).
     if name == "Merge":
         from .merge import Merge
         return Merge
+    if name == "SourceClient":
+        from .source import SourceClient
+        return SourceClient
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

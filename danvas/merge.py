@@ -147,6 +147,18 @@ def _authenticate(http_parts, password):
         return None
 
 
+class _InboundWS:
+    """Adapt a server-side (FastAPI) WebSocket to the ``.send(text)`` shape the
+    upstream routing path expects from a *client* connection — so a dial-in
+    source rides the exact same `_Upstream` machinery as a dialed-out one."""
+
+    def __init__(self, ws):
+        self._ws = ws
+
+    async def send(self, text):
+        await self._ws.send_text(text)
+
+
 class _Upstream:
     """One client connection to a source canvas, shared by every browser that
     requested this exact ``(ws_uri, cookie)`` pair.
@@ -156,9 +168,15 @@ class _Upstream:
     roles) get two, because the source filters per-connection by role. Caches the
     source's frames (already id-namespaced) so a newly-interested browser can be
     replayed without re-fetching.
+
+    A **dial-in** upstream (``dialin=True``) is the same record with the
+    connection direction flipped: the source dialed us (``?source=1`` on the
+    hub's ``/ws``), so there is no ``_run_upstream`` retry loop — the lifecycle
+    is the inbound socket's, and ``ws_uri`` is the pseudo-uri ``dialin:<label>``.
     """
 
     def __init__(self, ws_uri, http_parts, label, cookie, offset, tag):
+        self.dialin = False
         self.ws_uri = ws_uri
         self.http_parts = http_parts
         self.label = label
@@ -265,6 +283,7 @@ class _MergeHost:
         self._upstreams = {}          # key -> _Upstream
         self._tag_to_upstream = {}    # tag -> _Upstream
         self._conns = {}              # ws -> _Conn
+        self._dialins = {}            # inbound ws -> its dial-in _Upstream
         self._tag_seq = 0
         # nsid -> (conn, expiry): the viewer who last drove input on a panel, so
         # the source's echo of that change isn't fanned back to them (it would fight
@@ -299,6 +318,16 @@ class _MergeHost:
     def shared_specs(self):
         return [s["spec"] for s in self._shared_sources]
 
+    @staticmethod
+    def _resolve_uri(url):
+        """A source spec -> the ws uri it pools under. A dial-in's pseudo-uri
+        (``dialin:<label>``) has no host:port to parse, so it resolves to
+        itself — offsets and lookups work the same for both kinds."""
+        try:
+            return _parse_source(url)[0]
+        except Exception:
+            return str(url)
+
     def set_offset(self, url, offset):
         """Translate a merged source's whole block of panels to a new origin, for
         every viewer (hub-wide). The offset is applied on the way down and undone on
@@ -306,10 +335,7 @@ class _MergeHost:
         hub lays the merged content out. Shifts the replay cache (so reconnects /
         new viewers land at the new origin) and live-nudges every viewing browser.
         """
-        try:
-            ws_uri, _h, _l = _parse_source(url)
-        except Exception:
-            return
+        ws_uri = self._resolve_uri(url)
         ox2, oy2 = float(offset[0]), float(offset[1])
         for s in self._shared_sources:
             try:
@@ -354,16 +380,16 @@ class _MergeHost:
 
     def offset_of(self, url):
         """The current (x, y) origin a source is merged at, or (0, 0)."""
-        try:
-            ws_uri = _parse_source(url)[0]
-        except Exception:
-            return (0.0, 0.0)
+        ws_uri = self._resolve_uri(url)
         for s in self._shared_sources:
             try:
                 if _parse_source(s["spec"])[0] == ws_uri:
                     return tuple(s["offset"])
             except Exception:
                 pass
+        for up in self._upstreams.values():   # dial-ins have no shared entry
+            if up.ws_uri == ws_uri:
+                return tuple(up.offset)
         return (0.0, 0.0)
 
     # The owning Bridge supplies the event loop and the send primitives; exposing
@@ -650,7 +676,9 @@ class _MergeHost:
             return
         conn.sources.add(up.key)
         up.refs += 1
-        if up._task is None:
+        # A dial-in source has no outbound retry loop — its lifecycle is the
+        # inbound socket's (see on_connect / on_disconnect).
+        if up._task is None and not up.dialin:
             up._task = self._loop.create_task(self._run_upstream(up))
         for msg in up.cached_frames():
             self._loop.create_task(self._safe_send(conn.ws, msg))
@@ -666,6 +694,8 @@ class _MergeHost:
         self._send_source_teardown(conn.ws, up)
         up.refs -= 1
         if up.refs <= 0:
+            if up.dialin:
+                return  # lifecycle belongs to the source socket, not browser refs
             if up._task is not None:
                 up._task.cancel()
             self._upstreams.pop(key, None)
@@ -733,9 +763,23 @@ class _MergeHost:
         """Register a freshly-connected browser and seed its sources: the
         canvas-wide (``Canvas.merge`` / CLI) set that everyone gets, PLUS any this
         browser asked for via ``?sources=``. Called after the owning Bridge has
-        replayed its own state, so a hub's own panels arrive first."""
+        replayed its own state, so a hub's own panels arrive first.
+
+        A connection carrying ``?source=1`` is not a browser at all — it's a
+        **dial-in source** (an SDK process that dialed the hub instead of
+        serving a canvas for the hub to dial). It gets a dial-in upstream and
+        no ``_Conn``; the Bridge has already replayed the hub's state to it, so
+        it can observe the canvas like any subscriber."""
+        if qp and qp.get("source"):
+            self._attach_dialin(ws, qp)
+            return
         conn = _Conn(ws)
         self._conns[ws] = conn
+        # Dial-in sources are canvas-wide: every browser sees them, frozen
+        # replay included when one is offline-retained.
+        for up in list(self._upstreams.values()):
+            if up.dialin:
+                self._attach(conn, up)
         for src in list(self._shared_sources):
             self._loop.create_task(self._add_shared_source_for_conn(conn, src))
         raw_sources = qp.get("sources") if qp else None
@@ -743,8 +787,54 @@ class _MergeHost:
             for spec in [s for s in raw_sources.split(",") if s]:
                 self._loop.create_task(self._add_source_for_conn(conn, spec))
 
+    def _attach_dialin(self, ws, qp):
+        """Bind an inbound source connection to its (possibly pre-existing)
+        dial-in upstream. Identity is the ``label``: a source re-dialing under
+        the same label is the same source's next life, so any retained frames
+        from the previous one are stale (ids are minted per run) — tear them
+        down and let the fresh registers repopulate."""
+        label = (qp.get("label") or "").strip() or f"source{self._tag_seq}"
+        key = (f"dialin:{label}", "")
+        up = self._upstreams.get(key)
+        if up is None:
+            tag = f"s{self._tag_seq}"
+            self._tag_seq += 1
+            up = _Upstream(f"dialin:{label}", None, label, None, (0, 0), tag)
+            up.dialin = True
+            self._upstreams[key] = up
+            self._tag_to_upstream[tag] = up
+        elif up.registers or up.arrows or up.drawings:
+            for conn in self._interested(up):
+                self._send_source_teardown(conn.ws, up)
+            up.registers.clear()
+            up.updates.clear()
+            up.arrows.clear()
+            up.drawings.clear()
+        up.ws = _InboundWS(ws)
+        up.status = "live"
+        self._dialins[ws] = up
+        for conn in list(self._conns.values()):
+            self._attach(conn, up)
+        self._emit_sources_to_interested(up)
+
     def on_disconnect(self, ws):
-        """Release everything a departing browser was viewing."""
+        """Release everything a departing browser was viewing — or, for a
+        departing dial-in source, apply the offline policy (retain: freeze its
+        panels in place; otherwise: tear down and forget it)."""
+        up = self._dialins.pop(ws, None)
+        if up is not None:
+            up.ws = None
+            self._on_upstream_down(up)      # freeze (retain) or teardown+clear
+            if not self.retain:
+                stale = [c for c in self._conns.values() if up.key in c.sources]
+                for c in stale:
+                    c.sources.discard(up.key)
+                    up.refs -= 1
+                self._upstreams.pop(up.key, None)
+                self._tag_to_upstream.pop(up.tag, None)
+                for c in stale:
+                    self._emit_sources(c)
+            return
         conn = self._conns.pop(ws, None)
         if conn is not None:
             for key in list(conn.sources):
@@ -827,7 +917,23 @@ class _MergeHost:
         a merged panel (a namespaced ``s<N>:`` id) — forwarded to the owning canvas.
         Everything else (heartbeat/chat/cursor, and interactions on the hub's OWN
         panels, whose ids are bare) returns ``False``.
+
+        Frames FROM a dial-in source are its canvas content — register/update/
+        remove/arrow/draw are ingested through the same path a dialed-out
+        source's frames take (namespaced, cached, fanned out). Anything else it
+        sends (heartbeat, input on a hub panel it observed) falls through to
+        the base viewer path: a source is also a subscriber that may petition.
         """
+        up = self._dialins.get(ws)
+        if up is not None:
+            try:
+                msg = json.loads(raw)
+            except (ValueError, TypeError):
+                return False
+            if msg.get("type") in ("register", "update", "remove", "arrow", "draw"):
+                self._ingest(up, raw)
+                return True
+            return False
         conn = self._conns.get(ws)
         if conn is None:
             return False
