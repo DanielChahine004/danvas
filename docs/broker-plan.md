@@ -38,17 +38,31 @@ fake browser → assert frame sequences), proven against the Python hub first.
 Keeps the Rust SDK honest now and becomes the Rust broker's definition of
 done later. Can run alongside step 2.
 
-**4. The binary broker — deferred (plan below).** Build it when a workload
-nears the Python hub's fan-out ceiling, when a Python-free deployment target
-appears, or when Rust-SDK users ask why the hub still needs Python. Steps 1–3
-only make it cheaper: by then it's a transliteration of a proven, harness-
-pinned contract.
+**4. The binary broker — STARTED 2026-07-03.** Phase 0 and the phase-1 relay
+core shipped the same day the protocol froze: `tests/test_conformance.py` is
+the hub-agnostic contract (8 assertions over real sockets — welcome/version,
+namespacing+identity, replay, input routing, subscribe, set_props, retention
++ re-dial, cross-source arrows), and `broker/` is `danvasd`, a ~400-line
+axum/tokio relay that **passes all 8**:
+
+```bash
+python -m pytest tests/test_conformance.py                    # vs the Python hub
+DANVAS_HUB_CMD="<abs>/broker/target/debug/danvasd.exe|--port|{port}" \
+  python -m pytest tests/test_conformance.py                  # vs danvasd
+```
+
+Remaining for parity (the plan below): auth, drawings relay, offsets/roster
+(`merge_sources`), dialed-out sources (the hub dialing served canvases),
+binary frames, the ledger, static frontend serving, `/__describe__`, and
+distribution. Grow the harness with each — a behavior isn't done until it's
+asserted against both hubs.
 
 ---
 
-# The deferred phase: the performance binary broker (`danvasd`)
+# The broker plan (`danvasd`)
 
-Status: **planned, not started** — see the trigger conditions above.
+Status: **phase 1 relay core in progress** — conformance-green on the day-one
+scope above.
 
 ## What it is
 

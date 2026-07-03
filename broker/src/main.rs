@@ -1,0 +1,403 @@
+//! danvasd: the danvas standing broker (relay core).
+//!
+//! Speaks wire protocol v1 (../PROTOCOL.md) as a hub: dial-in sources
+//! (`/ws?source=1&label=`) contribute panels; browsers (and peer subscribers)
+//! receive the composed canvas; interactions route back to the owning source.
+//! The design rule is the plan's "parse the envelope, not the world": frames
+//! are `serde_json::Value`s — only `type`/`id`/`name`/`owner`/`start`/`end`
+//! and the geometry keys are touched; everything else passes through, so new
+//! panel types work through an old broker unchanged.
+//!
+//! Scope (phase 1, relay core): namespacing, caching + replay, fan-out,
+//! input/set_props/layout route-back, subscribe/unsubscribe, retention
+//! (default on: a dead source's panels freeze dimmed until its label
+//! re-dials). Not yet: auth, drawings, offsets, ledger, static frontend —
+//! tracked in ../docs/broker-plan.md phase 2+. The definition of done at
+//! every step is ../tests/test_conformance.py (DANVAS_HUB_CMD).
+
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Query, State};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::Router;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{json, Map, Value};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+
+const PROTOCOL_VERSION: u64 = 1;
+const FREEZE_OPACITY: f64 = 0.45;
+
+type Tx = UnboundedSender<String>;
+
+#[derive(Default)]
+struct Source {
+    tag: String,
+    live: bool,
+    tx: Option<Tx>,
+    /// nsid -> register frame (insertion order preserved via Vec of keys).
+    reg_order: Vec<String>,
+    registers: HashMap<String, Value>,
+    updates: HashMap<String, Map<String, Value>>,
+    arrows: HashMap<String, Value>,
+}
+
+#[derive(Default)]
+struct Hub {
+    run_id: String,
+    tag_seq: u64,
+    /// browser conn id -> sender
+    browsers: HashMap<u64, Tx>,
+    /// source label -> Source (kept while retained-offline too)
+    sources: HashMap<String, Source>,
+    tag_to_label: HashMap<String, String>,
+    /// composed panel id -> subscriber conn ids (browsers or sources)
+    subs: HashMap<String, HashSet<u64>>,
+    /// conn id -> sender for ANY connection (for subscription copies)
+    conns: HashMap<u64, Tx>,
+}
+
+impl Hub {
+    fn fanout_browsers(&self, text: &str) {
+        for tx in self.browsers.values() {
+            let _ = tx.send(text.to_string());
+        }
+    }
+
+    fn cached_frames(src: &Source) -> Vec<Value> {
+        let mut out = Vec::new();
+        for id in &src.reg_order {
+            if let Some(reg) = src.registers.get(id) {
+                out.push(reg.clone());
+            }
+        }
+        for (id, payload) in &src.updates {
+            out.push(json!({"type": "update", "id": id, "payload": payload}));
+        }
+        for arrow in src.arrows.values() {
+            out.push(arrow.clone());
+        }
+        if !src.live {
+            out.extend(Self::freeze_frames(src));
+        }
+        out
+    }
+
+    fn freeze_frames(src: &Source) -> Vec<Value> {
+        src.reg_order
+            .iter()
+            .map(|id| {
+                json!({"type": "update", "id": id,
+                       "payload": {"operable": false, "opacity": FREEZE_OPACITY}})
+            })
+            .collect()
+    }
+
+    fn teardown_frames(src: &Source) -> Vec<Value> {
+        src.reg_order
+            .iter()
+            .chain(src.arrows.keys())
+            .map(|id| json!({"type": "remove", "id": id}))
+            .collect()
+    }
+}
+
+fn now_hex() -> String {
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{ns:x}")
+}
+
+static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
+
+#[tokio::main]
+async fn main() {
+    let mut port: u16 = 8080;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--port" {
+            if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
+                port = p;
+            }
+        }
+    }
+    let hub = Arc::new(Mutex::new(Hub {
+        run_id: now_hex(),
+        ..Default::default()
+    }));
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .route("/", get(|| async { "danvasd: wire protocol v1 broker (phase 1 relay core)" }))
+        .with_state(hub);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    println!("[danvasd] serving ws://{addr}/ws");
+    axum::serve(listener, app).await.expect("serve");
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Query(q): Query<HashMap<String, String>>,
+    State(hub): State<Arc<Mutex<Hub>>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle(socket, q, hub))
+}
+
+async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hub>>) {
+    let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
+    let is_source = q.get("source").map(|v| !v.is_empty()).unwrap_or(false);
+    let label = q
+        .get("label")
+        .cloned()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("source{conn_id}"));
+
+    let (mut sink, mut stream) = socket.split();
+    let (tx, mut rx) = unbounded_channel::<String>();
+    let writer = tokio::spawn(async move {
+        while let Some(text) = rx.recv().await {
+            if sink.send(Message::Text(text)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Welcome first, always — the client's version check reads it.
+    let welcome = {
+        let h = hub.lock().unwrap();
+        json!({
+            "type": "welcome",
+            "protocol": PROTOCOL_VERSION,
+            "you": {"id": format!("v{conn_id}"), "name": label, "color": "#3b82f6",
+                     "device": "desktop", "role": null},
+            "runId": h.run_id,
+            "mergeHost": true,
+            "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
+        })
+    };
+    let _ = tx.send(welcome.to_string());
+
+    if is_source {
+        attach_source(&hub, &label, conn_id, tx.clone());
+    } else {
+        // Browser (or observing peer): replay every source's composed state.
+        let frames: Vec<String> = {
+            let mut h = hub.lock().unwrap();
+            h.browsers.insert(conn_id, tx.clone());
+            h.conns.insert(conn_id, tx.clone());
+            h.sources
+                .values()
+                .flat_map(|s| Hub::cached_frames(s))
+                .map(|f| f.to_string())
+                .collect()
+        };
+        for f in frames {
+            let _ = tx.send(f);
+        }
+    }
+
+    while let Some(Ok(msg)) = stream.next().await {
+        let text = match msg {
+            Message::Text(t) => t,
+            Message::Close(_) => break,
+            _ => continue,
+        };
+        let Ok(frame) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        if is_source {
+            source_frame(&hub, &label, conn_id, frame);
+        } else {
+            client_frame(&hub, conn_id, frame);
+        }
+    }
+
+    // -- disconnect ----------------------------------------------------------
+    {
+        let mut h = hub.lock().unwrap();
+        h.browsers.remove(&conn_id);
+        h.conns.remove(&conn_id);
+        for subs in h.subs.values_mut() {
+            subs.remove(&conn_id);
+        }
+        if is_source {
+            // Retention (default on): keep the caches, freeze the panels.
+            let frames: Vec<String> = if let Some(src) = h.sources.get_mut(&label) {
+                if src.tx.as_ref().map(|t| t.same_channel(&tx)).unwrap_or(false) {
+                    src.live = false;
+                    src.tx = None;
+                    Hub::freeze_frames(src).iter().map(|f| f.to_string()).collect()
+                } else {
+                    Vec::new() // an older life; the label was already re-taken
+                }
+            } else {
+                Vec::new()
+            };
+            for f in &frames {
+                h.fanout_browsers(f);
+            }
+        }
+    }
+    writer.abort();
+}
+
+fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
+    let mut h = hub.lock().unwrap();
+    h.conns.insert(conn_id, tx.clone());
+    if !h.sources.contains_key(label) {
+        let tag = format!("s{}", h.tag_seq);
+        h.tag_seq += 1;
+        h.tag_to_label.insert(tag.clone(), label.to_string());
+        h.sources.insert(
+            label.to_string(),
+            Source { tag, ..Default::default() },
+        );
+    }
+    // Same label re-dialing = the source's next life: stale frames out first
+    // (ids are minted per run on the source side).
+    let teardown: Vec<String> = {
+        let src = h.sources.get_mut(label).unwrap();
+        let frames = Hub::teardown_frames(src).iter().map(|f| f.to_string()).collect();
+        src.reg_order.clear();
+        src.registers.clear();
+        src.updates.clear();
+        src.arrows.clear();
+        src.live = true;
+        src.tx = Some(tx);
+        frames
+    };
+    for f in &teardown {
+        h.fanout_browsers(f);
+    }
+}
+
+/// A frame FROM a dial-in source: its canvas content, namespaced + cached +
+/// fanned out. Anything else (heartbeat, petitions on others' panels) falls
+/// through to the shared client path.
+fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Value) {
+    let kind = frame.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+    if !matches!(kind.as_str(), "register" | "update" | "remove" | "arrow") {
+        client_frame(hub, conn_id, frame);
+        return;
+    }
+    let mut h = hub.lock().unwrap();
+    let Some(src) = h.sources.get(label) else { return };
+    let tag = src.tag.clone();
+    let ns = |id: &str| format!("{tag}:{id}");
+    let raw_id = frame.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+    let nsid = ns(&raw_id);
+    let obj = frame.as_object_mut().unwrap();
+    obj.insert("id".into(), Value::String(nsid.clone()));
+    match kind.as_str() {
+        "register" => {
+            // Re-stamp ownership: on the composed canvas the owner is the
+            // source, by its label — whatever it says about itself.
+            obj.insert("owner".into(), Value::String(label.to_string()));
+            let src = h.sources.get_mut(label).unwrap();
+            if !src.registers.contains_key(&nsid) {
+                src.reg_order.push(nsid.clone());
+            }
+            src.registers.insert(nsid, frame.clone());
+        }
+        "update" => {
+            let payload = frame
+                .get("payload")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let src = h.sources.get_mut(label).unwrap();
+            src.updates.entry(nsid).or_default().extend(payload);
+        }
+        "remove" => {
+            let src = h.sources.get_mut(label).unwrap();
+            src.reg_order.retain(|i| i != &nsid);
+            src.registers.remove(&nsid);
+            src.updates.remove(&nsid);
+            src.arrows.remove(&nsid);
+        }
+        "arrow" => {
+            // Endpoints: the sender's own panels get its namespace; a
+            // reference to a panel it can SEE but doesn't own (an already-
+            // composed id) passes through — cross-source arrows.
+            for key in ["start", "end"] {
+                if let Some(Value::String(r)) = frame.get(key) {
+                    let composed = compose_endpoint(&h, &tag, r);
+                    frame.as_object_mut().unwrap().insert(key.into(), Value::String(composed));
+                }
+            }
+            let src = h.sources.get_mut(label).unwrap();
+            src.arrows.insert(nsid, frame.clone());
+        }
+        _ => {}
+    }
+    let text = frame.to_string();
+    h.fanout_browsers(&text);
+}
+
+fn compose_endpoint(h: &Hub, own_tag: &str, r: &str) -> String {
+    if let Some((tag, rest)) = r.split_once(':') {
+        if !rest.is_empty() && h.tag_to_label.contains_key(tag) {
+            return r.to_string(); // another source's composed id: untouched
+        }
+    }
+    format!("{own_tag}:{r}")
+}
+
+/// A frame from a browser (or a source acting as a peer): petitions on
+/// composed panels route to the owner; subscriptions live at the hub.
+fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
+    let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+    let Some(cid) = frame.get("id").and_then(Value::as_str).map(String::from) else {
+        return; // heartbeat / chat / plumbing: nothing to route in phase 1
+    };
+    match kind {
+        "subscribe" => {
+            let mut h = hub.lock().unwrap();
+            h.subs.entry(cid).or_default().insert(conn_id);
+        }
+        "unsubscribe" => {
+            let mut h = hub.lock().unwrap();
+            if let Some(s) = h.subs.get_mut(&cid) {
+                s.remove(&conn_id);
+            }
+        }
+        "input" | "set_props" | "layout" | "request" => {
+            let Some((tag, rest)) = cid.split_once(':') else { return };
+            let h = hub.lock().unwrap();
+            let Some(label) = h.tag_to_label.get(tag) else { return };
+            if let Some(src) = h.sources.get(label) {
+                if let Some(tx) = &src.tx {
+                    let mut out = frame.clone();
+                    out.as_object_mut()
+                        .unwrap()
+                        .insert("id".into(), Value::String(rest.to_string()));
+                    let _ = tx.send(out.to_string());
+                }
+            }
+            if kind == "input" {
+                // Event subscription fan-out (composed id; originator excluded).
+                if let Some(sub_ids) = h.subs.get(&cid) {
+                    let copy = json!({"type": "input", "id": cid,
+                                      "payload": frame.get("payload").cloned()
+                                                      .unwrap_or(Value::Null)});
+                    let text = copy.to_string();
+                    for sid in sub_ids {
+                        if *sid != conn_id {
+                            if let Some(tx) = h.conns.get(sid) {
+                                let _ = tx.send(text.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}

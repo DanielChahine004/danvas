@@ -1,0 +1,16 @@
+[package]
+name = "danvasd"
+version = "0.1.0"
+edition = "2021"
+description = "danvas standing broker: hub relay speaking wire protocol v1 (see ../PROTOCOL.md)"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+serde_json = "1"
+futures-util = "0.3"
+
+[profile.release]
+lto = true
+strip = true
