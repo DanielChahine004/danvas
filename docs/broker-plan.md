@@ -53,11 +53,13 @@ DANVAS_HUB_CMD="<abs>/broker/target/debug/danvasd.exe|--port|{port}" \
   python -m pytest tests/test_conformance.py                  # vs danvasd
 ```
 
-Remaining for parity (the plan below): auth, drawings relay, offsets,
-dialed-out sources (the hub dialing served canvases), binary frames, the
-ledger, `/__describe__`, heartbeat reaping, and distribution. Grow the
-harness with each — a behavior isn't done until it's asserted against both
-hubs.
+Done since (harness now 20, both hubs green on every row): drawings relay,
+offsets (`merge_offset`), roster, fresh-register replay folding, and **auth**
+(`--password` + the `/__auth__` cookie flow, on the Python hub too).
+Remaining for parity: dialed-out sources (the hub dialing served canvases),
+binary frames, the ledger, `/__describe__`, heartbeat reaping, and
+distribution. Grow the harness with each — a behavior isn't done until it's
+asserted against both hubs.
 
 ---
 
