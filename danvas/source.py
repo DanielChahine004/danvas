@@ -68,6 +68,10 @@ class SourceClient:
         self._layout_handlers = {}# cid -> [fn]
         self._frame_taps = []
         self._subs = set()        # panel ids we subscribed to (re-sent on reconnect)
+        # Optional replacement for the built-in replay: a callable yielding the
+        # frames that reconstruct this source on a fresh connection (used by
+        # RemoteCanvas, whose components — not this cache — hold the truth).
+        self._replay_hook = None
         # Local mirror of the canvas we joined: id -> {"component", "props",
         # "state", ...geometry} folded from the hub's register/update stream.
         # Eventually consistent (updated on the dispatch thread) — the replica
@@ -230,11 +234,15 @@ class SourceClient:
         """(Re)declare everything on a fresh connection — the source-side twin
         of the hub's replay-on-connect: registers first, then accumulated
         state, so a hub restart heals without user code doing anything."""
-        for msg in self._registers.values():
-            await sock.send(json.dumps(msg))
-        for cid, payload in self._updates.items():
-            await sock.send(json.dumps(
-                {"type": "update", "id": cid, "payload": payload}))
+        if self._replay_hook is not None:
+            for msg in self._replay_hook():
+                await sock.send(json.dumps(msg))
+        else:
+            for msg in self._registers.values():
+                await sock.send(json.dumps(msg))
+            for cid, payload in self._updates.items():
+                await sock.send(json.dumps(
+                    {"type": "update", "id": cid, "payload": payload}))
         for cid in self._subs:
             await sock.send(json.dumps({"type": "subscribe", "id": cid}))
 

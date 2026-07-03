@@ -974,24 +974,33 @@ flow above has the hub dial out to canvases that *serve*. Dial-in is the
 reverse: a process connects **to** a running canvas's WebSocket with
 `?source=1&label=<name>` and registers panels over the wire — no server of its
 own, works from behind NAT, and any language that can open a WebSocket
-qualifies (the contract is [PROTOCOL.md](PROTOCOL.md)). `danvas.SourceClient`
-is the built-in Python client — use it to split an app across processes, or as
-the reference for writing a Rust/C++ SDK:
+qualifies (the contract is [PROTOCOL.md](PROTOCOL.md)).
+
+From Python, joining is the **normal canvas API** — `danvas.connect()` returns
+a canvas backed by real danvas components whose frames ride the dial-in socket,
+so factories, live setters, name lookup, and every handler mode work exactly as
+in a served script:
 
 ```python
-from danvas import SourceClient
+import danvas
 
-src = SourceClient("127.0.0.1:8000", label="telemetry")   # any served canvas
-src.connect()
-src.register("temp", "Slider", props={"min": 0, "max": 100, "value": 20},
-             x=40, y=40, w=320, h=90)
+canvas = danvas.connect("127.0.0.1:8000", label="rig")   # any served canvas
+servo = canvas.slider("servo", min=0, max=180)           # native factory
 
-@src.on_input("temp")
-def moved(payload):                    # a browser operated our panel
-    print("set to", payload)
+@servo.on_change                                          # native handlers
+def _(v):
+    print("browser set", v)
 
-src.update("temp", value=55)           # stream state; panels update live
+servo.min = 10                                            # native live setters
+canvas["servo"].color = (255, 0, 0)                       # native lookup
+canvas.shared                                             # mirror of the whole canvas
+canvas.set_props(other_id, max=90)                        # edit anyone's panel
+canvas.subscribe(btn_id, lambda p: fire())                # react to anyone's events
 ```
+
+(For other languages — or wire-level control — `danvas.SourceClient` is the
+minimal client underneath: `register`/`update`/`on_input` as raw frames, and
+the reference for writing a Rust/C++ SDK.)
 
 The source's panels compose alongside the canvas's own for every viewer;
 interactions route back to the source process; if it dies, its panels hold

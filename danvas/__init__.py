@@ -94,4 +94,10 @@ def __getattr__(name):
     if name == "SourceClient":
         from .source import SourceClient
         return SourceClient
+    if name == "connect":
+        from .remote import connect
+        return connect
+    if name == "RemoteCanvas":
+        from .remote import RemoteCanvas
+        return RemoteCanvas
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
