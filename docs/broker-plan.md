@@ -1,8 +1,54 @@
-# Plan: the performance binary broker (`danvasd`)
+# Roadmap: the shared-canvas architecture
 
-Status: **planned, not started.** This is proposition 4 of the broker
-architecture — deliberately last, because the first three (the frozen
-protocol, the SQLite ledger, hub retention) define exactly what it must do.
+Where things stand (2026-07-03): the protocol is frozen (PROTOCOL.md v1), the
+SQLite ledger and hub retention shipped, and the whole peer story landed —
+dial-in sources, the shared property plane (`set_props`/`subscribe`),
+`danvas.connect()` (the native Canvas API over a socket), cross-process names
+and `owner`/`sources`, content-verb parity, cross-source arrows. **Dial-in is
+the primary protocol role**: SDKs implement it; dialed-out serving remains the
+composition feature for canvases that are themselves products.
+
+## Next steps, in order
+
+**1. Real-browser smoke test (~an hour).** Everything above shipped against
+frame-level and test-socket assertions; nobody has *looked* at it. Verify on
+a real canvas (LAN + phone): the retention freeze (dim + offline dot) when a
+source dies and heals on re-dial; the plain-tab disconnect banner; a
+`danvas.connect()` process putting a slider on a served canvas, editing a
+Python panel's props by name, and reacting to a Python button. One thing to
+check deliberately: raw `SourceClient.register("x", "Slider", ...)` sends
+`component: "Slider"`, but the frontend mounts built-ins as React panels with
+baked props — the raw client's panels may not render without React-shaped
+registration. `danvas.connect()` is immune (real component classes build its
+frames); PROTOCOL.md must state what a non-Python SDK actually has to send.
+
+**2. The Rust source SDK (`danvas-source` crate) — weeks, not months.** A
+transliteration of `danvas/source.py` (the executable spec) against protocol
+v1: dial in (`?source=1&label=`), register/update/remove + replay-on-
+reconnect, heartbeats, input/layout callbacks, `set_props`/`subscribe`, the
+panels mirror with name lookup. Ergonomics goal: feel like `danvas.connect()`
+does in Python. Deliverable: the two-languages-one-canvas demo — a Rust
+process putting live panels on a Python canvas, retuning a Python slider,
+reacting to a Python button. This is broker-plan phase 4 pulled forward,
+because it needs no broker: the Python hub already speaks the role.
+
+**3. Phase 0 conformance harness (1–2 weeks, pure Python).** Protocol-level
+tests that drive *any* hub over real sockets (spawn → connect fake source +
+fake browser → assert frame sequences), proven against the Python hub first.
+Keeps the Rust SDK honest now and becomes the Rust broker's definition of
+done later. Can run alongside step 2.
+
+**4. The binary broker — deferred (plan below).** Build it when a workload
+nears the Python hub's fan-out ceiling, when a Python-free deployment target
+appears, or when Rust-SDK users ask why the hub still needs Python. Steps 1–3
+only make it cheaper: by then it's a transliteration of a proven, harness-
+pinned contract.
+
+---
+
+# The deferred phase: the performance binary broker (`danvasd`)
+
+Status: **planned, not started** — see the trigger conditions above.
 
 ## What it is
 
@@ -101,10 +147,11 @@ the platform wheel (maturin/cibuildwheel; ruff-style per-platform binaries);
 release for the no-Python box. Exit: `serve(broker=True)` runs the README
 hello world on Win/mac/Linux CI.
 
-**Phase 4 (optional, opens polyglot) — source SDK extraction.** A ~1k-line
-`danvas-source` Rust crate (register/update/input dispatch/replay-on-connect)
-that a C++/Rust process embeds to *be* a source. This is where "any language
-on the canvas" becomes a shipped artifact rather than a spec promise.
+**Phase 4 — source SDK extraction.** *Pulled forward: this is step 2 of the
+roadmap above, buildable today against the Python hub with no broker.* A
+~1k-line `danvas-source` Rust crate that a C++/Rust process embeds to *be* a
+source — "any language on the canvas" as a shipped artifact rather than a
+spec promise.
 
 Realistic solo total for phases 0–3: **~3–4 months** at current pace,
 assuming no protocol changes mid-flight (that's what the freeze is for).
