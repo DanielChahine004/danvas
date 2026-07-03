@@ -398,6 +398,59 @@ function sendRaw(msg: any): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
+// --- disconnect treatment ----------------------------------------------------
+// When the socket drops, nothing is cleared: the tab keeps rendering the
+// last-known state and the reconnect replay heals it. Make that hold VISIBLE —
+// stale data must not read as live. After a short grace window (so a
+// hot-reload restart or a network blip doesn't flash it), dim the page and pin
+// a banner until the connection returns. Inputs already go nowhere while down
+// (sendRaw guards on readyState), so this is purely the staleness signal — the
+// client-side mirror of the merge hub's retain freeze.
+let dcTimer: any = null
+let dcOverlay: HTMLElement | null = null
+const DC_GRACE_MS = 1500
+
+function showDisconnected(): void {
+  if (dcOverlay) return
+  const el = document.createElement('div')
+  el.id = 'pc-disconnected'
+  el.setAttribute(
+    'style',
+    'position:fixed;inset:0;z-index:99999;pointer-events:none;' +
+      'background:rgba(0,0,0,0.28);',
+  )
+  const banner = document.createElement('div')
+  banner.setAttribute(
+    'style',
+    'position:absolute;top:0;left:0;right:0;padding:6px 14px;' +
+      'font:13px/1.4 "Inter Variable",Inter,system-ui,sans-serif;' +
+      'text-align:center;color:#fff;background:#b45309;opacity:0.95;',
+  )
+  banner.textContent = '⚠ Connection lost — showing last known state; retrying…'
+  el.appendChild(banner)
+  document.body.appendChild(el)
+  dcOverlay = el
+}
+
+function hideDisconnected(): void {
+  if (dcTimer) {
+    clearTimeout(dcTimer)
+    dcTimer = null
+  }
+  if (dcOverlay) {
+    dcOverlay.remove()
+    dcOverlay = null
+  }
+}
+
+function scheduleDisconnected(): void {
+  if (dcTimer || dcOverlay) return
+  dcTimer = setTimeout(() => {
+    dcTimer = null
+    showDisconnected()
+  }, DC_GRACE_MS)
+}
+
 export function connect(): void {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   let url = `${proto}://${location.host}/ws`
@@ -418,6 +471,7 @@ export function connect(): void {
   ws.binaryType = 'arraybuffer'
 
   ws.onopen = () => {
+    hideDisconnected()
     if (heartbeatTimer) clearInterval(heartbeatTimer)
     heartbeatTimer = setInterval(() => sendRaw({ type: 'heartbeat' }), 10000)
   }
@@ -440,6 +494,7 @@ export function connect(): void {
       clearInterval(heartbeatTimer)
       heartbeatTimer = null
     }
+    scheduleDisconnected()
     setTimeout(connect, 1000)
   }
   ws.onerror = () => {

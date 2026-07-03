@@ -1212,7 +1212,10 @@ nested detail.
 
 Connection lines always print. Stale tabs heal themselves: panel ids are minted
 per run, and a tab from an earlier run drops the old panels and replays the new
-ones — re-running never leaves duplicates.
+ones — re-running never leaves duplicates. If the server process dies, the tab
+keeps the last-known state on screen but dims it behind a **"connection lost —
+showing last known state"** banner (after a short grace, so hot-reload restarts
+don't flash it), then heals automatically when the process returns.
 
 All JSON at `ws://localhost:{port}/ws`:
 
