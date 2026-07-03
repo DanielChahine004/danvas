@@ -116,6 +116,41 @@ struct Hub {
     /// tokens carried in the pc_session cookie (PROTOCOL.md §transport).
     password: Option<String>,
     sessions: HashSet<String>,
+    /// Dialed-out sources (merge_add): label -> the retrying dial task, so
+    /// merge_remove can stop it for good.
+    dial_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+}
+
+/// Normalise a merge_add spec to `(ws_uri, label)`: bare port, host:port, or
+/// a full http(s)/ws(s) URL — the same forms the Python hub accepts.
+fn normalize_source_uri(spec: &str) -> Option<(String, String)> {
+    let text = spec.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some((scheme, rest)) = text.split_once("://") {
+        let ws_scheme = match scheme {
+            "http" | "ws" => "ws",
+            "https" | "wss" => "wss",
+            _ => return None,
+        };
+        let rest = rest.trim_end_matches('/');
+        let label = rest.split('/').next().unwrap_or(rest).to_string();
+        let path = if rest.ends_with("/ws") {
+            rest.to_string()
+        } else {
+            format!("{rest}/ws")
+        };
+        return Some((format!("{ws_scheme}://{path}"), label));
+    }
+    let hostport = if let Some(p) = text.strip_prefix(':') {
+        format!("localhost:{p}")
+    } else if text.contains(':') {
+        text.to_string()
+    } else {
+        format!("localhost:{text}")
+    };
+    Some((format!("ws://{hostport}/ws"), hostport))
 }
 
 impl Hub {
@@ -515,30 +550,76 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             subs.remove(&conn_id);
         }
         if is_source {
-            // Retention (default on): keep the caches, freeze the panels.
-            let mut went_offline = false;
-            let frames: Vec<String> = if let Some(src) = h.sources.get_mut(&label) {
-                if src.tx.as_ref().map(|t| t.same_channel(&tx)).unwrap_or(false) {
-                    src.live = false;
-                    src.tx = None;
-                    went_offline = true;
-                    Hub::freeze_frames(src).iter().map(|f| f.to_string()).collect()
-                } else {
-                    Vec::new() // an older life; the label was already re-taken
-                }
-            } else {
-                Vec::new()
-            };
-            for f in &frames {
-                h.fanout_browsers(f);
-            }
-            if went_offline {
-                let roster = h.roster_frame().to_string();
-                h.fanout_browsers(&roster);
-            }
+            source_down(&mut h, &label, &tx);
         }
     }
     writer.abort();
+}
+
+/// A source's connection dropped (server-side dial-in close OR a dialed-out
+/// link failing): retention keeps the caches and freezes the panels — unless
+/// a newer life already re-took the label (the same_channel check).
+fn source_down(h: &mut Hub, label: &str, tx: &Tx) {
+    let mut went_offline = false;
+    let frames: Vec<String> = if let Some(src) = h.sources.get_mut(label) {
+        if src.tx.as_ref().map(|t| t.same_channel(tx)).unwrap_or(false) {
+            src.live = false;
+            src.tx = None;
+            went_offline = true;
+            Hub::freeze_frames(src).iter().map(|f| f.to_string()).collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    for f in &frames {
+        h.fanout_browsers(f);
+    }
+    if went_offline {
+        let roster = h.roster_frame().to_string();
+        h.fanout_browsers(&roster);
+    }
+}
+
+/// Dial OUT to a served canvas (merge_add): connect as a ?proxy=1 client,
+/// ingest its stream through the same path a dial-in source's frames take,
+/// pump route-backs out, retry forever (retention covers the gaps). Stopped
+/// for good by merge_remove aborting the task.
+async fn dial_out(hub: Arc<Mutex<Hub>>, ws_uri: String, label: String) {
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as TMsg;
+    let sep = if ws_uri.contains('?') { '&' } else { '?' };
+    let uri = format!("{ws_uri}{sep}proxy=1");
+    loop {
+        if let Ok((stream, _)) = connect_async(&uri).await {
+            let (mut sink, mut read) = stream.split();
+            let (tx, mut rx) = unbounded_channel::<String>();
+            let writer = tokio::spawn(async move {
+                while let Some(text) = rx.recv().await {
+                    if sink.send(TMsg::Text(text)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+            let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
+            attach_source(&hub, &label, conn_id, tx.clone());
+            while let Some(Ok(msg)) = read.next().await {
+                if let TMsg::Text(text) = msg {
+                    if let Ok(frame) = serde_json::from_str::<Value>(&text) {
+                        source_frame(&hub, &label, conn_id, frame);
+                    }
+                }
+            }
+            writer.abort();
+            {
+                let mut h = hub.lock().unwrap();
+                h.conns.remove(&conn_id);
+                source_down(&mut h, &label, &tx);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 }
 
 fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
@@ -773,6 +854,46 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                 }
             }
         }
+        return;
+    }
+    if kind == "merge_add" {
+        // Compose a SERVED canvas by URL, live. (Canvas-wide here; the
+        // per-connection scoping the Python hub offers is deliberately
+        // unpinned by the harness for now.)
+        let Some((ws_uri, label)) = frame
+            .get("uri")
+            .and_then(Value::as_str)
+            .and_then(normalize_source_uri)
+        else {
+            return;
+        };
+        let mut h = hub.lock().unwrap();
+        if h.dial_tasks.contains_key(&label) {
+            return; // already composing it
+        }
+        let task = tokio::spawn(dial_out(hub.clone(), ws_uri, label.clone()));
+        h.dial_tasks.insert(label, task);
+        return;
+    }
+    if kind == "merge_remove" {
+        let sid = frame.get("sid").and_then(Value::as_str).unwrap_or("").to_string();
+        let mut h = hub.lock().unwrap();
+        let Some(label) = h.tag_to_label.get(&sid).cloned() else { return };
+        if let Some(task) = h.dial_tasks.remove(&label) {
+            task.abort(); // no more reconnects
+        }
+        let frames: Vec<String> = h
+            .sources
+            .get(&label)
+            .map(|src| Hub::teardown_frames(src).iter().map(|f| f.to_string()).collect())
+            .unwrap_or_default();
+        h.sources.remove(&label);
+        h.tag_to_label.remove(&sid);
+        for f in &frames {
+            h.fanout_browsers(f);
+        }
+        let roster = h.roster_frame().to_string();
+        h.fanout_browsers(&roster);
         return;
     }
     if kind == "merge_offset" {

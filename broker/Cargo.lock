@@ -138,6 +138,7 @@ dependencies = [
  "include_dir",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

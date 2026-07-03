@@ -684,3 +684,104 @@ def test_silent_source_is_reaped_heartbeating_source_survives(reaping_hub):
                         and m.get("id") == regb["id"]
                         and (m.get("payload") or {}).get("operable") is False]
     asyncio.run(asyncio.wait_for(go(), timeout=40))
+
+
+# -- dialed-out sources: merge_add composes a SERVED canvas by URL ---------------
+
+def _spawn_python_hub(port):
+    """A served target canvas (always the Python hub — it's the environment
+    here, not the implementation under test)."""
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "danvas.merge", "--port", str(port), "--no-open"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+            return proc
+        except OSError:
+            time.sleep(0.1)
+    proc.kill()
+    raise RuntimeError("target hub never started")
+
+
+def test_merge_add_composes_and_routes_and_retains(hub):
+    # (Single-browser scope: whether merge_add is per-connection or canvas-
+    # wide is deliberately unpinned here.)
+    tport = _free_port()
+    target = _spawn_python_hub(tport)
+    try:
+        async def go():
+            # the target canvas has one panel (contributed by a dial-in peer)
+            tsrc = await _source(tport, "origin")
+            ts = Peer(tsrc)
+            await ts.recv_until(lambda m: m["type"] == "welcome")
+            await ts.send({"type": "register", "id": "tp", "name": "tpanel",
+                           "component": "React", "props": {}, "x": 5, "y": 5})
+            async with _browser(hub) as bws:
+                br = Peer(bws)
+                await br.recv_until(lambda m: m["type"] == "welcome")
+                # pull the served canvas in by URL, live
+                await br.send({"type": "merge_add",
+                               "uri": f"127.0.0.1:{tport}"})
+                reg = await br.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "tpanel", timeout=10.0)
+                roster = await br.recv_until(
+                    lambda m: m.get("type") == "merge_sources"
+                    and any(str(tport) in str(s.get("label", ""))
+                            or str(tport) in str(s.get("uri", ""))
+                            for s in m.get("sources", [])))
+                # interaction routes back through the chain to the origin
+                await br.send({"type": "input", "id": reg["id"],
+                               "payload": {"value": 3}})
+                got = await ts.recv_until(lambda m: m.get("type") == "input",
+                                          timeout=10.0)
+                assert got["id"] == "tp" and got["payload"] == {"value": 3}
+                # the served canvas dies -> its panels hold, frozen (retention)
+                target.kill()
+                frozen = await br.recv_until(
+                    lambda m: m.get("type") == "update"
+                    and m.get("id") == reg["id"]
+                    and (m.get("payload") or {}).get("operable") is False,
+                    timeout=15.0)
+                assert frozen
+            await tsrc.close()
+        asyncio.run(asyncio.wait_for(go(), timeout=60))
+    finally:
+        target.kill()
+
+
+def test_merge_remove_drops_a_dialed_source(hub):
+    tport = _free_port()
+    target = _spawn_python_hub(tport)
+    try:
+        async def go():
+            tsrc = await _source(tport, "origin2")
+            ts = Peer(tsrc)
+            await ts.recv_until(lambda m: m["type"] == "welcome")
+            await ts.send({"type": "register", "id": "q", "name": "qpanel",
+                           "component": "React", "props": {}})
+            async with _browser(hub) as bws:
+                br = Peer(bws)
+                await br.send({"type": "merge_add",
+                               "uri": f"127.0.0.1:{tport}"})
+                reg = await br.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "qpanel", timeout=10.0)
+                roster = await br.recv_until(
+                    lambda m: m.get("type") == "merge_sources"
+                    and any(str(tport) in str(s.get("label", ""))
+                            or str(tport) in str(s.get("uri", ""))
+                            for s in m.get("sources", [])))
+                sid = next(s["sid"] for s in roster["sources"]
+                           if str(tport) in str(s.get("label", ""))
+                           or str(tport) in str(s.get("uri", "")))
+                await br.send({"type": "merge_remove", "sid": sid})
+                await br.recv_until(
+                    lambda m: m.get("type") == "remove"
+                    and m.get("id") == reg["id"], timeout=10.0)
+            await tsrc.close()
+        asyncio.run(asyncio.wait_for(go(), timeout=60))
+    finally:
+        target.kill()
