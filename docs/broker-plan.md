@@ -60,9 +60,12 @@ offsets (`merge_offset`), roster, fresh-register replay folding, **auth**
 and **dialed-out sources** (`merge_add`/`merge_remove` compose served
 canvases by URL; danvasd dials as a retrying ws client through the same
 ingest path as dial-ins — per-connection scoping remains unpinned).
-Remaining for parity: binary frames, the ledger, `/__describe__`,
-protected-source `merge_auth`, and distribution. Grow the harness with each
-— a behavior isn't done until it's asserted against both hubs.
+**Binary media now crosses both hubs** (harness at 25): video/audio/
+push_binary relay with the id rewritten in-envelope; binary INPUT routes back
+— this LIFTED the documented merge limitation rather than porting it.
+Remaining for parity: the ledger, `/__describe__`, protected-source
+`merge_auth`, and distribution. Grow the harness with each — a behavior
+isn't done until it's asserted against both hubs.
 
 ---
 
