@@ -43,7 +43,11 @@ def hub():
     port = _free_port()
     cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
     if cmd_tpl:
-        cmd = [part.format(port=port) for part in cmd_tpl.split("|")]
+        # A {password} placeholder formats to empty here — both hubs treat an
+        # empty --password as an open bind, so one template serves both the
+        # open and the secure fixture.
+        cmd = [part.format(port=port, password="")
+               for part in cmd_tpl.split("|")]
     else:
         cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
                "--no-open"]
@@ -474,4 +478,128 @@ def test_replayed_register_folds_text_content_too(hub):
                     lambda m: m.get("type") == "register"
                     and m.get("name") == "l16")
                 assert json.loads(reg["props"]["data"])["text"] == "done"
+    _run(go())
+
+
+# -- auth: the /__auth__ cookie flow gates HTTP and WS ---------------------------
+
+PASSWORD = "hunter2"
+
+
+@pytest.fixture(scope="module")
+def secure_hub():
+    """A password-protected hub. DANVAS_HUB_CMD may carry a {password}
+    placeholder; the default Python hub uses --password."""
+    port = _free_port()
+    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
+    if cmd_tpl and "{password}" in cmd_tpl:
+        cmd = [p.format(port=port, password=PASSWORD) for p in cmd_tpl.split("|")]
+    elif cmd_tpl:
+        pytest.skip("DANVAS_HUB_CMD given without a {password} placeholder")
+    else:
+        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
+               "--no-open", "--password", PASSWORD]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    raise RuntimeError(f"hub exited early: {cmd}")
+                time.sleep(0.1)
+        else:
+            raise RuntimeError(f"hub never opened port {port}: {cmd}")
+        yield port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def _login(port, password):
+    """POST /__auth__; return the pc_session token or None."""
+    import re
+    import urllib.request
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/__auth__",
+        data=f"password={password}".encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST")
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        resp = opener.open(req, timeout=5)
+    except urllib.error.HTTPError as e:
+        resp = e
+    cookie = resp.headers.get("Set-Cookie") or ""
+    m = re.search(r"pc_session=([^;]+)", cookie)
+    return m.group(1) if m else None
+
+
+def test_auth_gates_http_and_websocket(secure_hub):
+    import urllib.error
+    import urllib.request
+    # HTTP without a session: the login page, 401.
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{secure_hub}/", timeout=5)
+        status = 200
+    except urllib.error.HTTPError as e:
+        status = e.code
+    assert status == 401
+    # WS without a session: no welcome frame obtainable.
+    async def unauthed():
+        try:
+            async with _browser(secure_hub) as ws:
+                p = Peer(ws)
+                await p.recv_until(lambda m: m.get("type") == "welcome",
+                                   timeout=2.0)
+                return True
+        except Exception:
+            return False
+    got = [None]
+
+    async def go():
+        got[0] = await unauthed()
+    _run(go())
+    assert got[0] is False
+
+
+def test_auth_wrong_password_yields_no_session(secure_hub):
+    assert _login(secure_hub, "wrong") is None
+
+
+def test_auth_cookie_unlocks_http_and_ws_fully(secure_hub):
+    import urllib.request
+    token = _login(secure_hub, PASSWORD)
+    assert token
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{secure_hub}/",
+        headers={"Cookie": f"pc_session={token}"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.status == 200
+
+    async def go():
+        headers = {"Cookie": f"pc_session={token}"}
+        async with ws_connect(
+                f"ws://127.0.0.1:{secure_hub}/ws?source=1&label=sec",
+                max_size=None, additional_headers=headers) as sws, \
+            ws_connect(f"ws://127.0.0.1:{secure_hub}/ws",
+                       max_size=None, additional_headers=headers) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "p", "name": "sec1",
+                            "component": "React", "props": {}})
+            await br.recv_until(
+                lambda m: m.get("type") == "register"
+                and m.get("name") == "sec1")
     _run(go())

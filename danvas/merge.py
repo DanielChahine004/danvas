@@ -1193,18 +1193,22 @@ class Merge:
         self._tunnel = None
 
     def serve(self, port=8080, open_browser=True, host="127.0.0.1", block=True,
-              tunnel=False, tunnel_provider="cloudflared"):
+              tunnel=False, tunnel_provider="cloudflared", password=None):
         """Start the merge server.
 
         With ``block=True`` (default) this blocks until shutdown. With
         ``block=False`` it starts in the background and returns ``self`` (use in a
         notebook, then call :meth:`stop`). ``tunnel=True`` exposes the merged view
-        publicly over HTTPS.
+        publicly over HTTPS. ``password`` gates the hub behind the same
+        ``/__auth__`` login a protected canvas uses — browsers see the password
+        page once; dial-in sources authenticate with ``password=`` on
+        :class:`~danvas.SourceClient` / :func:`danvas.connect`.
         """
+        self._bridge._auth = bool(password)
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host,
-                compress=tunnel,
+                compress=tunnel, password=password,
             )
             if tunnel:
                 self._start_tunnel(port, tunnel_provider)
@@ -1213,7 +1217,7 @@ class Merge:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host, compress=tunnel)
+                       host=host, compress=tunnel, password=password)
         finally:
             self._stop_tunnel()
 
@@ -1265,6 +1269,9 @@ def main(argv=None):
                              "each (0 = overlay, preserving real coordinates)")
     parser.add_argument("--auth", action="append", metavar="URI=PASSWORD",
                         help="password for a protected default source (repeatable)")
+    parser.add_argument("--password", default=None,
+                        help="gate the merged view behind a password (the "
+                             "same /__auth__ login a protected canvas uses)")
     parser.add_argument("--no-retain", action="store_true",
                         help="drop a dead source's panels from the merged view "
                              "(default: keep them frozen — dimmed, non-operable "
@@ -1281,7 +1288,8 @@ def main(argv=None):
         auth=_parse_auth_flags(args.auth),
         retain=not args.no_retain,
     ).serve(port=args.port, open_browser=not args.no_open, host=args.host,
-            tunnel=args.tunnel, tunnel_provider=args.tunnel_provider)
+            tunnel=args.tunnel, tunnel_provider=args.tunnel_provider,
+            password=args.password)
 
 
 if __name__ == "__main__":

@@ -23,9 +23,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{header, StatusCode, Uri};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use include_dir::{include_dir, Dir};
@@ -112,6 +112,67 @@ struct Hub {
     conns: HashMap<u64, Tx>,
     /// Hub-native annotation ink (bare record ids): record id -> record.
     drawings: HashMap<String, Value>,
+    /// --password gate: None = open. Sessions are opaque server-minted
+    /// tokens carried in the pc_session cookie (PROTOCOL.md §transport).
+    password: Option<String>,
+    sessions: HashSet<String>,
+}
+
+impl Hub {
+    fn authed(&self, headers: &HeaderMap) -> bool {
+        if self.password.is_none() {
+            return true;
+        }
+        let Some(cookies) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
+        else {
+            return false;
+        };
+        cookies.split(';').any(|c| {
+            c.trim()
+                .strip_prefix("pc_session=")
+                .map(|t| self.sessions.contains(t))
+                .unwrap_or(false)
+        })
+    }
+}
+
+const LOGIN_PAGE: &str = r#"<!doctype html><html><head><title>danvas</title></head>
+<body style="font-family:system-ui;background:#111;color:#eee;display:flex;
+align-items:center;justify-content:center;height:100vh;margin:0">
+<form method="post" action="/__auth__" style="text-align:center">
+<h2>This canvas is protected</h2>
+<input type="password" name="password" autofocus
+ style="padding:8px 12px;font-size:14px;border-radius:8px;border:1px solid #444;
+ background:#1c1c1c;color:#eee">
+<button type="submit" style="padding:8px 16px;font-size:14px;border-radius:8px;
+ border:none;background:#2563eb;color:#fff;cursor:pointer">Enter</button>
+</form></body></html>"#;
+
+/// Minimal x-www-form-urlencoded "password" extraction (+ and %XX decoded).
+fn form_password(body: &str) -> Option<String> {
+    for pair in body.split('&') {
+        let (k, v) = pair.split_once('=')?;
+        if k != "password" {
+            continue;
+        }
+        let mut out = Vec::new();
+        let bytes = v.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'+' => out.push(b' '),
+                b'%' if i + 2 < bytes.len() => {
+                    let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+                    out.push(u8::from_str_radix(hex, 16).ok()?);
+                    i += 2;
+                }
+                b => out.push(b),
+            }
+            i += 1;
+        }
+        return String::from_utf8(out).ok();
+    }
+    None
 }
 
 /// Fold an update payload into the replay cache the way the OWNER's own
@@ -260,20 +321,27 @@ static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 #[tokio::main]
 async fn main() {
     let mut port: u16 = 8080;
+    let mut password: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        if a == "--port" {
-            if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
-                port = p;
+        match a.as_str() {
+            "--port" => {
+                if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
+                    port = p;
+                }
             }
+            "--password" => password = args.next().filter(|s| !s.is_empty()),
+            _ => {}
         }
     }
     let hub = Arc::new(Mutex::new(Hub {
         run_id: now_hex(),
+        password,
         ..Default::default()
     }));
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/__auth__", post(auth_handler))
         .fallback(get(static_handler))
         .with_state(hub);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -282,7 +350,37 @@ async fn main() {
     axum::serve(listener, app).await.expect("serve");
 }
 
-async fn static_handler(uri: Uri) -> impl IntoResponse {
+async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl IntoResponse {
+    let mut h = hub.lock().unwrap();
+    let ok = match (&h.password, form_password(&body)) {
+        (Some(pw), Some(given)) => &given == pw,
+        (None, _) => true, // open hub: the login is a no-op redirect
+        _ => false,
+    };
+    if !ok {
+        return (StatusCode::UNAUTHORIZED,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                LOGIN_PAGE).into_response();
+    }
+    let token = format!("{}{}", now_hex(), CONN_SEQ.fetch_add(1, Ordering::Relaxed));
+    h.sessions.insert(token.clone());
+    (StatusCode::SEE_OTHER,
+     [(header::LOCATION, "/".to_string()),
+      (header::SET_COOKIE,
+       format!("pc_session={token}; Path=/; SameSite=Lax; HttpOnly"))],
+     "").into_response()
+}
+
+async fn static_handler(
+    State(hub): State<Arc<Mutex<Hub>>>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> impl IntoResponse {
+    if !hub.lock().unwrap().authed(&headers) {
+        return (StatusCode::UNAUTHORIZED,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                LOGIN_PAGE.as_bytes()).into_response();
+    }
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
     // Unknown paths fall back to the SPA index, matching the Python server.
@@ -309,9 +407,13 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
     State(hub): State<Arc<Mutex<Hub>>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle(socket, q, hub))
+    if !hub.lock().unwrap().authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, "login required").into_response();
+    }
+    ws.on_upgrade(move |socket| handle(socket, q, hub)).into_response()
 }
 
 async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hub>>) {
