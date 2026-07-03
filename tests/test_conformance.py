@@ -603,3 +603,84 @@ def test_auth_cookie_unlocks_http_and_ws_fully(secure_hub):
                 lambda m: m.get("type") == "register"
                 and m.get("name") == "sec1")
     _run(go())
+
+
+# -- heartbeat reaping: silence is death, heartbeats are life --------------------
+
+@pytest.fixture(scope="module")
+def reaping_hub():
+    """A hub with a 2s heartbeat deadline (DANVAS_HEARTBEAT_TIMEOUT env —
+    honoured by both hubs so the reap is testable in seconds)."""
+    port = _free_port()
+    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
+    if cmd_tpl:
+        cmd = [p.format(port=port, password="") for p in cmd_tpl.split("|")]
+    else:
+        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
+               "--no-open"]
+    env = dict(os.environ)
+    env["DANVAS_HEARTBEAT_TIMEOUT"] = "2"
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    raise RuntimeError(f"hub exited early: {cmd}")
+                time.sleep(0.1)
+        else:
+            raise RuntimeError(f"hub never opened port {port}: {cmd}")
+        yield port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_silent_source_is_reaped_heartbeating_source_survives(reaping_hub):
+    async def go():
+        async with _browser(reaping_hub) as bws:
+            br = Peer(bws)
+            # two sources: c17 goes silent, c18 heartbeats
+            quiet = await _source(reaping_hub, "c17")
+            beat = await _source(reaping_hub, "c18")
+            q, b = Peer(quiet), Peer(beat)
+            await q.recv_until(lambda m: m["type"] == "welcome")
+            await b.recv_until(lambda m: m["type"] == "welcome")
+            await q.send({"type": "register", "id": "p", "name": "p17",
+                          "component": "React", "props": {}})
+            await b.send({"type": "register", "id": "p", "name": "p18",
+                          "component": "React", "props": {}})
+            regq = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "p17")
+            regb = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "p18")
+
+            # keep c18 alive with heartbeats while c17 stays mute; the browser
+            # heartbeats too (it must not be reaped either)
+            async def keepalive(peer, seconds):
+                end = time.monotonic() + seconds
+                while time.monotonic() < end:
+                    await peer.send({"type": "heartbeat"})
+                    await asyncio.sleep(0.7)
+
+            frozen = asyncio.create_task(br.recv_until(
+                lambda m: m.get("type") == "update"
+                and m.get("id") == regq["id"]
+                and (m.get("payload") or {}).get("operable") is False,
+                timeout=10.0))
+            await asyncio.gather(keepalive(b, 7), keepalive(br, 7), frozen)
+            # c17 was reaped and retention froze it…
+            assert frozen.result()["payload"]["opacity"] is not None
+            # …while heartbeating c18 was never frozen
+            assert not [m for m in br.frames
+                        if m.get("type") == "update"
+                        and m.get("id") == regb["id"]
+                        and (m.get("payload") or {}).get("operable") is False]
+    asyncio.run(asyncio.wait_for(go(), timeout=40))

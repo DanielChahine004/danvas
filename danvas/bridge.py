@@ -12,6 +12,7 @@ import itertools
 import json
 import logging
 import math
+import os
 import random
 import re
 import secrets
@@ -109,8 +110,8 @@ _VIEWER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6",
 # connection silent for longer than this is treated as dead and reaped, so the
 # viewer count can't stay inflated by a hard-dropped tab (the WS keepalive ping
 # is disabled server-side; see server.py).
-_HEARTBEAT_TIMEOUT = 30.0
-_REAP_INTERVAL = 10.0
+_HEARTBEAT_TIMEOUT = float(os.environ.get("DANVAS_HEARTBEAT_TIMEOUT", "30"))
+_REAP_INTERVAL = min(10.0, max(0.5, _HEARTBEAT_TIMEOUT / 3))
 
 # Binary-frame type codes. High-rate media rides a binary WebSocket frame instead
 # of base64-in-JSON: a 2-byte header (``[type][id-length]``) plus the id, then the

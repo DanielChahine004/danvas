@@ -480,7 +480,17 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         }
     }
 
-    while let Some(Ok(msg)) = stream.next().await {
+    // Heartbeat reaping: clients send a heartbeat every ~10s; a connection
+    // silent past the deadline is presumed dead (hard-dropped tab, crashed
+    // process with no clean close) and reaped — the disconnect path then
+    // applies retention. DANVAS_HEARTBEAT_TIMEOUT overrides for tests.
+    let idle = std::time::Duration::from_secs_f64(
+        std::env::var("DANVAS_HEARTBEAT_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30.0),
+    );
+    while let Ok(Some(Ok(msg))) = tokio::time::timeout(idle, stream.next()).await {
         let text = match msg {
             Message::Text(t) => t,
             Message::Close(_) => break,
