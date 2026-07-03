@@ -68,9 +68,22 @@ rusqlite), and protected-source `merge_auth` (danvasd probes, runs the
 target's `/__auth__`, dials with the cookie; minimal HTTP client — no TLS,
 so tunneled protected sources are a documented gap).
 
-What remains is **distribution only** (phase 3): cross-platform release
-builds in CI, `pip install danvas[broker]` wheels, `serve(broker=True)`
-spawning/attaching a local danvasd, a bare-binary GitHub release. Known
+**Since parity: templates + the transplant landed.** The built-in panels'
+register shapes are a language-neutral asset (`danvas/templates/
+components.json`, generator + freshness test; `SourceClient.
+register_template` is the reference move — any language authors native
+panels). And `serve(broker=True)` works end-to-end: danvasd owns the port,
+the existing bridge class-swaps onto the socket, the UI survives the script.
+
+**The declared goal is broker-by-default.** The gate is canvas-surface
+parity, harness-pinned like everything else. Rows still to cross the hub
+before the default flips: managed shapes (`shape`/`shape_update`), chat,
+presence/cursors, `on_request`→`response` round-trips, roles/per-viewer
+overlays, upload/download HTTP endpoints, `persist=` under the transplant,
+hot-reload interplay, `set_view`, define/style shared assets, graveyard
+UI. Then: cross-platform release builds in CI, `pip install
+danvas[broker]` wheels bundling the binary, flip `broker=` default with an
+escape hatch (`broker=False`), a bare-binary GitHub release. Known
 unpinned semantics: per-connection vs canvas-wide merge_add scoping;
 hub-side stream conflation (queue="latest" mid-hub).
 
