@@ -830,6 +830,7 @@ budget) on the fly.
 | `cursors` | auto¹ | viewers report pointer position |
 | `ui_inspector` | auto¹ | toolbar button to spawn an Inspector |
 | `ui_graveyard` | auto¹ | toolbar button to restore deleted panels |
+| `ui_hosting` | auto¹ | 🌐 button to share on LAN / open a tunnel, live |
 | `desktop` | auto² | open a native window (pywebview) instead of the browser |
 | `window_title` / `window_size` | `"danvas"` / `(1200, 800)` | native-window caption / size |
 | `tldraw_license_key` | — | **deprecated/ignored** (the frontend is tldraw-free; kept for backwards compatibility) |
@@ -840,15 +841,19 @@ default only inside a baked executable (`sys.frozen`).
 
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
-**Widen reach live (🌐 Hosting)** — a private, local-only canvas gets a
-**Hosting** button (above Merge) showing where it's reachable, with one-click
-**Share on LAN** (adds a second listener on your LAN address — the local URL
-keeps working) and **Open public tunnel** — no restart. The code twin:
+**Widen (or narrow) reach live (🌐 Hosting)** — a private, local-only canvas
+gets a **Hosting** button (above Merge) showing where it's reachable, with
+one-click **Share on LAN** (adds a second listener on your LAN address — the
+local URL keeps working) and **Open public tunnel** — no restart. Each live
+URL has a copy button and a red **✕** to turn that channel back off (the LAN
+listener drains / the tunnel closes; local keeps serving). The code twin is
+tri-state per channel — `True` opens, `False` closes, `None` leaves alone:
 
 ```python
 canvas.serve(block=False)              # private, local-only
 canvas.expose(lan=True)                # phones on the WiFi can join now
 url = canvas.expose(tunnel=True)["tunnel"]   # public HTTPS link, live
+canvas.expose(lan=False, tunnel=False)       # back to local-only, live
 ```
 
 Because widening exposure is a real decision, the button defaults on **only
