@@ -993,9 +993,23 @@ def _(v):
 
 servo.min = 10                                            # native live setters
 canvas["servo"].color = (255, 0, 0)                       # native lookup
-canvas.shared                                             # mirror of the whole canvas
-canvas.set_props(other_id, max=90)                        # edit anyone's panel
-canvas.subscribe(btn_id, lambda p: fire())                # react to anyone's events
+```
+
+**Names cross processes.** A panel's `name=` rides its register frame, so
+`canvas["name"]` resolves *any* panel on the canvas — your own (the native
+component object) or one a peer process created (a live handle whose reads
+come from the replica, writes ride the shared plane, and events arrive by
+subscription). One button can run handlers in several processes at once — each
+process attaches its own; nobody's is replaced:
+
+```python
+# this process did NOT create "servo" or "fire" — Python (or Rust) did:
+canvas["servo"].max = 90                    # applies at the owner, live
+canvas["servo"].on_change(lambda v: ...)    # react to its changes here
+
+@canvas["fire"].on_click                    # runs HERE on every click,
+def _():                                    # alongside the owner's handler
+    launch()
 ```
 
 (For other languages — or wire-level control — `danvas.SourceClient` is the

@@ -720,6 +720,12 @@ class Bridge:
             "component": component.component,
             "props": component.register_props_for(role, client_id),
         }
+        # The Python-side identity, carried on the wire so peer processes can
+        # resolve panels by the same name= the owning script uses (cross-
+        # process canvas["name"]). Additive: the frontend ignores it.
+        name = getattr(component, "name", None)
+        if name:
+            msg["name"] = name
         pos = getattr(component, "_position", None)
         if pos is not None:
             msg["x"], msg["y"] = pos

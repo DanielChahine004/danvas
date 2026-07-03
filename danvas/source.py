@@ -169,6 +169,15 @@ class SourceClient:
         self._send({"type": "unsubscribe", "id": cid})
         return self
 
+    def find(self, name):
+        """Resolve a panel's wire id from its Python-side ``name=`` (register
+        frames carry it), or ``None``. If two sources used the same name, the
+        first registered wins — qualify names across processes if that bites."""
+        for cid, entry in self.panels.items():
+            if entry.get("name") == name:
+                return cid
+        return None
+
     def on_frame(self, fn):
         """Tap every frame the hub sends this connection — including the hub
         canvas's own register/update stream, i.e. read access to the canvas."""
@@ -289,6 +298,7 @@ class SourceClient:
             # Fold the hub's canvas stream into the local mirror.
             self.panels[cid] = {
                 "component": msg.get("component"),
+                "name": msg.get("name"),
                 "props": dict(msg.get("props") or {}),
                 "state": {},
                 **{k: msg[k] for k in ("x", "y", "w", "h") if k in msg},

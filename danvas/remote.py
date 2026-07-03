@@ -92,6 +92,80 @@ class _RemoteBridge(Bridge):
                                 "payload": state})
 
 
+class RemoteHandle:
+    """A live proxy for a panel ANOTHER process owns, resolved by name.
+
+    Reads come from the connection's converging mirror; writes go through the
+    shared property plane (they apply at the owner's real setters); events come
+    via subscription. So ``canvas["servo"].max = 90`` and
+    ``canvas["go"].on_click(fn)`` work whether the panel is local or lives in
+    a peer process — the danvas name is the cross-process identity.
+    """
+
+    __slots__ = ("_canvas", "id", "name")
+
+    def __init__(self, canvas, panel_id, name):
+        object.__setattr__(self, "_canvas", canvas)
+        object.__setattr__(self, "id", panel_id)
+        object.__setattr__(self, "name", name)
+
+    # -- reads: the mirror (eventually consistent, like any replica) ----------
+    def _entry(self):
+        return self._canvas._client.panels.get(self.id) or {}
+
+    def __getattr__(self, key):
+        entry = self._entry()
+        state = entry.get("state") or {}
+        if key in state:
+            return state[key]
+        props = entry.get("props") or {}
+        if key in props:
+            return props[key]
+        if key in entry:
+            return entry[key]
+        raise AttributeError(
+            f"remote panel {self.name!r} has no visible property {key!r} "
+            "(reads come from the replica; only streamed state is readable)")
+
+    # -- writes: the shared property plane -------------------------------------
+    def __setattr__(self, key, value):
+        self._canvas.set_props(self.id, **{key: value})
+
+    def set_props(self, **props):
+        self._canvas.set_props(self.id, **props)
+        return self
+
+    def set_layout(self, **layout):
+        self._canvas.set_props(self.id, **layout)
+        return self
+
+    # -- events: subscription (the owner's handlers keep running too) ----------
+    def on_input(self, fn=None):
+        """The raw event feed: ``fn(payload)`` for every input on this panel."""
+        return self._canvas.subscribe(self.id, fn)
+
+    def on_click(self, fn=None):
+        """Button-flavoured sugar: ``fn()`` per click — alongside (not instead
+        of) whatever handler the owning process registered."""
+        if fn is None:
+            return lambda f: self.on_click(f)
+        self._canvas.subscribe(self.id, lambda _p, f=fn: f())
+        return fn
+
+    def on_change(self, fn=None):
+        """Value-control sugar: ``fn(value)`` per committed change."""
+        if fn is None:
+            return lambda f: self.on_change(f)
+        self._canvas.subscribe(
+            self.id, lambda p, f=fn: f(p.get("value", p) if isinstance(p, dict) else p))
+        return fn
+
+    def __repr__(self):
+        entry = self._entry()
+        return (f"<RemoteHandle {self.name!r} ({entry.get('component')}) "
+                f"id={self.id}>")
+
+
 class RemoteCanvas(Canvas):
     """A Canvas that joins a served canvas instead of serving one.
 
@@ -154,6 +228,23 @@ class RemoteCanvas(Canvas):
         elif kind == "layout":
             self._bridge._dispatch.submit(
                 lambda c=comp, m=dict(msg): self._bridge._dispatch_layout(c, m, None))
+
+    # -- cross-process lookup: the danvas name is the identity ------------------
+    def __getitem__(self, name):
+        """``canvas["name"]`` resolves panels this process owns (the native
+        component object) AND panels any peer owns (a :class:`RemoteHandle`
+        proxying reads/writes/events over the wire). Own panels win a name
+        collision; foreign names resolve through the connection's mirror."""
+        try:
+            return super().__getitem__(name)
+        except KeyError:
+            panel_id = self._client.find(name)
+            if panel_id is not None:
+                return RemoteHandle(self, panel_id, name)
+            raise
+
+    def __contains__(self, name):
+        return super().__contains__(name) or self._client.find(name) is not None
 
     # -- the shared plane (panels other processes own) --------------------------
     @property
