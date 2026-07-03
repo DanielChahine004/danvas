@@ -998,3 +998,60 @@ def test_merge_auth_flow_for_protected_source(hub):
         asyncio.run(asyncio.wait_for(go(), timeout=60))
     finally:
         proc.kill()
+
+
+# -- managed shapes: relay, fold, replay ------------------------------------------
+
+def test_shapes_relay_fold_and_replay(hub):
+    async def go():
+        async with _source(hub, "c23") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "shape", "id": "g1", "shapeType": "geo",
+                            "x": 5, "y": 6, "rotation": 0, "opacity": 1,
+                            "props": {"geo": "rectangle", "color": "blue"}})
+            shp = await br.recv_until(
+                lambda m: m.get("type") == "shape"
+                and str(m.get("id", "")).endswith(":g1"))
+            assert shp["props"]["geo"] == "rectangle"
+            await src.send({"type": "shape_update", "id": "g1",
+                            "x": 50, "props": {"color": "red"}})
+            upd = await br.recv_until(
+                lambda m: m.get("type") == "shape_update"
+                and m.get("id") == shp["id"] and m.get("x") == 50)
+            # a late browser gets the CURRENT shape (folded, not stale+patch)
+            async with _browser(hub) as b2ws:
+                b2 = Peer(b2ws)
+                got = await b2.recv_until(
+                    lambda m: m.get("type") == "shape"
+                    and m.get("id") == shp["id"])
+                assert got["x"] == 50
+                assert got["props"]["color"] == "red"
+    _run(go())
+
+
+# -- request/response: the awaitable round-trip crosses the hub -------------------
+
+def test_request_response_reaches_only_the_asker(hub):
+    async def go():
+        async with _source(hub, "c24") as sws, _browser(hub) as bws, \
+                _browser(hub) as b2ws:
+            src, br, b2 = Peer(sws), Peer(bws), Peer(b2ws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "rq", "name": "rq24",
+                            "component": "React", "props": {}})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "rq24")
+            await br.send({"type": "request", "id": reg["id"],
+                           "reqId": "r-77", "data": {"ask": "sum"}})
+            got = await src.recv_until(lambda m: m.get("type") == "request")
+            assert got["id"] == "rq" and got["reqId"] == "r-77"
+            await src.send({"type": "response", "reqId": "r-77", "result": 42})
+            resp = await br.recv_until(
+                lambda m: m.get("type") == "response"
+                and m.get("reqId") == "r-77")
+            assert resp["result"] == 42
+            # the other browser never sees the reply (no cross-viewer leak)
+            await asyncio.sleep(0.3)
+            assert not [m for m in b2.frames if m.get("type") == "response"]
+    _run(go())

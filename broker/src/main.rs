@@ -62,6 +62,8 @@ struct Source {
     arrows: HashMap<String, Value>,
     /// namespaced record id -> the record's current ("after") state.
     drawings: HashMap<String, Value>,
+    /// nsid -> managed-shape frame, kept current (shape_update folds in).
+    shapes: HashMap<String, Value>,
 }
 
 /// Rewrite every record id (diff keys, records' own `id`, arrow bindings)
@@ -128,6 +130,9 @@ struct Hub {
     /// DANVAS_LEDGER=<path.db>: append routed user actions to the SQLite
     /// event ledger (the same schema danvas/_ledger.py writes).
     ledger: Option<rusqlite::Connection>,
+    /// reqId -> (asker conn, expiry): the owner's `response` frame routes
+    /// back to exactly the viewer that sent the `request`.
+    pending_req: HashMap<String, (u64, std::time::Instant)>,
 }
 
 fn open_ledger(path: &str) -> Option<rusqlite::Connection> {
@@ -325,6 +330,9 @@ impl Hub {
         for arrow in src.arrows.values() {
             out.push(arrow.clone());
         }
+        for shape in src.shapes.values() {
+            out.push(shape.clone());
+        }
         if !src.drawings.is_empty() {
             out.push(json!({"type": "draw", "diff": {
                 "added": src.drawings.clone().into_iter()
@@ -367,6 +375,7 @@ impl Hub {
             .reg_order
             .iter()
             .chain(src.arrows.keys())
+            .chain(src.shapes.keys())
             .map(|id| json!({"type": "remove", "id": id}))
             .collect();
         if !src.drawings.is_empty() {
@@ -862,6 +871,7 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
         src.registers.clear();
         src.updates.clear();
         src.arrows.clear();
+        src.shapes.clear();
         src.drawings.clear();
         src.live = true;
         src.tx = Some(tx);
@@ -913,7 +923,21 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         h.fanout_browsers(&text);
         return;
     }
-    if !matches!(kind.as_str(), "register" | "update" | "remove" | "arrow") {
+    if kind == "response" {
+        // The owner answered a viewer's request: route to the asker only.
+        let Some(req_id) = frame.get("reqId").and_then(Value::as_str) else { return };
+        let mut h = hub.lock().unwrap();
+        if let Some((asker, expiry)) = h.pending_req.remove(req_id) {
+            if expiry > std::time::Instant::now() {
+                if let Some(tx) = h.conns.get(&asker) {
+                    let _ = tx.send(Out::T(frame.to_string()));
+                }
+            }
+        }
+        return;
+    }
+    if !matches!(kind.as_str(),
+                 "register" | "update" | "remove" | "arrow" | "shape" | "shape_update") {
         client_frame(hub, conn_id, frame);
         return;
     }
@@ -960,6 +984,36 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             src.registers.remove(&nsid);
             src.updates.remove(&nsid);
             src.arrows.remove(&nsid);
+            src.shapes.remove(&nsid);
+        }
+        "shape" => {
+            let src = h.sources.get_mut(label).unwrap();
+            let (ox, oy) = src.offset;
+            shift_xy(frame.as_object_mut().unwrap(), ox, oy);
+            let src = h.sources.get_mut(label).unwrap();
+            src.shapes.insert(nsid, frame.clone());
+        }
+        "shape_update" => {
+            let (ox, oy) = h.sources.get(label).map(|s| s.offset).unwrap_or((0.0, 0.0));
+            shift_xy(frame.as_object_mut().unwrap(), ox, oy);
+            // Fold into the cached shape so a late browser gets the CURRENT
+            // shape, not the original plus patches (same rule as panels).
+            let src = h.sources.get_mut(label).unwrap();
+            if let Some(shape) = src.shapes.get_mut(&nsid) {
+                let patch = frame.as_object().unwrap().clone();
+                let sobj = shape.as_object_mut().unwrap();
+                for (k, v) in patch {
+                    if k == "props" {
+                        if let (Some(Value::Object(sp)), Value::Object(pp)) =
+                            (sobj.get_mut("props"), v)
+                        {
+                            sp.extend(pp);
+                        }
+                    } else if k != "type" && k != "id" {
+                        sobj.insert(k, v);
+                    }
+                }
+            }
         }
         "arrow" => {
             // Endpoints: the sender's own panels get its namespace; a
@@ -1193,6 +1247,11 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
             for payload in src.updates.values_mut() {
                 shift_xy(payload, dx, dy);
             }
+            for shape in src.shapes.values_mut() {
+                if let Some(obj) = shape.as_object_mut() {
+                    shift_xy(obj, dx, dy);
+                }
+            }
             out
         };
         for u in &updates {
@@ -1220,6 +1279,19 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
             let Some((tag, rest)) = cid.split_once(':') else { return };
             let mut h = hub.lock().unwrap();
             ledger_record(&h, kind, Some(&cid), &frame);
+            if kind == "request" {
+                if let Some(req_id) = frame.get("reqId").and_then(Value::as_str) {
+                    if h.pending_req.len() > 256 {
+                        let now = std::time::Instant::now();
+                        h.pending_req.retain(|_, (_, exp)| *exp > now);
+                    }
+                    h.pending_req.insert(
+                        req_id.to_string(),
+                        (conn_id, std::time::Instant::now()
+                            + std::time::Duration::from_secs(30)),
+                    );
+                }
+            }
             let Some(label) = h.tag_to_label.get(tag).cloned() else { return };
             let offset = h.sources.get(&label).map(|s| s.offset).unwrap_or((0.0, 0.0));
             if let Some(src) = h.sources.get(&label) {

@@ -223,6 +223,7 @@ class _Upstream:
         self.registers = {}   # nsid -> register msg
         self.updates = {}     # nsid -> accumulated payload dict
         self.arrows = {}      # nsid -> arrow msg
+        self.shapes = {}      # nsid -> managed-shape frame (kept current)
         self.drawings = {}    # nsid -> free-form drawing record (the "after" state)
 
     async def send(self, msg):
@@ -254,6 +255,7 @@ class _Upstream:
         for nsid, payload in self.updates.items():
             yield {"type": "update", "id": nsid, "payload": payload}
         yield from self.arrows.values()
+        yield from self.shapes.values()
         if self.drawings:
             # The source's free-form ink, replayed as one "added" draw diff.
             yield {"type": "draw",
@@ -276,7 +278,7 @@ class _Upstream:
                    "payload": {"operable": False, "opacity": 0.45}}
 
     def cached_ids(self):
-        return list(self.registers) + list(self.arrows)
+        return list(self.registers) + list(self.arrows) + list(self.shapes)
 
 
 class _Conn:
@@ -338,6 +340,9 @@ class _MergeHost:
         if ledger_path:
             from . import _ledger as _ledger_mod
             self._ledger = _ledger_mod.open_ledger(ledger_path)
+        # reqId -> (ws, expiry): who asked, so the owner's response frame
+        # routes back to exactly that viewer (and nobody else).
+        self._pending_req = {}
         # nsid -> (conn, expiry): the viewer who last drove input on a panel, so
         # the source's echo of that change isn't fanned back to them (it would fight
         # their live drag). Short-lived; a stale entry just means one missed echo.
@@ -573,6 +578,7 @@ class _MergeHost:
                         up.registers.clear()
                         up.updates.clear()
                         up.arrows.clear()
+                        up.shapes.clear()
                         up.drawings.clear()
                     self._emit_sources_to_interested(up)
                     async for raw in ws:
@@ -645,11 +651,46 @@ class _MergeHost:
                 msg["end"] = self._compose_endpoint(up, msg["end"])
             up.arrows[cid] = msg
             self._fanout_upstream(up, msg)
+        elif kind == "shape":
+            cid = self._ns(up.tag, msg.get("id"))
+            msg["id"] = cid
+            if (ox or oy):
+                if isinstance(msg.get("x"), (int, float)):
+                    msg["x"] += ox
+                if isinstance(msg.get("y"), (int, float)):
+                    msg["y"] += oy
+            up.shapes[cid] = msg
+            self._fanout_upstream(up, msg)
+        elif kind == "shape_update":
+            cid = self._ns(up.tag, msg.get("id"))
+            msg["id"] = cid
+            if (ox or oy):
+                if isinstance(msg.get("x"), (int, float)):
+                    msg["x"] += ox
+                if isinstance(msg.get("y"), (int, float)):
+                    msg["y"] += oy
+            # Fold into the cached shape so a late browser gets the CURRENT
+            # shape, not the original plus patches (same rule as panels).
+            shape = up.shapes.get(cid)
+            if shape is not None:
+                props = msg.get("props")
+                if isinstance(props, dict):
+                    shape.setdefault("props", {}).update(props)
+                for k, v in msg.items():
+                    if k not in ("type", "id", "props"):
+                        shape[k] = v
+            self._fanout_upstream(up, msg)
+        elif kind == "response":
+            # The owner answered a viewer's request: route to the asker only.
+            entry = self._pending_req.pop(msg.get("reqId"), None)
+            if entry is not None and entry[1] > time.monotonic():
+                self._loop.create_task(self._safe_send(entry[0], msg))
         elif kind == "remove":
             cid = self._ns(up.tag, msg.get("id"))
             up.registers.pop(cid, None)
             up.updates.pop(cid, None)
             up.arrows.pop(cid, None)
+            up.shapes.pop(cid, None)
             self._fanout_upstream(up, {"type": "remove", "id": cid})
         elif kind == "draw":
             # Free-form ink drawn on the source (or its on-connect replay): namespace
@@ -753,6 +794,7 @@ class _MergeHost:
             up.registers.clear()
             up.updates.clear()
             up.arrows.clear()
+            up.shapes.clear()
             up.drawings.clear()
         self._emit_sources_to_interested(up)
 
@@ -939,6 +981,7 @@ class _MergeHost:
             up.registers.clear()
             up.updates.clear()
             up.arrows.clear()
+            up.shapes.clear()
             up.drawings.clear()
         up.ws = _InboundWS(ws)
         up.status = "live"
@@ -1061,7 +1104,8 @@ class _MergeHost:
             except (ValueError, TypeError):
                 return False
             kind = msg.get("type")
-            if kind in ("register", "update", "remove", "arrow", "draw"):
+            if kind in ("register", "update", "remove", "arrow", "draw",
+                        "shape", "shape_update", "response"):
                 self._ingest(up, raw)
                 return True
             # A source is also a peer on the shared plane: petitions and
@@ -1080,6 +1124,8 @@ class _MergeHost:
                     out["id"] = orig
                     self._unoffset_out(target, out, kind)
                     self._record(kind, cid, msg)
+                    if kind == "request" and msg.get("reqId") is not None:
+                        self._note_request(msg["reqId"], ws)
                     await target.send(out)
                     if kind == "input":
                         self._relay_input_subs(ws, cid, msg.get("payload"))
@@ -1135,6 +1181,8 @@ class _MergeHost:
         out["id"] = orig
         self._unoffset_out(up, out, kind)
         self._record(kind, cid, msg)
+        if kind == "request" and msg.get("reqId") is not None:
+            self._note_request(msg["reqId"], ws)
         # start/end on any forwarded frame reference sibling ids in the same source
         if isinstance(out.get("start"), str):
             out["start"] = self._strip(out["start"])[1]
@@ -1186,6 +1234,15 @@ class _MergeHost:
         if rest and tag in self._tag_to_upstream:     # another source's panel
             return ref
         return self._ns(up.tag, ref)                  # the sender's own panel
+
+    def _note_request(self, req_id, ws):
+        """Remember who asked, so the owner's response routes back to them.
+        Entries expire (30s) and the table self-prunes on insert."""
+        now = time.monotonic()
+        if len(self._pending_req) > 256:
+            self._pending_req = {k: v for k, v in self._pending_req.items()
+                                 if v[1] > now}
+        self._pending_req[req_id] = (ws, now + 30.0)
 
     def _record(self, kind, cid, msg):
         """Append one routed user action to the hub ledger (no-op when off;
