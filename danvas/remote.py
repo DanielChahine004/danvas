@@ -135,6 +135,16 @@ class RemoteHandle:
         self._canvas.set_props(self.id, **props)
         return self
 
+    def update(self, value=None, **props):
+        """Content-verb parity with the native object: ``handle.update("ready")``
+        does what the owner's ``label.update("ready")`` does — the value routes
+        to the owner's ``update()`` (silent, like any programmatic update);
+        keyword props ride along as property writes."""
+        if value is not None:
+            props["value"] = value
+        self._canvas.set_props(self.id, **props)
+        return self
+
     def set_layout(self, **layout):
         self._canvas.set_props(self.id, **layout)
         return self

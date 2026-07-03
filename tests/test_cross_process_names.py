@@ -123,3 +123,32 @@ def test_e2e_button_runs_handlers_in_both_processes():
                         break
                     time.sleep(0.01)
                 assert python_side == [1]
+
+
+# -- content-verb parity: peers replace content the way owners do ---------------
+
+def test_set_props_value_routes_through_owner_update():
+    c = danvas.Canvas()
+    lbl = c.label("status", "idle")
+    sld = c.slider("servo", min=0, max=180, default=90)
+    fired = []
+    sld.on_change(lambda v: fired.append(v))
+    c._bridge._apply_props(lbl, {"value": "ready"})
+    c._bridge._apply_props(sld, {"value": 120, "min": 10})
+    assert lbl.value == "ready"          # a peer rewrote the label's text
+    assert sld.value == 120 and sld.min == 10
+    assert fired == []                   # update semantics: silent, no on_change
+
+
+def test_remote_handle_update_is_native_shaped():
+    c, sent = _canvas()
+    c._client._handle({"type": "register", "id": "L1", "name": "status",
+                       "component": "React", "props": {}})
+    c["status"].update("ready")
+    assert sent[-1] == {"type": "set_props", "id": "L1",
+                        "props": {"value": "ready"}}
+    c["status"].update("go", color=(0, 255, 0))
+    assert sent[-1]["props"] == {"value": "go", "color": (0, 255, 0)}
+    c["status"].value = "again"          # attribute form, same path
+    assert sent[-1] == {"type": "set_props", "id": "L1",
+                        "props": {"value": "again"}}

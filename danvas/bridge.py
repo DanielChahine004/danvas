@@ -1341,6 +1341,17 @@ class Bridge:
                 except Exception:
                     _log.debug("set_props: %s.%s = %r rejected",
                                type(comp).__name__, k, v, exc_info=True)
+            elif k == "value" and callable(getattr(comp, "update", None)):
+                # The canonical content key: a peer's `panel.value = ...` takes
+                # the same path the owner's own `panel.update(...)` does —
+                # replace the content, broadcast, and (like any programmatic
+                # update) do NOT fire on_change. This is what lets a remote
+                # process rewrite a Label's text or set a Slider's position.
+                try:
+                    comp.update(v)
+                except Exception:
+                    _log.debug("set_props: %s.update(%r) rejected",
+                               type(comp).__name__, v, exc_info=True)
             else:
                 _log.debug("set_props: %s has no writable property %r",
                            type(comp).__name__, k)
