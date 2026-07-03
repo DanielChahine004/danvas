@@ -278,3 +278,36 @@ def test_cross_source_arrow_endpoints_pass_through(hub):
             assert arr["start"] == regb["id"]              # own: namespaced
             assert arr["end"] == rega["id"]                # foreign: untouched
     _run(go())
+
+
+def test_serves_the_frontend(hub):
+    # A browser must be able to point straight at the hub: GET / is the app.
+    import urllib.request
+    with urllib.request.urlopen(f"http://127.0.0.1:{hub}/", timeout=5) as r:
+        body = r.read(4096).decode("utf-8", "replace")
+    assert "<html" in body.lower()
+
+
+def test_roster_lists_dialin_sources_live_then_offline(hub):
+    async def go():
+        sws = await _source(hub, "c10")
+        src = Peer(sws)
+        await src.recv_until(lambda m: m["type"] == "welcome")
+        await src.send({"type": "register", "id": "p", "name": "p10",
+                        "component": "React", "props": {}})
+        await asyncio.sleep(0.2)
+        async with _browser(hub) as bws:
+            br = Peer(bws)
+            roster = await br.recv_until(
+                lambda m: m.get("type") == "merge_sources"
+                and any(s.get("label") == "c10" for s in m.get("sources", [])))
+            entry = next(s for s in roster["sources"] if s["label"] == "c10")
+            assert entry["status"] == "live"
+            await sws.close()                          # the source dies
+            gone = await br.recv_until(
+                lambda m: m.get("type") == "merge_sources"
+                and any(s.get("label") == "c10"
+                        and s.get("status") == "offline"
+                        for s in m.get("sources", [])))
+            assert gone                                # retained, shown offline
+    _run(go())

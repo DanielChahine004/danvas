@@ -23,15 +23,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
+use axum::http::{header, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use include_dir::{include_dir, Dir};
 use serde_json::{json, Map, Value};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 const PROTOCOL_VERSION: u64 = 1;
 const FREEZE_OPACITY: f64 = 0.45;
+
+/// The same pre-built frontend the Python package ships, embedded at compile
+/// time — a browser points straight at danvasd, no Python anywhere.
+static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../danvas/frontend/dist");
 
 type Tx = UnboundedSender<String>;
 
@@ -98,6 +104,21 @@ impl Hub {
             .collect()
     }
 
+    /// The merge-panel roster: one entry per source, live or retained-offline.
+    fn roster_frame(&self) -> Value {
+        let sources: Vec<Value> = self
+            .sources
+            .iter()
+            .map(|(label, s)| {
+                json!({"sid": s.tag, "label": label,
+                       "uri": format!("dialin:{label}"),
+                       "status": if s.live { "live" } else { "offline" },
+                       "offset": [0, 0]})
+            })
+            .collect();
+        json!({"type": "merge_sources", "sources": sources})
+    }
+
     fn teardown_frames(src: &Source) -> Vec<Value> {
         src.reg_order
             .iter()
@@ -134,12 +155,36 @@ async fn main() {
     }));
     let app = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/", get(|| async { "danvasd: wire protocol v1 broker (phase 1 relay core)" }))
+        .fallback(get(static_handler))
         .with_state(hub);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     println!("[danvasd] serving ws://{addr}/ws");
     axum::serve(listener, app).await.expect("serve");
+}
+
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    // Unknown paths fall back to the SPA index, matching the Python server.
+    let file = DIST.get_file(path).or_else(|| DIST.get_file("index.html"));
+    match file {
+        Some(f) => {
+            let mime = match path.rsplit_once('.').map(|(_, e)| e) {
+                Some("html") | None => "text/html; charset=utf-8",
+                Some("js") => "text/javascript",
+                Some("css") => "text/css",
+                Some("svg") => "image/svg+xml",
+                Some("png") => "image/png",
+                Some("json") => "application/json",
+                Some("woff2") => "font/woff2",
+                Some("ico") => "image/x-icon",
+                _ => "application/octet-stream",
+            };
+            ([(header::CONTENT_TYPE, mime)], f.contents()).into_response()
+        }
+        None => (StatusCode::NOT_FOUND, "frontend not built").into_response(),
+    }
 }
 
 async fn ws_handler(
@@ -192,11 +237,16 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             let mut h = hub.lock().unwrap();
             h.browsers.insert(conn_id, tx.clone());
             h.conns.insert(conn_id, tx.clone());
-            h.sources
+            let mut out: Vec<String> = h
+                .sources
                 .values()
                 .flat_map(|s| Hub::cached_frames(s))
                 .map(|f| f.to_string())
-                .collect()
+                .collect();
+            if !h.sources.is_empty() {
+                out.push(h.roster_frame().to_string());
+            }
+            out
         };
         for f in frames {
             let _ = tx.send(f);
@@ -229,10 +279,12 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         }
         if is_source {
             // Retention (default on): keep the caches, freeze the panels.
+            let mut went_offline = false;
             let frames: Vec<String> = if let Some(src) = h.sources.get_mut(&label) {
                 if src.tx.as_ref().map(|t| t.same_channel(&tx)).unwrap_or(false) {
                     src.live = false;
                     src.tx = None;
+                    went_offline = true;
                     Hub::freeze_frames(src).iter().map(|f| f.to_string()).collect()
                 } else {
                     Vec::new() // an older life; the label was already re-taken
@@ -242,6 +294,10 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             };
             for f in &frames {
                 h.fanout_browsers(f);
+            }
+            if went_offline {
+                let roster = h.roster_frame().to_string();
+                h.fanout_browsers(&roster);
             }
         }
     }
@@ -276,6 +332,8 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
     for f in &teardown {
         h.fanout_browsers(f);
     }
+    let roster = h.roster_frame().to_string();
+    h.fanout_browsers(&roster);
 }
 
 /// A frame FROM a dial-in source: its canvas content, namespaced + cached +

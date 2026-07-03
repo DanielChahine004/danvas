@@ -40,10 +40,12 @@ done later. Can run alongside step 2.
 
 **4. The binary broker — STARTED 2026-07-03.** Phase 0 and the phase-1 relay
 core shipped the same day the protocol froze: `tests/test_conformance.py` is
-the hub-agnostic contract (8 assertions over real sockets — welcome/version,
+the hub-agnostic contract (10 assertions over real sockets — welcome/version,
 namespacing+identity, replay, input routing, subscribe, set_props, retention
-+ re-dial, cross-source arrows), and `broker/` is `danvasd`, a ~400-line
-axum/tokio relay that **passes all 8**:
++ re-dial, cross-source arrows, embedded frontend at `GET /`, and the
+merge-panel roster incl. offline retention), and `broker/` is `danvasd`, an
+axum/tokio relay with the built `dist/` compiled in that **passes all 10** —
+a browser can point straight at it, no Python on the box:
 
 ```bash
 python -m pytest tests/test_conformance.py                    # vs the Python hub
@@ -51,11 +53,11 @@ DANVAS_HUB_CMD="<abs>/broker/target/debug/danvasd.exe|--port|{port}" \
   python -m pytest tests/test_conformance.py                  # vs danvasd
 ```
 
-Remaining for parity (the plan below): auth, drawings relay, offsets/roster
-(`merge_sources`), dialed-out sources (the hub dialing served canvases),
-binary frames, the ledger, static frontend serving, `/__describe__`, and
-distribution. Grow the harness with each — a behavior isn't done until it's
-asserted against both hubs.
+Remaining for parity (the plan below): auth, drawings relay, offsets,
+dialed-out sources (the hub dialing served canvases), binary frames, the
+ledger, `/__describe__`, heartbeat reaping, and distribution. Grow the
+harness with each — a behavior isn't done until it's asserted against both
+hubs.
 
 ---
 

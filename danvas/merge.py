@@ -783,10 +783,16 @@ class _MergeHost:
         conn = _Conn(ws)
         self._conns[ws] = conn
         # Dial-in sources are canvas-wide: every browser sees them, frozen
-        # replay included when one is offline-retained.
+        # replay included when one is offline-retained — and the roster must
+        # arrive with them (without this, a late-joining browser's merge panel
+        # stays empty until something changes).
+        attached_dialin = False
         for up in list(self._upstreams.values()):
             if up.dialin:
                 self._attach(conn, up)
+                attached_dialin = True
+        if attached_dialin:
+            self._emit_sources(conn)
         for src in list(self._shared_sources):
             self._loop.create_task(self._add_shared_source_for_conn(conn, src))
         raw_sources = qp.get("sources") if qp else None
