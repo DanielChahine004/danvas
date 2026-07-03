@@ -311,3 +311,46 @@ def test_roster_lists_dialin_sources_live_then_offline(hub):
                         for s in m.get("sources", [])))
             assert gone                                # retained, shown offline
     _run(go())
+
+
+def test_source_ink_relays_namespaced_and_replays(hub):
+    async def go():
+        async with _source(hub, "c11") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "draw", "diff": {
+                "added": {"d1": {"id": "d1", "x": 5, "props": {}}},
+                "updated": {}, "removed": {}}})
+            drew = await br.recv_until(
+                lambda m: m.get("type") == "draw"
+                and any(k.endswith(":d1")
+                        for k in (m.get("diff", {}).get("added") or {})))
+            nsid = next(k for k in drew["diff"]["added"] if k.endswith(":d1"))
+            assert drew["diff"]["added"][nsid]["id"] == nsid   # record id remapped
+            # a late browser gets the ink in its replay
+            async with _browser(hub) as b2ws:
+                b2 = Peer(b2ws)
+                await b2.recv_until(
+                    lambda m: m.get("type") == "draw"
+                    and nsid in (m.get("diff", {}).get("added") or {}))
+    _run(go())
+
+
+def test_browser_ink_edit_routes_back_to_owner_stripped(hub):
+    async def go():
+        async with _source(hub, "c12") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "draw", "diff": {
+                "added": {"dz": {"id": "dz", "props": {}}},
+                "updated": {}, "removed": {}}})
+            drew = await br.recv_until(
+                lambda m: m.get("type") == "draw"
+                and any(k.endswith(":dz")
+                        for k in (m.get("diff", {}).get("added") or {})))
+            nsid = next(k for k in drew["diff"]["added"] if k.endswith(":dz"))
+            await br.send({"type": "draw", "diff": {
+                "added": {}, "updated": {}, "removed": {nsid: {}}}})
+            back = await src.recv_until(lambda m: m.get("type") == "draw")
+            assert "dz" in (back["diff"].get("removed") or {})   # stripped
+    _run(go())

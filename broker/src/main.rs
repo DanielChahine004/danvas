@@ -51,6 +51,47 @@ struct Source {
     registers: HashMap<String, Value>,
     updates: HashMap<String, Map<String, Value>>,
     arrows: HashMap<String, Value>,
+    /// namespaced record id -> the record's current ("after") state.
+    drawings: HashMap<String, Value>,
+}
+
+/// Rewrite every record id (diff keys, records' own `id`, arrow bindings)
+/// through `f`. `updated` values are `[before, after]` pairs.
+fn remap_draw_diff(diff: &Value, f: &dyn Fn(&str) -> String) -> Value {
+    let remap_record = |val: &Value| -> Value {
+        let mut v = val.clone();
+        if let Some(obj) = v.as_object_mut() {
+            if let Some(Value::String(id)) = obj.get("id") {
+                let nid = f(id);
+                obj.insert("id".into(), Value::String(nid));
+            }
+            if let Some(Value::Object(props)) = obj.get_mut("props") {
+                for key in ["bindStart", "bindEnd"] {
+                    if let Some(Value::String(b)) = props.get(key) {
+                        let nb = f(b);
+                        props.insert(key.into(), Value::String(nb));
+                    }
+                }
+            }
+        }
+        v
+    };
+    let mut out = Map::new();
+    for bucket in ["added", "updated", "removed"] {
+        let mut nb = Map::new();
+        if let Some(Value::Object(b)) = diff.get(bucket) {
+            for (rid, val) in b {
+                let nv = match val {
+                    Value::Array(pair) if pair.len() == 2 => Value::Array(
+                        vec![remap_record(&pair[0]), remap_record(&pair[1])]),
+                    other => remap_record(other),
+                };
+                nb.insert(f(rid), nv);
+            }
+        }
+        out.insert(bucket.into(), Value::Object(nb));
+    }
+    Value::Object(out)
 }
 
 #[derive(Default)]
@@ -88,6 +129,12 @@ impl Hub {
         for arrow in src.arrows.values() {
             out.push(arrow.clone());
         }
+        if !src.drawings.is_empty() {
+            out.push(json!({"type": "draw", "diff": {
+                "added": src.drawings.clone().into_iter()
+                    .collect::<Map<String, Value>>(),
+                "updated": {}, "removed": {}}}));
+        }
         if !src.live {
             out.extend(Self::freeze_frames(src));
         }
@@ -120,11 +167,23 @@ impl Hub {
     }
 
     fn teardown_frames(src: &Source) -> Vec<Value> {
-        src.reg_order
+        let mut out: Vec<Value> = src
+            .reg_order
             .iter()
             .chain(src.arrows.keys())
             .map(|id| json!({"type": "remove", "id": id}))
-            .collect()
+            .collect();
+        if !src.drawings.is_empty() {
+            // Ink lives under its own ids, not shape ids — removed via a diff.
+            let removed: Map<String, Value> = src
+                .drawings
+                .keys()
+                .map(|k| (k.clone(), json!({})))
+                .collect();
+            out.push(json!({"type": "draw", "diff":
+                {"added": {}, "updated": {}, "removed": removed}}));
+        }
+        out
     }
 }
 
@@ -325,6 +384,7 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
         src.registers.clear();
         src.updates.clear();
         src.arrows.clear();
+        src.drawings.clear();
         src.live = true;
         src.tx = Some(tx);
         frames
@@ -341,6 +401,40 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
 /// through to the shared client path.
 fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Value) {
     let kind = frame.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+    if kind == "draw" {
+        // The source's own ink: namespace every record, fold into the replay
+        // cache (updated pairs keep the "after" state), fan out.
+        let mut h = hub.lock().unwrap();
+        let Some(src) = h.sources.get(label) else { return };
+        let tag = src.tag.clone();
+        let ns_diff = remap_draw_diff(
+            frame.get("diff").unwrap_or(&Value::Null),
+            &|r: &str| format!("{tag}:{r}"),
+        );
+        let src = h.sources.get_mut(label).unwrap();
+        if let Some(Value::Object(a)) = ns_diff.get("added") {
+            for (k, v) in a {
+                src.drawings.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(Value::Object(u)) = ns_diff.get("updated") {
+            for (k, v) in u {
+                let after = match v {
+                    Value::Array(p) if p.len() == 2 => p[1].clone(),
+                    other => other.clone(),
+                };
+                src.drawings.insert(k.clone(), after);
+            }
+        }
+        if let Some(Value::Object(r)) = ns_diff.get("removed") {
+            for k in r.keys() {
+                src.drawings.remove(k);
+            }
+        }
+        let text = json!({"type": "draw", "diff": ns_diff}).to_string();
+        h.fanout_browsers(&text);
+        return;
+    }
     if !matches!(kind.as_str(), "register" | "update" | "remove" | "arrow") {
         client_frame(hub, conn_id, frame);
         return;
@@ -412,6 +506,67 @@ fn compose_endpoint(h: &Hub, own_tag: &str, r: &str) -> String {
 /// composed panels route to the owner; subscriptions live at the hub.
 fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
     let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+    if kind == "draw" {
+        // A viewer's ink edit: records under a source's namespace route back
+        // to that owner (stripped); bare records are hub-native annotation,
+        // relayed to the other browsers.
+        let Some(diff) = frame.get("diff") else { return };
+        let h = hub.lock().unwrap();
+        let mut per_dest: HashMap<Option<String>, Map<String, Value>> = HashMap::new();
+        for bucket in ["added", "updated", "removed"] {
+            if let Some(Value::Object(b)) = diff.get(bucket) {
+                for (rid, val) in b {
+                    let dest = rid
+                        .split_once(':')
+                        .filter(|(t, _)| h.tag_to_label.contains_key(*t))
+                        .map(|(t, _)| t.to_string());
+                    let entry = per_dest.entry(dest).or_insert_with(|| {
+                        let mut m = Map::new();
+                        for bk in ["added", "updated", "removed"] {
+                            m.insert(bk.into(), json!({}));
+                        }
+                        m
+                    });
+                    entry
+                        .get_mut(bucket)
+                        .and_then(Value::as_object_mut)
+                        .unwrap()
+                        .insert(rid.clone(), val.clone());
+                }
+            }
+        }
+        for (dest, sub) in per_dest {
+            match dest {
+                Some(tag) => {
+                    let stripped = remap_draw_diff(&Value::Object(sub), &|r: &str| {
+                        r.split_once(':')
+                            .map(|(_, rest)| rest.to_string())
+                            .unwrap_or_else(|| r.to_string())
+                    });
+                    if let Some(label) = h.tag_to_label.get(&tag) {
+                        if let Some(src) = h.sources.get(label) {
+                            if let Some(tx) = &src.tx {
+                                let _ = tx.send(
+                                    json!({"type": "draw", "diff": stripped})
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+                None => {
+                    let text =
+                        json!({"type": "draw", "diff": Value::Object(sub)}).to_string();
+                    for (bid, btx) in &h.browsers {
+                        if *bid != conn_id {
+                            let _ = btx.send(text.clone());
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
     let Some(cid) = frame.get("id").and_then(Value::as_str).map(String::from) else {
         return; // heartbeat / chat / plumbing: nothing to route in phase 1
     };
