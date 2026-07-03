@@ -77,8 +77,9 @@ the existing bridge class-swaps onto the socket, the UI survives the script.
 
 **The declared goal is broker-by-default.** The gate is canvas-surface
 parity, harness-pinned like everything else. Rows still to cross the hub
-before the default flips: managed shapes (`shape`/`shape_update`), chat,
-presence/cursors, `on_request`→`response` round-trips, roles/per-viewer
+before the default flips (shapes and `on_request`→`response` landed —
+harness at 30): chat,
+presence/cursors, roles/per-viewer
 overlays, upload/download HTTP endpoints, `persist=` under the transplant,
 hot-reload interplay, `set_view`, define/style shared assets, graveyard
 UI. Then: cross-platform release builds in CI, `pip install
