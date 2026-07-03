@@ -67,6 +67,12 @@ class SourceClient:
         self._input_handlers = {} # cid -> [fn]
         self._layout_handlers = {}# cid -> [fn]
         self._frame_taps = []
+        self._subs = set()        # panel ids we subscribed to (re-sent on reconnect)
+        # Local mirror of the canvas we joined: id -> {"component", "props",
+        # "state", ...geometry} folded from the hub's register/update stream.
+        # Eventually consistent (updated on the dispatch thread) — the replica
+        # every participant holds in the shared-document model.
+        self.panels = {}
         self._loop = None
         self._thread = None
         self._sock = None
@@ -132,6 +138,32 @@ class SourceClient:
             return lambda f: self.on_layout(cid, f)
         self._layout_handlers.setdefault(cid, []).append(fn)
         return fn
+
+    def set_props(self, cid, **props):
+        """Write properties of ANY panel on the canvas — including panels other
+        processes own (``cid`` as it appears in :attr:`panels`). The write
+        applies at the panel's owner through its real setters (last-writer-wins
+        on races); a hard-locked panel refuses. Placement keys (x/y/w/h/
+        rotation/opacity) work too."""
+        self._send({"type": "set_props", "id": cid, "props": dict(props)})
+        return self
+
+    def subscribe(self, cid, fn=None):
+        """Receive ``cid``'s input events even though another process owns it
+        — this is how "the click runs on *this* process" works: the owner's
+        handlers are untouched; you react in parallel. Optionally pass/decorate
+        a handler (sugar for ``subscribe(cid)`` + ``on_input(cid, fn)``)."""
+        self._subs.add(cid)
+        self._send({"type": "subscribe", "id": cid})
+        if fn is not None:
+            self.on_input(cid, fn)
+            return fn
+        return lambda f: self.on_input(cid, f)
+
+    def unsubscribe(self, cid):
+        self._subs.discard(cid)
+        self._send({"type": "unsubscribe", "id": cid})
+        return self
 
     def on_frame(self, fn):
         """Tap every frame the hub sends this connection — including the hub
@@ -203,6 +235,8 @@ class SourceClient:
         for cid, payload in self._updates.items():
             await sock.send(json.dumps(
                 {"type": "update", "id": cid, "payload": payload}))
+        for cid in self._subs:
+            await sock.send(json.dumps({"type": "subscribe", "id": cid}))
 
     async def _heartbeat(self, sock):
         while True:
@@ -243,3 +277,17 @@ class SourceClient:
         elif kind == "layout":
             for fn in self._layout_handlers.get(cid, []):
                 fn(msg)
+        elif kind == "register":
+            # Fold the hub's canvas stream into the local mirror.
+            self.panels[cid] = {
+                "component": msg.get("component"),
+                "props": dict(msg.get("props") or {}),
+                "state": {},
+                **{k: msg[k] for k in ("x", "y", "w", "h") if k in msg},
+            }
+        elif kind == "update":
+            entry = self.panels.get(cid)
+            if entry is not None and isinstance(msg.get("payload"), dict):
+                entry["state"].update(msg["payload"])
+        elif kind == "remove":
+            self.panels.pop(cid, None)

@@ -997,8 +997,24 @@ The source's panels compose alongside the canvas's own for every viewer;
 interactions route back to the source process; if it dies, its panels hold
 frozen (retention, above) until the same `label` dials back in. A protected
 canvas takes `password=` — the source joins as that login's role. The
-connection also receives the hub's full state stream (`src.on_frame`), so a
-source can *read* the canvas it joined, not just write to it.
+connection also receives the hub's full state stream (`src.on_frame`, mirrored
+in `src.panels`), so a source can *read* the canvas it joined, not just write
+to it.
+
+**The canvas is a shared document.** A connected process isn't limited to its
+own panels: `set_props` writes **any** panel's properties — including ones
+Python (or another process) created — and `subscribe` receives any panel's
+input events without owning it. Writes apply at the panel's owner through its
+real setters (validation and broadcast for free; concurrent writers converge
+last-writer-wins), so a peer can retune a Python slider or react to a Python
+button with no prior declaration — only a `locked` panel refuses. Browsers get
+the same powers gated by roles; processes are authoritative:
+
+```python
+src.set_props(servo_id, min=10, max=90)     # retune a Python-borne slider, live
+src.subscribe(button_id, lambda p: fire())  # this process reacts to its clicks
+                                            # (Python's own handler still runs)
+```
 
 **Password-protected sources merge too.** Adding a protected canvas prompts for
 *its* password in the merge panel; the hub runs that canvas's login and connects as

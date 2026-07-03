@@ -930,9 +930,29 @@ class _MergeHost:
                 msg = json.loads(raw)
             except (ValueError, TypeError):
                 return False
-            if msg.get("type") in ("register", "update", "remove", "arrow", "draw"):
+            kind = msg.get("type")
+            if kind in ("register", "update", "remove", "arrow", "draw"):
                 self._ingest(up, raw)
                 return True
+            # A source is also a peer on the shared plane: petitions and
+            # subscriptions it addresses to ANOTHER source's panel (namespaced
+            # id) route through the hub like a browser's would. Bare ids (the
+            # hub's own panels) fall through to the base viewer path.
+            cid = msg.get("id")
+            if isinstance(cid, str):
+                tag, orig = self._strip(cid)
+                target = self._tag_to_upstream.get(tag)
+                if target is not None:
+                    if kind in ("subscribe", "unsubscribe"):
+                        self._sub(ws, cid, kind == "subscribe")
+                        return True
+                    out = dict(msg)
+                    out["id"] = orig
+                    self._unoffset_out(target, out, kind)
+                    await target.send(out)
+                    if kind == "input":
+                        self._relay_input_subs(ws, cid, msg.get("payload"))
+                    return True
             return False
         conn = self._conns.get(ws)
         if conn is None:
@@ -973,14 +993,15 @@ class _MergeHost:
         up = self._tag_to_upstream.get(tag)
         if up is None:
             return False  # a bare id (the hub's own panel) — the base handles it
+        if kind in ("subscribe", "unsubscribe"):
+            # Subscriptions to a merged panel live at the hub: the hub relays a
+            # copy of forwarded input frames itself (the owner never needs to
+            # know who's listening through the hub).
+            self._sub(ws, cid, kind == "subscribe")
+            return True
         out = dict(msg)
         out["id"] = orig
-        if kind == "layout":
-            ox, oy = up.offset
-            if out.get("x") is not None:
-                out["x"] -= ox
-            if out.get("y") is not None:
-                out["y"] -= oy
+        self._unoffset_out(up, out, kind)
         # start/end on any forwarded frame reference sibling ids in the same source
         if isinstance(out.get("start"), str):
             out["start"] = self._strip(out["start"])[1]
@@ -1013,7 +1034,51 @@ class _MergeHost:
                         self._loop.create_task(self._safe_send(other.ws, fan))
         elif kind == "input":
             self._input_movers[cid] = (conn, time.monotonic() + 1.0)
+            self._relay_input_subs(ws, cid, msg.get("payload"))
         return True
+
+    # -- shared-plane helpers (subscriptions on merged panels) ----------------
+    def _sub(self, ws, nsid, on):
+        """Record/drop a subscription to a merged panel's input events. Stored
+        in the bridge's table (one table for bare and namespaced ids; the
+        bridge's disconnect cleanup covers both)."""
+        subs = self.bridge._input_subs
+        if on:
+            subs.setdefault(nsid, set()).add(ws)
+        else:
+            existing = subs.get(nsid)
+            if existing is not None:
+                existing.discard(ws)
+
+    def _relay_input_subs(self, origin_ws, nsid, payload):
+        """Copy a forwarded input event to the hub-side subscribers of that
+        merged panel (the owner dispatches its own handlers; subscribers react
+        in parallel). The originator is excluded."""
+        for sub in list(self.bridge._input_subs.get(nsid, ())):
+            if sub is not origin_ws:
+                self._loop.create_task(self._safe_send(
+                    sub, {"type": "input", "id": nsid, "payload": payload}))
+
+    @staticmethod
+    def _unoffset_out(up, out, kind):
+        """Undo the hub's origin offset on a frame headed back to its owner:
+        merged-view coords -> the source's own coords. Layout carries x/y at
+        the top level; set_props nests them in ``props``."""
+        ox, oy = up.offset
+        if not (ox or oy):
+            return
+        if kind == "layout":
+            if out.get("x") is not None:
+                out["x"] -= ox
+            if out.get("y") is not None:
+                out["y"] -= oy
+        elif kind == "set_props" and isinstance(out.get("props"), dict):
+            p = dict(out["props"])
+            if isinstance(p.get("x"), (int, float)):
+                p["x"] -= ox
+            if isinstance(p.get("y"), (int, float)):
+                p["y"] -= oy
+            out["props"] = p
 
 
 class MergeBridge(Bridge):

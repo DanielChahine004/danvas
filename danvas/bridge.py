@@ -203,6 +203,15 @@ class Bridge:
         # connects as a proxy for many browsers, so it NEEDS the echo (to keep its
         # replay cache current and fan the change to its other viewers).
         self._proxy_conns = set()
+        # Dial-in source connections (?source=1): processes, not browsers. They
+        # are *authoritative* peers on the shared property plane (set_props) —
+        # only a hard lock stops them — where a browser passes the same
+        # role/operable gate as input.
+        self._source_conns = set()
+        # Input-event subscriptions: comp id -> connections that asked to
+        # RECEIVE this panel's input frames too (any process may react to a
+        # panel it doesn't own; the owner's handlers are untouched).
+        self._input_subs = {}
         self._any_connected = threading.Event()  # set while ≥1 client is connected
         # One asyncio.Lock per live connection. The websockets legacy protocol
         # forbids concurrent writes (its drain() has no internal lock — two
@@ -831,6 +840,10 @@ class Bridge:
         # (it fronts many browsers; see _proxy_conns / _dispatch_input).
         if qp.get("proxy"):
             self._proxy_conns.add(ws)
+        # A dial-in source (?source=1) is a process peer, not a browser — track
+        # it so the shared property plane can treat it as authoritative.
+        if qp.get("source"):
+            self._source_conns.add(ws)
         # Classify the connecting device from the handshake User-Agent (no client
         # cooperation needed) so a handler can adapt the layout to mobile.
         headers = getattr(ws, "headers", {})
@@ -967,6 +980,9 @@ class Bridge:
                 self._merge.on_disconnect(ws)
             self._connections.discard(ws)
             self._proxy_conns.discard(ws)
+            self._source_conns.discard(ws)
+            for subs in self._input_subs.values():
+                subs.discard(ws)
             if not self._connections:
                 self._any_connected.clear()
             self._send_locks.pop(ws, None)
@@ -1287,6 +1303,42 @@ class Bridge:
             return False
         return self._effective_flag(comp, viewer, "operable")
 
+    # Placement keys a set_props petition routes through set_layout (one live
+    # message, same as a drag) rather than individual property assignment.
+    _LAYOUT_PROP_KEYS = ("x", "y", "w", "h", "rotation", "opacity")
+
+    def _apply_props(self, comp, props):
+        """Apply a ``set_props`` petition through the component's own setters.
+
+        Runs on the dispatch thread (a slow/odd setter can't stall the wire).
+        Placement keys go through ``set_layout`` in one message; anything else
+        must be a *settable property* on the component class — the write then
+        takes the exact code path ``slider.min = 5`` takes in the owner's own
+        script, so validation and the live browser broadcast come for free. A
+        key with no writable property, or a value its setter rejects, is
+        dropped with a log line — the owner's echoed state remains canonical,
+        which is what keeps every replica convergent.
+        """
+        layout = {k: props.pop(k) for k in list(props)
+                  if k in self._LAYOUT_PROP_KEYS or k in LAYOUT_FLAGS}
+        if layout:
+            try:
+                comp.set_layout(**layout)
+            except Exception:
+                _log.debug("set_props: layout %r rejected for %s",
+                           layout, comp.id, exc_info=True)
+        for k, v in props.items():
+            prop = getattr(type(comp), k, None)
+            if isinstance(prop, property) and prop.fset is not None:
+                try:
+                    setattr(comp, k, v)
+                except Exception:
+                    _log.debug("set_props: %s.%s = %r rejected",
+                               type(comp).__name__, k, v, exc_info=True)
+            else:
+                _log.debug("set_props: %s has no writable property %r",
+                           type(comp).__name__, k)
+
     def _on_message(self, ws, raw):
         try:
             msg = _loads(raw)
@@ -1361,6 +1413,46 @@ class Bridge:
                 self._dispatch.submit(
                     lambda c=comp, p=payload: self._dispatch_input(c, p, ws)
                 )
+                # Event subscription fan-out: any connection that subscribed to
+                # this panel's inputs gets a copy of the raw event (so another
+                # process can react to a panel it doesn't own). The originator
+                # is excluded — it already knows what it sent.
+                for sub in list(self._input_subs.get(msg.get("id"), ())):
+                    if sub is not ws:
+                        self._loop.create_task(self._safe_send(
+                            sub, {"type": "input", "id": msg.get("id"),
+                                  "payload": payload}))
+        elif kind == "set_props":
+            # The shared property plane: ANY peer may write ANY panel's
+            # properties, Figma-style — the write applies through the owner's
+            # real setters (validation + live broadcast for free), so ordering-
+            # through-the-owner is the last-writer-wins. A browser passes the
+            # same gate as input; a process peer (dial-in source / merge proxy)
+            # is authoritative and is stopped only by a hard lock.
+            comp = self._components.get(msg.get("id"))
+            if comp is not None:
+                viewer = self._viewer_of(ws)
+                if ws in self._source_conns or ws in self._proxy_conns:
+                    allowed = not self._effective_flag(comp, viewer, "locked")
+                else:
+                    allowed = self._may_operate(comp, viewer)
+                props = msg.get("props")
+                if allowed and isinstance(props, dict) and props:
+                    self._dispatch.submit(
+                        lambda c=comp, p=dict(props): self._apply_props(c, p))
+                elif not allowed:
+                    _log.debug("dropped set_props for %s: not permitted",
+                               msg.get("id"))
+        elif kind == "subscribe":
+            # Ask to receive a panel's input events (in addition to its owner).
+            # Visibility-gated: you can't tap a panel your role can't see.
+            comp = self._components.get(msg.get("id"))
+            if comp is not None and self._may_see(comp, self._viewer_of(ws)):
+                self._input_subs.setdefault(msg.get("id"), set()).add(ws)
+        elif kind == "unsubscribe":
+            subs = self._input_subs.get(msg.get("id"))
+            if subs is not None:
+                subs.discard(ws)
         elif kind == "layout":
             # User moved/resized a panel or a managed shape; sync Python's state.
             cid = msg.get("id")

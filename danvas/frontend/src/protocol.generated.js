@@ -15,7 +15,7 @@ export const BIN_INPUT = 5
 export const FLAG_WIRE_KEYS = Object.freeze({"locked": "locked", "draggable": "movable", "resizable": "resizable", "operable": "interactive", "grabbable": "selectable", "frame": "frame"})
 
 export const MESSAGE_TYPES_OUT = Object.freeze(["register", "arrow", "shape", "shape_update", "update", "order", "remove", "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot", "draw", "presence", "cursor", "cursor_gone", "view", "welcome", "graveyard_update", "shared", "chat", "response"])
-export const MESSAGE_TYPES_IN = Object.freeze(["heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout", "graveyard", "restore", "draw", "request", "panel_error", "snapshot", "image"])
+export const MESSAGE_TYPES_IN = Object.freeze(["heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout", "graveyard", "restore", "draw", "request", "panel_error", "snapshot", "image", "set_props", "subscribe", "unsubscribe"])
 
 export const MERGE_MESSAGE_TYPES_OUT = Object.freeze(["merge_sources", "merge_auth_required", "merge_auth_failed"])
 export const MERGE_MESSAGE_TYPES_IN = Object.freeze(["merge_add", "merge_auth", "merge_remove", "merge_offset"])

@@ -82,6 +82,8 @@ replay again and must rebuild from it.
 | `chat` / `set_name` / `cursor` / `ui` | session plumbing |
 | `graveyard` / `restore` | delete / undelete a panel |
 | `snapshot` / `image` / `panel_error` | replies + error reports |
+| `set_props` | write any panel's properties: `{id, props: {...}}` (shared plane, below) |
+| `subscribe` / `unsubscribe` | receive a panel's `input` events without owning it |
 
 The server enforces authorization on ingress: an `input`/`request`/binary
 frame for a panel that is `locked`, non-`operable`, role-hidden, or
@@ -141,6 +143,28 @@ Every served canvas is a hub by default, so this works against a plain
 
 `danvas/source.py` (`danvas.SourceClient`) is the reference implementation —
 ~200 lines, and the executable spec for an SDK in any language.
+
+## The shared property plane
+
+The canvas is a shared document: **any peer may write any panel's properties**
+with `set_props` (`{"type": "set_props", "id": ..., "props": {...}}`), whether
+or not it owns the panel. The write routes to the panel's owner and applies
+through the owner's real setters — validation, lock enforcement, and the live
+broadcast come from that one code path, and because every write to a panel
+sequences through its owner, concurrent writers converge last-writer-wins with
+no merge machinery. Placement keys (`x`/`y`/`w`/`h`/`rotation`/`opacity`) and
+lock flags are accepted alongside component properties (`min`, `max`,
+`color`, `options`, …). Unknown keys and rejected values are dropped at the
+owner; its echoed state is canonical.
+
+Permissions: a **browser** passes the same gate as `input` (roles, `operable`,
+`lock_for`); a **process peer** (dial-in source, merge proxy) is authoritative
+— only a hard `locked` stops it.
+
+`subscribe` is the events half: a subscribed connection receives a copy of a
+panel's `input` frames (the originator excluded; the owner's handlers are
+unaffected), so any process can *react* to any panel — behavior stays where
+its code and state live, but who listens is a live, shared fact.
 
 ## Writing a non-Python client (the polyglot subset)
 

@@ -90,7 +90,7 @@ MESSAGE_TYPES_OUT = (
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout",
     "graveyard", "restore", "draw", "request", "panel_error", "snapshot",
-    "image",
+    "image", "set_props", "subscribe", "unsubscribe",
 )
 
 # -- merge control-plane tags (browser <-> merge server) --------------------
