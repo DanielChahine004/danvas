@@ -77,12 +77,13 @@ the existing bridge class-swaps onto the socket, the UI survives the script.
 
 **The declared goal is broker-by-default.** The gate is canvas-surface
 parity, harness-pinned like everything else. Rows still to cross the hub
-before the default flips (shapes, `on_request`→`response`, presence, and
-chat landed — harness at 32; cursors stay config-gated/unpinned):
-roles/per-viewer
-overlays, upload/download HTTP endpoints, `persist=` under the transplant,
-hot-reload interplay, `set_view`, define/style shared assets, graveyard
-UI. Then: cross-platform release builds in CI, `pip install
+before the default flips (harness at 35 — shapes, request/response,
+presence, chat, `set_view`, define/style shared assets, and the graveyard
+flow all landed; cursors stay config-gated/unpinned): **roles/per-viewer
+overlays** and **upload/download HTTP endpoints** are the two design-shaped
+rows left, plus `persist=` under the transplant and the hot-reload
+interplay (both may be re-scoped: the hub ledger + retention already cover
+most of what they exist for in broker mode). Then: cross-platform release builds in CI, `pip install
 danvas[broker]` wheels bundling the binary, flip `broker=` default with an
 escape hatch (`broker=False`), a bare-binary GitHub release. Known
 unpinned semantics: per-connection vs canvas-wide merge_add scoping;
