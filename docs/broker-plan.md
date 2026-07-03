@@ -56,11 +56,13 @@ DANVAS_HUB_CMD="<abs>/broker/target/debug/danvasd.exe|--port|{port}" \
 Done since (harness now 21, both hubs green on every row): drawings relay,
 offsets (`merge_offset`), roster, fresh-register replay folding, **auth**
 (`--password` + the `/__auth__` cookie flow, on the Python hub too), and
-**heartbeat reaping** (`DANVAS_HEARTBEAT_TIMEOUT` overridable on both hubs).
-Remaining for parity: dialed-out sources (the hub dialing served canvases),
-binary frames, the ledger, `/__describe__`, and distribution. Grow the
-harness with each — a behavior isn't done until it's asserted against both
-hubs.
+**heartbeat reaping** (`DANVAS_HEARTBEAT_TIMEOUT` overridable on both hubs),
+and **dialed-out sources** (`merge_add`/`merge_remove` compose served
+canvases by URL; danvasd dials as a retrying ws client through the same
+ingest path as dial-ins — per-connection scoping remains unpinned).
+Remaining for parity: binary frames, the ledger, `/__describe__`,
+protected-source `merge_auth`, and distribution. Grow the harness with each
+— a behavior isn't done until it's asserted against both hubs.
 
 ---
 
