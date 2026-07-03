@@ -858,3 +858,143 @@ def test_binary_input_routes_back_to_owner_stripped(hub):
             assert cid == "mic"                        # namespace stripped
             assert got == payload
     _run(go())
+
+
+# -- /__describe__: headless inventory of the composed canvas --------------------
+
+def test_describe_lists_composed_panels(hub):
+    async def go():
+        async with _source(hub, "c21") as sws:
+            src = Peer(sws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "d", "name": "dpanel",
+                            "component": "React", "props": {}, "x": 7, "y": 8})
+            await asyncio.sleep(0.3)
+            import urllib.request
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{hub}/__describe__", timeout=5) as r:
+                inv = json.loads(r.read().decode())
+            comps = inv["components"]
+            entry = next(c for c in comps if c.get("name") == "dpanel")
+            assert entry["owner"] == "c21"
+            assert (entry["x"], entry["y"]) == (7, 8)
+    _run(go())
+
+
+# -- ledger: DANVAS_LEDGER records user actions to the SQLite schema -------------
+
+@pytest.fixture(scope="module")
+def ledger_hub(tmp_path_factory):
+    port = _free_port()
+    path = str(tmp_path_factory.mktemp("ledger") / "hub.canvas.db")
+    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
+    if cmd_tpl:
+        cmd = [p.format(port=port, password="") for p in cmd_tpl.split("|")]
+    else:
+        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
+               "--no-open"]
+    env = dict(os.environ)
+    env["DANVAS_LEDGER"] = path
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    raise RuntimeError(f"hub exited early: {cmd}")
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("hub never started")
+        yield port, path
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_ledger_records_user_actions(ledger_hub):
+    port, path = ledger_hub
+
+    async def go():
+        async with _source(port, "c22") as sws, _browser(port) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "lp", "name": "lp22",
+                            "component": "React", "props": {}})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "lp22")
+            await br.send({"type": "input", "id": reg["id"],
+                           "payload": {"value": 9}})
+            await src.recv_until(lambda m: m.get("type") == "input")
+            await asyncio.sleep(0.5)                # let the append land
+    _run(go())
+
+    import sqlite3
+    con = sqlite3.connect(path)
+    tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"meta", "snapshots", "events"} <= tables    # the _ledger.py schema
+    rows = con.execute(
+        "SELECT type, comp, payload FROM events WHERE type='input'").fetchall()
+    con.close()
+    assert rows
+    assert any("9" in (r[2] or "") for r in rows)
+
+
+# -- merge_auth: composing a password-protected served canvas --------------------
+
+def test_merge_auth_flow_for_protected_source(hub):
+    tport = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "danvas.merge", "--port", str(tport),
+         "--no-open", "--password", "sesame"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", tport), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        # give the protected target a panel (its own auth flow, raw)
+        token = _login(tport, "sesame")
+
+        async def go():
+            tsrc = await ws_connect(
+                f"ws://127.0.0.1:{tport}/ws?source=1&label=vault",
+                max_size=None,
+                additional_headers={"Cookie": f"pc_session={token}"})
+            ts = Peer(tsrc)
+            await ts.recv_until(lambda m: m["type"] == "welcome")
+            await ts.send({"type": "register", "id": "v", "name": "vpanel",
+                           "component": "React", "props": {}})
+            async with _browser(hub) as bws:
+                br = Peer(bws)
+                await br.send({"type": "merge_add",
+                               "uri": f"127.0.0.1:{tport}"})
+                await br.recv_until(
+                    lambda m: m.get("type") == "merge_auth_required",
+                    timeout=10.0)
+                await br.send({"type": "merge_auth",
+                               "uri": f"127.0.0.1:{tport}",
+                               "password": "wrong"})
+                await br.recv_until(
+                    lambda m: m.get("type") == "merge_auth_failed",
+                    timeout=10.0)
+                await br.send({"type": "merge_auth",
+                               "uri": f"127.0.0.1:{tport}",
+                               "password": "sesame"})
+                await br.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "vpanel", timeout=10.0)
+            await tsrc.close()
+        asyncio.run(asyncio.wait_for(go(), timeout=60))
+    finally:
+        proc.kill()

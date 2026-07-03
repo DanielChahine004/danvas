@@ -125,6 +125,40 @@ struct Hub {
     /// Dialed-out sources (merge_add): label -> the retrying dial task, so
     /// merge_remove can stop it for good.
     dial_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// DANVAS_LEDGER=<path.db>: append routed user actions to the SQLite
+    /// event ledger (the same schema danvas/_ledger.py writes).
+    ledger: Option<rusqlite::Connection>,
+}
+
+fn open_ledger(path: &str) -> Option<rusqlite::Connection> {
+    let conn = rusqlite::Connection::open(path).ok()?;
+    let _ = conn.pragma_update(None, "journal_mode", "WAL");
+    let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+         CREATE TABLE IF NOT EXISTS snapshots (
+           seq INTEGER PRIMARY KEY AUTOINCREMENT,
+           ts REAL NOT NULL, state TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS events (
+           seq INTEGER PRIMARY KEY AUTOINCREMENT,
+           ts REAL NOT NULL, type TEXT NOT NULL, comp TEXT, payload TEXT);
+         INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1');",
+    )
+    .ok()?;
+    Some(conn)
+}
+
+fn ledger_record(h: &Hub, kind: &str, comp: Option<&str>, payload: &Value) {
+    if let Some(conn) = &h.ledger {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        let _ = conn.execute(
+            "INSERT INTO events (ts, type, comp, payload) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![ts, kind, comp, payload.to_string()],
+        );
+    }
 }
 
 /// Normalise a merge_add spec to `(ws_uri, label)`: bare port, host:port, or
@@ -378,11 +412,13 @@ async fn main() {
     let hub = Arc::new(Mutex::new(Hub {
         run_id: now_hex(),
         password,
+        ledger: std::env::var("DANVAS_LEDGER").ok().as_deref().and_then(open_ledger),
         ..Default::default()
     }));
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/__auth__", post(auth_handler))
+        .route("/__describe__", get(describe_handler))
         .fallback(get(static_handler))
         .with_state(hub);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -410,6 +446,41 @@ async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl 
       (header::SET_COOKIE,
        format!("pc_session={token}; Path=/; SameSite=Lax; HttpOnly"))],
      "").into_response()
+}
+
+/// Headless inventory of the composed canvas (the replay cache), one entry
+/// per merged panel with the cross-process identity and source liveness.
+async fn describe_handler(
+    State(hub): State<Arc<Mutex<Hub>>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let h = hub.lock().unwrap();
+    if !h.authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, "login required").into_response();
+    }
+    let mut components = Vec::new();
+    for (label, src) in &h.sources {
+        for id in &src.reg_order {
+            if let Some(reg) = src.registers.get(id) {
+                components.push(json!({
+                    "id": id,
+                    "name": reg.get("name").cloned().unwrap_or(Value::Null),
+                    "owner": reg.get("owner").cloned()
+                        .unwrap_or(Value::String(label.clone())),
+                    "component": reg.get("component").cloned().unwrap_or(Value::Null),
+                    "x": reg.get("x").cloned().unwrap_or(Value::Null),
+                    "y": reg.get("y").cloned().unwrap_or(Value::Null),
+                    "source": label,
+                    "status": if src.live { "live" } else { "offline" },
+                }));
+            }
+        }
+    }
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({"components": components}).to_string(),
+    )
+        .into_response()
 }
 
 async fn static_handler(
@@ -642,17 +713,97 @@ fn binary_frame(hub: &Arc<Mutex<Hub>>, from_source: bool, label: &str, data: Vec
     }
 }
 
+/// Host:port out of a ws uri like `ws://host:port/ws`.
+fn host_port_of(ws_uri: &str) -> Option<(String, u16)> {
+    let rest = ws_uri.split_once("://")?.1;
+    let hostport = rest.split('/').next()?;
+    let (host, port) = hostport.rsplit_once(':')?;
+    Some((host.to_string(), port.parse().ok()?))
+}
+
+/// Minimal HTTP/1.1 exchange over a fresh TCP connection; returns
+/// (status, full response text). Enough for the probe and the login — the
+/// broker never needs an HTTP client library for localhost/LAN sources.
+/// (TLS sources would need one; documented gap.)
+async fn http_exchange(host: &str, port: u16, request: String) -> Option<(u16, String)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect((host, port)).await.ok()?;
+    stream.write_all(request.as_bytes()).await.ok()?;
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(6),
+        stream.read_to_end(&mut buf),
+    )
+    .await;
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let status: u16 = text.split_whitespace().nth(1)?.parse().ok()?;
+    Some((status, text))
+}
+
+async fn http_probe(host: &str, port: u16) -> Option<u16> {
+    let req = format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    http_exchange(host, port, req).await.map(|(s, _)| s)
+}
+
+/// The /__auth__ password flow; returns the pc_session token on success.
+async fn http_login(host: &str, port: u16, password: &str) -> Option<String> {
+    let mut body = String::from("password=");
+    for b in password.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                body.push(b as char)
+            }
+            _ => body.push_str(&format!("%{b:02X}")),
+        }
+    }
+    let req = format!(
+        "POST /__auth__ HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let (_status, text) = http_exchange(host, port, req).await?;
+    for line in text.lines() {
+        if line.to_ascii_lowercase().starts_with("set-cookie:") {
+            if let Some(rest) = line.split_once("pc_session=") {
+                let token: String = rest
+                    .1
+                    .chars()
+                    .take_while(|c| *c != ';' && !c.is_whitespace())
+                    .collect();
+                if !token.is_empty() {
+                    return Some(token);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Dial OUT to a served canvas (merge_add): connect as a ?proxy=1 client,
 /// ingest its stream through the same path a dial-in source's frames take,
 /// pump route-backs out, retry forever (retention covers the gaps). Stopped
 /// for good by merge_remove aborting the task.
-async fn dial_out(hub: Arc<Mutex<Hub>>, ws_uri: String, label: String) {
+async fn dial_out(
+    hub: Arc<Mutex<Hub>>,
+    ws_uri: String,
+    label: String,
+    cookie: Option<String>,
+) {
     use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::Message as TMsg;
     let sep = if ws_uri.contains('?') { '&' } else { '?' };
     let uri = format!("{ws_uri}{sep}proxy=1");
     loop {
-        if let Ok((stream, _)) = connect_async(&uri).await {
+        let mut request = match uri.clone().into_client_request() {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        if let Some(token) = &cookie {
+            if let Ok(v) = format!("pc_session={token}").parse() {
+                request.headers_mut().insert("Cookie", v);
+            }
+        }
+        if let Ok((stream, _)) = connect_async(request).await {
             let (mut sink, mut read) = stream.split();
             let (tx, mut rx) = unbounded_channel::<Out>();
             let writer = tokio::spawn(async move {
@@ -924,10 +1075,13 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         }
         return;
     }
-    if kind == "merge_add" {
-        // Compose a SERVED canvas by URL, live. (Canvas-wide here; the
-        // per-connection scoping the Python hub offers is deliberately
-        // unpinned by the harness for now.)
+    if kind == "merge_add" || kind == "merge_auth" {
+        // Compose a SERVED canvas by URL, live. merge_add probes first: a
+        // password-protected target (HTTP 401) asks the requesting browser
+        // for its password (merge_auth_required); merge_auth runs the
+        // target's /__auth__ flow and dials with the session cookie (a wrong
+        // password reports merge_auth_failed). (Canvas-wide here; the Python
+        // hub's per-connection scoping is deliberately unpinned.)
         let Some((ws_uri, label)) = frame
             .get("uri")
             .and_then(Value::as_str)
@@ -935,12 +1089,58 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         else {
             return;
         };
-        let mut h = hub.lock().unwrap();
-        if h.dial_tasks.contains_key(&label) {
-            return; // already composing it
+        let password = frame
+            .get("password")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .filter(|_| kind == "merge_auth");
+        let (requester, already) = {
+            let h = hub.lock().unwrap();
+            (h.conns.get(&conn_id).cloned(), h.dial_tasks.contains_key(&label))
+        };
+        if already {
+            return;
         }
-        let task = tokio::spawn(dial_out(hub.clone(), ws_uri, label.clone()));
-        h.dial_tasks.insert(label, task);
+        let hub2 = hub.clone();
+        tokio::spawn(async move {
+            let hp = host_port_of(&ws_uri);
+            if let Some(pw) = password {
+                let cookie = match &hp {
+                    Some((host, port)) => http_login(host, *port, &pw).await,
+                    None => None,
+                };
+                let Some(cookie) = cookie else {
+                    if let Some(tx) = requester {
+                        let _ = tx.send(Out::T(
+                            json!({"type": "merge_auth_failed",
+                                   "uri": ws_uri, "label": label})
+                            .to_string(),
+                        ));
+                    }
+                    return;
+                };
+                let task = tokio::spawn(dial_out(
+                    hub2.clone(), ws_uri, label.clone(), Some(cookie)));
+                hub2.lock().unwrap().dial_tasks.insert(label, task);
+                return;
+            }
+            // merge_add: probe for protection first
+            if let Some((host, port)) = &hp {
+                if http_probe(host, *port).await == Some(401) {
+                    if let Some(tx) = requester {
+                        let _ = tx.send(Out::T(
+                            json!({"type": "merge_auth_required",
+                                   "uri": ws_uri, "label": label})
+                            .to_string(),
+                        ));
+                    }
+                    return;
+                }
+            }
+            let task = tokio::spawn(dial_out(
+                hub2.clone(), ws_uri, label.clone(), None));
+            hub2.lock().unwrap().dial_tasks.insert(label, task);
+        });
         return;
     }
     if kind == "merge_remove" {
@@ -1019,6 +1219,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         "input" | "set_props" | "layout" | "request" => {
             let Some((tag, rest)) = cid.split_once(':') else { return };
             let mut h = hub.lock().unwrap();
+            ledger_record(&h, kind, Some(&cid), &frame);
             let Some(label) = h.tag_to_label.get(tag).cloned() else { return };
             let offset = h.sources.get(&label).map(|s| s.offset).unwrap_or((0.0, 0.0));
             if let Some(src) = h.sources.get(&label) {

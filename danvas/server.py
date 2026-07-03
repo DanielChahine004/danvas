@@ -486,9 +486,26 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     def describe():
         # Pure Python state — works with no browser open (headless QC).
         canvas = getattr(bridge, "_canvas", None)
-        if canvas is None:
+        if canvas is not None:
+            return JSONResponse(canvas.describe())
+        # A standing hub has no canvas of its own; its inventory is the
+        # composed replay cache — one entry per merged panel, with the
+        # cross-process identity (name/owner) and source liveness.
+        merge = getattr(bridge, "_merge", None)
+        if merge is None:
             return PlainTextResponse("no canvas", status_code=503)
-        return JSONResponse(canvas.describe())
+        components = []
+        for up in merge._upstreams.values():
+            for nsid, reg in up.registers.items():
+                components.append({
+                    "id": nsid,
+                    "name": reg.get("name"),
+                    "owner": reg.get("owner", up.label),
+                    "component": reg.get("component"),
+                    "x": reg.get("x"), "y": reg.get("y"),
+                    "source": up.label, "status": up.status,
+                })
+        return JSONResponse({"components": components})
 
     @app.get("/__screenshot__.png")
     def screenshot_png():

@@ -62,6 +62,7 @@ the historical drop-on-offline behaviour.
 import argparse
 import asyncio
 import json
+import os
 import re
 import time
 import traceback
@@ -329,6 +330,14 @@ class _MergeHost:
         self._conns = {}              # ws -> _Conn
         self._dialins = {}            # inbound ws -> its dial-in _Upstream
         self._tag_seq = 0
+        # DANVAS_LEDGER=<path.db>: append every routed user action to the
+        # SQLite event ledger (the _ledger.py schema) — hub-level forensics,
+        # same file format the canvas's persist= ledger writes.
+        self._ledger = None
+        ledger_path = os.environ.get("DANVAS_LEDGER")
+        if ledger_path:
+            from . import _ledger as _ledger_mod
+            self._ledger = _ledger_mod.open_ledger(ledger_path)
         # nsid -> (conn, expiry): the viewer who last drove input on a panel, so
         # the source's echo of that change isn't fanned back to them (it would fight
         # their live drag). Short-lived; a stale entry just means one missed echo.
@@ -1070,6 +1079,7 @@ class _MergeHost:
                     out = dict(msg)
                     out["id"] = orig
                     self._unoffset_out(target, out, kind)
+                    self._record(kind, cid, msg)
                     await target.send(out)
                     if kind == "input":
                         self._relay_input_subs(ws, cid, msg.get("payload"))
@@ -1103,6 +1113,7 @@ class _MergeHost:
         if kind == "draw":
             diff = msg.get("diff") or {}
             if self._has_namespaced(diff):
+                self._record("draw", None, msg)
                 self._route_draw(conn, ws, diff)
                 return True
             return False  # pure local/native ink — the base draw path handles it
@@ -1123,6 +1134,7 @@ class _MergeHost:
         out = dict(msg)
         out["id"] = orig
         self._unoffset_out(up, out, kind)
+        self._record(kind, cid, msg)
         # start/end on any forwarded frame reference sibling ids in the same source
         if isinstance(out.get("start"), str):
             out["start"] = self._strip(out["start"])[1]
@@ -1174,6 +1186,16 @@ class _MergeHost:
         if rest and tag in self._tag_to_upstream:     # another source's panel
             return ref
         return self._ns(up.tag, ref)                  # the sender's own panel
+
+    def _record(self, kind, cid, msg):
+        """Append one routed user action to the hub ledger (no-op when off;
+        an append failure must never take down the routing path)."""
+        if self._ledger is None:
+            return
+        try:
+            self._ledger.append_event(kind, cid, msg)
+        except Exception:
+            traceback.print_exc()
 
     # -- shared-plane helpers (subscriptions on merged panels) ----------------
     def _sub(self, ws, nsid, on):
