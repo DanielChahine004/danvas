@@ -208,7 +208,11 @@ class RemoteCanvas(Canvas):
         self._serving = True
 
     # -- lifecycle -------------------------------------------------------------
-    def connect(self, timeout=10.0):
+    # Named dial() rather than connect(): Canvas.connect(a, b) is the ARROW
+    # verb, inherited and fully functional here (an arrow between this
+    # process's panels rides the socket like any frame) — the session verb
+    # must not shadow it.
+    def dial(self, timeout=10.0):
         self._client.connect(timeout=timeout)
         return self
 
@@ -301,6 +305,7 @@ def connect(url, label="python", password=None, timeout=10.0):
 
     Returns a connected :class:`RemoteCanvas` — the normal danvas API, with the
     frames going to the serving canvas instead of to browsers of this
-    process's own.
+    process's own. (On the returned canvas, ``connect(a, b)`` keeps its normal
+    danvas meaning: an arrow between two panels.)
     """
-    return RemoteCanvas(url, label=label, password=password).connect(timeout)
+    return RemoteCanvas(url, label=label, password=password).dial(timeout)

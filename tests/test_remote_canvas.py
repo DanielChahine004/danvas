@@ -109,3 +109,16 @@ def test_serve_is_refused_with_a_pointer():
 def test_connect_is_exported():
     assert callable(danvas.connect)
     assert danvas.RemoteCanvas is RemoteCanvas
+
+
+def test_connect_is_still_the_arrow_verb():
+    # RemoteCanvas.dial() is the session verb precisely so Canvas.connect(a, b)
+    # keeps its danvas meaning — an arrow — and rides the socket like any frame.
+    c, sent = _canvas()
+    a = c.slider("a", min=0, max=1)
+    b = c.label("b", "x")
+    arrow = c.connect(a, b, text="a->b")
+    assert arrow in c.arrows
+    frames = [m for m in sent if m.get("type") == "arrow"]
+    assert frames and frames[-1]["start"] == a.id and frames[-1]["end"] == b.id
+    assert callable(c.dial)                      # the session verb, renamed
