@@ -105,3 +105,72 @@ def test_serve_broker_end_to_end():
         asyncio.run(asyncio.wait_for(go(), timeout=30))
     finally:
         canvas._broker.stop()
+
+
+# -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
+
+def _rust_canvas_exe():
+    root = os.path.join(os.path.dirname(__file__), "..")
+    exe = "rust_canvas.exe" if os.name == "nt" else "rust_canvas"
+    for profile in ("debug", "release"):
+        p = os.path.abspath(os.path.join(root, "broker", "target", profile,
+                                         "examples", exe))
+        if os.path.exists(p):
+            return p
+    return None
+
+
+@pytest.mark.skipif(_danvasd() is None or _rust_canvas_exe() is None,
+                    reason="rust binaries not built")
+def test_canvas_authored_in_rust_no_python_serving():
+    import subprocess
+    import urllib.request
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    broker = subprocess.Popen([_danvasd(), "--port", str(port)])
+    rust = None
+    try:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        rust = subprocess.Popen([_rust_canvas_exe(), "--port", str(port)])
+
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws",
+                                  max_size=None) as ws:
+                reg = None
+                end = time.monotonic() + 10
+                while reg is None and time.monotonic() < end:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                    if m.get("type") == "register" and m.get("name") == "servo":
+                        reg = m
+                assert reg is not None
+                assert reg["owner"] == "rust-canvas"      # authored in Rust
+                assert reg["component"] == "React"        # renders natively
+                blob = json.loads(reg["props"]["data"])
+                assert blob["max"] == 180                 # template + overrides
+                # browser drags the Rust slider -> Rust computes -> label updates
+                await ws.send(json.dumps({"type": "input", "id": reg["id"],
+                                          "payload": {"value": 77}}))
+                while True:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                    if (m.get("type") == "update"
+                            and "computed in rust" in json.dumps(m)
+                            and "77" in json.dumps(m)):
+                        break
+        asyncio.run(asyncio.wait_for(go(), timeout=40))
+        # the frontend itself is served by the Rust broker
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
+            assert r.status == 200
+    finally:
+        if rust is not None:
+            rust.kill()
+        broker.kill()
