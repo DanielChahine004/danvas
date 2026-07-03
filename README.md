@@ -841,6 +841,16 @@ default only inside a baked executable (`sys.frozen`).
 
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
+**Serve through the binary broker (experimental)** — `serve(broker=True)`
+hands the port to `danvasd` (the ~6 MB dependency-free Rust broker): browsers
+talk to the binary, your Python process dials in as the `host` source, and
+**the UI survives your script crashing** — restart it and the canvas heals.
+Panels, handlers, live setters, arrows, ink, media, and `password=` work
+through it today; managed shapes, chat, `on_request`, roles, uploads and
+`persist=` don't cross the hub yet (why it isn't the default — tracked in
+[docs/broker-plan.md](docs/broker-plan.md)). Locate the binary via `$DANVASD`,
+`PATH`, or a repo build (`cargo build --release` in `broker/`).
+
 **Widen (or narrow) reach live (🌐 Hosting)** — a private, local-only canvas
 gets a **Hosting** button (above Merge) showing where it's reachable, with
 one-click **Share on LAN** (adds a second listener on your LAN address — the
@@ -1036,6 +1046,14 @@ def _():                                    # alongside the owner's handler
 (For other languages — or wire-level control — `danvas.SourceClient` is the
 minimal client underneath: `register`/`update`/`on_input` as raw frames, and
 the reference for writing a Rust/C++ SDK.)
+
+**Native panels from any language** — the built-in panels' register shapes
+(the React source + data defaults the frontend mounts) ship as a
+language-neutral asset, `danvas/templates/components.json`, so an SDK in any
+language renders a REAL slider/label/button/toggle/text field/markdown panel
+by merging kwargs over the template's data and sending one register frame.
+`SourceClient.register_template("temp", "slider", min=0, max=100)` is the
+reference implementation of that move.
 
 The source's panels compose alongside the canvas's own for every viewer;
 interactions route back to the source process; if it dies, its panels hold

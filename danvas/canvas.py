@@ -2194,7 +2194,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None, tldraw_license_key=None, watch=None,
-              merge_server=None, merge=True, merge_retain=True):
+              merge_server=None, merge=True, merge_retain=True, broker=False):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -2340,7 +2340,19 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``tldraw_license_key`` is **deprecated and ignored** — the frontend is
         tldraw-free, so no production licence key is needed. The argument is
         accepted (and discarded) only so older call sites don't break.
+
+        ``broker=True`` (EXPERIMENTAL) serves through the ``danvasd`` binary
+        instead of the embedded Python server: the broker owns the port and
+        the UI survives this process; this process dials in as the ``host``
+        source. Panels, handlers, live setters, arrows, ink, media, and auth
+        work; managed shapes, chat, presence, ``on_request``, roles,
+        upload/download endpoints, ``persist=`` and hot reload don't cross
+        the hub yet — see :func:`danvas.remote.serve_via_broker`.
         """
+        if broker:
+            from .remote import serve_via_broker
+            return serve_via_broker(self, port=port, open_browser=open_browser,
+                                    block=block, password=password)
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.

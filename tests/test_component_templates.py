@@ -1,0 +1,107 @@
+"""The language-neutral component templates + serve(broker=True).
+
+components.json is what lets a non-Python SDK author NATIVE panels (the
+register frame's React source + data defaults, extracted from the real
+components). serve(broker=True) is the transplant: danvasd owns the port,
+the Python process dials in as the host source.
+"""
+
+import asyncio
+import json
+import os
+import socket
+import sys
+import time
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+import danvas
+from danvas.source import SourceClient, _templates
+
+
+def test_committed_asset_is_fresh():
+    import gen_component_templates as gen
+    committed = json.load(open(gen.OUT_PATH, encoding="utf-8"))
+    assert committed == gen.build(), (
+        "danvas/templates/components.json is stale — run "
+        "python scripts/gen_component_templates.py")
+
+
+def test_templates_match_the_real_components():
+    tpl = _templates()["slider"]
+    real = danvas.Slider().register_props_for(None, None)
+    assert tpl["component"] == "React"
+    assert tpl["props"]["source"] == real["source"]      # same JSX mounts
+    assert tpl["data"]["max"] == 100
+
+
+def test_register_template_builds_a_native_register():
+    c = SourceClient(":8000", label="rig")
+    sent = []
+    c._send = lambda m: sent.append(m)
+    c.register_template("temp", "slider", min=0, max=60, value=20, x=40, y=50)
+    reg = sent[-1]
+    assert reg["type"] == "register"
+    assert reg["component"] == "React"                   # renders natively
+    assert reg["name"] == "temp" and (reg["x"], reg["y"]) == (40, 50)
+    blob = json.loads(reg["props"]["data"])
+    assert (blob["min"], blob["max"], blob["value"]) == (0, 60, 20)
+    assert "source" in reg["props"]                      # the mounting JSX
+
+
+# -- serve(broker=True): the binary owns the port, Python dials in ---------------
+
+def _danvasd():
+    from danvas.remote import _find_danvasd
+    return _find_danvasd()
+
+
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_end_to_end():
+    from websockets.asyncio.client import connect as ws_connect
+
+    port = None
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+
+    canvas = danvas.Canvas()
+    servo = canvas.slider("servo", min=0, max=180, default=90)
+    status = canvas.label("status", "idle")
+    got = []
+    servo.on_change(lambda v: (got.append(v), status.update(f"at {v}")))
+
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        # the broker serves the frontend...
+        import urllib.request
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
+            assert r.status == 200
+
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws",
+                                  max_size=None) as ws:
+                reg = None
+                while reg is None:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "register" and m.get("name") == "servo":
+                        reg = m
+                assert reg["owner"] == "host"
+                # a browser input reaches the Python handler through the broker
+                await ws.send(json.dumps({"type": "input", "id": reg["id"],
+                                          "payload": {"value": 42}}))
+                deadline = time.monotonic() + 5
+                while not got and time.monotonic() < deadline:
+                    await asyncio.sleep(0.05)
+                assert got == [42]
+                # ...and the handler's update comes back out to the browser
+                while True:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "update" and "at 42" in json.dumps(m):
+                        break
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()

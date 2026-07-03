@@ -35,6 +35,7 @@ doesn't relay it).
 """
 
 import logging
+import os
 
 from .bridge import Bridge
 from .canvas import Canvas
@@ -241,17 +242,7 @@ class RemoteCanvas(Canvas):
             yield arrow.register_message()
 
     def _on_hub_frame(self, msg):
-        kind = msg.get("type")
-        comp = self._bridge._components.get(msg.get("id"))
-        if comp is None:
-            return
-        if kind == "input":
-            payload = msg.get("payload") or {}
-            self._bridge._dispatch.submit(
-                lambda c=comp, p=payload: self._bridge._dispatch_input(c, p, None))
-        elif kind == "layout":
-            self._bridge._dispatch.submit(
-                lambda c=comp, m=dict(msg): self._bridge._dispatch_layout(c, m, None))
+        _dispatch_hub_frame(self._bridge, msg)
 
     # -- cross-process lookup: the danvas name is the identity ------------------
     def __getitem__(self, name):
@@ -312,6 +303,139 @@ class RemoteCanvas(Canvas):
     def unsubscribe(self, panel_id):
         self._client.unsubscribe(panel_id)
         return self
+
+
+def _dispatch_hub_frame(bridge, msg):
+    """Route one hub frame at a source-side bridge: interactions on this
+    process's panels go through the real dispatch machinery (handler threading
+    modes and the authoritative echo included)."""
+    kind = msg.get("type")
+    comp = bridge._components.get(msg.get("id"))
+    if comp is None:
+        return
+    if kind == "input":
+        payload = msg.get("payload") or {}
+        bridge._dispatch.submit(
+            lambda c=comp, p=payload: bridge._dispatch_input(c, p, None))
+    elif kind == "layout":
+        bridge._dispatch.submit(
+            lambda c=comp, m=dict(msg): bridge._dispatch_layout(c, m, None))
+
+
+# -- serve(broker=True): the binary broker serves; this process is a source --
+
+def _find_danvasd():
+    """Locate the danvasd binary: $DANVASD, the repo's cargo output, or PATH."""
+    import shutil
+    cand = os.environ.get("DANVASD")
+    if cand and os.path.exists(cand):
+        return cand
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    exe = "danvasd.exe" if os.name == "nt" else "danvasd"
+    for profile in ("release", "debug"):
+        p = os.path.join(here, "broker", "target", profile, exe)
+        if os.path.exists(p):
+            return p
+    return shutil.which("danvasd")
+
+
+class BrokerHandle:
+    """The running broker behind serve(broker=True): stop() ends it."""
+
+    def __init__(self, proc, client):
+        self.proc = proc
+        self.client = client
+
+    def stop(self):
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass
+
+
+def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
+                     password=None):
+    """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
+
+    The broker owns the port (frontend, browsers, retention, ledger, merging);
+    this Python process dials in as the ``host`` source — so it can crash and
+    restart while the UI survives. The existing bridge is transplanted onto
+    the socket (class-swap onto :class:`_RemoteBridge`), so components,
+    handlers, and live setters work unchanged.
+
+    Known gaps vs the embedded server (why this isn't the default yet):
+    managed shapes, chat, presence/cursors, ``on_request`` replies,
+    roles/per-viewer overlays, upload/download endpoints, ``persist=``,
+    hot reload, and the hosting button don't cross the hub yet.
+    """
+    import subprocess
+    import time as _time
+    import webbrowser
+
+    binary = _find_danvasd()
+    if binary is None:
+        raise RuntimeError(
+            "danvasd binary not found — set $DANVASD, put danvasd on PATH, "
+            "or build broker/ (cargo build --release)")
+    cmd = [binary, "--port", str(port)]
+    if password:
+        cmd += ["--password", str(password)]
+    proc = subprocess.Popen(cmd)
+    import socket as _socket
+    deadline = _time.time() + 15
+    while _time.time() < deadline:
+        try:
+            _socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+            break
+        except OSError:
+            if proc.poll() is not None:
+                raise RuntimeError("danvasd exited on startup")
+            _time.sleep(0.1)
+    else:
+        proc.terminate()
+        raise RuntimeError("danvasd never opened its port")
+
+    bridge = canvas._bridge
+    client = SourceClient(f"127.0.0.1:{port}", label="host", password=password)
+    # Transplant: the existing bridge (components already bound to it) becomes
+    # socket-backed in place — every outbound path now rides the dial-in.
+    bridge.__class__ = _RemoteBridge
+    bridge._client = client
+
+    def _replay():
+        for comp in bridge._components.values():
+            yield bridge.register_message(comp)
+            state = comp.state_payload()
+            if state:
+                yield {"type": "update", "id": comp.id, "payload": state}
+        for arrow in canvas._arrows:
+            yield arrow.register_message()
+
+    client._replay_hook = _replay
+    client.on_frame(lambda m: _dispatch_hub_frame(bridge, m))
+    client._binary_hook = lambda data: bridge._on_binary_input(None, data)
+    client.connect()
+    canvas._serving = True
+    canvas._broker = BrokerHandle(proc, client)
+    url = f"http://127.0.0.1:{port}"
+    print(f"[danvas] serving via danvasd at {url}"
+          f"  (broker pid {proc.pid}; UI survives this process)")
+    if open_browser:
+        webbrowser.open(url)
+    if not block:
+        return canvas
+    try:
+        while True:
+            _time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        canvas._broker.stop()
+    return canvas
 
 
 def connect(url, label="python", password=None, timeout=10.0):

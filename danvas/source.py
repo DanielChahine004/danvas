@@ -47,6 +47,20 @@ from .merge import _authenticate, _parse_source
 _HEARTBEAT_S = 10.0     # the hub reaps connections silent for ~30s
 _RECONNECT_S = 1.0
 
+_TEMPLATES = None
+
+
+def _templates():
+    """The language-neutral built-in panel templates (lazy-loaded)."""
+    global _TEMPLATES
+    if _TEMPLATES is None:
+        import os
+        path = os.path.join(os.path.dirname(__file__),
+                            "templates", "components.json")
+        with open(path, encoding="utf-8") as f:
+            _TEMPLATES = json.load(f)["templates"]
+    return _TEMPLATES
+
 
 class SourceClient:
     """One dial-in connection to a hub, owning the panels it registers."""
@@ -116,6 +130,31 @@ class SourceClient:
         self._updates.pop(cid, None)   # a re-register resets accumulated state
         self._send(msg)
         return self
+
+    def register_template(self, cid, kind, name=None, x=None, y=None,
+                          w=None, h=None, **data):
+        """Register a NATIVE built-in panel from the language-neutral template
+        asset (``danvas/templates/components.json``): ``kind`` is one of
+        slider/label/button/toggle/text_field/markdown; ``**data`` overrides
+        its data defaults (min/max/value/text/options/...). This is the move a
+        non-Python SDK makes to put a real, rendering slider on the canvas —
+        the template carries the React source the frontend mounts::
+
+            src.register_template("temp", "slider", min=0, max=100, value=20,
+                                  x=40, y=40)
+        """
+        tpl = _templates()[kind]
+        props = dict(tpl["props"])
+        blob = dict(tpl["data"])
+        blob.update(data)
+        props["data"] = json.dumps(blob)
+        props["label"] = name or cid
+        if w is not None:
+            props["w"] = w
+        if h is not None:
+            props["h"] = h
+        return self.register(cid, tpl["component"], props=props,
+                             name=name or cid, x=x, y=y)
 
     def update(self, cid, **payload):
         """Stream new state for a registered panel."""
