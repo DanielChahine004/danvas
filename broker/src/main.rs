@@ -45,6 +45,9 @@ type Tx = UnboundedSender<String>;
 struct Source {
     tag: String,
     live: bool,
+    /// The 📍 origin this source is merged at: applied to content coming
+    /// down, undone on interactions going back — the source never moves.
+    offset: (f64, f64),
     tx: Option<Tx>,
     /// nsid -> register frame (insertion order preserved via Vec of keys).
     reg_order: Vec<String>,
@@ -107,6 +110,17 @@ struct Hub {
     subs: HashMap<String, HashSet<u64>>,
     /// conn id -> sender for ANY connection (for subscription copies)
     conns: HashMap<u64, Tx>,
+    /// Hub-native annotation ink (bare record ids): record id -> record.
+    drawings: HashMap<String, Value>,
+}
+
+/// Shift a frame's top-level or payload x/y by (dx, dy) where present.
+fn shift_xy(obj: &mut Map<String, Value>, dx: f64, dy: f64) {
+    for (key, d) in [("x", dx), ("y", dy)] {
+        if let Some(v) = obj.get(key).and_then(Value::as_f64) {
+            obj.insert(key.into(), json!(v + d));
+        }
+    }
 }
 
 impl Hub {
@@ -160,7 +174,7 @@ impl Hub {
                 json!({"sid": s.tag, "label": label,
                        "uri": format!("dialin:{label}"),
                        "status": if s.live { "live" } else { "offline" },
-                       "offset": [0, 0]})
+                       "offset": [s.offset.0, s.offset.1]})
             })
             .collect();
         json!({"type": "merge_sources", "sources": sources})
@@ -302,6 +316,12 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
                 .flat_map(|s| Hub::cached_frames(s))
                 .map(|f| f.to_string())
                 .collect();
+            if !h.drawings.is_empty() {
+                out.push(json!({"type": "draw", "diff": {
+                    "added": h.drawings.clone().into_iter()
+                        .collect::<Map<String, Value>>(),
+                    "updated": {}, "removed": {}}}).to_string());
+            }
             if !h.sources.is_empty() {
                 out.push(h.roster_frame().to_string());
             }
@@ -453,17 +473,26 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             // source, by its label — whatever it says about itself.
             obj.insert("owner".into(), Value::String(label.to_string()));
             let src = h.sources.get_mut(label).unwrap();
+            let (ox, oy) = src.offset;
+            shift_xy(frame.as_object_mut().unwrap(), ox, oy);
+            let src = h.sources.get_mut(label).unwrap();
             if !src.registers.contains_key(&nsid) {
                 src.reg_order.push(nsid.clone());
             }
             src.registers.insert(nsid, frame.clone());
         }
         "update" => {
-            let payload = frame
+            let (ox, oy) = h.sources.get(label).map(|s| s.offset).unwrap_or((0.0, 0.0));
+            let mut payload = frame
                 .get("payload")
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
+            shift_xy(&mut payload, ox, oy);
+            frame
+                .as_object_mut()
+                .unwrap()
+                .insert("payload".into(), Value::Object(payload.clone()));
             let src = h.sources.get_mut(label).unwrap();
             src.updates.entry(nsid).or_default().extend(payload);
         }
@@ -511,7 +540,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         // to that owner (stripped); bare records are hub-native annotation,
         // relayed to the other browsers.
         let Some(diff) = frame.get("diff") else { return };
-        let h = hub.lock().unwrap();
+        let mut h = hub.lock().unwrap();
         let mut per_dest: HashMap<Option<String>, Map<String, Value>> = HashMap::new();
         for bucket in ["added", "updated", "removed"] {
             if let Some(Value::Object(b)) = diff.get(bucket) {
@@ -555,6 +584,27 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                     }
                 }
                 None => {
+                    // Hub-native annotation: store for replay, relay to the
+                    // other viewers.
+                    if let Some(Value::Object(a)) = sub.get("added") {
+                        for (k, v) in a {
+                            h.drawings.insert(k.clone(), v.clone());
+                        }
+                    }
+                    if let Some(Value::Object(u)) = sub.get("updated") {
+                        for (k, v) in u {
+                            let after = match v {
+                                Value::Array(p) if p.len() == 2 => p[1].clone(),
+                                other => other.clone(),
+                            };
+                            h.drawings.insert(k.clone(), after);
+                        }
+                    }
+                    if let Some(Value::Object(r)) = sub.get("removed") {
+                        for k in r.keys() {
+                            h.drawings.remove(k);
+                        }
+                    }
                     let text =
                         json!({"type": "draw", "diff": Value::Object(sub)}).to_string();
                     for (bid, btx) in &h.browsers {
@@ -565,6 +615,44 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                 }
             }
         }
+        return;
+    }
+    if kind == "merge_offset" {
+        // The 📍 origin drag: translate a source's whole block, hub-wide.
+        // Cache shifts so replay lands at the new origin; live updates nudge
+        // every open browser; the roster reports the offset.
+        let sid = frame.get("sid").and_then(Value::as_str).unwrap_or("").to_string();
+        let nx = frame.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+        let ny = frame.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+        let mut h = hub.lock().unwrap();
+        let Some(label) = h.tag_to_label.get(&sid).cloned() else { return };
+        let updates: Vec<String> = {
+            let src = h.sources.get_mut(&label).unwrap();
+            let (dx, dy) = (nx - src.offset.0, ny - src.offset.1);
+            if dx == 0.0 && dy == 0.0 {
+                return;
+            }
+            src.offset = (nx, ny);
+            let mut out = Vec::new();
+            for (id, reg) in src.registers.iter_mut() {
+                if let Some(obj) = reg.as_object_mut() {
+                    shift_xy(obj, dx, dy);
+                    if let (Some(x), Some(y)) = (obj.get("x"), obj.get("y")) {
+                        out.push(json!({"type": "update", "id": id,
+                                        "payload": {"x": x, "y": y}}).to_string());
+                    }
+                }
+            }
+            for payload in src.updates.values_mut() {
+                shift_xy(payload, dx, dy);
+            }
+            out
+        };
+        for u in &updates {
+            h.fanout_browsers(u);
+        }
+        let roster = h.roster_frame().to_string();
+        h.fanout_browsers(&roster);
         return;
     }
     let Some(cid) = frame.get("id").and_then(Value::as_str).map(String::from) else {
@@ -583,15 +671,49 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         }
         "input" | "set_props" | "layout" | "request" => {
             let Some((tag, rest)) = cid.split_once(':') else { return };
-            let h = hub.lock().unwrap();
-            let Some(label) = h.tag_to_label.get(tag) else { return };
-            if let Some(src) = h.sources.get(label) {
+            let mut h = hub.lock().unwrap();
+            let Some(label) = h.tag_to_label.get(tag).cloned() else { return };
+            let offset = h.sources.get(&label).map(|s| s.offset).unwrap_or((0.0, 0.0));
+            if let Some(src) = h.sources.get(&label) {
                 if let Some(tx) = &src.tx {
                     let mut out = frame.clone();
-                    out.as_object_mut()
-                        .unwrap()
-                        .insert("id".into(), Value::String(rest.to_string()));
+                    let obj = out.as_object_mut().unwrap();
+                    obj.insert("id".into(), Value::String(rest.to_string()));
+                    // merged-view coords -> the source's own coords
+                    if kind == "layout" {
+                        shift_xy(obj, -offset.0, -offset.1);
+                    } else if kind == "set_props" {
+                        if let Some(Value::Object(p)) = obj.get_mut("props") {
+                            shift_xy(p, -offset.0, -offset.1);
+                        }
+                    }
                     let _ = tx.send(out.to_string());
+                }
+            }
+            if kind == "layout" {
+                // The owner doesn't echo layout back; the hub folds the
+                // (merged-view) geometry into its replay cache and keeps the
+                // OTHER browsers in step — same division of labour as the
+                // Python hub.
+                let mut geom = Map::new();
+                for key in ["x", "y", "w", "h", "rotation"] {
+                    if let Some(v) = frame.get(key) {
+                        if !v.is_null() {
+                            geom.insert(key.into(), v.clone());
+                        }
+                    }
+                }
+                if !geom.is_empty() {
+                    if let Some(src) = h.sources.get_mut(&label) {
+                        src.updates.entry(cid.clone()).or_default().extend(geom.clone());
+                    }
+                    let text = json!({"type": "update", "id": cid,
+                                      "payload": geom}).to_string();
+                    for (bid, btx) in &h.browsers {
+                        if *bid != conn_id {
+                            let _ = btx.send(text.clone());
+                        }
+                    }
                 }
             }
             if kind == "input" {

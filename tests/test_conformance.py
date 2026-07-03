@@ -354,3 +354,75 @@ def test_browser_ink_edit_routes_back_to_owner_stripped(hub):
             back = await src.recv_until(lambda m: m.get("type") == "draw")
             assert "dz" in (back["diff"].get("removed") or {})   # stripped
     _run(go())
+
+
+def test_browser_drag_geometry_survives_replay(hub):
+    # A browser's layout drag must fold into the hub's replay cache — the
+    # owner deliberately doesn't echo layout back, so the hub is responsible.
+    async def go():
+        async with _source(hub, "c13") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "p", "name": "p13",
+                            "component": "React", "props": {}, "x": 10, "y": 10})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "p13")
+            await br.send({"type": "layout", "id": reg["id"], "x": 300, "y": 120})
+            await asyncio.sleep(0.3)
+            async with _browser(hub) as b2ws:
+                b2 = Peer(b2ws)
+                await b2.recv_until(
+                    lambda m: m.get("id") == reg["id"] and (
+                        (m.get("type") == "update"
+                         and (m.get("payload") or {}).get("x") == 300)
+                        or (m.get("type") == "register" and m.get("x") == 300)))
+    _run(go())
+
+
+def test_hub_native_ink_is_stored_and_replayed(hub):
+    # Ink drawn ON the hub view (bare ids) is the hub's own annotation layer:
+    # relayed to other viewers AND replayed to late joiners.
+    async def go():
+        async with _browser(hub) as bws:
+            br = Peer(bws)
+            await br.recv_until(lambda m: m["type"] == "welcome")
+            await br.send({"type": "draw", "diff": {
+                "added": {"hubink1": {"id": "hubink1", "x": 3, "props": {}}},
+                "updated": {}, "removed": {}}})
+            await asyncio.sleep(0.3)
+            async with _browser(hub) as b2ws:
+                b2 = Peer(b2ws)
+                await b2.recv_until(
+                    lambda m: m.get("type") == "draw"
+                    and "hubink1" in (m.get("diff", {}).get("added") or {}))
+    _run(go())
+
+
+def test_merge_offset_translates_a_source(hub):
+    # The 📍 origin drag: merge_offset shifts the source's cached panels for
+    # everyone (live updates + shifted replay + roster offset).
+    async def go():
+        async with _source(hub, "c14") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "p", "name": "p14",
+                            "component": "React", "props": {}, "x": 10, "y": 20})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "p14")
+            roster = await br.recv_until(
+                lambda m: m.get("type") == "merge_sources"
+                and any(s.get("label") == "c14" for s in m.get("sources", [])))
+            sid = next(s["sid"] for s in roster["sources"]
+                       if s["label"] == "c14")
+            await br.send({"type": "merge_offset", "sid": sid,
+                           "x": 600, "y": 0})
+            await br.recv_until(
+                lambda m: m.get("type") == "update" and m.get("id") == reg["id"]
+                and (m.get("payload") or {}).get("x") == 610)   # 10 + 600
+            # a late browser lands at the new origin
+            async with _browser(hub) as b2ws:
+                b2 = Peer(b2ws)
+                await b2.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "p14" and m.get("x") == 610)
+    _run(go())
