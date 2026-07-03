@@ -1081,8 +1081,10 @@ crashed script's dashboard stays readable for as long as it takes to restart it.
 Opt out with `serve(merge_retain=False)` (or `Merge(retain=False)` /
 `python -m danvas.merge --no-retain`) to drop a dead source's panels instead.
 Binary media
-(video/audio feeds) isn't composited. Cross-canvas arrows work from **dial-in
-peers** (below) — a `danvas.connect()` process can arrow its own panel to
+(video/audio feeds, `push_binary`) composites too — frames relay with the
+panel id rewritten in-envelope, so a source's webcam shows on the merged view
+(streams aren't replayed on reconnect, as everywhere). Cross-canvas arrows
+work from **dial-in peers** (below) — a `danvas.connect()` process can arrow its own panel to
 anyone's, e.g. `canvas.connect(mine, canvas["servo"])` — but not between two
 merged *served* canvases, which never see each other's panels.
 

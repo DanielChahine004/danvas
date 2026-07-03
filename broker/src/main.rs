@@ -39,7 +39,13 @@ const FREEZE_OPACITY: f64 = 0.45;
 /// time — a browser points straight at danvasd, no Python anywhere.
 static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../danvas/frontend/dist");
 
-type Tx = UnboundedSender<String>;
+/// One outbound frame: the wire has text (JSON) and binary (media) kinds.
+enum Out {
+    T(String),
+    B(Vec<u8>),
+}
+
+type Tx = UnboundedSender<Out>;
 
 #[derive(Default)]
 struct Source {
@@ -268,7 +274,7 @@ fn shift_xy(obj: &mut Map<String, Value>, dx: f64, dy: f64) {
 impl Hub {
     fn fanout_browsers(&self, text: &str) {
         for tx in self.browsers.values() {
-            let _ = tx.send(text.to_string());
+            let _ = tx.send(Out::T(text.to_string()));
         }
     }
 
@@ -461,10 +467,14 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         .unwrap_or_else(|| format!("source{conn_id}"));
 
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = unbounded_channel::<String>();
+    let (tx, mut rx) = unbounded_channel::<Out>();
     let writer = tokio::spawn(async move {
-        while let Some(text) = rx.recv().await {
-            if sink.send(Message::Text(text)).await.is_err() {
+        while let Some(out) = rx.recv().await {
+            let msg = match out {
+                Out::T(t) => Message::Text(t),
+                Out::B(b) => Message::Binary(b),
+            };
+            if sink.send(msg).await.is_err() {
                 break;
             }
         }
@@ -483,7 +493,7 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
         })
     };
-    let _ = tx.send(welcome.to_string());
+    let _ = tx.send(Out::T(welcome.to_string()));
 
     if is_source {
         attach_source(&hub, &label, conn_id, tx.clone());
@@ -511,7 +521,7 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             out
         };
         for f in frames {
-            let _ = tx.send(f);
+            let _ = tx.send(Out::T(f));
         }
     }
 
@@ -528,6 +538,10 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
     while let Ok(Some(Ok(msg))) = tokio::time::timeout(idle, stream.next()).await {
         let text = match msg {
             Message::Text(t) => t,
+            Message::Binary(b) => {
+                binary_frame(&hub, is_source, &label, b);
+                continue;
+            }
             Message::Close(_) => break,
             _ => continue,
         };
@@ -582,6 +596,52 @@ fn source_down(h: &mut Hub, label: &str, tx: &Tx) {
     }
 }
 
+const BIN_INPUT: u8 = 5;
+
+/// Rewrite the id inside a binary envelope ([type][idLen][id][payload]).
+fn bin_reframe(data: &[u8], new_id: &str) -> Vec<u8> {
+    let idlen = data[1] as usize;
+    let nid = new_id.as_bytes();
+    let mut out = Vec::with_capacity(2 + nid.len() + data.len() - 2 - idlen);
+    out.push(data[0]);
+    out.push(nid.len() as u8);
+    out.extend_from_slice(nid);
+    out.extend_from_slice(&data[2 + idlen..]);
+    out
+}
+
+fn bin_id(data: &[u8]) -> Option<String> {
+    if data.len() < 2 || data.len() < 2 + data[1] as usize {
+        return None;
+    }
+    String::from_utf8(data[2..2 + data[1] as usize].to_vec()).ok()
+}
+
+/// One inbound binary envelope. From a source: MEDIA relays to browsers with
+/// the id namespaced in-envelope (not cached — streams aren't replayed). From
+/// a viewer: a binary INPUT on a merged panel routes to its owner, stripped.
+fn binary_frame(hub: &Arc<Mutex<Hub>>, from_source: bool, label: &str, data: Vec<u8>) {
+    let Some(cid) = bin_id(&data) else { return };
+    let h = hub.lock().unwrap();
+    if from_source && data[0] != BIN_INPUT {
+        let Some(src) = h.sources.get(label) else { return };
+        let out = bin_reframe(&data, &format!("{}:{}", src.tag, cid));
+        for tx in h.browsers.values() {
+            let _ = tx.send(Out::B(out.clone()));
+        }
+        return;
+    }
+    if data[0] == BIN_INPUT {
+        let Some((tag, rest)) = cid.split_once(':') else { return };
+        let Some(owner) = h.tag_to_label.get(tag) else { return };
+        if let Some(src) = h.sources.get(owner) {
+            if let Some(tx) = &src.tx {
+                let _ = tx.send(Out::B(bin_reframe(&data, rest)));
+            }
+        }
+    }
+}
+
 /// Dial OUT to a served canvas (merge_add): connect as a ?proxy=1 client,
 /// ingest its stream through the same path a dial-in source's frames take,
 /// pump route-backs out, retry forever (retention covers the gaps). Stopped
@@ -594,10 +654,14 @@ async fn dial_out(hub: Arc<Mutex<Hub>>, ws_uri: String, label: String) {
     loop {
         if let Ok((stream, _)) = connect_async(&uri).await {
             let (mut sink, mut read) = stream.split();
-            let (tx, mut rx) = unbounded_channel::<String>();
+            let (tx, mut rx) = unbounded_channel::<Out>();
             let writer = tokio::spawn(async move {
-                while let Some(text) = rx.recv().await {
-                    if sink.send(TMsg::Text(text)).await.is_err() {
+                while let Some(out) = rx.recv().await {
+                    let msg = match out {
+                        Out::T(t) => TMsg::Text(t),
+                        Out::B(b) => TMsg::Binary(b),
+                    };
+                    if sink.send(msg).await.is_err() {
                         break;
                     }
                 }
@@ -605,10 +669,14 @@ async fn dial_out(hub: Arc<Mutex<Hub>>, ws_uri: String, label: String) {
             let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
             attach_source(&hub, &label, conn_id, tx.clone());
             while let Some(Ok(msg)) = read.next().await {
-                if let TMsg::Text(text) = msg {
-                    if let Ok(frame) = serde_json::from_str::<Value>(&text) {
-                        source_frame(&hub, &label, conn_id, frame);
+                match msg {
+                    TMsg::Text(text) => {
+                        if let Ok(frame) = serde_json::from_str::<Value>(&text) {
+                            source_frame(&hub, &label, conn_id, frame);
+                        }
                     }
+                    TMsg::Binary(b) => binary_frame(&hub, true, &label, b),
+                    _ => {}
                 }
             }
             writer.abort();
@@ -814,10 +882,10 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                     if let Some(label) = h.tag_to_label.get(&tag) {
                         if let Some(src) = h.sources.get(label) {
                             if let Some(tx) = &src.tx {
-                                let _ = tx.send(
+                                let _ = tx.send(Out::T(
                                     json!({"type": "draw", "diff": stripped})
                                         .to_string(),
-                                );
+                                ));
                             }
                         }
                     }
@@ -848,7 +916,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                         json!({"type": "draw", "diff": Value::Object(sub)}).to_string();
                     for (bid, btx) in &h.browsers {
                         if *bid != conn_id {
-                            let _ = btx.send(text.clone());
+                            let _ = btx.send(Out::T(text.clone()));
                         }
                     }
                 }
@@ -966,7 +1034,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                             shift_xy(p, -offset.0, -offset.1);
                         }
                     }
-                    let _ = tx.send(out.to_string());
+                    let _ = tx.send(Out::T(out.to_string()));
                 }
             }
             if kind == "layout" {
@@ -990,7 +1058,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                                       "payload": geom}).to_string();
                     for (bid, btx) in &h.browsers {
                         if *bid != conn_id {
-                            let _ = btx.send(text.clone());
+                            let _ = btx.send(Out::T(text.clone()));
                         }
                     }
                 }
@@ -1005,7 +1073,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                     for sid in sub_ids {
                         if *sid != conn_id {
                             if let Some(tx) = h.conns.get(sid) {
-                                let _ = tx.send(text.clone());
+                                let _ = tx.send(Out::T(text.clone()));
                             }
                         }
                     }

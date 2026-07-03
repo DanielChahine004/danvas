@@ -584,6 +584,17 @@ class Bridge:
         if self._frame_taps:
             self._tap_frame("in", {"type": "binary", "id": comp_id,
                                    "bytes": len(data)})
+        # Merge plane: a dial-in source's MEDIA frames relay to the composed
+        # canvas (id rewritten in-envelope); a viewer's binary INPUT on a
+        # merged (namespaced) panel routes to the owning source. Bare-id
+        # INPUT on this canvas's own panels falls through to normal dispatch.
+        if self._merge is not None:
+            up = self._merge._dialins.get(ws)
+            if up is not None and type_code != BINARY_INPUT:
+                self._merge.ingest_binary(up, data)
+                return
+            if self._merge.route_binary(ws, data):
+                return
         if type_code == BINARY_INPUT:
             comp = self._components.get(comp_id)
             if comp is not None:

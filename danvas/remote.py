@@ -78,14 +78,16 @@ class _RemoteBridge(Bridge):
     def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None,
                             **kw):
         # The hub coalesces per-browser on its side; up here there is exactly
-        # one pipe, so just send. Binary payloads aren't relayed by the merge
-        # fabric — drop them (same limitation as merged canvases).
+        # one pipe, so just send — text or media alike.
         if msg is not None:
             self._client._send(msg)
+        elif data is not None:
+            self._client._send_binary(data)
 
     def broadcast_binary(self, data, exclude=None, roles=None):
-        _log.debug("RemoteCanvas: binary media is not relayed through a hub; "
-                   "frame dropped")
+        # Media rides the same envelope up; the hub rewrites the id in-place
+        # and relays to browsers (video/audio through a hub works).
+        self._client._send_binary(data)
 
     def register_live(self, component, only_roles=None):
         self._client._send(self.register_message(component))
@@ -201,6 +203,9 @@ class RemoteCanvas(Canvas):
         # the real bridge machinery, so handler modes (inline/threaded/
         # dedicated/async) and the authoritative state echo work unchanged.
         client.on_frame(self._on_hub_frame)
+        # Binary INPUT the hub routes to this source's panels (sendBinary /
+        # camera / mic relays): through the real dispatch, like JSON input.
+        client._binary_hook = lambda data: self._bridge._on_binary_input(None, data)
         # Live-announce inserts from the start: Canvas gates register_live on
         # _serving, and for a RemoteCanvas the dial-in session IS the serving
         # state. Frames sent before connect() drop at the (socket-less) client

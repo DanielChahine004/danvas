@@ -122,3 +122,25 @@ def test_connect_is_still_the_arrow_verb():
     frames = [m for m in sent if m.get("type") == "arrow"]
     assert frames and frames[-1]["start"] == a.id and frames[-1]["end"] == b.id
     assert callable(c.dial)                      # the session verb, renamed
+
+
+def test_binary_media_and_input_cross_the_socket():
+    # Media down: video-style bytes ride _send_binary (not dropped anymore).
+    c, sent = _canvas()
+    blobs = []
+    c._client._send_binary = lambda d: blobs.append(bytes(d))
+    feed = c.video("cam", encode=False)
+    feed.update(b"\xff\xd8fakejpeg")
+    assert blobs and blobs[-1][0] == 1            # VIDEO envelope
+    assert blobs[-1].endswith(b"fakejpeg")
+    # Input up: a routed binary INPUT envelope dispatches @on_binary.
+    got = []
+    feed.on_binary(lambda d: got.append(bytes(d)))
+    cid = feed.id.encode()
+    c._client._binary_hook(bytes([5, len(cid)]) + cid + b"mic-bytes")
+    import time
+    for _ in range(100):
+        if got:
+            break
+        time.sleep(0.01)
+    assert got == [b"mic-bytes"]

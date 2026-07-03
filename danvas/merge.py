@@ -42,8 +42,12 @@ merged view routes back to the owning canvas; and fresh strokes drawn on the mer
 view are the merge server's own shared annotation layer (visible to every merge
 viewer, not pushed to any source).
 
-Limitations: binary media (video/audio feeds) is not relayed through the merge,
-and rearranging panels in the merged view is local to the merge server.
+Binary media relays too: a source's video/audio/push_binary envelopes reach the
+merged view with the panel id rewritten in-envelope, and a viewer's binary INPUT
+on a merged panel routes back to the owner (streams aren't cached — they're
+transient by the protocol's own rule, so they don't replay).
+
+Limitations: rearranging panels in the merged view is local to the merge server.
 Cross-source arrows work from a *dial-in* peer (it holds the composed replica,
 so it can bind an arrow to any panel it sees — its own, the hub's, or another
 source's); a *dialed-out* source canvas still can't draw them, because it never
@@ -68,7 +72,27 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 from . import server
+from ._protocol import BINARY_FRAME_CODES
 from .bridge import Bridge
+
+# Media codes relay hub-ward (source -> browsers); INPUT routes owner-ward.
+_BINARY_MEDIA_CODES = {c for name, c in BINARY_FRAME_CODES.items()
+                       if name != "INPUT"}
+_BINARY_INPUT_CODE = BINARY_FRAME_CODES["INPUT"]
+
+
+def _bin_reframe(data, new_id):
+    """Rewrite the id inside a binary envelope ([type][idLen][id][payload])."""
+    idlen = data[1]
+    nid = new_id.encode()
+    return bytes([data[0], len(nid)]) + nid + bytes(data[2 + idlen:])
+
+
+def _bin_id(data):
+    """The panel id carried in a binary envelope, or None if malformed."""
+    if len(data) < 2 or len(data) < 2 + data[1]:
+        return None
+    return bytes(data[2:2 + data[1]]).decode("utf-8", "replace")
 
 
 def _parse_source(spec):
@@ -161,6 +185,9 @@ class _InboundWS:
     async def send(self, text):
         await self._ws.send_text(text)
 
+    async def send_binary(self, data):
+        await self._ws.send_bytes(data)
+
 
 class _Upstream:
     """One client connection to a source canvas, shared by every browser that
@@ -203,6 +230,20 @@ class _Upstream:
             return
         try:
             await ws.send(json.dumps(msg))
+        except WebSocketException:
+            pass
+
+    async def send_binary(self, data):
+        """Route a binary envelope to the owner (dialed-out client sockets
+        accept bytes directly; a dial-in's _InboundWS adapts to send_bytes)."""
+        ws = self.ws
+        if ws is None:
+            return
+        try:
+            if hasattr(ws, "send_binary"):
+                await ws.send_binary(data)
+            else:
+                await ws.send(data)
         except WebSocketException:
             pass
 
@@ -545,10 +586,13 @@ class _MergeHost:
         ignored. Ids (including an arrow's start/end) are namespaced with the
         upstream tag so sources can't collide and route-back is unambiguous.
         """
+        if isinstance(raw, (bytes, bytearray)):
+            self.ingest_binary(up, raw)
+            return
         try:
             msg = json.loads(raw)
         except (ValueError, TypeError):
-            return  # binary media frame or non-JSON -- not composited
+            return  # non-JSON text -- not composited
         kind = msg.get("type")
         ox, oy = up.offset
         if kind == "register":
@@ -644,6 +688,34 @@ class _MergeHost:
                         pass
         if rest:
             up.updates.setdefault(cid, {}).update(rest)
+
+    def ingest_binary(self, up, data):
+        """A source's binary media frame (video/audio/push_binary): rewrite
+        the id inside the envelope to the composed namespace and relay to the
+        interested browsers. Not cached — streams aren't replayed (the same
+        rule as everywhere else in danvas)."""
+        cid = _bin_id(data)
+        if cid is None or data[0] not in _BINARY_MEDIA_CODES:
+            return
+        out = _bin_reframe(data, self._ns(up.tag, cid))
+        for conn in self._interested(up):
+            self._loop.create_task(self.bridge._safe_send_binary(conn.ws, out))
+
+    def route_binary(self, ws, data):
+        """A viewer's binary INPUT frame addressed to a merged panel: strip
+        the namespace and forward to the owner. Returns True when handled
+        (bare ids fall through to the Bridge's own dispatch)."""
+        if len(data) < 2 or data[0] != _BINARY_INPUT_CODE:
+            return False
+        cid = _bin_id(data)
+        if cid is None:
+            return False
+        tag, orig = self._strip(cid)
+        up = self._tag_to_upstream.get(tag)
+        if up is None:
+            return False
+        self._loop.create_task(up.send_binary(_bin_reframe(data, orig)))
+        return True
 
     def _send_source_teardown(self, ws, up):
         """Remove a source's panels (``remove`` frames) AND its free-form ink (a

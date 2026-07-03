@@ -72,6 +72,9 @@ class SourceClient:
         # frames that reconstruct this source on a fresh connection (used by
         # RemoteCanvas, whose components — not this cache — hold the truth).
         self._replay_hook = None
+        # Optional receiver for inbound BINARY envelopes (browser->owner INPUT
+        # routed by the hub); RemoteCanvas wires it into the bridge dispatch.
+        self._binary_hook = None
         # Local mirror of the canvas we joined: id -> {"component", "props",
         # "state", ...geometry} folded from the hub's register/update stream.
         # Eventually consistent (updated on the dispatch thread) — the replica
@@ -199,6 +202,14 @@ class SourceClient:
             return  # not connected yet — replay on connect covers it
         asyncio.run_coroutine_threadsafe(sock.send(json.dumps(msg)), loop)
 
+    def _send_binary(self, data):
+        """Ship one binary envelope up (media frames; not replayed — streams
+        are transient by the protocol's own rule)."""
+        loop, sock = self._loop, self._sock
+        if loop is None or sock is None:
+            return
+        asyncio.run_coroutine_threadsafe(sock.send(bytes(data)), loop)
+
     def _run(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -263,7 +274,8 @@ class SourceClient:
     # -- inbound --------------------------------------------------------------
     def _on_raw(self, raw):
         if isinstance(raw, (bytes, bytearray)):
-            return  # binary media isn't part of the dial-in v1 surface
+            self._events.put(bytes(raw))   # binary envelope -> hook, in order
+            return
         try:
             msg = json.loads(raw)
         except (ValueError, TypeError):
@@ -274,7 +286,11 @@ class SourceClient:
         while True:
             msg = self._events.get()
             try:
-                self._handle(msg)
+                if isinstance(msg, bytes):
+                    if self._binary_hook is not None:
+                        self._binary_hook(msg)
+                else:
+                    self._handle(msg)
             except Exception:
                 traceback.print_exc()
 

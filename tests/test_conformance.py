@@ -81,9 +81,13 @@ class Peer:
     def __init__(self, ws):
         self.ws = ws
         self.frames = []
+        self.blobs = []   # binary frames, raw
 
     async def send(self, msg):
         await self.ws.send(json.dumps(msg))
+
+    async def send_binary(self, data):
+        await self.ws.send(data)
 
     async def recv_until(self, pred, timeout=5.0):
         """Return the first (possibly already-buffered) frame matching pred."""
@@ -98,11 +102,42 @@ class Peer:
                     f"no matching frame; saw {[m.get('type') for m in self.frames][-12:]}")
             raw = await asyncio.wait_for(self.ws.recv(), timeout=remaining)
             if isinstance(raw, (bytes, bytearray)):
+                self.blobs.append(bytes(raw))
                 continue
             m = json.loads(raw)
             self.frames.append(m)
             if pred(m):
                 return m
+
+    async def recv_blob(self, pred, timeout=5.0):
+        """The binary twin: first blob matching pred (buffered included)."""
+        for b in self.blobs:
+            if pred(b):
+                return b
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"no matching blob; have {len(self.blobs)}")
+            raw = await asyncio.wait_for(self.ws.recv(), timeout=remaining)
+            if isinstance(raw, (bytes, bytearray)):
+                b = bytes(raw)
+                self.blobs.append(b)
+                if pred(b):
+                    return b
+            else:
+                self.frames.append(json.loads(raw))
+
+
+def _bin_frame(code, cid, payload):
+    """The protocol's binary envelope: [type][idLen][id bytes][payload]."""
+    cid_b = cid.encode()
+    return bytes([code, len(cid_b)]) + cid_b + payload
+
+
+def _bin_parse(data):
+    code, idlen = data[0], data[1]
+    return code, data[2:2 + idlen].decode(), data[2 + idlen:]
 
 
 def _browser(port):
@@ -785,3 +820,41 @@ def test_merge_remove_drops_a_dialed_source(hub):
         asyncio.run(asyncio.wait_for(go(), timeout=60))
     finally:
         target.kill()
+
+
+# -- binary media: the envelope crosses the hub, ids rewritten -------------------
+
+def test_binary_media_relays_to_browsers_namespaced(hub):
+    async def go():
+        async with _source(hub, "c19") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "cam", "name": "cam19",
+                            "component": "React", "props": {}})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "cam19")
+            payload = b"\xff\xd8jpegish-bytes"
+            await src.send_binary(_bin_frame(1, "cam", payload))   # VIDEO
+            blob = await br.recv_blob(lambda b: b and b[0] == 1)
+            code, cid, got = _bin_parse(blob)
+            assert cid == reg["id"]                    # namespaced in-envelope
+            assert got == payload                      # payload untouched
+    _run(go())
+
+
+def test_binary_input_routes_back_to_owner_stripped(hub):
+    async def go():
+        async with _source(hub, "c20") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "mic", "name": "mic20",
+                            "component": "React", "props": {}})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "mic20")
+            payload = b"pcm-or-whatever"
+            await br.send_binary(_bin_frame(5, reg["id"], payload))   # INPUT
+            blob = await src.recv_blob(lambda b: b and b[0] == 5)
+            code, cid, got = _bin_parse(blob)
+            assert cid == "mic"                        # namespace stripped
+            assert got == payload
+    _run(go())
