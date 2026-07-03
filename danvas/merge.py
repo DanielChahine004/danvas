@@ -43,8 +43,11 @@ view are the merge server's own shared annotation layer (visible to every merge
 viewer, not pushed to any source).
 
 Limitations: binary media (video/audio feeds) is not relayed through the merge,
-cross-canvas arrows are not supported (an arrow binds by panel id within one
-canvas), and rearranging panels in the merged view is local to the merge server. A
+and rearranging panels in the merged view is local to the merge server.
+Cross-source arrows work from a *dial-in* peer (it holds the composed replica,
+so it can bind an arrow to any panel it sees — its own, the hub's, or another
+source's); a *dialed-out* source canvas still can't draw them, because it never
+sees the composed ids. A
 source going offline keeps its panels (and its ink) on the merged view by default,
 frozen at their last-known state — dimmed and non-operable, so a held record can't
 be mistaken for live data — until it reconnects, when the fresh replay replaces
@@ -584,9 +587,9 @@ class _MergeHost:
             cid = self._ns(up.tag, msg.get("id"))
             msg["id"] = cid
             if isinstance(msg.get("start"), str):
-                msg["start"] = self._ns(up.tag, msg["start"])
+                msg["start"] = self._compose_endpoint(up, msg["start"])
             if isinstance(msg.get("end"), str):
-                msg["end"] = self._ns(up.tag, msg["end"])
+                msg["end"] = self._compose_endpoint(up, msg["end"])
             up.arrows[cid] = msg
             self._fanout_upstream(up, msg)
         elif kind == "remove":
@@ -1040,6 +1043,23 @@ class _MergeHost:
             self._input_movers[cid] = (conn, time.monotonic() + 1.0)
             self._relay_input_subs(ws, cid, msg.get("payload"))
         return True
+
+    def _compose_endpoint(self, up, ref):
+        """An arrow endpoint as the composed canvas knows it.
+
+        A source's own panel id gets the source's namespace (the historical
+        behaviour). A reference to a panel the sender can SEE but doesn't own —
+        the hub's own panel by its bare id, or another source's panel by its
+        already-namespaced id — passes through untouched. That's what makes
+        **cross-source arrows** work: a dial-in peer holds the composed
+        replica, so the ids it binds to are already the composed ones.
+        """
+        if ref in self.bridge._components:            # the hub's own panel
+            return ref
+        tag, rest = self._strip(ref)
+        if rest and tag in self._tag_to_upstream:     # another source's panel
+            return ref
+        return self._ns(up.tag, ref)                  # the sender's own panel
 
     # -- shared-plane helpers (subscriptions on merged panels) ----------------
     def _sub(self, ws, nsid, on):

@@ -232,6 +232,8 @@ class RemoteCanvas(Canvas):
             state = comp.state_payload()
             if state:
                 yield {"type": "update", "id": comp.id, "payload": state}
+        for arrow in self._arrows:
+            yield arrow.register_message()
 
     def _on_hub_frame(self, msg):
         kind = msg.get("type")

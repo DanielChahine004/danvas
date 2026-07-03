@@ -212,3 +212,58 @@ def test_hub_canvas_sources_property():
         assert srcs == [{"label": "rig", "status": "live",
                          "dialin": True, "panels": 0}]
     asyncio.run(run())
+
+
+# -- cross-source arrows: the replica makes foreign endpoints bindable -----------
+
+def test_arrow_endpoints_compose_across_sources():
+    import asyncio
+    from danvas.merge import MergeBridge
+
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        h = b._merge
+        # the hub owns a panel of its own
+        hub_panel = danvas.Slider("hub_servo")
+        hub_panel._bind("HUBID", b)
+        b.add_component(hub_panel)
+        # source A contributes a panel
+        aws = type("W", (), {"sent": []})()
+        h.on_connect(aws, {"source": "1", "label": "A"})
+        upA = h._dialins[aws]
+        h._ingest(upA, json.dumps({"type": "register", "id": "pa",
+                                   "component": "Label", "props": {}}))
+        # source B draws: own panel -> hub panel, and own panel -> A's panel
+        bws = type("W", (), {"sent": []})()
+        h.on_connect(bws, {"source": "1", "label": "B"})
+        upB = h._dialins[bws]
+        h._ingest(upB, json.dumps({"type": "register", "id": "pb",
+                                   "component": "Label", "props": {}}))
+        h._ingest(upB, json.dumps({"type": "arrow", "id": "ar1",
+                                   "start": "pb", "end": "HUBID",
+                                   "props": {}}))
+        h._ingest(upB, json.dumps({"type": "arrow", "id": "ar2",
+                                   "start": "pb", "end": f"{upA.tag}:pa",
+                                   "props": {}}))
+        a1 = upB.arrows[f"{upB.tag}:ar1"]
+        a2 = upB.arrows[f"{upB.tag}:ar2"]
+        assert a1["start"] == f"{upB.tag}:pb"     # own endpoint: namespaced
+        assert a1["end"] == "HUBID"               # hub endpoint: untouched
+        assert a2["end"] == f"{upA.tag}:pa"       # other source's: untouched
+    asyncio.run(run())
+
+
+def test_remote_canvas_connect_binds_a_foreign_endpoint():
+    c, sent = _canvas()
+    mine = c.slider("mine", min=0, max=1)
+    c._client._handle({"type": "register", "id": "PYID", "name": "servo",
+                       "component": "React", "props": {}, "owner": "host"})
+    arrow = c.connect(mine, c["servo"], text="feeds")
+    frames = [m for m in sent if m.get("type") == "arrow"]
+    assert frames[-1]["start"] == mine.id
+    assert frames[-1]["end"] == "PYID"            # the composed foreign id
+    # arrows survive a reconnect: they're in the replay
+    replay = list(c._replay_frames())
+    assert any(m.get("type") == "arrow" and m.get("end") == "PYID"
+               for m in replay)
