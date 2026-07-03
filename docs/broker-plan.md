@@ -60,12 +60,19 @@ offsets (`merge_offset`), roster, fresh-register replay folding, **auth**
 and **dialed-out sources** (`merge_add`/`merge_remove` compose served
 canvases by URL; danvasd dials as a retrying ws client through the same
 ingest path as dial-ins — per-connection scoping remains unpinned).
-**Binary media now crosses both hubs** (harness at 25): video/audio/
-push_binary relay with the id rewritten in-envelope; binary INPUT routes back
-— this LIFTED the documented merge limitation rather than porting it.
-Remaining for parity: the ledger, `/__describe__`, protected-source
-`merge_auth`, and distribution. Grow the harness with each — a behavior
-isn't done until it's asserted against both hubs.
+**Wire-behavior parity is COMPLETE** (harness at 28, both hubs green,
+release binary 6.1 MB): binary media relay (which LIFTED the documented
+merge limitation), `/__describe__` (composed inventory on standing hubs —
+both), the hub ledger (`DANVAS_LEDGER=<path.db>`, `_ledger.py` schema via
+rusqlite), and protected-source `merge_auth` (danvasd probes, runs the
+target's `/__auth__`, dials with the cookie; minimal HTTP client — no TLS,
+so tunneled protected sources are a documented gap).
+
+What remains is **distribution only** (phase 3): cross-platform release
+builds in CI, `pip install danvas[broker]` wheels, `serve(broker=True)`
+spawning/attaching a local danvasd, a bare-binary GitHub release. Known
+unpinned semantics: per-connection vs canvas-wide merge_add scoping;
+hub-side stream conflation (queue="latest" mid-hub).
 
 ---
 
