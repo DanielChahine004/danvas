@@ -1055,3 +1055,50 @@ def test_request_response_reaches_only_the_asker(hub):
             await asyncio.sleep(0.3)
             assert not [m for m in b2.frames if m.get("type") == "response"]
     _run(go())
+
+
+# -- presence + chat: the hub is a place, not just a relay -----------------------
+
+def test_presence_roster_tracks_joins_and_names(hub):
+    async def go():
+        async with _browser(hub) as aws:
+            a = Peer(aws)
+            wa = await a.recv_until(lambda m: m.get("type") == "welcome")
+            my = wa["you"]["name"]
+            await a.recv_until(
+                lambda m: m.get("type") == "presence"
+                and any(v.get("name") == my for v in m.get("viewers", [])))
+            async with _browser(hub) as bws:
+                b = Peer(bws)
+                wb = await b.recv_until(lambda m: m.get("type") == "welcome")
+                # the FIRST browser sees the second join
+                await a.recv_until(
+                    lambda m: m.get("type") == "presence"
+                    and m.get("count", 0) >= 2)
+                # renames propagate
+                await b.send({"type": "set_name", "name": "renamed-peer"})
+                await a.recv_until(
+                    lambda m: m.get("type") == "presence"
+                    and any(v.get("name") == "renamed-peer"
+                            for v in m.get("viewers", [])))
+    _run(go())
+
+
+def test_chat_relays_and_replays_history(hub):
+    async def go():
+        async with _browser(hub) as aws, _browser(hub) as bws:
+            a, b = Peer(aws), Peer(bws)
+            wa = await a.recv_until(lambda m: m.get("type") == "welcome")
+            await b.recv_until(lambda m: m.get("type") == "welcome")
+            await a.send({"type": "chat", "text": "hello from A"})
+            got = await b.recv_until(
+                lambda m: m.get("type") == "chat"
+                and m.get("text") == "hello from A")
+            assert got.get("name")                      # server-stamped identity
+            # a late joiner gets the conversation so far
+            async with _browser(hub) as cws:
+                c = Peer(cws)
+                await c.recv_until(
+                    lambda m: m.get("type") == "chat"
+                    and m.get("text") == "hello from A")
+    _run(go())

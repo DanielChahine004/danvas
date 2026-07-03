@@ -133,7 +133,15 @@ struct Hub {
     /// reqId -> (asker conn, expiry): the owner's `response` frame routes
     /// back to exactly the viewer that sent the `request`.
     pending_req: HashMap<String, (u64, std::time::Instant)>,
+    /// conn id -> viewer meta ({id, name, color, ...}) — everyone connected,
+    /// sources included (a process peer is a viewer too).
+    viewers: HashMap<u64, Value>,
+    chat_history: Vec<Value>,
+    chat_seq: u64,
 }
+
+const VIEWER_COLORS: [&str; 6] =
+    ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899"];
 
 fn open_ledger(path: &str) -> Option<rusqlite::Connection> {
     let conn = rusqlite::Connection::open(path).ok()?;
@@ -370,6 +378,17 @@ impl Hub {
         json!({"type": "merge_sources", "sources": sources})
     }
 
+    fn presence_frame(&self) -> Value {
+        let viewers: Vec<Value> = self.viewers.values().cloned().collect();
+        json!({"type": "presence", "count": viewers.len(), "viewers": viewers})
+    }
+
+    fn fanout_all(&self, text: &str) {
+        for tx in self.conns.values() {
+            let _ = tx.send(Out::T(text.to_string()));
+        }
+    }
+
     fn teardown_frames(src: &Source) -> Vec<Value> {
         let mut out: Vec<Value> = src
             .reg_order
@@ -545,6 +564,14 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         .cloned()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("source{conn_id}"));
+    let display_name = q
+        .get("vname")
+        .cloned()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if is_source { label.clone() } else { format!("viewer{conn_id}") }
+        });
+    let color = VIEWER_COLORS[(conn_id as usize) % VIEWER_COLORS.len()];
 
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = unbounded_channel::<Out>();
@@ -566,14 +593,29 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         json!({
             "type": "welcome",
             "protocol": PROTOCOL_VERSION,
-            "you": {"id": format!("v{conn_id}"), "name": label, "color": "#3b82f6",
-                     "device": "desktop", "role": null},
+            "you": {"id": format!("v{conn_id}"), "name": display_name,
+                     "color": color, "device": "desktop", "role": null},
             "runId": h.run_id,
             "mergeHost": true,
             "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
         })
     };
     let _ = tx.send(Out::T(welcome.to_string()));
+    // Everyone is a viewer (sources included): roster in, presence out to all,
+    // and the chat so far replays to the newcomer.
+    {
+        let mut h = hub.lock().unwrap();
+        h.conns.insert(conn_id, tx.clone());
+        h.viewers.insert(conn_id, json!({
+            "id": format!("v{conn_id}"), "name": display_name,
+            "color": color, "device": "desktop", "role": null,
+        }));
+        let p = h.presence_frame().to_string();
+        h.fanout_all(&p);
+        for entry in &h.chat_history {
+            let _ = tx.send(Out::T(entry.to_string()));
+        }
+    }
 
     if is_source {
         attach_source(&hub, &label, conn_id, tx.clone());
@@ -640,9 +682,12 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         let mut h = hub.lock().unwrap();
         h.browsers.remove(&conn_id);
         h.conns.remove(&conn_id);
+        h.viewers.remove(&conn_id);
         for subs in h.subs.values_mut() {
             subs.remove(&conn_id);
         }
+        let p = h.presence_frame().to_string();
+        h.fanout_all(&p);
         if is_source {
             source_down(&mut h, &label, &tx);
         }
@@ -1127,6 +1172,54 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                 }
             }
         }
+        return;
+    }
+    if kind == "chat" {
+        let Some(text) = frame.get("text").and_then(Value::as_str) else { return };
+        if text.trim().is_empty() {
+            return;
+        }
+        let mut h = hub.lock().unwrap();
+        let (name, color) = h
+            .viewers
+            .get(&conn_id)
+            .map(|v| {
+                (v.get("name").and_then(Value::as_str).unwrap_or("?").to_string(),
+                 v.get("color").and_then(Value::as_str).unwrap_or("#888").to_string())
+            })
+            .unwrap_or(("?".into(), "#888".into()));
+        h.chat_seq += 1;
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        // Identity is server-stamped (the sender's roster entry), never the
+        // client's claim — a name can't be spoofed in a chat line.
+        let entry = json!({"type": "chat", "msgId": h.chat_seq,
+                           "name": name, "color": color,
+                           "text": text, "ts": ts});
+        h.chat_history.push(entry.clone());
+        if h.chat_history.len() > 100 {
+            h.chat_history.remove(0);
+        }
+        let t = entry.to_string();
+        h.fanout_all(&t);
+        return;
+    }
+    if kind == "set_name" {
+        let Some(name) = frame.get("name").and_then(Value::as_str) else { return };
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let mut h = hub.lock().unwrap();
+        if let Some(v) = h.viewers.get_mut(&conn_id) {
+            v.as_object_mut()
+                .unwrap()
+                .insert("name".into(), Value::String(name.to_string()));
+        }
+        let p = h.presence_frame().to_string();
+        h.fanout_all(&p);
         return;
     }
     if kind == "merge_add" || kind == "merge_auth" {
