@@ -45,7 +45,11 @@ viewer, not pushed to any source).
 Limitations: binary media (video/audio feeds) is not relayed through the merge,
 cross-canvas arrows are not supported (an arrow binds by panel id within one
 canvas), and rearranging panels in the merged view is local to the merge server. A
-source going offline drops its panels (and its ink) until it reconnects.
+source going offline keeps its panels (and its ink) on the merged view by default,
+frozen at their last-known state — dimmed and non-operable, so a held record can't
+be mistaken for live data — until it reconnects, when the fresh replay replaces
+them. Pass ``retain=False`` (``--no-retain`` / ``serve(merge_retain=False)``) for
+the historical drop-on-offline behaviour.
 """
 
 import argparse
@@ -191,6 +195,22 @@ class _Upstream:
             # The source's free-form ink, replayed as one "added" draw diff.
             yield {"type": "draw",
                    "diff": {"added": dict(self.drawings), "updated": {}, "removed": {}}}
+        # A retained-offline source (caches kept past the drop; only a
+        # retain=True host leaves them populated while offline) replays frozen:
+        # last-known state, controls non-operable — so a browser joining while
+        # the source is down sees the same held record the live viewers do.
+        if self.status == "offline":
+            yield from self.freeze_frames()
+
+    def freeze_frames(self):
+        """The freeze overlay a retaining host applies when this source goes
+        down: per cached panel, non-operable AND visibly dimmed — stale data
+        that *looks* live is worse than a vanished panel, so the hold must be
+        unmistakable. Opacity rides the existing panel property, so no frontend
+        change is involved; the reconnect teardown + fresh replay restores it."""
+        for nsid in self.registers:
+            yield {"type": "update", "id": nsid,
+                   "payload": {"operable": False, "opacity": 0.45}}
 
     def cached_ids(self):
         return list(self.registers) + list(self.arrows)
@@ -221,8 +241,18 @@ class _MergeHost:
     :meth:`route`, :meth:`on_disconnect`.
     """
 
-    def __init__(self, bridge, default_sources=None, default_auth=None, region_width=0):
+    def __init__(self, bridge, default_sources=None, default_auth=None, region_width=0,
+                 retain=True):
         self.bridge = bridge
+        # retain=True (the default): a source going offline KEEPS its panels/ink
+        # on the merged view, frozen at their last-known state — dimmed and
+        # non-operable, so held data can't be mistaken for live — instead of
+        # dropping them. The crash-isolation mode: the source script can die and
+        # the hub stays a faithful record of it up to the last frame. On
+        # reconnect the stale frames are torn down and the source's fresh replay
+        # repopulates (ids are minted per run, so reconciling in place is not
+        # possible). retain=False restores the historical drop-on-offline.
+        self.retain = retain
         # Canvas-wide ("shared") sources: EVERY connection gets these, on top of
         # whatever it adds itself via ?sources= / the UI panel. Set by the code API
         # (Canvas.merge) and the CLI's seeded set. Each is {spec, offset, password}.
@@ -454,6 +484,17 @@ class _MergeHost:
                                    additional_headers=headers) as ws:
                     up.ws = ws
                     up.status = "live"
+                    # Retained frames from the source's previous life are stale
+                    # on reconnect (panel ids are minted per run): tear them
+                    # down now and let the fresh replay repopulate. A no-op in
+                    # non-retain mode, whose caches were cleared on the drop.
+                    if up.registers or up.arrows or up.drawings:
+                        for conn in self._interested(up):
+                            self._send_source_teardown(conn.ws, up)
+                        up.registers.clear()
+                        up.updates.clear()
+                        up.arrows.clear()
+                        up.drawings.clear()
                     self._emit_sources_to_interested(up)
                     async for raw in ws:
                         self._ingest(up, raw)
@@ -547,15 +588,22 @@ class _MergeHost:
                 ws, {"type": "draw", "diff": {"added": {}, "updated": {}, "removed": removed}}))
 
     def _on_upstream_down(self, up):
-        """A source dropped: remove its panels + ink from the interested browsers
-        and clear its caches, then mark it offline in their rosters."""
+        """A source dropped. Default: remove its panels + ink from the interested
+        browsers and clear its caches. With ``retain=True``: keep everything at
+        its last-known state and freeze it (controls non-operable) — the UI
+        outlives the source process. Either way it's marked offline in rosters."""
         up.status = "offline"
-        for conn in self._interested(up):
-            self._send_source_teardown(conn.ws, up)
-        up.registers.clear()
-        up.updates.clear()
-        up.arrows.clear()
-        up.drawings.clear()
+        if self.retain:
+            for conn in self._interested(up):
+                for msg in up.freeze_frames():
+                    self._loop.create_task(self._safe_send(conn.ws, msg))
+        else:
+            for conn in self._interested(up):
+                self._send_source_teardown(conn.ws, up)
+            up.registers.clear()
+            up.updates.clear()
+            up.arrows.clear()
+            up.drawings.clear()
         self._emit_sources_to_interested(up)
 
     # -- fan-out -------------------------------------------------------------
@@ -869,10 +917,12 @@ class MergeBridge(Bridge):
     own bridge, composing merged sources alongside its panels — this class is just
     the component-less variant the CLI/``Merge`` entry point uses."""
 
-    def __init__(self, default_sources=None, default_auth=None, region_width=0):
+    def __init__(self, default_sources=None, default_auth=None, region_width=0,
+                 retain=True):
         super().__init__()
         self._merge = _MergeHost(self, default_sources=default_sources,
-                                 default_auth=default_auth, region_width=region_width)
+                                 default_auth=default_auth, region_width=region_width,
+                                 retain=retain)
 
 
 class Merge:
@@ -887,7 +937,7 @@ class Merge:
     wide) instead of overlaying them.
     """
 
-    def __init__(self, sources=None, region_width=0, auth=None):
+    def __init__(self, sources=None, region_width=0, auth=None, retain=True):
         defaults = []
         for i, spec in enumerate(sources or []):
             _u, _h, _label = _parse_source(spec)
@@ -897,8 +947,11 @@ class Merge:
         for k, v in (auth or {}).items():
             _u, _h, label = _parse_source(k)
             norm_auth[label] = v
+        # retain (default True): a dead source's panels stay on the merged view,
+        # frozen (dimmed, non-operable) at their last-known state, until it comes
+        # back — see _MergeHost.retain. retain=False drops them instead.
         self._bridge = MergeBridge(default_sources=defaults, default_auth=norm_auth,
-                                   region_width=region_width)
+                                   region_width=region_width, retain=retain)
         self._server = None
         self._tunnel = None
 
@@ -975,6 +1028,10 @@ def main(argv=None):
                              "each (0 = overlay, preserving real coordinates)")
     parser.add_argument("--auth", action="append", metavar="URI=PASSWORD",
                         help="password for a protected default source (repeatable)")
+    parser.add_argument("--no-retain", action="store_true",
+                        help="drop a dead source's panels from the merged view "
+                             "(default: keep them frozen — dimmed, non-operable "
+                             "— at their last-known state until it reconnects)")
     parser.add_argument("--tunnel", action="store_true",
                         help="expose the merged view on the public internet")
     parser.add_argument("--tunnel-provider", default="cloudflared",
@@ -985,6 +1042,7 @@ def main(argv=None):
         args.sources,
         region_width=args.region_width,
         auth=_parse_auth_flags(args.auth),
+        retain=not args.no_retain,
     ).serve(port=args.port, open_browser=not args.no_open, host=args.host,
             tunnel=args.tunnel, tunnel_provider=args.tunnel_provider)
 

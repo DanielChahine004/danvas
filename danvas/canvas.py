@@ -2144,7 +2144,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None, tldraw_license_key=None, watch=None,
-              merge_server=None, merge=True):
+              merge_server=None, merge=True, merge_retain=True):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -2268,7 +2268,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         ``merge=False`` to hide the panel and disable it. (The standalone
         ``python -m danvas.merge`` server is still available for a neutral,
         compute-less aggregator; ``merge_server=`` adds a button that navigates to
-        one, shown only when ``merge=False``.)
+        one, shown only when ``merge=False``.) By default a dead source's panels
+        stay on this hub — frozen at their last-known state, dimmed and
+        non-operable so held data reads as held — until it reconnects: the
+        merged UI outlives a crashed source script. ``merge_retain=False``
+        drops them instead (the historical behaviour).
 
         ``debug=True`` logs every WebSocket frame to the console — what Python
         sends (``->``) and what each browser sends back (``<-``) — so "the panel
@@ -2343,7 +2347,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # in the websocket *client* stack until a canvas actually serves.
         if merge and self._bridge._merge is None:
             from .merge import _MergeHost
-            self._bridge._merge = _MergeHost(self._bridge)
+            # merge_retain (default True): a merged source that dies keeps its
+            # panels on this hub, frozen (dimmed, non-operable) at their
+            # last-known state, until it reconnects (see _MergeHost.retain);
+            # False drops them instead.
+            self._bridge._merge = _MergeHost(self._bridge, retain=merge_retain)
         # Apply any canvas.merge() calls made before serving (a protected source's
         # password rides along). A no-op when merging is off.
         if self._bridge._merge is not None and self._pending_merges:

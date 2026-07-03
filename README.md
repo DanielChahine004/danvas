@@ -982,8 +982,14 @@ erasing a source stroke from the merged view routes back to the owning canvas; a
 strokes drawn *on* the merged view are its own shared annotation layer (visible to
 every merge viewer, not pushed to any source).
 
-Sources overlay by default (`region_width` spreads a seeded set side-by-side); a
-source going offline drops its panels and ink until it reconnects. Binary media
+Sources overlay by default (`region_width` spreads a seeded set side-by-side).
+**A source going offline keeps its panels on the hub** — frozen at their
+last-known state, dimmed and non-operable so held data can't be mistaken for
+live — until it reconnects, when the fresh replay replaces the held state: a
+crashed script's dashboard stays readable for as long as it takes to restart it.
+Opt out with `serve(merge_retain=False)` (or `Merge(retain=False)` /
+`python -m danvas.merge --no-retain`) to drop a dead source's panels instead.
+Binary media
 (video/audio feeds) isn't composited, and cross-canvas arrows aren't supported (an
 arrow binds by panel id within one canvas).
 
