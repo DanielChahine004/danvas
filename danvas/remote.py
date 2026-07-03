@@ -58,6 +58,9 @@ class _RemoteBridge(Bridge):
     def __init__(self, client):
         super().__init__()
         self._client = client
+        # Panels made here are owned (handler-executed) by this process; the
+        # hub re-stamps them with our dial-in label on the composed canvas.
+        self._owner_label = client.label
 
     # -- every outbound path becomes "send it up the socket" ------------------
     def _emit(self, targets, msg):
@@ -255,6 +258,20 @@ class RemoteCanvas(Canvas):
 
     def __contains__(self, name):
         return super().__contains__(name) or self._client.find(name) is not None
+
+    @property
+    def sources(self):
+        """The processes contributing panels to the canvas this one joined:
+        ``{owner_label: panel_count}``, derived from the replica ("host" is
+        the serving canvas itself; this process's label covers its own)."""
+        counts = {}
+        for entry in self._client.panels.values():
+            owner = entry.get("owner")
+            if owner:
+                counts[owner] = counts.get(owner, 0) + 1
+        for comp in self._bridge._components.values():
+            counts[self._client.label] = counts.get(self._client.label, 0) + 1
+        return counts
 
     # -- the shared plane (panels other processes own) --------------------------
     @property

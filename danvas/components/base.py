@@ -263,6 +263,18 @@ class BaseComponent:
         return self._visible
 
     @property
+    def owner(self):
+        """Which process executes this panel's handlers, as its peers see it:
+        the bridge's owner label (``"host"`` for a serving canvas, the dial-in
+        label for a :func:`danvas.connect` canvas), or ``None`` before insert.
+        The cross-process twin is ``RemoteHandle.owner`` — so
+        ``canvas["x"].owner`` answers the same question for local and foreign
+        panels alike."""
+        if self._bridge is None:
+            return None
+        return getattr(self._bridge, "_owner_label", "host")
+
+    @property
     def label(self):
         """The card title shown on the panel header."""
         return self._props.get("label")

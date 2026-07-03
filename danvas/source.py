@@ -299,6 +299,7 @@ class SourceClient:
             self.panels[cid] = {
                 "component": msg.get("component"),
                 "name": msg.get("name"),
+                "owner": msg.get("owner"),
                 "props": dict(msg.get("props") or {}),
                 "state": {},
                 **{k: msg[k] for k in ("x", "y", "w", "h") if k in msg},

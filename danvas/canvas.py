@@ -287,6 +287,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         return self._bridge._merge.shared_specs()
 
     @property
+    def sources(self):
+        """The peer processes composed into this canvas right now — merged
+        canvases and dial-in sources alike — one dict per source:
+        ``{"label", "status", "dialin", "panels"}``. ``status`` is
+        ``"live"``/``"offline"`` (an offline entry with panels is being
+        retained). Empty before serving or when nothing has joined."""
+        host = self._bridge._merge
+        if host is None:
+            return []
+        return [{"label": up.label, "status": up.status,
+                 "dialin": up.dialin, "panels": len(up.registers)}
+                for up in host._upstreams.values()]
+
+    @property
     def components(self):
         """Return a list of all components on the canvas.
 

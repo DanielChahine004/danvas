@@ -203,6 +203,10 @@ class Bridge:
         # connects as a proxy for many browsers, so it NEEDS the echo (to keep its
         # replay cache current and fan the change to its other viewers).
         self._proxy_conns = set()
+        # The label register frames carry as "owner" — who runs this panel's
+        # handlers. "host" for a serving canvas; a RemoteCanvas overrides it
+        # with its dial-in label.
+        self._owner_label = "host"
         # Dial-in source connections (?source=1): processes, not browsers. They
         # are *authoritative* peers on the shared property plane (set_props) —
         # only a hard lock stops them — where a browser passes the same
@@ -726,6 +730,11 @@ class Bridge:
         name = getattr(component, "name", None)
         if name:
             msg["name"] = name
+        # Which process executes this panel's handlers: the serving canvas's
+        # own panels say "host"; a RemoteCanvas stamps its dial-in label; a hub
+        # re-stamps relayed panels with the source's label. Purely descriptive
+        # (routing is by connection, not by this field).
+        msg["owner"] = self._owner_label
         pos = getattr(component, "_position", None)
         if pos is not None:
             msg["x"], msg["y"] = pos

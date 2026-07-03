@@ -551,6 +551,10 @@ class _MergeHost:
         if kind == "register":
             cid = self._ns(up.tag, msg.get("id"))
             msg["id"] = cid
+            # Re-stamp ownership with THIS hub's name for the source: the
+            # source may say "host" about itself, but on the composed canvas
+            # the panel's owner is the source, by its merge label.
+            msg["owner"] = up.label
             if (ox or oy) and "x" in msg and "y" in msg:
                 msg["x"] += ox
                 msg["y"] += oy

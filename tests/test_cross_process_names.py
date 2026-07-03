@@ -152,3 +152,63 @@ def test_remote_handle_update_is_native_shaped():
     c["status"].value = "again"          # attribute form, same path
     assert sent[-1] == {"type": "set_props", "id": "L1",
                         "props": {"value": "again"}}
+
+
+# -- ownership is visible: .owner + .sources -------------------------------------
+
+def test_owner_rides_the_register_frame():
+    c = danvas.Canvas()
+    s = c.slider("servo", min=0, max=180)
+    assert c._bridge.register_message(s)["owner"] == "host"
+    assert s.owner == "host"                     # native twin
+
+    rc, _sent = _canvas()
+    rs = rc.slider("remote_servo", min=0, max=1)
+    assert rc._bridge.register_message(rs)["owner"] == "rig"
+    assert rs.owner == "rig"
+
+
+def test_hub_restamps_relayed_panels_with_source_label():
+    import asyncio
+    from danvas.merge import MergeBridge
+
+    async def run():
+        b = MergeBridge()
+        b._loop = asyncio.get_running_loop()
+        h = b._merge
+        ws = type("W", (), {"sent": []})()
+        h.on_connect(ws, {"source": "1", "label": "telemetry"})
+        up = h._dialins[ws]
+        h._ingest(up, json.dumps({"type": "register", "id": "p1",
+                                  "component": "Slider", "props": {},
+                                  "owner": "host"}))     # source's self-view
+        assert up.registers[f"{up.tag}:p1"]["owner"] == "telemetry"
+    asyncio.run(run())
+
+
+def test_remote_handle_owner_and_canvas_sources():
+    c, _sent = _canvas()
+    c._client._handle({"type": "register", "id": "a", "name": "servo",
+                       "component": "React", "props": {}, "owner": "host"})
+    c._client._handle({"type": "register", "id": "b", "name": "temp",
+                       "component": "React", "props": {}, "owner": "cpp-rig"})
+    assert c["servo"].owner == "host"
+    assert c["temp"].owner == "cpp-rig"
+    c.slider("mine", min=0, max=1)               # our own panel counts too
+    assert c.sources == {"host": 1, "cpp-rig": 1, "rig": 1}
+
+
+def test_hub_canvas_sources_property():
+    c = danvas.Canvas()
+    assert c.sources == []                       # merge host not enabled yet
+    c._bridge._merge = _MergeHost(c._bridge)
+    ws = type("W", (), {})()
+    import asyncio
+
+    async def run():
+        c._bridge._loop = asyncio.get_running_loop()
+        c._bridge._merge.on_connect(ws, {"source": "1", "label": "rig"})
+        srcs = c.sources
+        assert srcs == [{"label": "rig", "status": "live",
+                         "dialin": True, "panels": 0}]
+    asyncio.run(run())
