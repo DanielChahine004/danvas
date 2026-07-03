@@ -674,7 +674,7 @@ export function HostingButton() {
       /* clipboard unavailable (http LAN page) — the URL is selectable text */
     }
   }
-  const row = (label: string, url: string | null, action: string | null, actionLabel: string) => (
+  const row = (label: string, url: string | null, action: string | null, actionLabel: string, offAction?: string) => (
     <div style={mergeRowStyle}>
       <span style={{ flexShrink: 0, width: 52, fontSize: 11, fontWeight: 700, color: 'var(--ui-label)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
       {url ? (
@@ -683,6 +683,17 @@ export function HostingButton() {
           <button onClick={() => copy(url)} title="Copy URL" style={mergeIconBtnStyle}>
             {copied === url ? '✓' : '⧉'}
           </button>
+          {offAction ? (
+            <button
+              data-pc-host-action={offAction}
+              disabled={!!state.busy}
+              onClick={() => sendHostAction(offAction as any)}
+              title={`Stop ${label} sharing`}
+              style={{ ...mergeIconBtnStyle, color: '#ef4444' }}
+            >
+              {state.busy === offAction ? '…' : '✕'}
+            </button>
+          ) : null}
         </>
       ) : action ? (
         <button
@@ -712,8 +723,8 @@ export function HostingButton() {
         <div class="pc-hosting-panel" style={mergePanelStyle}>
           <div style={mergeHeaderStyle}>Where this canvas is reachable</div>
           {row('Local', state.local, null, '')}
-          {row('LAN', state.lan, 'host_lan', 'Share on LAN')}
-          {row('Public', state.tunnel, 'host_tunnel', 'Open tunnel')}
+          {row('LAN', state.lan, 'host_lan', 'Share on LAN', 'host_lan_off')}
+          {row('Public', state.tunnel, 'host_tunnel', 'Open tunnel', 'host_tunnel_off')}
           {state.error ? (
             <div style={{ padding: '8px 12px', fontSize: 11, color: '#ef4444' }}>{state.error}</div>
           ) : null}

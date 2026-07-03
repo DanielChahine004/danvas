@@ -749,6 +749,10 @@ class Bridge:
                 await self._expose_lan()
             elif action == "host_tunnel":
                 await self._open_tunnel()
+            elif action == "host_lan_off":
+                await self._close_lan()
+            elif action == "host_tunnel_off":
+                await self._close_tunnel()
         except Exception as exc:
             self._hosting["error"] = str(exc) or type(exc).__name__
             _log.warning("hosting: %s failed: %s", action, exc)
@@ -797,6 +801,26 @@ class Bridge:
         self._tunnel_handle = handle
         self._hosting["tunnel"] = handle.url
         _diag(f"[danvas] canvas now public: {handle.url}")
+
+    async def _close_lan(self):
+        """Drop the extra LAN listener (the loopback bind is untouched). LAN
+        viewers' sockets close; their tabs show the disconnect banner and stop
+        being able to reconnect."""
+        srv = self._lan_server
+        self._lan_server = None
+        self._hosting["lan"] = None
+        if srv is not None:
+            srv.should_exit = True   # its serve task drains and exits
+        _diag("[danvas] LAN sharing stopped (local URL still up)")
+
+    async def _close_tunnel(self):
+        """Tear the public tunnel down (blocking process stop, off-loop)."""
+        handle = self._tunnel_handle
+        self._tunnel_handle = None
+        self._hosting["tunnel"] = None
+        if handle is not None:
+            await self._loop.run_in_executor(None, handle.stop)
+        _diag("[danvas] public tunnel closed")
 
     def register_message(self, component, role=None, client_id=None):
         """Build the ``register`` message for a component, including placement.
@@ -1505,7 +1529,8 @@ class Bridge:
             # Live hosting actions (the 🌐 flyout): gated by the same
             # private-bind default as the button itself; each is idempotent
             # and reports through the broadcast hosting state.
-            if msg.get("action") in ("host_lan", "host_tunnel"):
+            if msg.get("action") in ("host_lan", "host_tunnel",
+                                     "host_lan_off", "host_tunnel_off"):
                 if self._ui_hosting:
                     self._loop.create_task(
                         self._hosting_action(msg["action"]))

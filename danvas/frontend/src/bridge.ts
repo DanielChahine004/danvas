@@ -1444,7 +1444,9 @@ export function subscribeHosting(cb: (s: any) => void): () => void {
   cb(hosting)
   return () => hostingListeners.delete(cb)
 }
-export function sendHostAction(action: 'host_lan' | 'host_tunnel'): void {
+export function sendHostAction(
+  action: 'host_lan' | 'host_tunnel' | 'host_lan_off' | 'host_tunnel_off',
+): void {
   sendRaw({ type: 'ui', action })
 }
 

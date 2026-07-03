@@ -2071,29 +2071,36 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                     pass
             raise
 
-    def expose(self, lan=False, tunnel=False, timeout=60.0):
-        """Widen a live canvas's reach without restarting — the code twin of
-        the 🌐 hosting button.
+    def expose(self, lan=None, tunnel=None, timeout=60.0):
+        """Change a live canvas's reach without restarting — the code twin of
+        the 🌐 hosting button. Tri-state per channel: ``True`` opens it,
+        ``False`` closes it, ``None`` (default) leaves it alone.
 
         ``lan=True`` adds a second listener for the same canvas on this
-        machine's LAN address (the local URL keeps working); ``tunnel=True``
-        opens a public HTTPS tunnel (needs the ``[tunnel]`` extra the first
-        time). Both are idempotent. Returns the hosting state dict
-        (``{"local", "lan", "tunnel", ...}``) with the new URLs::
+        machine's LAN address (the local URL keeps working); ``lan=False``
+        drops it again. ``tunnel=True`` opens a public HTTPS tunnel (needs the
+        ``[tunnel]`` extra the first time); ``tunnel=False`` closes it. All
+        idempotent. Returns the hosting state dict
+        (``{"local", "lan", "tunnel", ...}``) with the current URLs::
 
             canvas.serve(block=False)          # private, local-only
             canvas.expose(lan=True)            # now phones on the WiFi can join
             canvas.expose(tunnel=True)["tunnel"]   # now anyone can
+            canvas.expose(lan=False, tunnel=False) # back to local-only, live
         """
         import asyncio as _asyncio
         loop = self._bridge._loop
         if loop is None:
             raise RuntimeError("expose() needs a serving canvas — call "
                                "serve() first (block=False in a script/notebook)")
-        for flag, action in ((lan, "host_lan"), (tunnel, "host_tunnel")):
-            if flag:
+        actions = {(True, "lan"): "host_lan", (False, "lan"): "host_lan_off",
+                   (True, "tunnel"): "host_tunnel",
+                   (False, "tunnel"): "host_tunnel_off"}
+        for flag, channel in ((lan, "lan"), (tunnel, "tunnel")):
+            if flag is not None:
                 _asyncio.run_coroutine_threadsafe(
-                    self._bridge._hosting_action(action), loop).result(timeout)
+                    self._bridge._hosting_action(actions[(bool(flag), channel)]),
+                    loop).result(timeout)
         state = self._bridge.hosting_state()
         if state.get("error"):
             raise RuntimeError(f"expose failed: {state['error']}")

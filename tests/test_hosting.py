@@ -119,3 +119,67 @@ def test_welcome_carries_hosting_keys():
                     break
     assert m["uiHosting"] is True
     assert m["hosting"]["local"] == "http://127.0.0.1:8000"
+
+
+# -- live teardown: LAN and tunnel turn OFF without restarting -------------------
+
+def test_close_actions_tear_down_and_clear_state():
+    async def run():
+        c = danvas.Canvas()
+        b = c._bridge
+        b._loop = asyncio.get_running_loop()
+        b.broadcast = lambda msg, **kw: None
+
+        class FakeSrv:
+            should_exit = False
+
+        class FakeTunnel:
+            stopped = False
+            url = "https://x.trycloudflare.com"
+            def stop(self):
+                FakeTunnel.stopped = True
+
+        srv = FakeSrv()
+        b._lan_server = srv
+        b._tunnel_handle = FakeTunnel()
+        b._hosting.update(port=8000, lan="http://10.0.0.5:8000",
+                          tunnel=FakeTunnel.url)
+        await b._hosting_action("host_lan_off")
+        assert srv.should_exit is True
+        assert b._hosting["lan"] is None and b._lan_server is None
+        await b._hosting_action("host_tunnel_off")
+        assert FakeTunnel.stopped is True
+        assert b._hosting["tunnel"] is None and b._tunnel_handle is None
+        # idempotent: closing again with nothing open is a clean no-op
+        await b._hosting_action("host_lan_off")
+        await b._hosting_action("host_tunnel_off")
+        assert b._hosting["error"] is None
+    asyncio.run(run())
+
+
+def test_expose_tristate_maps_to_actions():
+    async def run():
+        c = danvas.Canvas()
+        b = c._bridge
+        b._loop = asyncio.get_running_loop()
+        calls = []
+
+        async def fake_action(action):
+            calls.append(action)
+        b._hosting_action = fake_action
+
+        import threading
+        done = threading.Event()
+
+        def drive():
+            c.expose(lan=True, tunnel=False)
+            c.expose()                        # both None: touches nothing
+            done.set()
+        threading.Thread(target=drive, daemon=True).start()
+        for _ in range(200):
+            if done.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert done.is_set()
+        assert calls == ["host_lan", "host_tunnel_off"]
+    asyncio.run(run())
