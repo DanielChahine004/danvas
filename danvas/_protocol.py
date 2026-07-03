@@ -85,7 +85,7 @@ MESSAGE_TYPES_OUT = (
     "register", "arrow", "shape", "shape_update", "update", "order", "remove",
     "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot",
     "draw", "presence", "cursor", "cursor_gone", "view", "welcome",
-    "graveyard_update", "shared", "chat", "response",
+    "graveyard_update", "shared", "chat", "response", "hosting",
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout",

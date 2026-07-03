@@ -207,6 +207,18 @@ class Bridge:
         # handlers. "host" for a serving canvas; a RemoteCanvas overrides it
         # with its dial-in label.
         self._owner_label = "host"
+        # Live hosting controls (the 🌐 button): whether the button is shown
+        # (defaults on only for a private local bind, like the Inspector), and
+        # the current exposure state broadcast to viewers. ``_app`` is the
+        # FastAPI app (set by server.create_app) so a LAN listener can be added
+        # to the SAME app live; the handles keep the extra listener/tunnel
+        # stoppable and idempotent.
+        self._ui_hosting = False
+        self._hosting = {"host": None, "port": None, "lan": None,
+                         "tunnel": None, "busy": None, "error": None}
+        self._app = None
+        self._lan_server = None
+        self._tunnel_handle = None
         # Dial-in source connections (?source=1): processes, not browsers. They
         # are *authoritative* peers on the shared property plane (set_props) —
         # only a hard lock stops them — where a browser passes the same
@@ -711,6 +723,81 @@ class Bridge:
         self._loop = loop
         loop.create_task(self._reap_loop())
 
+    # -- live hosting (the 🌐 button + canvas.expose()) -----------------------
+    def hosting_state(self):
+        """The exposure snapshot broadcast to viewers (and sent in welcome)."""
+        h = self._hosting
+        local = f"http://127.0.0.1:{h['port']}" if h.get("port") else None
+        return {"local": local, "lan": h.get("lan"), "tunnel": h.get("tunnel"),
+                "busy": h.get("busy"), "error": h.get("error")}
+
+    def _broadcast_hosting(self):
+        self.broadcast({"type": "hosting", **self.hosting_state()})
+
+    async def _hosting_action(self, action):
+        """Perform one exposure change (idempotent) and keep viewers posted.
+
+        Runs on the event loop; the slow parts (tunnel spawn) hop to an
+        executor. Errors land in the broadcast state instead of raising — the
+        flyout shows them, and the canvas keeps serving regardless.
+        """
+        self._hosting["error"] = None
+        self._hosting["busy"] = action
+        self._broadcast_hosting()
+        try:
+            if action == "host_lan":
+                await self._expose_lan()
+            elif action == "host_tunnel":
+                await self._open_tunnel()
+        except Exception as exc:
+            self._hosting["error"] = str(exc) or type(exc).__name__
+            _log.warning("hosting: %s failed: %s", action, exc)
+        finally:
+            self._hosting["busy"] = None
+            self._broadcast_hosting()
+
+    async def _expose_lan(self):
+        """Add a second listener for the SAME app on the LAN address, live.
+
+        The original 127.0.0.1 bind stays; the LAN IP is a distinct address so
+        the same port binds cleanly. ``_serve`` is used instead of ``serve()``
+        because the latter's capture_signals would steal Ctrl+C from the
+        primary server when this loop runs on the main thread.
+        """
+        if self._hosting.get("lan"):
+            return
+        if self._app is None or not self._hosting.get("port"):
+            raise RuntimeError("hosting state not initialised (serve() first)")
+        from . import server as _server
+        import uvicorn
+        ip = _server._lan_ip()
+        if not ip:
+            raise RuntimeError("no LAN address found on this machine")
+        port = self._hosting["port"]
+        sock = _server._make_server_socket(ip, port)
+        srv = uvicorn.Server(uvicorn.Config(
+            self._app, log_level="warning", **_server._ws_opts(False)))
+        serve = getattr(srv, "_serve", None) or srv.serve
+        self._loop.create_task(serve([sock]))
+        self._lan_server = srv
+        self._hosting["lan"] = f"http://{ip}:{port}"
+        _diag(f"[danvas] canvas now also on the LAN: http://{ip}:{port}")
+
+    async def _open_tunnel(self):
+        """Open a public HTTPS tunnel to the local port, live (blocking spawn
+        off-loop). Needs the [tunnel] extra the first time (downloads
+        cloudflared)."""
+        if self._hosting.get("tunnel"):
+            return
+        if not self._hosting.get("port"):
+            raise RuntimeError("hosting state not initialised (serve() first)")
+        from .tunnel import open_tunnel
+        handle = await self._loop.run_in_executor(
+            None, open_tunnel, self._hosting["port"])
+        self._tunnel_handle = handle
+        self._hosting["tunnel"] = handle.url
+        _diag(f"[danvas] canvas now public: {handle.url}")
+
     def register_message(self, component, role=None, client_id=None):
         """Build the ``register`` message for a component, including placement.
 
@@ -874,6 +961,8 @@ class Bridge:
                                   "protocol": PROTOCOL_VERSION,
                                   "uiInspector": self._ui_inspector,
                                   "uiGraveyard": self._ui_graveyard,
+                                  "uiHosting": self._ui_hosting,
+                                  "hosting": self.hosting_state(),
                                   "auth": self._auth,
                                   "cursors": self._cursors,
                                   "view": view_for_client,
@@ -1413,6 +1502,14 @@ class Bridge:
             # Native-UI request (e.g. the toolbar Inspector toggle). Gated by the
             # same flag advertised in `welcome`, and only ever touches the canvas
             # when one is attached (the merge host has none and ignores it).
+            # Live hosting actions (the 🌐 flyout): gated by the same
+            # private-bind default as the button itself; each is idempotent
+            # and reports through the broadcast hosting state.
+            if msg.get("action") in ("host_lan", "host_tunnel"):
+                if self._ui_hosting:
+                    self._loop.create_task(
+                        self._hosting_action(msg["action"]))
+                return
             if self._ui_inspector and self._canvas is not None:
                 if msg.get("action") == "toggle_inspector":
                     # Open it centred in this viewer's current view — the browser

@@ -621,6 +621,9 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     if os.path.isdir(DIST_DIR):
         app.mount("/", _FrontendStatic(directory=DIST_DIR, html=True), name="static")
 
+    # Keep the app reachable from the bridge so live hosting changes (the 🌐
+    # button / canvas.expose) can add a LAN listener for the SAME app.
+    bridge._app = app
     return app
 
 

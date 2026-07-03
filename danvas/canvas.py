@@ -2071,6 +2071,34 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                     pass
             raise
 
+    def expose(self, lan=False, tunnel=False, timeout=60.0):
+        """Widen a live canvas's reach without restarting — the code twin of
+        the 🌐 hosting button.
+
+        ``lan=True`` adds a second listener for the same canvas on this
+        machine's LAN address (the local URL keeps working); ``tunnel=True``
+        opens a public HTTPS tunnel (needs the ``[tunnel]`` extra the first
+        time). Both are idempotent. Returns the hosting state dict
+        (``{"local", "lan", "tunnel", ...}``) with the new URLs::
+
+            canvas.serve(block=False)          # private, local-only
+            canvas.expose(lan=True)            # now phones on the WiFi can join
+            canvas.expose(tunnel=True)["tunnel"]   # now anyone can
+        """
+        import asyncio as _asyncio
+        loop = self._bridge._loop
+        if loop is None:
+            raise RuntimeError("expose() needs a serving canvas — call "
+                               "serve() first (block=False in a script/notebook)")
+        for flag, action in ((lan, "host_lan"), (tunnel, "host_tunnel")):
+            if flag:
+                _asyncio.run_coroutine_threadsafe(
+                    self._bridge._hosting_action(action), loop).result(timeout)
+        state = self._bridge.hosting_state()
+        if state.get("error"):
+            raise RuntimeError(f"expose failed: {state['error']}")
+        return state
+
     def wait_for_client(self, timeout=10.0):
         """Block until at least one browser is connected, or ``timeout`` elapses.
 
@@ -2154,7 +2182,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
     def serve(self, port=8000, open_browser=True, host="127.0.0.1",
               block=True, wait=True,
               tunnel=False, tunnel_provider="cloudflared", ui_inspector=None,
-              ui_graveyard=None, cursors=None, view=None, desktop=None, window_title="danvas",
+              ui_graveyard=None, ui_hosting=None, cursors=None, view=None,
+              desktop=None, window_title="danvas",
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None, tldraw_license_key=None, watch=None,
@@ -2329,6 +2358,15 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                                           ui_graveyard, cursors)
         self._public_bind = exposure.public_bind
         self._bridge._ui_inspector = exposure.ui_inspector
+        # The 🌐 hosting button: lets a viewer widen a private canvas's reach
+        # (LAN listener / public tunnel) live. Widening exposure is a real
+        # decision, so it defaults on ONLY for a private local bind — the same
+        # rule as the Inspector — and once the canvas is already LAN-bound or
+        # tunneled there's nothing for it to do anyway.
+        default_private = host in ("127.0.0.1", "localhost") and not tunnel
+        self._bridge._ui_hosting = (bool(ui_hosting) if ui_hosting is not None
+                                    else default_private)
+        self._bridge._hosting.update(host=host, port=port)
         self._bridge._ui_graveyard = exposure.ui_graveyard
         self._bridge._cursors = exposure.cursors
         # When a password is set, advertise it so the frontend offers a built-in

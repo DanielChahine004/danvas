@@ -547,6 +547,11 @@ function handle(msg: any): void {
     case 'response':
       resolveRequest(msg.reqId, msg.result, msg.error)
       break
+    case 'hosting':
+      // Live exposure change (LAN listener / tunnel opened) — refresh the 🌐
+      // flyout on every viewer.
+      setHosting(msg)
+      break
     case 'view':
       applyLiveView(msg.view || {})
       break
@@ -628,6 +633,7 @@ function onWelcome(msg: any): void {
   setIdentity(msg.you || null)
   setUiInspectorEnabled(!!msg.uiInspector)
   setGraveyardEnabled(!!msg.uiGraveyard)
+  setHosting({ ...(msg.hosting || {}), enabled: !!msg.uiHosting })
   setAuthEnabled(!!msg.auth)
   setCursorsEnabled(!!msg.cursors)
   setViewConfig(msg.view || null)
@@ -1423,6 +1429,25 @@ export function subscribeUiInspector(cb: (s: any) => void): () => void {
   cb(uiInspector)
   return () => uiInspectorListeners.delete(cb)
 }
+// === live hosting (the 🌐 button) ===========================================
+// Exposure state pushed by the server: current local/LAN/tunnel URLs, which
+// action is in flight, and the last error. `enabled` gates the button (the
+// server shows it only for a private local bind, like the Inspector).
+let hosting: any = { enabled: false, local: null, lan: null, tunnel: null, busy: null, error: null }
+const hostingListeners = new Set<(s: any) => void>()
+function setHosting(patch: any): void {
+  hosting = { ...hosting, ...patch }
+  for (const cb of hostingListeners) cb(hosting)
+}
+export function subscribeHosting(cb: (s: any) => void): () => void {
+  hostingListeners.add(cb)
+  cb(hosting)
+  return () => hostingListeners.delete(cb)
+}
+export function sendHostAction(action: 'host_lan' | 'host_tunnel'): void {
+  sendRaw({ type: 'ui', action })
+}
+
 let _sentUi = 0
 export function toggleUiInspector(): void {
   // Send the viewport centre so Python opens the inspector in this viewer's view.

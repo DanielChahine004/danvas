@@ -174,11 +174,13 @@
 .pc-chrome-inspector { bottom: 54px; left: 8px; }
 .pc-chrome-graveyard { bottom: 90px; left: 8px; }
 .pc-chrome-merge { bottom: 126px; left: 8px; }
-/* The graveyard + merge flyouts are mutually exclusive (openChrome), so they share
-   one slot that clears the whole button column (topmost button = merge at 126) —
-   the open panel floats above every button and covers none of them. */
-.pc-graveyard-panel { bottom: 164px; }
-.pc-merge-panel { bottom: 164px; }
+.pc-chrome-hosting { bottom: 162px; left: 8px; }
+/* The graveyard / merge / hosting flyouts are mutually exclusive (openChrome), so
+   they share one slot that clears the whole button column (topmost button =
+   hosting at 162) — the open panel floats above every button and covers none. */
+.pc-graveyard-panel { bottom: 200px; }
+.pc-merge-panel { bottom: 200px; }
+.pc-hosting-panel { bottom: 200px; }
 /* floating style-panel toggle: phones only (desktop shows the panel always). It
    floats ABOVE the toolbar's right end so it never overlaps the toolbar. */
 .pc-style-toggle { display: none; right: 10px; bottom: calc(env(safe-area-inset-bottom, 0px) + 80px); }
@@ -206,8 +208,10 @@
     border-radius: 12px !important;
   }
   .pc-chrome-merge { bottom: calc(env(safe-area-inset-bottom, 0px) + 140px); }
-  .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 178px); }
-  .pc-merge-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 178px); }
+  .pc-chrome-hosting { bottom: calc(env(safe-area-inset-bottom, 0px) + 174px); }
+  .pc-graveyard-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 212px); }
+  .pc-merge-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 212px); }
+  .pc-hosting-panel { bottom: calc(env(safe-area-inset-bottom, 0px) + 212px); }
   /* whiteboard-style: the panel floats bottom-right, ABOVE the toggle + toolbar */
   [data-pc-stylepanel] {
     top: auto !important;

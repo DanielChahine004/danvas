@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { useValue } from './react/EngineContext'
 import { PanelLayer } from './react/PanelLayer'
-import { CursorLayer, InspectorButton, GraveyardButton, SignOutButton, KioskHandTool, UndoRedoButtons, StyleToggle, SettingsButton, MergeHostPanel, MergeLaunchButton, MergeOriginDot } from './react/overlays'
+import { CursorLayer, InspectorButton, GraveyardButton, SignOutButton, KioskHandTool, UndoRedoButtons, StyleToggle, SettingsButton, MergeHostPanel, MergeLaunchButton, MergeOriginDot, HostingButton } from './react/overlays'
 import { Toolbar } from './react/Toolbar'
 import { StylePanel } from './react/StylePanel'
 import { TextEditor } from './react/TextEditor'
@@ -53,6 +53,7 @@ export function App() {
       {!hideUi && <InspectorButton />}
       {!hideUi && <GraveyardButton />}
       {!hideUi && <MergeHostPanel />}
+      {!hideUi && <HostingButton />}
       {!hideUi && <MergeLaunchButton />}
       {!hideUi && <MergeOriginDot />}
       {hideUi && <KioskHandTool />}

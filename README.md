@@ -840,6 +840,22 @@ default only inside a baked executable (`sys.frozen`).
 
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
+**Widen reach live (🌐 Hosting)** — a private, local-only canvas gets a
+**Hosting** button (above Merge) showing where it's reachable, with one-click
+**Share on LAN** (adds a second listener on your LAN address — the local URL
+keeps working) and **Open public tunnel** — no restart. The code twin:
+
+```python
+canvas.serve(block=False)              # private, local-only
+canvas.expose(lan=True)                # phones on the WiFi can join now
+url = canvas.expose(tunnel=True)["tunnel"]   # public HTTPS link, live
+```
+
+Because widening exposure is a real decision, the button defaults on **only
+for a private local bind** (same rule as the Inspector) — override with
+`serve(ui_hosting=True/False)`. Already-LAN-bound or tunneled canvases have
+nothing to widen, so it stays hidden there.
+
 **Password** — gate any shared canvas; viewers see a password page once, then a
 session cookie carries them (the password is never stored in the cookie). A
 protected canvas also gets a **Sign out** button and an optional `login_message=`

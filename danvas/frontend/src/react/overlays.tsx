@@ -24,6 +24,8 @@ import {
   setSourceHidden,
   setMergeMove,
   mergeOffset,
+  subscribeHosting,
+  sendHostAction,
 } from '../bridge'
 
 // --- peer cursors ------------------------------------------------------------
@@ -650,6 +652,81 @@ const mergeRowStyle: any = { display: 'flex', alignItems: 'center', gap: 8, padd
 const mergeIconBtnStyle: any = { flexShrink: 0, padding: '2px 6px', fontSize: 12, cursor: 'pointer', background: 'transparent', color: 'var(--ui-fg)', border: 'none', borderRadius: 4 }
 const mergeInputStyle: any = { flex: 1, minWidth: 0, padding: '5px 8px', fontSize: 12, borderRadius: 6, border: '1px solid var(--ui-border)', background: 'var(--ui-bg)', color: 'var(--ui-fg)', boxSizing: 'border-box' }
 const mergeAddBtnStyle: any = { flexShrink: 0, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6 }
+
+// --- live hosting: the 🌐 button + flyout ------------------------------------
+// Shown only when the server enables it (private local bind, like the
+// Inspector). Lists the canvas's current reach — local / LAN / public tunnel —
+// with copyable URLs, and widens it live: "Share on LAN" adds a second listener
+// on the machine's LAN address; "Open public tunnel" spawns an HTTPS tunnel.
+export function HostingButton() {
+  const [state, setState] = useState<any>({ enabled: false })
+  const [copied, setCopied] = useState('')
+  useEffect(() => subscribeHosting(setState), [])
+  const open = useValue('hosting-open', () => openChrome() === 'hosting', [])
+  if (!state.enabled) return null
+  const reach = state.tunnel ? 'public' : state.lan ? 'LAN' : 'local'
+  const copy = (url: string) => {
+    try {
+      navigator.clipboard?.writeText(url)
+      setCopied(url)
+      setTimeout(() => setCopied(''), 1500)
+    } catch {
+      /* clipboard unavailable (http LAN page) — the URL is selectable text */
+    }
+  }
+  const row = (label: string, url: string | null, action: string | null, actionLabel: string) => (
+    <div style={mergeRowStyle}>
+      <span style={{ flexShrink: 0, width: 52, fontSize: 11, fontWeight: 700, color: 'var(--ui-label)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
+      {url ? (
+        <>
+          <span style={{ flex: 1, fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'text' }}>{url}</span>
+          <button onClick={() => copy(url)} title="Copy URL" style={mergeIconBtnStyle}>
+            {copied === url ? '✓' : '⧉'}
+          </button>
+        </>
+      ) : action ? (
+        <button
+          data-pc-host-action={action}
+          disabled={!!state.busy}
+          onClick={() => sendHostAction(action as any)}
+          style={{ ...mergeAddBtnStyle, opacity: state.busy ? 0.6 : 1 }}
+        >
+          {state.busy === action ? 'Working…' : actionLabel}
+        </button>
+      ) : null}
+    </div>
+  )
+  return (
+    <>
+      <button
+        data-pc-hosting-btn=""
+        class="pc-chrome-hosting"
+        onClick={() => toggleChrome('hosting')}
+        title={open ? 'Close the hosting panel' : 'Share this canvas: LAN or public tunnel'}
+        style={btnStyle({ background: open ? 'var(--ui-accent)' : 'var(--ui-bg)', color: open ? '#fff' : 'var(--ui-fg)' })}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>🌐</span>
+        Hosting ({reach}){open ? ' ✕' : ''}
+      </button>
+      {open && (
+        <div class="pc-hosting-panel" style={mergePanelStyle}>
+          <div style={mergeHeaderStyle}>Where this canvas is reachable</div>
+          {row('Local', state.local, null, '')}
+          {row('LAN', state.lan, 'host_lan', 'Share on LAN')}
+          {row('Public', state.tunnel, 'host_tunnel', 'Open tunnel')}
+          {state.error ? (
+            <div style={{ padding: '8px 12px', fontSize: 11, color: '#ef4444' }}>{state.error}</div>
+          ) : null}
+          <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--ui-muted)' }}>
+            Sharing widens who can reach this canvas — LAN is anyone on this
+            network; a tunnel is anyone with the link. The local URL keeps
+            working either way.
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 // --- kiosk hand tool (touch, ui:false) --------------------------------------
 // Under a chrome-free view a touch user is stuck on select (one finger drags the
