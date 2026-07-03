@@ -64,6 +64,10 @@ struct Source {
     drawings: HashMap<String, Value>,
     /// nsid -> managed-shape frame, kept current (shape_update folds in).
     shapes: HashMap<String, Value>,
+    /// Latest shared-assets frame (define/style cumulative snapshot).
+    shared: Option<Value>,
+    /// Latest graveyard_update (item ids namespaced).
+    graveyard: Option<Value>,
 }
 
 /// Rewrite every record id (diff keys, records' own `id`, arrow bindings)
@@ -138,6 +142,9 @@ struct Hub {
     viewers: HashMap<u64, Value>,
     chat_history: Vec<Value>,
     chat_seq: u64,
+    /// The hub view (camera/chrome), folded from sources' `view` frames and
+    /// baked into welcome for late joiners.
+    hub_view: Map<String, Value>,
 }
 
 const VIEWER_COLORS: [&str; 6] =
@@ -327,6 +334,11 @@ impl Hub {
 
     fn cached_frames(src: &Source) -> Vec<Value> {
         let mut out = Vec::new();
+        if let Some(shared) = &src.shared {
+            // Before the registers: React panels mount with shared components
+            // and the global stylesheet already in place.
+            out.push(shared.clone());
+        }
         for id in &src.reg_order {
             if let Some(reg) = src.registers.get(id) {
                 out.push(reg.clone());
@@ -340,6 +352,9 @@ impl Hub {
         }
         for shape in src.shapes.values() {
             out.push(shape.clone());
+        }
+        if let Some(gy) = &src.graveyard {
+            out.push(gy.clone());
         }
         if !src.drawings.is_empty() {
             out.push(json!({"type": "draw", "diff": {
@@ -596,6 +611,8 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             "you": {"id": format!("v{conn_id}"), "name": display_name,
                      "color": color, "device": "desktop", "role": null},
             "runId": h.run_id,
+            "view": if h.hub_view.is_empty() { Value::Null }
+                    else { Value::Object(h.hub_view.clone()) },
             "mergeHost": true,
             "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
         })
@@ -917,6 +934,8 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
         src.updates.clear();
         src.arrows.clear();
         src.shapes.clear();
+        src.shared = None;
+        src.graveyard = None;
         src.drawings.clear();
         src.live = true;
         src.tx = Some(tx);
@@ -979,6 +998,58 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
                 }
             }
         }
+        return;
+    }
+    if kind == "view" {
+        // The source (e.g. the transplanted host) sets camera/chrome: fold
+        // for late joiners' welcome, relay live.
+        let mut h = hub.lock().unwrap();
+        if let Some(Value::Object(delta)) = frame.get("view") {
+            for (k, v) in delta {
+                h.hub_view.insert(k.clone(), v.clone());
+            }
+        }
+        let text = frame.to_string();
+        h.fanout_browsers(&text);
+        return;
+    }
+    if kind == "shared" {
+        let mut h = hub.lock().unwrap();
+        if let Some(src) = h.sources.get_mut(label) {
+            src.shared = Some(frame.clone());
+        }
+        let text = frame.to_string();
+        h.fanout_browsers(&text);
+        return;
+    }
+    if kind == "graveyard_update" {
+        let mut h = hub.lock().unwrap();
+        let Some(src) = h.sources.get(label) else { return };
+        let tag = src.tag.clone();
+        let items: Vec<Value> = frame
+            .get("items")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .map(|item| {
+                        let mut it = item.clone();
+                        if let Some(obj) = it.as_object_mut() {
+                            if let Some(Value::String(id)) = obj.get("id") {
+                                let nid = format!("{tag}:{id}");
+                                obj.insert("id".into(), Value::String(nid));
+                            }
+                        }
+                        it
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let msg = json!({"type": "graveyard_update", "items": items});
+        if let Some(src) = h.sources.get_mut(label) {
+            src.graveyard = Some(msg.clone());
+        }
+        let text = msg.to_string();
+        h.fanout_browsers(&text);
         return;
     }
     if !matches!(kind.as_str(),
@@ -1368,7 +1439,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                 s.remove(&conn_id);
             }
         }
-        "input" | "set_props" | "layout" | "request" => {
+        "input" | "set_props" | "layout" | "request" | "graveyard" | "restore" => {
             let Some((tag, rest)) = cid.split_once(':') else { return };
             let mut h = hub.lock().unwrap();
             ledger_record(&h, kind, Some(&cid), &frame);

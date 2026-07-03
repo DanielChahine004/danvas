@@ -1102,3 +1102,67 @@ def test_chat_relays_and_replays_history(hub):
                     lambda m: m.get("type") == "chat"
                     and m.get("text") == "hello from A")
     _run(go())
+
+
+# -- view / shared assets / graveyard: the last small relays ---------------------
+
+def test_source_view_folds_into_welcome_and_relays(hub):
+    async def go():
+        async with _source(hub, "c25") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "view", "view": {"zoom": 1.5, "grid": True}})
+            live = await br.recv_until(
+                lambda m: m.get("type") == "view"
+                and (m.get("view") or {}).get("zoom") == 1.5)
+            assert live["view"]["grid"] is True
+            async with _browser(hub) as b2ws:      # late joiner: baked into welcome
+                b2 = Peer(b2ws)
+                w = await b2.recv_until(lambda m: m.get("type") == "welcome")
+                assert (w.get("view") or {}).get("zoom") == 1.5
+    _run(go())
+
+
+def test_shared_assets_relay_and_replay(hub):
+    async def go():
+        async with _source(hub, "c26") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "shared",
+                            "components": {"Pill": "function Pill(){return null}"},
+                            "styles": ".pill{color:red}"})
+            got = await br.recv_until(
+                lambda m: m.get("type") == "shared"
+                and "Pill" in (m.get("components") or {}))
+            assert ".pill" in got.get("styles", "")
+            async with _browser(hub) as b2ws:      # late joiner replays it
+                b2 = Peer(b2ws)
+                await b2.recv_until(
+                    lambda m: m.get("type") == "shared"
+                    and "Pill" in (m.get("components") or {}))
+    _run(go())
+
+
+def test_graveyard_roundtrip_through_the_hub(hub):
+    async def go():
+        async with _source(hub, "c27") as sws, _browser(hub) as bws:
+            src, br = Peer(sws), Peer(bws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "gp", "name": "gp27",
+                            "component": "React", "props": {}})
+            reg = await br.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "gp27")
+            # viewer deletes the merged panel -> petition reaches the owner bare
+            await br.send({"type": "graveyard", "id": reg["id"]})
+            got = await src.recv_until(lambda m: m.get("type") == "graveyard")
+            assert got["id"] == "gp"
+            # the owner's graveyard roster relays namespaced (restore targets it)
+            await src.send({"type": "graveyard_update",
+                            "items": [{"id": "gp", "label": "gp27"}]})
+            gy = await br.recv_until(
+                lambda m: m.get("type") == "graveyard_update"
+                and any(i.get("id") == reg["id"] for i in m.get("items", [])))
+            await br.send({"type": "restore", "id": reg["id"]})
+            back = await src.recv_until(lambda m: m.get("type") == "restore")
+            assert back["id"] == "gp"
+    _run(go())

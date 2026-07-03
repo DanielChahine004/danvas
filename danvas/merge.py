@@ -224,6 +224,8 @@ class _Upstream:
         self.updates = {}     # nsid -> accumulated payload dict
         self.arrows = {}      # nsid -> arrow msg
         self.shapes = {}      # nsid -> managed-shape frame (kept current)
+        self.shared = None    # latest shared-assets frame (define/style snapshot)
+        self.graveyard = None # latest graveyard_update (item ids namespaced)
         self.drawings = {}    # nsid -> free-form drawing record (the "after" state)
 
     async def send(self, msg):
@@ -251,11 +253,17 @@ class _Upstream:
 
     def cached_frames(self):
         """Every frame needed to reconstruct this source on a fresh browser."""
+        if self.shared is not None:
+            # Before the registers: a React panel must mount with its shared
+            # components and stylesheet already in place.
+            yield self.shared
         yield from self.registers.values()
         for nsid, payload in self.updates.items():
             yield {"type": "update", "id": nsid, "payload": payload}
         yield from self.arrows.values()
         yield from self.shapes.values()
+        if self.graveyard is not None:
+            yield self.graveyard
         if self.drawings:
             # The source's free-form ink, replayed as one "added" draw diff.
             yield {"type": "draw",
@@ -579,6 +587,8 @@ class _MergeHost:
                         up.updates.clear()
                         up.arrows.clear()
                         up.shapes.clear()
+                        up.shared = None
+                        up.graveyard = None
                         up.drawings.clear()
                     self._emit_sources_to_interested(up)
                     async for raw in ws:
@@ -679,6 +689,29 @@ class _MergeHost:
                 for k, v in msg.items():
                     if k not in ("type", "id", "props"):
                         shape[k] = v
+            self._fanout_upstream(up, msg)
+        elif kind == "view":
+            # A source (e.g. the transplanted host under serve(broker=True))
+            # sets the camera/chrome: fold into the hub's view so late joiners
+            # get it baked into welcome, and relay live.
+            delta = msg.get("view")
+            if isinstance(delta, dict):
+                self.bridge._view = {**(self.bridge._view or {}), **delta}
+            self._fanout_upstream(up, msg)
+        elif kind == "shared":
+            # define()/style() snapshot: cache the latest (each frame is the
+            # full cumulative snapshot) and relay; replays before registers.
+            up.shared = msg
+            self._fanout_upstream(up, msg)
+        elif kind == "graveyard_update":
+            items = []
+            for item in msg.get("items", []):
+                it = dict(item)
+                if isinstance(it.get("id"), str):
+                    it["id"] = self._ns(up.tag, it["id"])
+                items.append(it)
+            msg = {"type": "graveyard_update", "items": items}
+            up.graveyard = msg
             self._fanout_upstream(up, msg)
         elif kind == "response":
             # The owner answered a viewer's request: route to the asker only.
@@ -795,6 +828,8 @@ class _MergeHost:
             up.updates.clear()
             up.arrows.clear()
             up.shapes.clear()
+            up.shared = None
+            up.graveyard = None
             up.drawings.clear()
         self._emit_sources_to_interested(up)
 
@@ -982,6 +1017,8 @@ class _MergeHost:
             up.updates.clear()
             up.arrows.clear()
             up.shapes.clear()
+            up.shared = None
+            up.graveyard = None
             up.drawings.clear()
         up.ws = _InboundWS(ws)
         up.status = "live"
@@ -1105,7 +1142,8 @@ class _MergeHost:
                 return False
             kind = msg.get("type")
             if kind in ("register", "update", "remove", "arrow", "draw",
-                        "shape", "shape_update", "response"):
+                        "shape", "shape_update", "response",
+                        "view", "shared", "graveyard_update"):
                 self._ingest(up, raw)
                 return True
             # A source is also a peer on the shared plane: petitions and
