@@ -253,14 +253,21 @@ class RemoteCanvas(Canvas):
         """``canvas["name"]`` resolves panels this process owns (the native
         component object) AND panels any peer owns (a :class:`RemoteHandle`
         proxying reads/writes/events over the wire). Own panels win a name
-        collision; foreign names resolve through the connection's mirror."""
+        collision; foreign names resolve through the connection's mirror —
+        waiting briefly (≤2 s) for it to converge, so a lookup right after
+        :func:`danvas.connect` doesn't race the hub's initial replay."""
+        import time as _time
         try:
             return super().__getitem__(name)
         except KeyError:
-            panel_id = self._client.find(name)
-            if panel_id is not None:
-                return RemoteHandle(self, panel_id, name)
-            raise
+            deadline = _time.monotonic() + 2.0
+            while True:
+                panel_id = self._client.find(name)
+                if panel_id is not None:
+                    return RemoteHandle(self, panel_id, name)
+                if _time.monotonic() >= deadline:
+                    raise
+                _time.sleep(0.05)
 
     def __contains__(self, name):
         return super().__contains__(name) or self._client.find(name) is not None

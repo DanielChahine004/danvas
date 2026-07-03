@@ -426,3 +426,52 @@ def test_merge_offset_translates_a_source(hub):
                     lambda m: m.get("type") == "register"
                     and m.get("name") == "p14" and m.get("x") == 610)
     _run(go())
+
+
+def test_replayed_register_is_fresh_not_stale_plus_patches(hub):
+    # A hub browser-refresh must be equivalent to a direct source reconnect:
+    # the replayed REGISTER itself carries current geometry and value (the
+    # owner's own replay bakes them; transient channels like {post} and
+    # racing update frames don't survive a fresh mount).
+    async def go():
+        async with _source(hub, "c15") as sws:
+            src = Peer(sws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "p", "name": "p15",
+                            "component": "React",
+                            "props": {"data": json.dumps({"value": 90, "min": 0})},
+                            "x": 10, "y": 20})
+            await src.send({"type": "update", "id": "p", "payload": {"post": 140}})
+            await src.send({"type": "update", "id": "p",
+                            "payload": {"x": 520, "y": 300}})
+            await asyncio.sleep(0.3)
+            async with _browser(hub) as bws:
+                br = Peer(bws)
+                reg = await br.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "p15")
+                assert (reg["x"], reg["y"]) == (520, 300)      # fresh geometry
+                blob = json.loads(reg["props"]["data"])
+                assert blob["value"] == 140                    # fresh value
+    _run(go())
+
+
+def test_replayed_register_folds_text_content_too(hub):
+    # Same freshness rule for text-content panels (a Label's key is "text").
+    async def go():
+        async with _source(hub, "c16") as sws:
+            src = Peer(sws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            await src.send({"type": "register", "id": "l", "name": "l16",
+                            "component": "React",
+                            "props": {"data": json.dumps({"text": "idle"})}})
+            await src.send({"type": "update", "id": "l",
+                            "payload": {"post": "done"}})
+            await asyncio.sleep(0.3)
+            async with _browser(hub) as bws:
+                br = Peer(bws)
+                reg = await br.recv_until(
+                    lambda m: m.get("type") == "register"
+                    and m.get("name") == "l16")
+                assert json.loads(reg["props"]["data"])["text"] == "done"
+    _run(go())

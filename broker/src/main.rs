@@ -114,6 +114,52 @@ struct Hub {
     drawings: HashMap<String, Value>,
 }
 
+/// Fold an update payload into the replay cache the way the OWNER's own
+/// reconnect replay would express it: geometry onto the cached register's top
+/// level, a value `post` into the register's baked `props.data`, the rest
+/// onto the accumulated updates. This is what makes a hub browser-refresh
+/// equivalent to a direct source reconnect (transient channels like `post`
+/// don't survive a fresh mount). The `props.data` peek is the one bounded
+/// exception to "parse the envelope, not the world" — the built-in controls'
+/// value convention.
+fn fold_state(src: &mut Source, nsid: &str, payload: Map<String, Value>) {
+    let mut rest = payload;
+    if let Some(reg) = src.registers.get_mut(nsid) {
+        if let Some(obj) = reg.as_object_mut() {
+            for k in ["x", "y", "rotation", "opacity"] {
+                if rest.get(k).map(|v| v.is_number()).unwrap_or(false) {
+                    obj.insert(k.into(), rest.remove(k).unwrap());
+                }
+            }
+            if let Some(post) = rest.get("post").cloned() {
+                let folded = obj
+                    .get_mut("props")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|props| {
+                        let data = props.get("data")?.as_str()?;
+                        let mut blob: Value = serde_json::from_str(data).ok()?;
+                        let b = blob.as_object_mut()?;
+                        // The built-in controls' content keys — the one
+                        // bounded convention the hub knows about panels.
+                        let key = ["value", "text", "src"]
+                            .into_iter()
+                            .find(|k| b.contains_key(*k))?;
+                        b.insert(key.into(), post.clone());
+                        props.insert("data".into(), Value::String(blob.to_string()));
+                        Some(())
+                    })
+                    .is_some();
+                if folded {
+                    rest.remove("post");
+                }
+            }
+        }
+    }
+    if !rest.is_empty() {
+        src.updates.entry(nsid.to_string()).or_default().extend(rest);
+    }
+}
+
 /// Shift a frame's top-level or payload x/y by (dx, dy) where present.
 fn shift_xy(obj: &mut Map<String, Value>, dx: f64, dy: f64) {
     for (key, d) in [("x", dx), ("y", dy)] {
@@ -494,7 +540,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
                 .unwrap()
                 .insert("payload".into(), Value::Object(payload.clone()));
             let src = h.sources.get_mut(label).unwrap();
-            src.updates.entry(nsid).or_default().extend(payload);
+            fold_state(src, &nsid, payload);
         }
         "remove" => {
             let src = h.sources.get_mut(label).unwrap();
@@ -705,7 +751,7 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                 }
                 if !geom.is_empty() {
                     if let Some(src) = h.sources.get_mut(&label) {
-                        src.updates.entry(cid.clone()).or_default().extend(geom.clone());
+                        fold_state(src, &cid, geom.clone());
                     }
                     let text = json!({"type": "update", "id": cid,
                                       "payload": geom}).to_string();

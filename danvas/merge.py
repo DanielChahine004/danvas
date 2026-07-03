@@ -576,7 +576,7 @@ class _MergeHost:
                     payload["x"] += ox
                 if payload.get("y") is not None:
                     payload["y"] += oy
-            up.updates.setdefault(cid, {}).update(payload)
+            self._fold_state(up, cid, payload)
             # If this echo is the result of a viewer's own input, don't fan it back
             # to that viewer (they already have it locally; re-applying a streamed
             # value fights their drag). Others still get it, and it's cached above
@@ -608,6 +608,42 @@ class _MergeHost:
                 ns_diff = self._offset_draw_diff(ns_diff, ox, oy)
             self._fold_draw(up.drawings, ns_diff)
             self._fanout_upstream(up, {"type": "draw", "diff": ns_diff})
+
+    @staticmethod
+    def _fold_state(up, cid, payload):
+        """Fold an update payload into the replay cache the way the OWNER's
+        own reconnect replay would express it: geometry onto the cached
+        register's top level, a value ``post`` into the register's baked
+        ``props.data``, anything else onto the accumulated updates. Without
+        this, a browser refresh replays the ORIGINAL register plus patches —
+        and the transient channels (``post`` feeds mounted nodes, never the
+        store) don't survive a fresh mount, so values/positions snapped back.
+        """
+        reg = up.registers.get(cid)
+        rest = dict(payload)
+        if reg is not None:
+            for k in ("x", "y", "rotation", "opacity"):
+                if isinstance(rest.get(k), (int, float)):
+                    reg[k] = rest.pop(k)
+            if "post" in rest:
+                props = reg.get("props")
+                data = props.get("data") if isinstance(props, dict) else None
+                if isinstance(data, str):
+                    try:
+                        blob = json.loads(data)
+                        if isinstance(blob, dict):
+                            # The built-in controls' content keys (slider/
+                            # toggle value, label text, image src) — the one
+                            # bounded convention the hub knows about panels.
+                            for key in ("value", "text", "src"):
+                                if key in blob:
+                                    blob[key] = rest.pop("post")
+                                    props["data"] = json.dumps(blob)
+                                    break
+                    except (ValueError, TypeError):
+                        pass
+        if rest:
+            up.updates.setdefault(cid, {}).update(rest)
 
     def _send_source_teardown(self, ws, up):
         """Remove a source's panels (``remove`` frames) AND its free-form ink (a
@@ -1040,7 +1076,7 @@ class _MergeHost:
                     ("x", "y", "w", "h", "rotation", "autoH", "autoW")
                     if msg.get(k) is not None}
             if geom:
-                up.updates.setdefault(cid, {}).update(geom)
+                self._fold_state(up, cid, geom)
                 fan = {"type": "update", "id": cid, "payload": geom}
                 for other in list(self._conns.values()):
                     if other is not conn and up.key in other.sources:
