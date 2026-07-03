@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from typing_extensions import Unpack
 
 from . import server
+from . import _ledger
 from ._flags import LAYOUT_FLAGS
 from .kernel import spawn
 from .arrow import Arrow, _arrow_props
@@ -154,6 +155,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._persist_path = None
         self._persist_timer = None
         self._persist_lock = threading.Lock()
+        # SQLite ledger backend for persist= (selected by a .db/.sqlite path):
+        # snapshots are appended (not overwritten) and user actions are recorded
+        # to an events table. None when off or when the JSON backend is in use.
+        self._ledger = None
         # Stack of active auto-layout containers (grid/column/row). The innermost
         # one places any panel inserted inside its `with` block that didn't get an
         # explicit x/y or relative anchor. Empty = panels auto-cascade as before.
@@ -1914,9 +1919,15 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         ``persist`` is the ``serve(persist=...)`` value: ``True`` for the default
         path, or a string path. Called once from serve() in the serving process.
+        A path ending in ``.db`` / ``.sqlite`` / ``.sqlite3`` selects the
+        append-only SQLite ledger backend (see :mod:`danvas._ledger`); anything
+        else keeps the historical JSON file.
         """
         path = persist if isinstance(persist, str) else self._default_persist_path()
         self._persist_path = path
+        if _ledger.is_ledger_path(path):
+            self._persist_setup_ledger(path)
+            return
         if os.path.exists(path):
             try:
                 self._persist_load(path)
@@ -1929,6 +1940,55 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # Arm last, so the load above (which mutates layout) doesn't trigger a
         # redundant save of what we just read back in.
         self._bridge._on_mutation = self._schedule_persist
+
+    def _persist_setup_ledger(self, path):
+        """The ledger twin of the JSON branch: open/create the SQLite file,
+        restore the latest snapshot, arm the autosave, and start recording user
+        actions to the events table."""
+        self._ledger = _ledger.open_ledger(path)
+        try:
+            state = self._ledger.latest_state()
+        except Exception:
+            warnings.warn(f"persist: could not read ledger {path!r}; "
+                          "starting fresh", stacklevel=3)
+            traceback.print_exc()
+            state = None
+        if state:
+            if state.get("layout"):
+                self._restore_layout(state["layout"])
+            drawings = state.get("drawings")
+            if isinstance(drawings, dict):
+                self._bridge._drawings = dict(drawings)
+        # Arm after the restore (same reason as the JSON branch), then start
+        # the event recorder: a frame tap filtered to meaningful user actions,
+        # so cursor/heartbeat plumbing never touches the disk.
+        self._bridge._on_mutation = self._schedule_persist
+        self._bridge.add_frame_tap(self._ledger_tap)
+
+    def _ledger_tap(self, direction, msg):
+        """Frame tap → events table. Inbound user actions only (the recorded
+        history of *what viewers did*); outbound state rides the snapshots."""
+        if direction != "in" or self._ledger is None:
+            return
+        kind = msg.get("type")
+        if kind not in _ledger.EVENT_TYPES:
+            return
+        try:
+            self._ledger.append_event(kind, msg.get("id"), msg)
+        except Exception:
+            # Persistence must never take down a live interaction path.
+            traceback.print_exc()
+
+    @property
+    def ledger(self):
+        """The active persistence :class:`~danvas._ledger.Ledger`, or ``None``.
+
+        Only set when serving with a SQLite persist path
+        (``serve(persist="board.canvas.db")``). ``canvas.ledger.events()``
+        returns the recent user actions; the file is also queryable by any
+        external SQLite tool while the canvas runs (WAL mode).
+        """
+        return self._ledger
 
     def _persist_load(self, path):
         """Apply a persist file: restore the panel formation and seed drawings.
@@ -1977,6 +2037,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 self._persist_timer.cancel()
                 self._persist_timer = None
         data = {"layout": self._layout(), "drawings": dict(self._bridge._drawings)}
+        if self._ledger is not None:
+            # Ledger backend: append the snapshot (O(delta) history, no
+            # rewrite-the-world I/O) instead of replacing a JSON file.
+            self._ledger.append_snapshot(data)
+            return
         # Write to a temp file in the same directory and atomically replace, so a
         # crash mid-write can never leave a truncated (unloadable) file behind.
         tmp = f"{path}.{uuid.uuid4().hex}.tmp"

@@ -1026,6 +1026,19 @@ restarts with no `save`/`load` of your own.
 ```python
 canvas.serve(persist=True)              # <script>.canvas.json next to your script
 canvas.serve(persist="board.json")      # or choose the file
+canvas.serve(persist="board.canvas.db") # SQLite ledger: append-only history
+```
+
+**The SQLite ledger** — a persist path ending in `.db`/`.sqlite`/`.sqlite3`
+switches from rewrite-the-file JSON to an **append-only SQLite ledger**: each
+flush appends a snapshot row (bounded history, latest restores on startup —
+same semantics as JSON), and every user action (`input`/`layout`/`draw`) is
+recorded to an `events` table the moment it arrives. After a crash the whole
+run is queryable — `canvas.ledger.events()` in-process, or any external SQLite
+tool while the canvas runs (WAL mode):
+
+```sql
+SELECT ts, type, comp, payload FROM events ORDER BY seq DESC LIMIT 20;
 ```
 
 On startup each panel snaps back to where it was dragged *and* to the value the
