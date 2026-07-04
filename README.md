@@ -20,7 +20,10 @@ password, or over a public HTTPS tunnel — all built in, no extra services.
 pip install danvas
 ```
 
-The base install is lightweight. Heavier features are optional extras:
+The base install is deliberately light: the serving engine is the `danvasd`
+binary (bundled in the platform wheel, so `pip install` is all it takes), and the
+Python side needs only `websockets` + `orjson`. Heavier features are optional
+extras:
 
 | Extra | Enables |
 |---|---|
@@ -28,10 +31,12 @@ The base install is lightweight. Heavier features are optional extras:
 | `pip install "danvas[audio]"` | microphone capture for `AudioFeed` |
 | `pip install "danvas[tunnel]"` | public sharing (`serve(tunnel=True)`) |
 | `pip install "danvas[desktop]"` | native window + `bake()` to a standalone app |
+| `pip install "danvas[hub]"` | run the Python reference hub `python -m danvas.merge` (FastAPI/uvicorn) |
 
 `canvas.video(...)` needs `[video]` for default encoding — or stream
 already-JPEG bytes with `VideoFeed(encode=False)`, which needs nothing. For local
-development, clone and `pip install -e .`.
+development, clone and `pip install -e .` (a checkout builds `danvasd` with
+`cargo build --release --manifest-path broker/Cargo.toml`).
 
 ## Hello world
 
@@ -820,7 +825,7 @@ budget) on the fly.
 | `password` | – | gate the whole canvas behind one password (session cookie) |
 | `passwords` | – | `{role: password}` for role-based access |
 | `login_message` | – | host note on the password page |
-| `broker` | `"auto"` | serve through the `danvasd` binary when available (UI survives your script); `False` = embedded Python server, `True` = require the binary |
+| `broker` | — | **deprecated/ignored** — serving is always the `danvasd` binary now (kept so old call sites don't break) |
 | `merge` | `True` | this canvas is a merge hub (🧩 panel to pull other canvases in); `False` disables it |
 | `merge_server` | – | URL of a standing merge server; adds a **Merge…** button (only when `merge=False`) |
 | `tunnel` | `False` | expose publicly through a tunnel |
@@ -842,17 +847,18 @@ default only inside a baked executable (`sys.frozen`).
 
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
-**The broker is the default.** When the `danvasd` binary is available
-(`$DANVASD`, `PATH`, or a repo build), plain `serve()` hands the port to it —
-the ~6 MB dependency-free Rust broker serves browsers, your Python process
-dials in as the `host` source, and **the UI survives your script crashing**:
-restart it and the canvas heals. Everything crosses the broker — panels,
-handlers, media, ink, shapes, arrows, chat, presence, roles, request/response,
-uploads, downloads — pinned by a conformance harness both implementations
-pass. `serve(broker=False)` (or `DANVAS_EMBEDDED=1`) keeps the embedded
-Python server, which is also the automatic fallback when the binary is
-missing or an embedded-only feature is used (`hot_reload`, `persist=`,
-`desktop=`, `tunnel=`, `merge_server=`, the hosting button).
+**Serving is the binary broker.** `serve()` hands the port to `danvasd` — the
+~6 MB dependency-free Rust broker that serves the browser frontend — and your
+Python process dials in as the `host` source, so **the UI survives your script
+crashing**: restart it and the canvas heals. Everything crosses the broker —
+panels, handlers, media, ink, shapes, arrows, chat, presence, roles,
+request/response, uploads, downloads — pinned by a conformance harness both
+`danvasd` and the Python reference hub pass. There is **no in-process Python
+server**: a binary-less install (a source/pure wheel on an unsupported platform)
+can still `danvas.connect()` into a canvas, but to *serve* one it needs `danvasd`
+on `$DANVASD`/`PATH` or a `cargo build`. The neutral Python hub `python -m
+danvas.merge` — the conformance reference and a scriptless aggregator — is the
+one place the FastAPI stack is still used; install it with `danvas[hub]`.
 
 **Widen (or narrow) reach live (🌐 Hosting)** — a private, local-only canvas
 gets a **Hosting** button (above Merge) showing where it's reachable, with
@@ -1047,8 +1053,10 @@ def _():                                    # alongside the owner's handler
 ```
 
 (For other languages — or wire-level control — `danvas.SourceClient` is the
-minimal client underneath: `register`/`update`/`on_input` as raw frames, and
-the reference for writing a Rust/C++ SDK.)
+minimal Python client underneath (`register`/`update`/`on_input` as raw frames),
+and [`danvas-source/`](danvas-source/) is a full **Rust** SDK that does the same;
+both are references for writing an SDK in any language against
+[PROTOCOL.md](PROTOCOL.md).)
 
 **Native panels from any language** — the built-in panels' register shapes
 (the React source + data defaults the frontend mounts) ship as a
@@ -1243,12 +1251,26 @@ import with `include=[...]`, skip a build-breaking dep with `exclude=[...]`.
 
 # How it works
 
-danvas is two halves joined by **one WebSocket**: your Python process, and a
-pre-built browser frontend (a custom [Preact](https://preactjs.com) canvas, with
-React panels) it serves. You never touch the frontend — it ships compiled in the
-package, no Node or build step. The backend is ~660 kB of pure Python over four
-dependencies (FastAPI, uvicorn, websockets, orjson); the browser page loads
-~0.1 MB gzipped, with Plotly fetched on demand only when you add a chart.
+danvas is three parts over **one WebSocket**: the `danvasd` **binary broker** (a
+~6 MB dependency-free [Rust](broker/) server that owns the port and serves the
+frontend), your **Python process** (which dials into it as the `host` source),
+and the pre-built [Preact](https://preactjs.com) **frontend** danvasd serves. You
+never touch the frontend — it ships compiled in the package, no Node or build
+step. The Python side is minimal: base dependencies are just `websockets` +
+`orjson` (serving is the binary, so there's no Python server stack); the
+FastAPI/uvicorn hub is an optional `danvas[hub]` extra used only by `python -m
+danvas.merge`. The browser page loads ~0.1 MB gzipped, with Plotly fetched on
+demand only when you add a chart.
+
+**One protocol, any language.** The broker and the frontend speak a single frozen
+wire contract — JSON frames plus a binary media envelope, versioned in
+[PROTOCOL.md](PROTOCOL.md) / `danvas/_protocol.py`. Nothing about it is
+Python-specific, so any process that can open a WebSocket is a first-class peer:
+the Python binding here is one SDK, [`danvas-source/`](danvas-source/) is a Rust
+one, and the built-in panels ship as a language-neutral asset
+(`danvas/templates/components.json`) so an SDK in any language authors real native
+panels. The binary is the universal engine; each language brings only a thin
+client that wraps the protocol.
 
 **The model: Python owns state, the browser renders it.** Each panel is a Python
 *component* with a unique id. The **bridge** turns your calls into small JSON
@@ -1272,16 +1294,19 @@ then runs on a second, handler-only asyncio loop, kept separate from the
 server's so an ill-behaved handler still can't stall the wire). High-rate media
 (`VideoFeed`, `AudioFeed`, `push_binary`) skips JSON on a binary frame.
 
-**Auth & sharing.** Roles come from the login password, carried in a signed
-session cookie (no server-side store), so a viewer stays logged in across
-reconnects and restarts. Under `hot_reload`, a long-lived monitor process re-execs
-the worker on each save and owns the tunnel + cookie secret, so the public URL and
-sessions survive edits.
+**Auth & sharing.** Roles come from the login password, carried in a session
+cookie (the password itself never rides in the cookie), so a viewer stays logged
+in across reconnects and restarts. Under `hot_reload`, a long-lived monitor
+process re-execs the worker on each save and owns the tunnel, so the public URL
+and sessions survive edits.
 
 **Where to look:** `danvas/canvas.py` (the `Canvas` façade + factories),
-`danvas/bridge.py` (wire / replay / per-viewer sends), `danvas/server.py` (FastAPI
-+ auth), `danvas/components/` (the panels), `danvas/frontend/src/bridge.js` (the
-browser side).
+`danvas/bridge.py` (wire / replay / per-viewer sends), `danvas/remote.py` +
+`danvas/source.py` (dial into the broker as the host source),
+[`broker/src/main.rs`](broker/) (the `danvasd` broker), `PROTOCOL.md` /
+`danvas/_protocol.py` (the wire contract), `danvas/server.py` (the FastAPI
+reference hub behind `python -m danvas.merge`), `danvas/components/` (the panels),
+`danvas/frontend/src/bridge.js` (the browser side).
 
 ## Debugging the wire
 
