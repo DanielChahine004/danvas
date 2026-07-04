@@ -11,10 +11,10 @@ on:
     paths:
       - "broker/**"
       - "danvas/**"
-      - "tests/test_conformance.py"
+      - "tests/**"
       - ".github/workflows/broker.yml"
   pull_request:
-    paths: ["broker/**", "danvas/**", "tests/test_conformance.py"]
+    paths: ["broker/**", "danvas/**", "tests/**"]
   workflow_dispatch:
 
 jobs:
