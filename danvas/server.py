@@ -536,6 +536,22 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     async def upload(token: str, request: Request, name: str = "", viewer: str = ""):
         comp = bridge.upload_component(token)
         if comp is None:
+            # A hub doesn't own upload endpoints — a SOURCE does. Push the
+            # bytes over the wire (file_push + FILE envelope -> file_ack).
+            merge = getattr(bridge, "_merge", None)
+            if merge is not None:
+                filename = os.path.basename(name) or "upload.bin"
+                ctype = (request.headers.get("content-type")
+                         or "application/octet-stream")
+                try:
+                    body = await _read_upload_to_memory(request, None)
+                except Exception as exc:
+                    return PlainTextResponse(f"upload failed: {exc}",
+                                             status_code=400)
+                ack = await merge.push_file(token, filename, ctype, body)
+                if ack is not None:
+                    return {"ok": True, "name": ack.get("name", filename),
+                            "size": ack.get("size", len(body))}
             return PlainTextResponse("unknown upload target", status_code=404)
         # Per-endpoint role gate (canvas.receive_files(role=...) / Upload(role=...)):
         # the shared auth gate already requires a session; this restricts the

@@ -206,7 +206,7 @@ class RemoteCanvas(Canvas):
         client.on_frame(self._on_hub_frame)
         # Binary INPUT the hub routes to this source's panels (sendBinary /
         # camera / mic relays): through the real dispatch, like JSON input.
-        client._binary_hook = lambda data: self._bridge._on_binary_input(None, data)
+        client._binary_hook = lambda data: _hub_binary(self._bridge, data)
         # Live-announce inserts from the start: Canvas gates register_live on
         # _serving, and for a RemoteCanvas the dial-in session IS the serving
         # state. Frames sent before connect() drop at the (socket-less) client
@@ -334,6 +334,14 @@ def _dispatch_hub_frame(bridge, msg):
         rid = str(req).encode()
         bridge.broadcast_binary(bytes([6, len(rid)]) + rid + data)
         return
+    if kind == "file_push":
+        # An upload is arriving for one of this process's endpoints: the FILE
+        # bytes follow on the same socket; stash the meta until they land.
+        pushes = getattr(bridge, "_pending_pushes", None)
+        if pushes is None:
+            pushes = bridge._pending_pushes = {}
+        pushes[msg.get("reqId")] = msg
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         return
@@ -347,6 +355,56 @@ def _dispatch_hub_frame(bridge, msg):
 
 
 # -- serve(broker=True): the binary broker serves; this process is a source --
+
+def _hub_binary(bridge, data):
+    """Route a binary envelope from the hub: FILE completes a pending upload
+    push; everything else is binary INPUT for this process's panels."""
+    import json as _json
+    import os as _os
+    if len(data) >= 2 and data[0] == 6:                    # FILE
+        req = bytes(data[2:2 + data[1]]).decode("utf-8", "replace")
+        pushes = getattr(bridge, "_pending_pushes", {})
+        push = pushes.pop(req, None)
+        if push is None:
+            return
+        payload = bytes(data[2 + data[1]:])
+
+        def _ack(ok, **extra):
+            bridge.broadcast({"type": "file_ack", "reqId": req,
+                              "ok": ok, **extra})
+
+        comp = bridge.upload_component(push.get("token"))
+        # Unknown endpoint (another source's) or role-gated: decline —
+        # the hub can't verify per-endpoint roles, so fail closed.
+        if comp is None or getattr(comp, "_role", None) is not None:
+            _ack(False)
+            return
+        max_size = getattr(comp, "_max_size", None)
+        if max_size and len(payload) > max_size:
+            _ack(False, error="file too large")
+            return
+        filename = _os.path.basename(push.get("name") or "upload.bin")
+        dest = getattr(comp, "_dest", None)
+        info = {"name": filename, "size": len(payload),
+                "content_type": push.get("content_type")
+                or "application/octet-stream",
+                "data": None if dest else payload, "path": None}
+        if dest:
+            from .server import _safe_upload_path
+            try:
+                target = _safe_upload_path(dest, filename)
+                with open(target, "wb") as f:
+                    f.write(payload)
+                info["path"] = target
+                info["name"] = _os.path.basename(target)
+            except Exception:
+                _ack(False, error="write failed")
+                return
+        bridge.deliver_upload(comp, info, viewer=None)
+        _ack(True, name=info["name"], size=info["size"])
+        return
+    bridge._on_binary_input(None, data)
+
 
 def _find_danvasd():
     """Locate the danvasd binary: $DANVASD, the repo's cargo output, or PATH."""
@@ -441,7 +499,7 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
 
     client._replay_hook = _replay
     client.on_frame(lambda m: _dispatch_hub_frame(bridge, m))
-    client._binary_hook = lambda data: bridge._on_binary_input(None, data)
+    client._binary_hook = lambda data: _hub_binary(bridge, data)
     client.connect()
     canvas._serving = True
     canvas._broker = BrokerHandle(proc, client)

@@ -366,6 +366,8 @@ class _MergeHost:
         if ledger_path:
             from . import _ledger as _ledger_mod
             self._ledger = _ledger_mod.open_ledger(ledger_path)
+        # reqId -> {"remaining", "ack"}: one in-flight upload push.
+        self._pending_uploads = {}
         # reqId -> {"event", "remaining", "meta", "data"}: one in-flight
         # file pull per HTTP download; the owning source answers with
         # file_meta + a FILE binary envelope, non-owners decline.
@@ -737,6 +739,8 @@ class _MergeHost:
             self._fanout_upstream(up, msg)
         elif kind == "file_meta":
             self._file_meta(msg)
+        elif kind == "file_ack":
+            self._file_ack(msg)
         elif kind == "response":
             # The owner answered a viewer's request: route to the asker only.
             entry = self._pending_req.pop(msg.get("reqId"), None)
@@ -1195,6 +1199,7 @@ class _MergeHost:
             kind = msg.get("type")
             if kind in ("register", "update", "remove", "arrow", "draw",
                         "shape", "shape_update", "response", "file_meta",
+                        "file_ack",
                         "view", "shared", "graveyard_update"):
                 self._ingest(up, raw)
                 return True
@@ -1369,6 +1374,47 @@ class _MergeHost:
             return None
         finally:
             self._pending_files.pop(req, None)
+
+    async def push_file(self, token, filename, content_type, data,
+                        timeout=15.0):
+        """Push an uploaded file to whichever live source owns the endpoint
+        token: file_push meta + a FILE envelope to every source (opaque
+        tokens, same broadcast rule as pull); the owner acks, others decline.
+        Returns the ack dict or ``None``."""
+        targets = [up for up in self._upstreams.values() if up.ws is not None]
+        if not targets:
+            return None
+        import uuid as _uuid
+        req = _uuid.uuid4().hex
+        entry = {"remaining": len(targets), "ack": None}
+        self._pending_uploads[req] = entry
+        rid = req.encode()
+        frame = bytes([_BINARY_FILE_CODE, len(rid)]) + rid + bytes(data)
+        try:
+            for up in targets:
+                await up.send({"type": "file_push", "token": token,
+                               "reqId": req, "name": filename,
+                               "content_type": content_type})
+                await up.send_binary(frame)
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if entry["ack"] is not None:
+                    return entry["ack"]
+                if entry["remaining"] <= 0:
+                    return None
+                await asyncio.sleep(0.05)
+            return None
+        finally:
+            self._pending_uploads.pop(req, None)
+
+    def _file_ack(self, msg):
+        entry = self._pending_uploads.get(msg.get("reqId"))
+        if entry is None:
+            return
+        if msg.get("ok"):
+            entry["ack"] = msg
+        else:
+            entry["remaining"] -= 1
 
     def _file_meta(self, msg):
         entry = self._pending_files.get(msg.get("reqId"))

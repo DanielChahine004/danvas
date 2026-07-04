@@ -81,11 +81,13 @@ before the default flips (harness at 36 — shapes, request/response,
 presence, chat, `set_view`, shared assets, graveyard, and **roles** all
 landed; roles = multi-password login + wire-declared allowlists + hub-side
 egress/ingress enforcement, the row that mattered most for the declared
-endgame): **upload/download HTTP endpoints** is the one design-shaped row
-left, plus `persist=`/hot-reload under the transplant (likely re-scoped —
-ledger + retention cover most of their broker-mode value) and per-role
-prop OVERLAYS (update(roles=...) content slices — deferred, rarely used
-without multi-role setups that now exist, so pin it when someone needs it).
+endgame): **THE PARITY BOARD IS CLEAR** (harness at 38):
+uploads AND downloads cross both hubs (file_pull/file_push + the FILE
+envelope; owners hold the bytes; role-gated tokens/endpoints fail closed
+over a hub). What remains is by choice, not gap: per-role prop OVERLAYS
+(deferred until a real multi-role app needs them), `persist=`/hot-reload
+re-scope under the transplant (ledger + retention cover most of it), then
+THE DEFAULT FLIP and distribution.
 
 **The declared endgame (Daniel, 2026-07-04): the broker is THE
 implementation.** Once uploads/downloads land and the default flips, the

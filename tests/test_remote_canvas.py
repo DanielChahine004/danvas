@@ -164,3 +164,30 @@ def test_file_pull_serves_this_processes_download_tokens():
                                     "reqId": "r2"})
     assert [m for m in sent if m.get("type") == "file_meta"
             and m.get("reqId") == "r2"][-1]["ok"] is False
+
+
+def test_file_push_delivers_to_this_processes_upload_endpoint():
+    from danvas.remote import _dispatch_hub_frame, _hub_binary
+    c, sent = _canvas()
+    got = []
+    url = c.receive_files(lambda f: got.append(f))
+    token = url.rsplit("/", 1)[-1]
+    _dispatch_hub_frame(c._bridge, {"type": "file_push", "token": token,
+                                    "reqId": "u1", "name": "d.csv",
+                                    "content_type": "text/csv"})
+    rid = b"u1"
+    _hub_binary(c._bridge, bytes([6, len(rid)]) + rid + b"CSV,1,2")
+    import time
+    for _ in range(100):
+        if got:
+            break
+        time.sleep(0.01)
+    assert got and got[0].data == b"CSV,1,2" and got[0].name == "d.csv"
+    acks = [m for m in sent if m.get("type") == "file_ack"]
+    assert acks[-1]["ok"] is True and acks[-1]["size"] == 7
+    # a push for an endpoint we don't own is declined
+    _dispatch_hub_frame(c._bridge, {"type": "file_push", "token": "alien",
+                                    "reqId": "u2", "name": "x"})
+    _hub_binary(c._bridge, bytes([6, 2]) + b"u2" + b"zz")
+    assert [m for m in sent if m.get("type") == "file_ack"
+            and m.get("reqId") == "u2"][-1]["ok"] is False

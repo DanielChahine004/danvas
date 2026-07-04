@@ -151,6 +151,8 @@ struct Hub {
     /// In-flight file pulls (HTTP download -> owning source): reqId ->
     /// (meta, bytes, sources-still-undeclined).
     pending_files: HashMap<String, (Option<Value>, Option<Vec<u8>>, usize)>,
+    /// In-flight upload pushes: reqId -> (ack, sources-still-undeclined).
+    pending_uploads: HashMap<String, (Option<Value>, usize)>,
 }
 
 const VIEWER_COLORS: [&str; 6] =
@@ -520,6 +522,8 @@ async fn main() {
         .route("/__auth__", post(auth_handler))
         .route("/__describe__", get(describe_handler))
         .route("/__download__/:token", get(download_handler))
+        .route("/__upload__/:token", post(upload_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))
         .fallback(get(static_handler))
         .with_state(hub);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -623,6 +627,81 @@ async fn download_handler(
             hub.lock().unwrap().pending_files.remove(&req);
             return (StatusCode::NOT_FOUND, "download expired or not found")
                 .into_response();
+        }
+    }
+}
+
+/// Uploads through the hub: push the browser's bytes to whichever source
+/// owns the endpoint token (file_push meta + FILE envelope, broadcast; the
+/// owner acks, others decline).
+async fn upload_handler(
+    State(hub): State<Arc<Mutex<Hub>>>,
+    headers: HeaderMap,
+    axum::extract::Path(token): axum::extract::Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let req = format!("{}{}", now_hex(), CONN_SEQ.fetch_add(1, Ordering::Relaxed));
+    let filename = q
+        .get("name")
+        .map(|n| n.rsplit(['/', '\\']).next().unwrap_or(n).to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "upload.bin".into());
+    {
+        let mut h = hub.lock().unwrap();
+        if !h.authed(&headers) {
+            return (StatusCode::UNAUTHORIZED, "login required").into_response();
+        }
+        let targets: Vec<Tx> = h.sources.values().filter_map(|s| s.tx.clone()).collect();
+        if targets.is_empty() {
+            return (StatusCode::NOT_FOUND, "unknown upload target").into_response();
+        }
+        h.pending_uploads.insert(req.clone(), (None, targets.len()));
+        let ctype = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream");
+        let meta = json!({"type": "file_push", "token": token, "reqId": req,
+                          "name": filename, "content_type": ctype})
+            .to_string();
+        let rid = req.as_bytes();
+        let mut frame = Vec::with_capacity(2 + rid.len() + body.len());
+        frame.push(BIN_FILE);
+        frame.push(rid.len() as u8);
+        frame.extend_from_slice(rid);
+        frame.extend_from_slice(&body);
+        for tx in targets {
+            let _ = tx.send(Out::T(meta.clone()));
+            let _ = tx.send(Out::B(frame.clone()));
+        }
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut h = hub.lock().unwrap();
+        match h.pending_uploads.get(&req) {
+            Some((Some(_), _)) => {
+                let (ack, _) = h.pending_uploads.remove(&req).unwrap();
+                let ack = ack.unwrap();
+                let out = json!({"ok": true,
+                                 "name": ack.get("name").cloned()
+                                     .unwrap_or(Value::String(filename)),
+                                 "size": ack.get("size").cloned()
+                                     .unwrap_or(Value::Null)});
+                return ([(header::CONTENT_TYPE, "application/json")],
+                        out.to_string()).into_response();
+            }
+            Some((None, 0)) => {
+                h.pending_uploads.remove(&req);
+                return (StatusCode::NOT_FOUND, "unknown upload target")
+                    .into_response();
+            }
+            _ => {}
+        }
+        drop(h);
+        if std::time::Instant::now() > deadline {
+            hub.lock().unwrap().pending_uploads.remove(&req);
+            return (StatusCode::NOT_FOUND, "unknown upload target").into_response();
         }
     }
 }
@@ -1155,6 +1234,18 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
                 entry.0 = Some(frame.clone());
             } else if entry.2 > 0 {
                 entry.2 -= 1;
+            }
+        }
+        return;
+    }
+    if kind == "file_ack" {
+        let Some(req_id) = frame.get("reqId").and_then(Value::as_str) else { return };
+        let mut h = hub.lock().unwrap();
+        if let Some(entry) = h.pending_uploads.get_mut(req_id) {
+            if frame.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                entry.0 = Some(frame.clone());
+            } else if entry.1 > 0 {
+                entry.1 -= 1;
             }
         }
         return;

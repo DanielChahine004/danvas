@@ -110,6 +110,14 @@ are opaque); the owner replies `{"type": "file_meta", "reqId", "ok": true,
 `ok: false`. First success streams out as the HTTP response; all-declined or
 15 s → 404. Role-gated tokens are declined over a hub (fail closed).
 
+**Uploads** mirror it: the hub's `POST /__upload__/<token>?name=...` (raw
+body) broadcasts `{"type": "file_push", "token", "reqId", "name",
+"content_type"}` followed by a FILE envelope with the bytes; the owning
+source delivers to its endpoint handler and replies `{"type": "file_ack",
+"reqId", "ok": true, "name", "size"}` (non-owners `ok: false`); the hub
+answers the HTTP request from the ack. Owner-side `max_size` and role gates
+apply at the owner (role-gated endpoints fail closed over a hub).
+
 ## The merge control plane
 
 A merge hub speaks the base protocol to each source (as a `?proxy=1` client)

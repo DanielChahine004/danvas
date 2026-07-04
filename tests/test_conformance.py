@@ -1316,3 +1316,60 @@ def test_download_pulls_bytes_from_the_owning_source(hub):
                 await asyncio.sleep(0.05)
             assert result["miss"][0] == 404
     asyncio.run(asyncio.wait_for(go(), timeout=60))
+
+
+# -- uploads through the hub: bytes push owner-ward -------------------------------
+
+def test_upload_pushes_bytes_to_the_owning_source(hub):
+    import threading
+    import urllib.request
+    import urllib.error
+
+    result = {}
+
+    def post(token, key):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{hub}/__upload__/{token}?name=data.csv",
+            data=b"CSV,BYTES,42", method="POST",
+            headers={"Content-Type": "text/csv"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                result[key] = (r.status, r.read())
+        except urllib.error.HTTPError as e:
+            result[key] = (e.code, b"")
+
+    async def go():
+        async with _source(hub, "c29") as sws:
+            src = Peer(sws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            t = threading.Thread(target=post, args=("up-tok", "hit"))
+            t.start()
+            push = await src.recv_until(
+                lambda m: m.get("type") == "file_push"
+                and m.get("token") == "up-tok", timeout=10.0)
+            assert push["name"] == "data.csv"
+            req = push["reqId"]
+            blob = await src.recv_blob(lambda b: b and b[0] == 6, timeout=10.0)
+            code, rid, payload = _bin_parse(blob)
+            assert rid == req and payload == b"CSV,BYTES,42"
+            await src.send({"type": "file_ack", "reqId": req, "ok": True,
+                            "name": "data.csv", "size": len(payload)})
+            for _ in range(400):
+                if "hit" in result:
+                    break
+                await asyncio.sleep(0.05)
+            assert result["hit"][0] == 200
+            # an endpoint nobody owns: decline -> 404
+            t2 = threading.Thread(target=post, args=("up-nope", "miss"))
+            t2.start()
+            push2 = await src.recv_until(
+                lambda m: m.get("type") == "file_push"
+                and m.get("token") == "up-nope", timeout=10.0)
+            await src.send({"type": "file_ack", "reqId": push2["reqId"],
+                            "ok": False})
+            for _ in range(400):
+                if "miss" in result:
+                    break
+                await asyncio.sleep(0.05)
+            assert result["miss"][0] == 404
+    asyncio.run(asyncio.wait_for(go(), timeout=60))
