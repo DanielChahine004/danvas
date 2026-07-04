@@ -107,6 +107,55 @@ def test_serve_broker_end_to_end():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_forwards_view_background_and_merge_server():
+    # Tier-1 parity: serve() features that ride the host source or the broker's
+    # CLI must land through the broker just as they do embedded — the initial
+    # view (folded into welcome), background producer loops, and merge_server=.
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+
+    canvas = danvas.Canvas()
+    beat = canvas.label("beat", "waiting")
+
+    @canvas.background
+    def pulse():
+        beat.update("alive")   # a producer loop must run in the serving process
+
+    canvas.serve(broker=True, port=port, open_browser=False, block=False,
+                 view={"locked": True, "zoom": 2.0},
+                 merge_server="127.0.0.1:9999")
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                welcome = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                assert welcome["type"] == "welcome"
+                # serve(view=...) folded into the broker's welcome
+                assert (welcome.get("view") or {}).get("locked") is True
+                assert (welcome.get("view") or {}).get("zoom") == 2.0
+                # serve(merge_server=...) advertised for the "Merge…" button
+                assert welcome.get("mergeServer") == "127.0.0.1:9999"
+                # the background loop ran (through the broker) and its content
+                # reaches the browser — either as a live update (browser already
+                # connected) or folded into the replayed register (browser
+                # joined after the worker fired). Either proves _start_background
+                # ran and its frames crossed the hub.
+                end = time.monotonic() + 5
+                while time.monotonic() < end:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "update" and "alive" in json.dumps(m):
+                        return
+                    if (m.get("type") == "register" and m.get("name") == "beat"
+                            and "alive" in (m.get("props", {}).get("data") or "")):
+                        return
+                raise AssertionError("background update never arrived")
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():

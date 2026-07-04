@@ -460,7 +460,8 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                      password=None, passwords=None, host="127.0.0.1",
                      existing_port=None, persist=False, desktop=False,
                      window_title="danvas", window_size=(1200, 800),
-                     tunnel=False, tunnel_provider="cloudflared"):
+                     tunnel=False, tunnel_provider="cloudflared",
+                     merge_server=None, self_url=None):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -493,6 +494,13 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
         cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
         if password:
             cmd += ["--password", str(password)]
+        if merge_server:
+            # serve(merge_server=): the broker advertises it in welcome so the
+            # UI shows a "Merge…" button; self_url is the address that server
+            # dials back to reach this canvas.
+            cmd += ["--merge-server", str(merge_server)]
+            if self_url:
+                cmd += ["--self-url", str(self_url)]
         env = dict(os.environ)
         if passwords:
             # Role logins ride the env contract both hubs share.
@@ -549,6 +557,28 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             _tb.print_exc()
     client.connect()
     canvas._serving = True
+    # Background producer loops (a camera feed, a sensor stream) run in the
+    # serving process — their frames now ride the dial-in through the
+    # transplanted bridge, exactly as they'd ride the embedded server.
+    canvas._start_background()
+    # serve(view=...): the host source folds its view delta into the broker's
+    # hub view, which the broker bakes into every browser's welcome (the same
+    # `view` frame a source sends over the wire — see the conformance contract).
+    view = getattr(canvas._bridge, "_view", None)
+    if view:
+        client._send({"type": "view", "view": view})
+    # Pre-serve canvas.merge(url) calls: the broker owns merging, so replay them
+    # as merge frames instead of standing up the Python merge host. A known
+    # password uses merge_auth (dials with the session cookie); otherwise
+    # merge_add composes an open target.
+    pending = getattr(canvas, "_pending_merges", None)
+    if pending:
+        for url, pw, _offset in pending:
+            frame = {"type": "merge_auth" if pw else "merge_add", "uri": url}
+            if pw:
+                frame["password"] = pw
+            client._send(frame)
+        canvas._pending_merges = []
     tunnel_handle = None
     if tunnel:
         # A tunnel is a Python-side concern (pycloudflared) — point it at the

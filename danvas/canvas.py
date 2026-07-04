@@ -2362,8 +2362,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         broker_required = broker is True   # explicit demand vs "auto"
         if broker == "auto":
             from .remote import _find_danvasd
-            embedded_only = bool(merge_server
-                                 or os.environ.get("DANVAS_EMBEDDED"))
+            embedded_only = bool(os.environ.get("DANVAS_EMBEDDED"))
             broker = (not embedded_only) and _find_danvasd() is not None
         # Hot-reload monitor/worker split FIRST (for both serving modes). The
         # monitor-parent path exits inside this call; a worker returns and
@@ -2383,6 +2382,25 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             # _danvas_BROKER_PORT; workers dial into it rather than spawn.
             existing = os.environ.get("_danvas_BROKER_PORT")
             existing = int(existing) if existing else None
+            # Python-side setup that rides the host source (so it lands the same
+            # whether we serve embedded or through the broker): the debug frame
+            # tap, and the initial view — folded into the broker's welcome.
+            if debug:
+                self._bridge.add_frame_tap(self._debug_frame)
+            serve_view = self._normalize_view(view)
+            if serve_view is not None:
+                self._bridge._view = {**(self._bridge._view or {}), **serve_view}
+            # merge_server=: the address the broker advertises a "Merge…" button
+            # for; self_url is how that server dials back to reach this canvas
+            # (loopback for a local bind, else the LAN IP — a tunnel's public URL
+            # isn't known here, so merge_server suits a local/LAN canvas).
+            _self_url = None
+            if merge_server:
+                if host in ("127.0.0.1", "localhost", ""):
+                    _self_url = f"127.0.0.1:{port}"
+                else:
+                    from .server import _lan_ip
+                    _self_url = f"{_lan_ip() or host}:{port}"
             try:
                 # Native window (desktop=True, or a baked exe) points at the
                 # broker's URL just as it would the embedded server's — a pure
@@ -2395,7 +2413,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                     host=host, existing_port=existing, persist=persist,
                     desktop=_use_desktop, window_title=window_title,
                     window_size=window_size, tunnel=tunnel,
-                    tunnel_provider=tunnel_provider)
+                    tunnel_provider=tunnel_provider,
+                    merge_server=merge_server, self_url=_self_url)
             except _BrokerUnavailable as exc:
                 if broker_required:   # explicitly demanded -> surface it
                     raise
