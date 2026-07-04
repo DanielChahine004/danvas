@@ -164,6 +164,44 @@ def test_serve_broker_forwards_view_background_and_merge_server():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_on_request_round_trips():
+    # Tier-2 parity: canvas.request() from the browser must reach the owner's
+    # on_request handler through the broker and the reply must route back to
+    # exactly the asker (the broker's pending-request routing).
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+
+    canvas = danvas.Canvas()
+    btn = canvas.button("go")
+
+    @btn.on_request()
+    def _(req):
+        return {"echo": req.get("n", 0) * 2}
+
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                reg = None
+                while reg is None:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "register" and m.get("name") == "go":
+                        reg = m
+                await ws.send(json.dumps({"type": "request", "id": reg["id"],
+                                          "reqId": "r1", "data": {"n": 21}}))
+                while True:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "response" and m.get("reqId") == "r1":
+                        assert m["result"] == {"echo": 42}
+                        return
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():

@@ -353,6 +353,17 @@ def _dispatch_hub_frame(bridge, msg):
     elif kind == "layout":
         bridge._dispatch.submit(
             lambda c=comp, m=dict(msg): bridge._dispatch_layout(c, m, None))
+    elif kind == "request":
+        # A panel's canvas.request(data): the broker routed the browser's
+        # request to us (the owner). Answer it on the dispatch machinery and
+        # reply with a `response` correlated by reqId — the broker fans it back
+        # to exactly the asker (the same pending-request routing a browser gets
+        # from the embedded server). The broker already gated operability, so
+        # dispatch straight to the handler; the requester's viewer identity
+        # isn't carried over the hub, so on_request's second arg is empty.
+        bridge._dispatch.submit(
+            lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
+            bridge._dispatch_request(c, r, d, None))
 
 
 # -- serve(broker=True): the binary broker serves; this process is a source --
