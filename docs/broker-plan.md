@@ -95,8 +95,14 @@ workers dial in as the `host` source, and RETENTION holds the UI across
 each edit (no 502, no reconnect — strictly better than embedded). This
 reframes "embedded-only" from "broker-incompatible" to "owner-process
 concerns not yet reworked to drive the owner against the broker"; the same
-rework retires `persist=`/`desktop=`/`tunnel=`/`merge_server`/hosting and
-then the embedded server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
+rework retires the rest. **`persist=` DONE** (`b5ba1a5`) — an owner-STATE
+feature (vs hot_reload's owner-PROCESS), pattern holds across both: the
+owner's persist machinery runs under `serve_via_broker` (restore-before-
+connect so saved state rides the initial replay); round-trip verified
+through danvasd (browser sets 73 → owner → file → restored). Caveat: ink is
+hub-native so drawings don't round-trip; layout + values do. Left
+embedded-only: `desktop=`/`tunnel=`/`merge_server`/hosting → then delete the
+embedded server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
 (`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
 each platform's binary to the 38-assertion harness (plus the Python-hub
 reference everywhere and the full suite on Win/Linux); a `v*` tag attaches
