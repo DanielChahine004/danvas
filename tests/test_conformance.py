@@ -140,13 +140,21 @@ def _bin_parse(data):
     return code, data[2:2 + idlen].decode(), data[2 + idlen:]
 
 
+# max_queue=None: a real client (browser, Rust SDK) drains its socket
+# continuously and never backpressures. These test peers instead read only the
+# frames an assertion cares about and leave the rest buffered — with the default
+# 32-frame queue that overflows on a large replay, pausing the client's reader
+# so it can't even process the hub's Close frame at teardown (a 10s close_timeout
+# per connection). Unbounding the queue models the well-behaved client the
+# protocol assumes, fairly, against either hub.
 def _browser(port):
-    return ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None)
+    return ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None, max_queue=None)
 
 
 def _source(port, label):
     return ws_connect(
-        f"ws://127.0.0.1:{port}/ws?source=1&label={label}", max_size=None)
+        f"ws://127.0.0.1:{port}/ws?source=1&label={label}",
+        max_size=None, max_queue=None)
 
 
 def _run(coro):

@@ -42,6 +42,11 @@ static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../danvas/frontend/dist
 enum Out {
     T(String),
     B(Vec<u8>),
+    /// Terminal marker: the writer sends a WebSocket Close and returns. Emitted
+    /// on disconnect so the peer's own close handshake completes at once — a
+    /// client with buffered-but-unread frames must not have to wait out its
+    /// close_timeout because we merely dropped the socket.
+    Close,
 }
 
 /// Per-connection outbound buffer with *latest-wins conflation under
@@ -116,6 +121,7 @@ fn conflate_key(out: &Out) -> Option<String> {
             let id = bin_id(data)?;
             Some(format!("b:{}:{id}", data[0]))
         }
+        Out::Close => None,
     }
 }
 
@@ -470,6 +476,17 @@ impl Hub {
     fn fanout_browsers(&self, text: &str) {
         for tx in self.browsers.values() {
             let _ = tx.send(Out::T(text.to_string()));
+        }
+    }
+
+    /// Fan out to every subscriber EXCEPT one connection — used to keep a
+    /// source's own frames from echoing back to it (a source is a subscriber
+    /// too, but must not receive its own registers/updates/ink).
+    fn fanout_browsers_except(&self, text: &str, except: u64) {
+        for (id, tx) in &self.browsers {
+            if *id != except {
+                let _ = tx.send(Out::T(text.to_string()));
+            }
         }
     }
 
@@ -999,6 +1016,13 @@ async fn handle(
                     let msg = match out {
                         Out::T(t) => Message::Text(t),
                         Out::B(b) => Message::Binary(b),
+                        Out::Close => {
+                            // Flush what's queued, then close the handshake so
+                            // the peer's close() returns immediately.
+                            let _ = sink.send(Message::Close(None)).await;
+                            let _ = sink.flush().await;
+                            return;
+                        }
                     };
                     if sink.send(msg).await.is_err() {
                         return;
@@ -1045,17 +1069,39 @@ async fn handle(
         }
     }
 
+    // A source contributes; a browser (or an observing source) receives the
+    // composed canvas. A SOURCE also gets the replay — so it can find/edit/
+    // observe peers that already exist — but is NOT added to the live browser
+    // fan-out (no self-echo, no traffic it doesn't render); subscription copies
+    // still reach a source via `conns`. Only OTHER sources are replayed to a
+    // source (skipping itself), so an accumulating hub stays O(sources), not
+    // O(sources²) per source connect.
     if is_source {
         attach_source(&hub, &label, conn_id, tx.clone());
-    } else {
-        // Browser (or observing peer): replay every source's composed state.
+    }
+    {
         let frames: Vec<String> = {
             let mut h = hub.lock().unwrap();
-            h.browsers.insert(conn_id, tx.clone());
+            if !is_source {
+                h.browsers.insert(conn_id, tx.clone());
+            }
             h.conns.insert(conn_id, tx.clone());
             let mut out: Vec<String> = Vec::new();
-            for s in h.sources.values() {
+            for (slabel, s) in h.sources.iter() {
+                // A source replays only OTHER sources' panels (skip itself) —
+                // it dials in to find/edit peers, not to see its own panels.
+                if is_source && slabel == &label {
+                    continue;
+                }
                 for f in Hub::cached_frames(s) {
+                    // A source discovers peers' PANELS (registers/updates/
+                    // shapes) so it can find/edit/observe them; it has no use
+                    // for peers' freehand ink, and receiving a replayed draw
+                    // would land in the source's draw stream ahead of the
+                    // edits it's waiting on.
+                    if is_source && f.get("type").and_then(Value::as_str) == Some("draw") {
+                        continue;
+                    }
                     if let Some(cid) = f.get("id").and_then(Value::as_str) {
                         if !role_may_see(&role, &panel_roles(s, cid, Some(&f))) {
                             continue; // role-hidden panel: not replayed
@@ -1064,7 +1110,11 @@ async fn handle(
                     out.push(f.to_string());
                 }
             }
-            if !h.drawings.is_empty() {
+            // Freehand ink is a browser-render concern: a source contributing
+            // panels doesn't need (and shouldn't receive) the composed ink
+            // frame — replaying it would land in a source's draw stream ahead
+            // of the edits it's actually waiting on.
+            if !is_source && !h.drawings.is_empty() {
                 out.push(json!({"type": "draw", "diff": {
                     "added": h.drawings.clone().into_iter()
                         .collect::<Map<String, Value>>(),
@@ -1125,7 +1175,16 @@ async fn handle(
             source_down(&mut h, &label, &tx);
         }
     }
-    writer.abort();
+    // Complete the close handshake: ask the writer to flush its queue and send
+    // a Close, so the peer's close() returns at once instead of waiting out its
+    // close_timeout on a socket we merely dropped. Bounded — a wedged writer
+    // (e.g. a peer that stopped reading entirely) is aborted after the grace.
+    tx.send(Out::Close);
+    let mut writer = writer;
+    tokio::select! {
+        _ = &mut writer => {}
+        _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => writer.abort(),
+    }
 }
 
 /// A source's connection dropped (server-side dial-in close OR a dialed-out
@@ -1316,6 +1375,11 @@ async fn dial_out(
                             let msg = match out {
                                 Out::T(t) => TMsg::Text(t),
                                 Out::B(b) => TMsg::Binary(b),
+                                Out::Close => {
+                                    let _ = sink.send(TMsg::Close(None)).await;
+                                    let _ = sink.flush().await;
+                                    return;
+                                }
                             };
                             if sink.send(msg).await.is_err() {
                                 return;
@@ -1420,7 +1484,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             }
         }
         let text = json!({"type": "draw", "diff": ns_diff}).to_string();
-        h.fanout_browsers(&text);
+        h.fanout_browsers_except(&text, conn_id);
         return;
     }
     if kind == "file_meta" {
@@ -1470,7 +1534,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             }
         }
         let text = frame.to_string();
-        h.fanout_browsers(&text);
+        h.fanout_browsers_except(&text, conn_id);
         return;
     }
     if kind == "shared" {
@@ -1479,7 +1543,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             src.shared = Some(frame.clone());
         }
         let text = frame.to_string();
-        h.fanout_browsers(&text);
+        h.fanout_browsers_except(&text, conn_id);
         return;
     }
     if kind == "graveyard_update" {
@@ -1509,7 +1573,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             src.graveyard = Some(msg.clone());
         }
         let text = msg.to_string();
-        h.fanout_browsers(&text);
+        h.fanout_browsers_except(&text, conn_id);
         return;
     }
     if !matches!(kind.as_str(),
@@ -1613,12 +1677,13 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         .map(|s| panel_roles(s, &nsid, Some(&frame)))
         .unwrap_or_default();
     if roles.is_empty() {
-        h.fanout_browsers(&text);
+        h.fanout_browsers_except(&text, conn_id);
     } else {
         // Role egress: frames tied to a role-restricted panel reach only
         // viewers whose login role is on the allowlist.
         let ids: Vec<u64> = h.browsers.keys().cloned().collect();
         for bid in ids {
+            if bid == conn_id { continue; }   // don't echo to the origin source
             let vrole = viewer_role(&h, bid);
             if role_may_see(&vrole, &roles) {
                 if let Some(tx) = h.browsers.get(&bid) {
