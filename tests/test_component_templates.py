@@ -289,3 +289,37 @@ def test_serve_via_broker_desktop_opens_window_at_broker_url(monkeypatch):
                                 desktop=True, window_title="MyApp")
     assert captured["url"] == "http://127.0.0.1:9911"    # window -> broker
     assert captured["title"] == "MyApp"
+
+
+def test_serve_tunnel_opens_python_owned_tunnel_to_broker_port(monkeypatch):
+    # tunnel=True through the broker: Python opens a tunnel to danvasd's port
+    # (a client-side concern, like the hot-reload monitor tunnels the worker).
+    import danvas.remote as remote_mod
+    import types, sys as _sys
+    opened = {}
+
+    class FakeTunnel:
+        url = "https://x.trycloudflare.com"
+        def stop(self): opened["stopped"] = True
+    fake_tunnel_mod = types.ModuleType("danvas.tunnel")
+    fake_tunnel_mod.open_tunnel = lambda port, provider="cloudflared": (
+        opened.update(port=port), FakeTunnel())[1]
+    monkeypatch.setitem(_sys.modules, "danvas.tunnel", fake_tunnel_mod)
+    monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
+
+    class FakeProc:
+        pid = 1; 
+        def poll(self): return None
+        def terminate(self): pass
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr("socket.create_connection",
+                        lambda *a, **k: type("S", (), {"close": lambda self: None})())
+    monkeypatch.setattr(remote_mod.SourceClient, "connect", lambda self, **k: self)
+
+    c = danvas.Canvas()
+    remote_mod.serve_via_broker(c, port=8080, open_browser=False, block=False,
+                                tunnel=True)
+    assert opened["port"] == 8080                 # tunnel -> the broker's port
+    assert c._broker.tunnel is not None
+    c._broker.stop()
+    assert opened.get("stopped") is True          # torn down with the broker

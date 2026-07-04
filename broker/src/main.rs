@@ -251,6 +251,11 @@ struct Hub {
     /// The hub view (camera/chrome), folded from sources' `view` frames and
     /// baked into welcome for late joiners.
     hub_view: Map<String, Value>,
+    /// serve(merge_server=): a standing merge server URL the UI shows a
+    /// "Merge…" button for (welcome.mergeServer). self_url is the address that
+    /// server dials back to reach this canvas.
+    merge_server: Option<String>,
+    self_url: Option<String>,
     /// In-flight file pulls (HTTP download -> owning source): reqId ->
     /// (meta, bytes, sources-still-undeclined).
     pending_files: HashMap<String, (Option<Value>, Option<Vec<u8>>, usize)>,
@@ -594,6 +599,8 @@ async fn main() {
     let mut port: u16 = 8080;
     let mut host = std::net::IpAddr::from([127, 0, 0, 1]);
     let mut password: Option<String> = None;
+    let mut merge_server: Option<String> = None;
+    let mut self_url: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -611,6 +618,8 @@ async fn main() {
                 }
             }
             "--password" => password = args.next().filter(|s| !s.is_empty()),
+            "--merge-server" => merge_server = args.next().filter(|s| !s.is_empty()),
+            "--self-url" => self_url = args.next().filter(|s| !s.is_empty()),
             _ => {}
         }
     }
@@ -629,6 +638,8 @@ async fn main() {
         run_id: now_hex(),
         password,
         role_passwords,
+        merge_server,
+        self_url,
         ledger: std::env::var("DANVAS_LEDGER").ok().as_deref().and_then(open_ledger),
         ..Default::default()
     }));
@@ -971,6 +982,8 @@ async fn handle(
             "view": if h.hub_view.is_empty() { Value::Null }
                     else { Value::Object(h.hub_view.clone()) },
             "mergeHost": true,
+            "mergeServer": h.merge_server,
+            "selfUrl": h.self_url,
             "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
         })
     };

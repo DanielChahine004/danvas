@@ -441,25 +441,26 @@ class _BrokerUnavailable(RuntimeError):
 class BrokerHandle:
     """The running broker behind serve(broker=True): stop() ends it."""
 
-    def __init__(self, proc, client):
+    def __init__(self, proc, client, tunnel=None):
         self.proc = proc
         self.client = client
+        self.tunnel = tunnel
 
     def stop(self):
-        try:
-            self.client.close()
-        except Exception:
-            pass
-        try:
-            self.proc.terminate()
-        except Exception:
-            pass
+        for closer in (lambda: self.client.close(),
+                       lambda: self.tunnel and self.tunnel.stop(),
+                       lambda: self.proc and self.proc.terminate()):
+            try:
+                closer()
+            except Exception:
+                pass
 
 
 def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                      password=None, passwords=None, host="127.0.0.1",
                      existing_port=None, persist=False, desktop=False,
-                     window_title="danvas", window_size=(1200, 800)):
+                     window_title="danvas", window_size=(1200, 800),
+                     tunnel=False, tunnel_provider="cloudflared"):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -548,7 +549,19 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             _tb.print_exc()
     client.connect()
     canvas._serving = True
-    canvas._broker = BrokerHandle(proc, client)
+    tunnel_handle = None
+    if tunnel:
+        # A tunnel is a Python-side concern (pycloudflared) — point it at the
+        # broker's port, exactly as the hot-reload monitor tunnels the worker's
+        # port. The broker serves; Python owns the public URL.
+        from .tunnel import open_tunnel
+        try:
+            tunnel_handle = open_tunnel(port, provider=tunnel_provider)
+            print(f"[danvas] public URL: {tunnel_handle.url}"
+                  "   <- share this; served by danvasd behind it")
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(f"tunnel failed to start ({exc}); serving locally")
+    canvas._broker = BrokerHandle(proc, client, tunnel_handle)
     url = f"http://127.0.0.1:{port}"
     if proc is not None:
         print(f"[danvas] serving via danvasd at {url}"
