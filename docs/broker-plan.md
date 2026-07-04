@@ -91,9 +91,15 @@ demands it; danvasd grew `--host` for LAN binds). **CROSS-OS CI IS GREEN**
 (`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
 each platform's binary to the 38-assertion harness (plus the Python-hub
 reference everywhere and the full suite on Win/Linux); a `v*` tag attaches
-the three binaries to a GitHub release. What remains: cut the first tag,
-wheels bundling the binary (`pip install danvas[broker]`), TLS in
-dial-out, and the deferred overlays / persist re-scope.
+the three binaries to a GitHub release. **OFFLINE WHEELS DONE**: CI
+builds a per-OS platform wheel bundling danvasd in `danvas/_bin/` (Linux
+musl-static → manylinux2014, mac arm64, win amd64), verified installing to
+site-packages and resolving offline; `serve(broker='auto')` falls back to
+the embedded server if the binary is absent OR won't launch (wrong
+arch/corrupt). A `v*` tag attaches the three wheels + a pure fallback wheel
++ raw binaries to the release. What remains is elective: cut the first tag,
+optional PyPI publish, TLS in dial-out, and the deferred overlays / persist
+re-scope.
 
 **The declared endgame (Daniel, 2026-07-04): the broker is THE
 implementation.** Once uploads/downloads land and the default flips, the
