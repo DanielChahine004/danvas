@@ -11,7 +11,8 @@
 #
 # It republishes the exact wheels already attached to the GitHub release
 # (byte-identical to what release downloaders got) plus a freshly built sdist
-# (a source install has no binary and falls back to the embedded server).
+# (a source install has no bundled binary; serving is broker-only, so it needs a
+# danvasd on $DANVASD/PATH or a cargo build).
 name: publish-pypi
 
 on:
@@ -43,8 +44,9 @@ jobs:
         run: |
           mkdir -p dist
           gh release download "${{ inputs.tag }}" --pattern '*.whl' --dir dist
-          # sdist has no binary (danvas/_bin absent) — a source install falls
-          # back to the embedded server, which is correct.
+          # sdist has no binary (danvas/_bin absent) — a source install serves
+          # via a danvasd on $DANVASD/PATH or a cargo build (serving is
+          # broker-only; there is no embedded server).
           pip install build
           python -m build --sdist --outdir dist
           echo "--- publishing ---"; ls dist

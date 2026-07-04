@@ -1,8 +1,10 @@
 """Build shim: make the wheel PLATFORM-SPECIFIC when a danvasd binary is
 bundled (danvas/_bin/), so a per-OS wheel ships the broker inside it (offline,
 no runtime download). With no binary present the build stays a pure
-``py3-none-any`` wheel — the automatic fallback for platforms we don't ship a
-binary for. Everything else lives in pyproject.toml.
+``py3-none-any`` wheel — it imports and can dial into a running canvas
+(``danvas.connect``), but since serving is broker-only, ``serve()`` then needs a
+danvasd on ``$DANVASD``/``PATH`` (or a cargo build in a dev checkout). Everything
+else lives in pyproject.toml.
 
 The wheel-building CI (a v* tag) does, per OS:
     cargo build --release  ->  copy into danvas/_bin/  ->  python -m build
