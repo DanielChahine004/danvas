@@ -6,9 +6,10 @@
 //! browser input, streams updates back. The whole stack is then
 //! `danvasd.exe` + this program + a browser.
 //!
-//!     danvasd --port 8080
-//!     cargo run --example rust_canvas -- --port 8080
-//!     # open http://127.0.0.1:8080
+//!     cargo run --example rust_canvas
+//!     # that's it — it spawns danvasd itself if nothing is serving the port,
+//!     # opens the browser, and dials in. (Against an already-running hub —
+//!     # danvasd OR a Python canvas — it just dials in.)
 //!
 //! This is the seed of the `danvas-source` crate: connect, replay-on-
 //! reconnect, heartbeat, register_template, on_input — the whole dial-in
@@ -58,6 +59,46 @@ async fn main() {
     }
     let templates: Value = serde_json::from_str(TEMPLATES).expect("templates");
     let uri = format!("ws://127.0.0.1:{port}/ws?source=1&label=rust-canvas");
+
+    // No hub on the port? Spawn danvasd ourselves — the Rust twin of
+    // Python's serve(broker=True). The broker is deliberately left running
+    // when this program exits: the UI surviving the script IS the model
+    // (retention holds the panels; rerun this program and it heals).
+    if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        let broker = std::env::var("DANVASD").ok().or_else(|| {
+            let sibling = std::env::current_exe().ok()?.parent()?.parent()?
+                .join(if cfg!(windows) { "danvasd.exe" } else { "danvasd" });
+            sibling.exists().then(|| sibling.to_string_lossy().into_owned())
+        }).unwrap_or_else(|| "danvasd".into());
+        match std::process::Command::new(&broker)
+            .args(["--port", &port.to_string()])
+            .spawn()
+        {
+            Ok(child) => {
+                println!("[rust-canvas] spawned danvasd (pid {}) on :{port} — \
+                          it outlives this program; kill it to stop serving",
+                         child.id());
+                for _ in 0..100 {
+                    if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                let url = format!("http://127.0.0.1:{port}");
+                #[cfg(windows)]
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &url]).spawn();
+                #[cfg(not(windows))]
+                let _ = std::process::Command::new(
+                    if cfg!(target_os = "macos") { "open" } else { "xdg-open" })
+                    .arg(&url).spawn();
+            }
+            Err(e) => {
+                eprintln!("[rust-canvas] no hub on :{port} and couldn't spawn \
+                           danvasd ({e}) — set $DANVASD or start a hub first");
+            }
+        }
+    }
 
     // Reconnect loop: replay our panels on every (re)connect — the dial-in
     // role's one obligation (the hub replays to browsers; we replay to it).
