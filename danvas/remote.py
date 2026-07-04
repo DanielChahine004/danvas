@@ -432,6 +432,11 @@ def _find_danvasd():
     return shutil.which("danvasd")
 
 
+class _BrokerUnavailable(RuntimeError):
+    """The broker binary is absent or won't launch — the caller falls back to
+    the embedded server (raised only from the broker launch path)."""
+
+
 class BrokerHandle:
     """The running broker behind serve(broker=True): stop() ends it."""
 
@@ -471,9 +476,7 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
 
     binary = _find_danvasd()
     if binary is None:
-        raise RuntimeError(
-            "danvasd binary not found — set $DANVASD, put danvasd on PATH, "
-            "or build broker/ (cargo build --release)")
+        raise _BrokerUnavailable("danvasd binary not found")
     cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
     if password:
         cmd += ["--password", str(password)]
@@ -491,11 +494,14 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             break
         except OSError:
             if proc.poll() is not None:
-                raise RuntimeError("danvasd exited on startup")
+                # Won't launch (wrong arch, corrupt, missing lib): not fatal —
+                # the auto path falls back to the embedded server.
+                raise _BrokerUnavailable(
+                    f"danvasd exited on startup (code {proc.returncode})")
             _time.sleep(0.1)
     else:
         proc.terminate()
-        raise RuntimeError("danvasd never opened its port")
+        raise _BrokerUnavailable("danvasd never opened its port")
 
     bridge = canvas._bridge
     login = password or (next(iter(passwords.values())) if passwords else None)

@@ -209,3 +209,29 @@ def test_serve_auto_resolves_to_broker(monkeypatch):
     with _pytest.raises(SystemExit):
         c3.serve(open_browser=False, block=False)
     assert not calls
+
+
+def test_serve_auto_falls_back_when_broker_wont_launch(monkeypatch):
+    # A found-but-unlaunchable binary (wrong arch, corrupt) must NOT break
+    # serve() in auto mode — it falls back to the embedded server.
+    import danvas.remote as remote_mod
+    from danvas.remote import _BrokerUnavailable
+
+    def boom(canvas, **kw):
+        raise _BrokerUnavailable("danvasd exited on startup (code 1)")
+    monkeypatch.setattr(remote_mod, "serve_via_broker", boom)
+    monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
+
+    import pytest as _pytest
+    monkeypatch.setattr(
+        danvas.Canvas, "_maybe_handoff_reload",
+        lambda self, *a, **k: (_ for _ in ()).throw(SystemExit("embedded")))
+    c = danvas.Canvas()
+    with _pytest.warns(UserWarning, match="broker unavailable"):
+        with _pytest.raises(SystemExit, match="embedded"):   # reached embedded
+            c.serve(open_browser=False, block=False)
+
+    # broker=True (explicit) instead surfaces the failure
+    c2 = danvas.Canvas()
+    with _pytest.raises(_BrokerUnavailable):
+        c2.serve(broker=True, open_browser=False, block=False)

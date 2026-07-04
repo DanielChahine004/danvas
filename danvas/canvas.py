@@ -2356,6 +2356,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # the binary and raises without it. DANVAS_EMBEDDED=1 force-disables
         # globally. Embedded-only today: hot_reload, persist=, desktop
         # windows, tunnels, merge_server, and the hosting button.
+        broker_required = broker is True   # explicit demand vs "auto"
         if broker == "auto":
             from .remote import _find_danvasd
             embedded_only = bool(hot_reload or persist or desktop or tunnel
@@ -2363,10 +2364,18 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                                  or os.environ.get("DANVAS_EMBEDDED"))
             broker = (not embedded_only) and _find_danvasd() is not None
         if broker:
-            from .remote import serve_via_broker
-            return serve_via_broker(self, port=port, open_browser=open_browser,
-                                    block=block, password=password,
-                                    passwords=passwords, host=host)
+            from .remote import serve_via_broker, _BrokerUnavailable
+            try:
+                return serve_via_broker(
+                    self, port=port, open_browser=open_browser, block=block,
+                    password=password, passwords=passwords, host=host)
+            except _BrokerUnavailable as exc:
+                if broker_required:   # explicitly demanded -> surface it
+                    raise
+                # broker="auto": the binary is missing or won't run here;
+                # fall through to the embedded server so serve() still works.
+                warnings.warn(f"broker unavailable ({exc}); serving with the "
+                              "embedded server", stacklevel=2)
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.

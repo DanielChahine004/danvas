@@ -100,6 +100,13 @@ jobs:
             [ -e "$w" ] || continue
             mv "$w" "${w/linux_x86_64/manylinux2014_x86_64}"
           done
+          # the macos-latest runner is arm64 and ships an arm64 binary — pin
+          # the tag to arm64 (Python's native universal2 tag would overclaim
+          # Intel, where the arm binary can't run).
+          for w in dist/*universal2.whl dist/*x86_64.whl; do
+            [ -e "$w" ] || continue
+            case "$w" in *macosx*) mv "$w" "$(echo "$w" | sed -E 's/macosx_[0-9_]+_(universal2|x86_64)/macosx_11_0_arm64/')";; esac
+          done
 
       - uses: actions/upload-artifact@v4
         with:
