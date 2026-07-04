@@ -184,7 +184,7 @@ def _apply_live_patch(port, old_text, new_text):
 
 
 def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared",
-                watch=None):
+                watch=None, broker=False):
     """Re-run ``main_file`` as a subprocess, restarting it on edits.
 
     This is the monitor side of ``serve(hot_reload=True)``: it never binds a
@@ -264,6 +264,40 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
             if snap != last:
                 return snap
 
+    # Broker mode: spawn danvasd ONCE here in the long-lived monitor (like the
+    # tunnel below), so it outlives every worker restart. Workers dial into it
+    # as the "host" source (via _danvas_BROKER_PORT) instead of binding the
+    # port themselves — so the browser stays connected to danvasd across an
+    # edit and retention holds the panels (dim -> refresh) with no disconnect,
+    # no 502. A failure to launch is non-fatal: fall back to embedded workers.
+    danvasd_proc = None
+    if broker:
+        from .remote import _find_danvasd
+        import socket as _socket
+        binary = _find_danvasd()
+        if binary:
+            danvasd_proc = subprocess.Popen(
+                [binary, "--port", str(port), "--host", "127.0.0.1"])
+            _end = time.time() + 15
+            up = False
+            while time.time() < _end:
+                try:
+                    _socket.create_connection(("127.0.0.1", port), 0.5).close()
+                    up = True
+                    break
+                except OSError:
+                    if danvasd_proc.poll() is not None:
+                        break
+                    time.sleep(0.1)
+            if up:
+                base_env["_danvas_BROKER_PORT"] = str(port)
+                print(f"danvas hot reload: broker (danvasd) on :{port} — "
+                      "UI survives every restart (retention)")
+            else:
+                danvasd_proc = None
+                print("danvas hot reload: danvasd wouldn't start; "
+                      "workers serve embedded")
+
     _watched = "*.py" + (", " + ", ".join(watch_patterns) if watch_patterns else "")
     print(f"danvas hot reload: watching {directory} ({_watched})")
     proc = spawn(restart=False)
@@ -333,7 +367,11 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
             # Partial React-source hot update: skip the restart entirely when the
             # only change is in top-level string variables used as canvas.react(source=).
             only_main_changed = (
-                prev_snap.get(main_file_abs) != last.get(main_file_abs)
+                danvasd_proc is None   # live-patch HTTP-pokes the worker's own
+                                       # endpoints; in broker mode danvasd owns
+                                       # the port, so just restart (seamless via
+                                       # retention — the browser never drops).
+                and prev_snap.get(main_file_abs) != last.get(main_file_abs)
                 and set(prev_snap.keys()) == set(last.keys())
                 and all(prev_snap[f] == last[f]
                         for f in last if f != main_file_abs)
@@ -369,5 +407,7 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
     finally:
         if proc is not None and proc.poll() is None:
             stop(proc)
+        if danvasd_proc is not None and danvasd_proc.poll() is None:
+            stop(danvasd_proc)
         if persistent_tunnel is not None:
             persistent_tunnel.stop()

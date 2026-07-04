@@ -456,7 +456,8 @@ class BrokerHandle:
 
 
 def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
-                     password=None, passwords=None, host="127.0.0.1"):
+                     password=None, passwords=None, host="127.0.0.1",
+                     existing_port=None):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -474,34 +475,42 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     import time as _time
     import webbrowser
 
-    binary = _find_danvasd()
-    if binary is None:
-        raise _BrokerUnavailable("danvasd binary not found")
-    cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
-    if password:
-        cmd += ["--password", str(password)]
-    env = dict(os.environ)
-    if passwords:
-        # Role logins ride the env contract both hubs share.
-        env["DANVAS_ROLE_PASSWORDS"] = ",".join(
-            f"{r}={pw}" for r, pw in passwords.items())
-    proc = subprocess.Popen(cmd, env=env)
     import socket as _socket
-    deadline = _time.time() + 15
-    while _time.time() < deadline:
-        try:
-            _socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-            break
-        except OSError:
-            if proc.poll() is not None:
-                # Won't launch (wrong arch, corrupt, missing lib): not fatal —
-                # the auto path falls back to the embedded server.
-                raise _BrokerUnavailable(
-                    f"danvasd exited on startup (code {proc.returncode})")
-            _time.sleep(0.1)
+    if existing_port is not None:
+        # A broker is already running (the hot-reload monitor owns it) — dial
+        # into it instead of spawning our own. The UI lives in that danvasd, so
+        # this process restarting (an edit) never drops the browser: retention
+        # holds the panels while we re-dial.
+        port = existing_port
+        proc = None
     else:
-        proc.terminate()
-        raise _BrokerUnavailable("danvasd never opened its port")
+        binary = _find_danvasd()
+        if binary is None:
+            raise _BrokerUnavailable("danvasd binary not found")
+        cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
+        if password:
+            cmd += ["--password", str(password)]
+        env = dict(os.environ)
+        if passwords:
+            # Role logins ride the env contract both hubs share.
+            env["DANVAS_ROLE_PASSWORDS"] = ",".join(
+                f"{r}={pw}" for r, pw in passwords.items())
+        proc = subprocess.Popen(cmd, env=env)
+        deadline = _time.time() + 15
+        while _time.time() < deadline:
+            try:
+                _socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    # Won't launch (wrong arch, corrupt, missing lib): not
+                    # fatal — the auto path falls back to the embedded server.
+                    raise _BrokerUnavailable(
+                        f"danvasd exited on startup (code {proc.returncode})")
+                _time.sleep(0.1)
+        else:
+            proc.terminate()
+            raise _BrokerUnavailable("danvasd never opened its port")
 
     bridge = canvas._bridge
     login = password or (next(iter(passwords.values())) if passwords else None)
@@ -527,8 +536,9 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     canvas._serving = True
     canvas._broker = BrokerHandle(proc, client)
     url = f"http://127.0.0.1:{port}"
-    print(f"[danvas] serving via danvasd at {url}"
-          f"  (broker pid {proc.pid}; UI survives this process)")
+    if proc is not None:
+        print(f"[danvas] serving via danvasd at {url}"
+              f"  (broker pid {proc.pid}; UI survives this process)")
     if open_browser:
         webbrowser.open(url)
     if not block:

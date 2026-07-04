@@ -2354,21 +2354,40 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # requested; broker=False forces the embedded Python server (also the
         # automatic fallback when the binary is missing); broker=True demands
         # the binary and raises without it. DANVAS_EMBEDDED=1 force-disables
-        # globally. Embedded-only today: hot_reload, persist=, desktop
-        # windows, tunnels, merge_server, and the hosting button.
+        # globally. Embedded-only today: persist=, desktop windows, tunnels,
+        # merge_server, and the hosting button. hot_reload is NOT embedded-only
+        # any more — it runs through the broker (the monitor owns one danvasd;
+        # workers dial in; retention holds the UI across each restart, so the
+        # browser never even disconnects across an edit).
         broker_required = broker is True   # explicit demand vs "auto"
         if broker == "auto":
             from .remote import _find_danvasd
-            embedded_only = bool(hot_reload or persist or desktop or tunnel
-                                 or merge_server
+            embedded_only = bool(persist or desktop or tunnel or merge_server
                                  or os.environ.get("DANVAS_EMBEDDED"))
             broker = (not embedded_only) and _find_danvasd() is not None
+        # Hot-reload monitor/worker split FIRST (for both serving modes). The
+        # monitor-parent path exits inside this call; a worker returns and
+        # continues to serve (broker or embedded).
+        handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
+                                             tunnel_provider, watch,
+                                             broker=broker)
+        if namespace is not None:
+            self._namespace = namespace
+        if handoff.should_return:
+            return self
+        if handoff.open_browser is not None:
+            open_browser = handoff.open_browser
         if broker:
             from .remote import serve_via_broker, _BrokerUnavailable
+            # Under hot_reload the monitor spawned danvasd once and set
+            # _danvas_BROKER_PORT; workers dial into it rather than spawn.
+            existing = os.environ.get("_danvas_BROKER_PORT")
+            existing = int(existing) if existing else None
             try:
                 return serve_via_broker(
-                    self, port=port, open_browser=open_browser, block=block,
-                    password=password, passwords=passwords, host=host)
+                    self, port=existing or port, open_browser=open_browser,
+                    block=block, password=password, passwords=passwords,
+                    host=host, existing_port=existing)
             except _BrokerUnavailable as exc:
                 if broker_required:   # explicitly demanded -> surface it
                     raise
@@ -2376,17 +2395,6 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 # fall through to the embedded server so serve() still works.
                 warnings.warn(f"broker unavailable ({exc}); serving with the "
                               "embedded server", stacklevel=2)
-        # Hot-reload / reload pre-flight handoff. May exit (the import
-        # pre-flight), hand off to the file-watch monitor (return early), or
-        # force open_browser off when a reload restart should reuse the tab.
-        handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
-                                             tunnel_provider, watch)
-        if namespace is not None:
-            self._namespace = namespace
-        if handoff.should_return:
-            return self
-        if handoff.open_browser is not None:
-            open_browser = handoff.open_browser
         # Under hot reload the persistent monitor process owns the tunnel, so this
         # worker must not open its own — but it's still publicly reachable
         # *through* that tunnel, so every public-exposure decision stays keyed on
@@ -2526,7 +2534,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         )
 
     def _maybe_handoff_reload(self, hot_reload, block, port, tunnel,
-                              tunnel_provider, watch=None):
+                              tunnel_provider, watch=None, broker=False):
         """Handle the hot-reload pre-flight and monitor handoff for serve().
 
         Returns ``_ReloadHandoff(should_return, open_browser)``: when
@@ -2581,7 +2589,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 [sys.executable, "-m", "danvas._hotreload_monitor",
                  main_file, str(port),
                  str(int(bool(tunnel))),
-                 str(tunnel_provider or "cloudflared")],
+                 str(tunnel_provider or "cloudflared"),
+                 str(int(bool(broker)))],
                 env=env,
             )
             try:

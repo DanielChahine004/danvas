@@ -227,8 +227,11 @@ def test_serve_auto_falls_back_when_broker_wont_launch(monkeypatch):
     monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
 
     import pytest as _pytest
+    # Sentinel for "fell through to the embedded server": stub its block=False
+    # entry point (the handoff now runs BEFORE the broker branch, so it can't
+    # be the sentinel any more).
     monkeypatch.setattr(
-        danvas.Canvas, "_maybe_handoff_reload",
+        danvas.Canvas, "_serve_background",
         lambda self, *a, **k: (_ for _ in ()).throw(SystemExit("embedded")))
     c = danvas.Canvas()
     with _pytest.warns(UserWarning, match="broker unavailable"):
