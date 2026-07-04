@@ -130,7 +130,10 @@ struct Hub {
     /// DANVAS_ROLE_PASSWORDS=role=pw,role2=pw2 defines role logins.
     password: Option<String>,
     role_passwords: Vec<(String, String)>,
-    sessions: HashMap<String, Option<String>>,
+    /// token -> (role, expiry). Bounded by a TTL + prune-on-insert so a
+    /// long-lived protected broker's login tokens can't grow without limit
+    /// (the Python hub is stateless/HMAC-signed and needs no such store).
+    sessions: HashMap<String, (Option<String>, std::time::Instant)>,
     /// Dialed-out sources (merge_add): label -> the retrying dial task, so
     /// merge_remove can stop it for good.
     dial_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
@@ -236,10 +239,13 @@ impl Hub {
         else {
             return Err(());
         };
+        let now = std::time::Instant::now();
         for c in cookies.split(';') {
             if let Some(t) = c.trim().strip_prefix("pc_session=") {
-                if let Some(role) = self.sessions.get(t) {
-                    return Ok(role.clone());
+                if let Some((role, exp)) = self.sessions.get(t) {
+                    if *exp > now {
+                        return Ok(role.clone());
+                    }
                 }
             }
         }
@@ -565,7 +571,15 @@ async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl 
                 LOGIN_PAGE).into_response();
     };
     let token = format!("{}{}", now_hex(), CONN_SEQ.fetch_add(1, Ordering::Relaxed));
-    h.sessions.insert(token.clone(), role);
+    // Sessions live 30 days (a cookie surviving reconnects/restarts, matching
+    // the Python hub's signed-token lifetime); prune the expired whenever the
+    // map grows, so it stays bounded no matter how many logins occur.
+    let now = std::time::Instant::now();
+    let ttl = std::time::Duration::from_secs(30 * 24 * 3600);
+    if h.sessions.len() > 1024 {
+        h.sessions.retain(|_, (_, exp)| *exp > now);
+    }
+    h.sessions.insert(token.clone(), (role, now + ttl));
     (StatusCode::SEE_OTHER,
      [(header::LOCATION, "/".to_string()),
       (header::SET_COOKIE,

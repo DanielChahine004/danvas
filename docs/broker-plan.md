@@ -140,19 +140,28 @@ behavioral spec, not the 12k-line package.
 
 ## Why (and why not yet)
 
-| Gain | Ballpark |
-|---|---|
-| Fan-out throughput | Python asyncio+orjson ceiling ~10⁴–10⁵ small frames/s/core → **5–20×** |
-| Tail latency | no GC/GIL pauses → per-frame jitter drops an order of magnitude |
-| Footprint | ~30–60 MB RSS → **~5–15 MB**; cold start ~1 s → ~10 ms |
-| Deployment | UI survives *any* script, no Python required on the box |
+MEASURED (`tests/benchmark_hub.py`, 2026-07-04, this Windows box), NOT the
+speculative ballpark this section originally guessed:
 
-A 20-panel dashboard at 30 Hz is ~600 frames/s — **1–2% of the Python
-ceiling**. So the go/no-go trigger is honest need: build it when a real
-workload sits within ~10× of the Python hub's ceiling, when a Python-free
-deployment target appears, or when the polyglot SDK story needs a neutral
-standing broker to sell. Until then this document is the plan of record and
-nothing more.
+| Regime | Python hub | danvasd | Finding |
+|---|---|---|---|
+| Realistic (≤ few hundred fps, any viewer count tried) | ~1 ms p50, 100% | ~1 ms p50, 100% | **identical — no difference for normal workloads** |
+| Overload (unthrottled producer, 20 viewers) | ~102k fps but **p50 2037 ms** (delivers 2 s STALE via unbounded buffering) | ~92k fps, **p50 113 ms**, 100% delivered | **~18× lower latency**, honest backpressure; NOT higher raw throughput |
+| Footprint | ~30–60 MB RSS | 6.3 MB binary, ~5–15 MB RSS | as expected |
+| Deployment | needs Python + FastAPI/uvicorn | one static file, any OS | the concrete win |
+
+**The corrected thesis:** the broker's measured win is **latency and
+backpressure honesty under overload** (Python buffers and falls seconds
+behind; danvasd stays real-time) plus **deployment/dependencies** — NOT the
+"5–20× throughput" originally guessed (raw fan-out is comparable, ~90–100k
+small frames/s on both). For normal workloads the two are indistinguishable.
+
+Two real findings the benchmark surfaced: (1) danvasd does **no per-viewer
+conflation** yet — under overload it backpressures the *source*, which is
+wrong for media (one slow viewer would throttle the camera for everyone);
+the `queue="latest"` story needs to cross the hub. (2) danvasd's fan-out
+clones the frame string per browser under the global lock — the suspected
+ceiling if raw throughput ever matters (it doesn't at these scales).
 
 ## What already pins the design
 
