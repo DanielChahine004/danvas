@@ -144,3 +144,23 @@ def test_binary_media_and_input_cross_the_socket():
             break
         time.sleep(0.01)
     assert got == [b"mic-bytes"]
+
+
+def test_file_pull_serves_this_processes_download_tokens():
+    from danvas.remote import _dispatch_hub_frame
+    c, sent = _canvas()
+    blobs = []
+    c._client._send_binary = lambda d: blobs.append(bytes(d))
+    url = c.serve_bytes(b"REPORT-DATA", "report.pdf")
+    token = url.rsplit("/", 1)[-1]
+    _dispatch_hub_frame(c._bridge, {"type": "file_pull", "token": token,
+                                    "reqId": "r1"})
+    metas = [m for m in sent if m.get("type") == "file_meta"]
+    assert metas[-1]["ok"] is True and metas[-1]["filename"] == "report.pdf"
+    assert blobs and blobs[-1][0] == 6            # FILE envelope
+    assert blobs[-1].endswith(b"REPORT-DATA")
+    # a token we don't own is declined
+    _dispatch_hub_frame(c._bridge, {"type": "file_pull", "token": "nope",
+                                    "reqId": "r2"})
+    assert [m for m in sent if m.get("type") == "file_meta"
+            and m.get("reqId") == "r2"][-1]["ok"] is False

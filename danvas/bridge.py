@@ -126,6 +126,7 @@ BINARY_AUDIO = BINARY_FRAME_CODES["AUDIO"]   # little-endian int16 PCM (interlea
 BINARY_CUSTOM = BINARY_FRAME_CODES["CUSTOM"]  # opaque -> Custom.push_binary -> canvas.onPush
 BINARY_REACT = BINARY_FRAME_CODES["REACT"]   # opaque -> React.push_binary -> canvas.onFrame
 BINARY_INPUT = BINARY_FRAME_CODES["INPUT"]   # browser -> Python (canvas.sendBinary -> @on_binary)
+BINARY_FILE = BINARY_FRAME_CODES["FILE"]     # hub <-> owner file transfer (id = reqId)
 
 
 def encode_binary_frame(type_code, comp_id, payload):

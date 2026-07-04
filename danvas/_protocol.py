@@ -55,6 +55,7 @@ BINARY_FRAME_CODES = {
     "CUSTOM": 3,  # opaque user bytes -> Custom.push_binary -> canvas.onPush
     "REACT": 4,   # opaque user bytes -> React.push_binary -> canvas.onFrame
     "INPUT": 5,   # browser -> Python raw bytes (canvas.sendBinary -> @on_binary)
+    "FILE": 6,    # hub <-> owner file transfer (id field = reqId, not a panel)
 }
 
 # -- lock / chrome flag wire keys -------------------------------------------

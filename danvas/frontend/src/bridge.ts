@@ -17,7 +17,7 @@ import { openContextMenuAt } from './engine/contextmenu'
 import { toImage } from './engine/export'
 import { measuredTextSize } from './react/measure'
 import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType, WriteSignal } from './engine/types'
-import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT } from './protocol.generated.js'
+import { BIN_VIDEO, BIN_AUDIO, BIN_CUSTOM, BIN_REACT, BIN_INPUT, BIN_FILE } from './protocol.generated.js'
 
 // --- id helpers --------------------------------------------------------------
 export function createShapeId(id: string): string {
@@ -515,6 +515,9 @@ function handleBinary(buf: ArrayBuffer): void {
   if (buf.byteLength < 2 + idLen) return
   const id = frameDecoder.decode(new Uint8Array(buf, 2, idLen))
   const payload = buf.slice(2 + idLen)
+  if (type === BIN_FILE) {
+    return // hub <-> owner file transfer; never addressed to a browser
+  }
   if (type === BIN_VIDEO || type === BIN_AUDIO || type === BIN_CUSTOM || type === BIN_REACT) {
     const handler = liveHandlers.get(id)
     if (handler) handler(payload)

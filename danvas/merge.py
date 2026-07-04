@@ -78,7 +78,8 @@ from .bridge import Bridge
 
 # Media codes relay hub-ward (source -> browsers); INPUT routes owner-ward.
 _BINARY_MEDIA_CODES = {c for name, c in BINARY_FRAME_CODES.items()
-                       if name != "INPUT"}
+                       if name not in ("INPUT", "FILE")}
+_BINARY_FILE_CODE = BINARY_FRAME_CODES["FILE"]
 _BINARY_INPUT_CODE = BINARY_FRAME_CODES["INPUT"]
 
 
@@ -178,16 +179,32 @@ def _authenticate(http_parts, password):
 class _InboundWS:
     """Adapt a server-side (FastAPI) WebSocket to the ``.send(text)`` shape the
     upstream routing path expects from a *client* connection — so a dial-in
-    source rides the exact same `_Upstream` machinery as a dialed-out one."""
+    source rides the exact same `_Upstream` machinery as a dialed-out one.
 
-    def __init__(self, ws):
+    Sends go through the bridge's per-connection lock: the underlying
+    websocket protocol forbids concurrent writers (see server._WS_OPTS), and
+    hub->source sends can originate from a DIFFERENT task than the
+    connection's own (e.g. an HTTP download route doing a file_pull), so the
+    same serialization every other send path gets applies here too.
+    """
+
+    def __init__(self, ws, lock=None):
         self._ws = ws
+        self._lock = lock
 
     async def send(self, text):
-        await self._ws.send_text(text)
+        if self._lock is not None:
+            async with self._lock:
+                await self._ws.send_text(text)
+        else:
+            await self._ws.send_text(text)
 
     async def send_binary(self, data):
-        await self._ws.send_bytes(data)
+        if self._lock is not None:
+            async with self._lock:
+                await self._ws.send_bytes(data)
+        else:
+            await self._ws.send_bytes(data)
 
 
 class _Upstream:
@@ -349,6 +366,10 @@ class _MergeHost:
         if ledger_path:
             from . import _ledger as _ledger_mod
             self._ledger = _ledger_mod.open_ledger(ledger_path)
+        # reqId -> {"event", "remaining", "meta", "data"}: one in-flight
+        # file pull per HTTP download; the owning source answers with
+        # file_meta + a FILE binary envelope, non-owners decline.
+        self._pending_files = {}
         # reqId -> (ws, expiry): who asked, so the owner's response frame
         # routes back to exactly that viewer (and nobody else).
         self._pending_req = {}
@@ -714,6 +735,8 @@ class _MergeHost:
             msg = {"type": "graveyard_update", "items": items}
             up.graveyard = msg
             self._fanout_upstream(up, msg)
+        elif kind == "file_meta":
+            self._file_meta(msg)
         elif kind == "response":
             # The owner answered a viewer's request: route to the asker only.
             entry = self._pending_req.pop(msg.get("reqId"), None)
@@ -779,7 +802,12 @@ class _MergeHost:
         interested browsers. Not cached — streams aren't replayed (the same
         rule as everywhere else in danvas)."""
         cid = _bin_id(data)
-        if cid is None or data[0] not in _BINARY_MEDIA_CODES:
+        if cid is None:
+            return
+        if data[0] == _BINARY_FILE_CODE:
+            self._file_bytes(cid, bytes(data[2 + data[1]:]))
+            return
+        if data[0] not in _BINARY_MEDIA_CODES:
             return
         out = _bin_reframe(data, self._ns(up.tag, cid))
         for conn in self._interested(up):
@@ -1044,7 +1072,7 @@ class _MergeHost:
             up.shared = None
             up.graveyard = None
             up.drawings.clear()
-        up.ws = _InboundWS(ws)
+        up.ws = _InboundWS(ws, self.bridge._send_locks.get(ws))
         up.status = "live"
         self._dialins[ws] = up
         for conn in list(self._conns.values()):
@@ -1166,7 +1194,7 @@ class _MergeHost:
                 return False
             kind = msg.get("type")
             if kind in ("register", "update", "remove", "arrow", "draw",
-                        "shape", "shape_update", "response",
+                        "shape", "shape_update", "response", "file_meta",
                         "view", "shared", "graveyard_update"):
                 self._ingest(up, raw)
                 return True
@@ -1308,6 +1336,54 @@ class _MergeHost:
             self._pending_req = {k: v for k, v in self._pending_req.items()
                                  if v[1] > now}
         self._pending_req[req_id] = (ws, now + 30.0)
+
+    async def pull_file(self, token, timeout=15.0):
+        """Fetch a download token's bytes from whichever live source owns it.
+
+        Broadcast ``file_pull`` (tokens are opaque — the hub can't tell whose
+        it is); the owner replies ``file_meta ok`` + a FILE binary envelope,
+        everyone else declines. Returns ``(filename, bytes)`` or ``None``.
+        """
+        targets = [up for up in self._upstreams.values() if up.ws is not None]
+        if not targets:
+            return None
+        import uuid as _uuid
+        req = _uuid.uuid4().hex
+        entry = {"remaining": len(targets), "meta": None, "data": None}
+        self._pending_files[req] = entry
+        try:
+            for up in targets:
+                await up.send({"type": "file_pull", "token": token,
+                               "reqId": req})
+            # Short-sleep polling: simpler than juggling an Event across
+            # the meta/bytes pair, and 50ms granularity costs nothing at
+            # download-click rates.
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if entry["meta"] is not None and entry["data"] is not None:
+                    return (entry["meta"].get("filename") or "download",
+                            entry["data"])
+                if entry["remaining"] <= 0 and entry["meta"] is None:
+                    return None            # everyone declined
+                await asyncio.sleep(0.05)
+            return None
+        finally:
+            self._pending_files.pop(req, None)
+
+    def _file_meta(self, msg):
+        entry = self._pending_files.get(msg.get("reqId"))
+        if entry is None:
+            return
+        if msg.get("ok"):
+            entry["meta"] = msg
+        else:
+            entry["remaining"] -= 1
+
+    def _file_bytes(self, req, payload):
+        entry = self._pending_files.get(req)
+        if entry is None:
+            return
+        entry["data"] = bytes(payload)
 
     def _record(self, kind, cid, msg):
         """Append one routed user action to the hub ledger (no-op when off;

@@ -100,6 +100,15 @@ frame for a panel that is `locked`, non-`operable`, role-hidden, or
 | 3 | CUSTOM | server → client | opaque bytes → Custom panel `onPush` |
 | 4 | REACT | server → client | opaque bytes → React panel `onFrame` |
 | 5 | INPUT | client → server | opaque bytes → `@panel.on_binary` |
+| 6 | FILE | hub ↔ owner | file-transfer bytes; the envelope id is a **reqId**, not a panel |
+
+**File transfer (downloads through a hub):** the owner process holds download
+bytes, so a browser's `GET /__download__/<token>` at the hub triggers a pull:
+hub → sources `{"type": "file_pull", "token", "reqId"}` (broadcast — tokens
+are opaque); the owner replies `{"type": "file_meta", "reqId", "ok": true,
+"filename"}` followed by a FILE envelope carrying the bytes; non-owners reply
+`ok: false`. First success streams out as the HTTP response; all-declined or
+15 s → 404. Role-gated tokens are declined over a hub (fail closed).
 
 ## The merge control plane
 

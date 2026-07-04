@@ -11,6 +11,7 @@ export const BIN_AUDIO = 2
 export const BIN_CUSTOM = 3
 export const BIN_REACT = 4
 export const BIN_INPUT = 5
+export const BIN_FILE = 6
 
 export const FLAG_WIRE_KEYS = Object.freeze({"locked": "locked", "draggable": "movable", "resizable": "resizable", "operable": "interactive", "grabbable": "selectable", "frame": "frame"})
 

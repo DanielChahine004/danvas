@@ -1259,3 +1259,60 @@ def test_roles_gate_login_visibility_and_input(roles_hub):
             await admin_ws.close()
             await view_ws.close()
     asyncio.run(asyncio.wait_for(go(), timeout=40))
+
+
+# -- downloads through the hub: the owner holds the bytes -------------------------
+
+def test_download_pulls_bytes_from_the_owning_source(hub):
+    import threading
+    import urllib.request
+    import urllib.error
+
+    result = {}
+
+    def fetch(token, key):
+        try:
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{hub}/__download__/{token}",
+                    timeout=20) as r:
+                result[key] = (r.status, r.read(),
+                               r.headers.get("Content-Disposition", ""))
+        except urllib.error.HTTPError as e:
+            result[key] = (e.code, b"", "")
+
+    async def go():
+        async with _source(hub, "c28") as sws:
+            src = Peer(sws)
+            await src.recv_until(lambda m: m["type"] == "welcome")
+            t = threading.Thread(target=fetch, args=("tok-report", "hit"))
+            t.start()
+            pull = await src.recv_until(
+                lambda m: m.get("type") == "file_pull"
+                and m.get("token") == "tok-report", timeout=10.0)
+            req = pull["reqId"]
+            await src.send({"type": "file_meta", "reqId": req, "ok": True,
+                            "filename": "report.bin"})
+            await src.send_binary(_bin_frame(6, req, b"FILE-BYTES-123"))
+            # Wait WITHOUT blocking this loop (t.join would also block the
+            # websockets client's flush of the final frame).
+            for _ in range(400):
+                if "hit" in result:
+                    break
+                await asyncio.sleep(0.05)
+            assert result["hit"][0] == 200
+            assert result["hit"][1] == b"FILE-BYTES-123"
+            assert "report.bin" in result["hit"][2]
+            # a token nobody owns: the source declines, the hub 404s
+            t2 = threading.Thread(target=fetch, args=("tok-nope", "miss"))
+            t2.start()
+            pull2 = await src.recv_until(
+                lambda m: m.get("type") == "file_pull"
+                and m.get("token") == "tok-nope", timeout=10.0)
+            await src.send({"type": "file_meta", "reqId": pull2["reqId"],
+                            "ok": False})
+            for _ in range(400):
+                if "miss" in result:
+                    break
+                await asyncio.sleep(0.05)
+            assert result["miss"][0] == 404
+    asyncio.run(asyncio.wait_for(go(), timeout=60))

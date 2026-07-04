@@ -148,6 +148,9 @@ struct Hub {
     /// The hub view (camera/chrome), folded from sources' `view` frames and
     /// baked into welcome for late joiners.
     hub_view: Map<String, Value>,
+    /// In-flight file pulls (HTTP download -> owning source): reqId ->
+    /// (meta, bytes, sources-still-undeclined).
+    pending_files: HashMap<String, (Option<Value>, Option<Vec<u8>>, usize)>,
 }
 
 const VIEWER_COLORS: [&str; 6] =
@@ -516,6 +519,7 @@ async fn main() {
         .route("/ws", get(ws_handler))
         .route("/__auth__", post(auth_handler))
         .route("/__describe__", get(describe_handler))
+        .route("/__download__/:token", get(download_handler))
         .fallback(get(static_handler))
         .with_state(hub);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -554,6 +558,73 @@ async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl 
       (header::SET_COOKIE,
        format!("pc_session={token}; Path=/; SameSite=Lax; HttpOnly"))],
      "").into_response()
+}
+
+/// Downloads through the hub: the owning SOURCE holds the bytes. Broadcast
+/// file_pull (tokens are opaque), the owner answers file_meta + a FILE
+/// binary envelope, everyone else declines; first success streams out.
+async fn download_handler(
+    State(hub): State<Arc<Mutex<Hub>>>,
+    headers: HeaderMap,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let req = format!("{}{}", now_hex(), CONN_SEQ.fetch_add(1, Ordering::Relaxed));
+    {
+        let mut h = hub.lock().unwrap();
+        if !h.authed(&headers) {
+            return (StatusCode::UNAUTHORIZED, "login required").into_response();
+        }
+        let targets: Vec<Tx> = h
+            .sources
+            .values()
+            .filter_map(|s| s.tx.clone())
+            .collect();
+        if targets.is_empty() {
+            return (StatusCode::NOT_FOUND, "download expired or not found")
+                .into_response();
+        }
+        h.pending_files.insert(req.clone(), (None, None, targets.len()));
+        let pull = json!({"type": "file_pull", "token": token, "reqId": req})
+            .to_string();
+        for tx in targets {
+            let _ = tx.send(Out::T(pull.clone()));
+        }
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut h = hub.lock().unwrap();
+        let done = match h.pending_files.get(&req) {
+            Some((Some(_), Some(_), _)) => true,
+            Some((None, _, 0)) => {
+                h.pending_files.remove(&req);
+                return (StatusCode::NOT_FOUND, "download expired or not found")
+                    .into_response();
+            }
+            Some(_) => false,
+            None => false,
+        };
+        if done {
+            let (meta, data, _) = h.pending_files.remove(&req).unwrap();
+            let filename = meta
+                .and_then(|m| m.get("filename").and_then(Value::as_str)
+                    .map(String::from))
+                .unwrap_or_else(|| "download".into());
+            return (
+                [(header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                 (header::CONTENT_DISPOSITION,
+                  format!("attachment; filename=\"{filename}\""))],
+                data.unwrap(),
+            )
+                .into_response();
+        }
+        drop(h);
+        if std::time::Instant::now() > deadline {
+            hub.lock().unwrap().pending_files.remove(&req);
+            return (StatusCode::NOT_FOUND, "download expired or not found")
+                .into_response();
+        }
+    }
 }
 
 /// Headless inventory of the composed canvas (the replay cache), one entry
@@ -841,8 +912,18 @@ fn bin_id(data: &[u8]) -> Option<String> {
 /// One inbound binary envelope. From a source: MEDIA relays to browsers with
 /// the id namespaced in-envelope (not cached — streams aren't replayed). From
 /// a viewer: a binary INPUT on a merged panel routes to its owner, stripped.
+const BIN_FILE: u8 = 6;
+
 fn binary_frame(hub: &Arc<Mutex<Hub>>, from_source: bool, label: &str, data: Vec<u8>) {
     let Some(cid) = bin_id(&data) else { return };
+    if from_source && data[0] == BIN_FILE {
+        let payload = data[2 + data[1] as usize..].to_vec();
+        let mut h = hub.lock().unwrap();
+        if let Some(entry) = h.pending_files.get_mut(&cid) {
+            entry.1 = Some(payload);
+        }
+        return;
+    }
     let h = hub.lock().unwrap();
     if from_source && data[0] != BIN_INPUT {
         let Some(src) = h.sources.get(label) else { return };
@@ -1064,6 +1145,18 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         }
         let text = json!({"type": "draw", "diff": ns_diff}).to_string();
         h.fanout_browsers(&text);
+        return;
+    }
+    if kind == "file_meta" {
+        let Some(req_id) = frame.get("reqId").and_then(Value::as_str) else { return };
+        let mut h = hub.lock().unwrap();
+        if let Some(entry) = h.pending_files.get_mut(req_id) {
+            if frame.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                entry.0 = Some(frame.clone());
+            } else if entry.2 > 0 {
+                entry.2 -= 1;
+            }
+        }
         return;
     }
     if kind == "response" {

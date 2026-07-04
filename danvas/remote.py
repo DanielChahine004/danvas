@@ -310,6 +310,30 @@ def _dispatch_hub_frame(bridge, msg):
     process's panels go through the real dispatch machinery (handler threading
     modes and the authoritative echo included)."""
     kind = msg.get("type")
+    if kind == "file_pull":
+        # The hub is asking for a download token's bytes on a browser's
+        # behalf (this process owns them). Reply file_meta + a FILE binary
+        # envelope; decline tokens that aren't ours (another source's, or
+        # expired). Role-gated tokens are declined over a hub — the hub
+        # can't verify the per-token role, so fail closed.
+        import json as _json
+        req = msg.get("reqId")
+        item = bridge.take_download(msg.get("token"))
+        if item is None or item[2] is not None:
+            bridge.broadcast({"type": "file_meta", "reqId": req, "ok": False})
+            return
+        filename, source, _role = item
+        try:
+            data = (bytes(source) if isinstance(source, (bytes, bytearray))
+                    else open(source, "rb").read())
+        except OSError:
+            bridge.broadcast({"type": "file_meta", "reqId": req, "ok": False})
+            return
+        bridge.broadcast({"type": "file_meta", "reqId": req, "ok": True,
+                          "filename": filename})
+        rid = str(req).encode()
+        bridge.broadcast_binary(bytes([6, len(rid)]) + rid + data)
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         return

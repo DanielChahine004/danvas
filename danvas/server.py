@@ -458,6 +458,16 @@ def create_app(bridge, port=8000, open_browser=True, password=None,
     async def download(token: str, request: Request):
         item = bridge.take_download(token)
         if item is None:
+            # A hub doesn't hold file bytes — the owning SOURCE does. Pull
+            # them over the wire (file_pull -> file_meta + FILE envelope).
+            merge = getattr(bridge, "_merge", None)
+            if merge is not None:
+                pulled = await merge.pull_file(token)
+                if pulled is not None:
+                    p_name, p_data = pulled
+                    return Response(content=p_data,
+                                    media_type="application/octet-stream",
+                                    headers=_attachment_headers(p_name))
             return PlainTextResponse("download expired or not found",
                                      status_code=404)
         filename, source, role = item
