@@ -242,3 +242,50 @@ def test_serve_auto_falls_back_when_broker_wont_launch(monkeypatch):
     c2 = danvas.Canvas()
     with _pytest.raises(_BrokerUnavailable):
         c2.serve(broker=True, open_browser=False, block=False)
+
+
+def test_serve_desktop_routes_through_broker(monkeypatch):
+    # desktop=True must reach serve_via_broker with desktop=True (a native
+    # window pointed at the broker's URL — a pure client-side retarget).
+    import danvas.remote as remote_mod
+    calls = {}
+    monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
+    monkeypatch.setattr(remote_mod, "serve_via_broker",
+                        lambda canvas, **kw: (calls.update(kw), canvas)[1])
+    c = danvas.Canvas()
+    c.serve(desktop=True, open_browser=False, block=False)
+    assert calls.get("desktop") is True
+    assert "window_title" in calls and "window_size" in calls
+
+
+def test_serve_via_broker_desktop_opens_window_at_broker_url(monkeypatch):
+    # desktop=True opens the native window pointed at the BROKER's url. Stub
+    # pywebview to capture that url (a real window can't run headless) and
+    # stub the danvasd spawn so nothing external launches.
+    import sys as _sys
+    import types
+    import danvas.remote as remote_mod
+
+    captured = {}
+    fake_webview = types.ModuleType("webview")
+    fake_webview.create_window = lambda title, url, **k: captured.update(
+        title=title, url=url)
+    fake_webview.start = lambda: None
+    monkeypatch.setitem(_sys.modules, "webview", fake_webview)
+    monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
+
+    class FakeProc:
+        pid = 123
+        def poll(self): return None
+        def terminate(self): pass
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(
+        "socket.create_connection",
+        lambda *a, **k: type("S", (), {"close": lambda self: None})())
+    monkeypatch.setattr(remote_mod.SourceClient, "connect", lambda self, **k: self)
+
+    c = danvas.Canvas()
+    remote_mod.serve_via_broker(c, port=9911, open_browser=False,
+                                desktop=True, window_title="MyApp")
+    assert captured["url"] == "http://127.0.0.1:9911"    # window -> broker
+    assert captured["title"] == "MyApp"

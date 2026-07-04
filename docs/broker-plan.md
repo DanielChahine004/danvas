@@ -100,9 +100,14 @@ feature (vs hot_reload's owner-PROCESS), pattern holds across both: the
 owner's persist machinery runs under `serve_via_broker` (restore-before-
 connect so saved state rides the initial replay); round-trip verified
 through danvasd (browser sets 73 → owner → file → restored). Caveat: ink is
-hub-native so drawings don't round-trip; layout + values do. Left
-embedded-only: `desktop=`/`tunnel=`/`merge_server`/hosting → then delete the
-embedded server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
+hub-native so drawings don't round-trip; layout + values do. **`desktop=` DONE** (`11ae569`) —
+the third category, a CLIENT-SIDE convenience (after owner-process and
+owner-state): the native pywebview window just points at the broker's URL
+instead of the embedded server's; pywebview-missing falls back to the
+browser. So every KIND of embedded-only feature now has a demonstrated
+broker path. Left: `tunnel=` (tunnel danvasd's port — the monitor already
+owns tunnels), `merge_server`, hosting button → then delete the embedded
+server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
 (`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
 each platform's binary to the 38-assertion harness (plus the Python-hub
 reference everywhere and the full suite on Win/Linux); a `v*` tag attaches

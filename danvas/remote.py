@@ -36,6 +36,7 @@ doesn't relay it).
 
 import logging
 import os
+import warnings
 
 from .bridge import Bridge
 from .canvas import Canvas
@@ -457,7 +458,8 @@ class BrokerHandle:
 
 def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                      password=None, passwords=None, host="127.0.0.1",
-                     existing_port=None, persist=False):
+                     existing_port=None, persist=False, desktop=False,
+                     window_title="danvas", window_size=(1200, 800)):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -551,6 +553,28 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     if proc is not None:
         print(f"[danvas] serving via danvasd at {url}"
               f"  (broker pid {proc.pid}; UI survives this process)")
+
+    if desktop:
+        # Native window instead of a browser — the same webview.create_window
+        # the embedded path uses, just pointed at the broker's URL. pywebview
+        # must drive on the main thread (the dial-in socket is a bg thread, so
+        # that's fine); the window blocks until closed, then we stop the broker.
+        try:
+            import webview
+        except ImportError:
+            warnings.warn("pywebview is not installed; opening in the browser "
+                          "instead. Install: pip install 'danvas[desktop]'")
+            webbrowser.open(url)
+        else:
+            try:
+                w, h = window_size
+                webview.create_window(window_title, url,
+                                      width=int(w), height=int(h))
+                webview.start()
+            finally:
+                canvas._broker.stop()
+            return canvas
+
     if open_browser:
         webbrowser.open(url)
     if not block:
