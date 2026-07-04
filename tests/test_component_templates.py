@@ -186,6 +186,10 @@ def test_serve_auto_resolves_to_broker(monkeypatch):
         calls.update(kw)
         return canvas
     monkeypatch.setattr(remote_mod, "serve_via_broker", fake_serve_via_broker)
+    # Force the broker to "resolve" regardless of whether a real binary is
+    # present in this environment (the broker CI has one, a pure compat run
+    # doesn't) — we're testing serve()'s routing, not binary discovery.
+    monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
 
     c = danvas.Canvas()
     out = c.serve(port=1234, open_browser=False, block=False)   # plain serve()
