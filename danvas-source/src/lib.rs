@@ -53,6 +53,11 @@ struct State {
     reg_order: Vec<String>,
     registers: HashMap<String, Value>,
     updates: HashMap<String, Map<String, Value>>,
+    // Managed shapes + arrows this source owns, kept current for replay.
+    shape_order: Vec<String>,
+    shapes: HashMap<String, Value>,
+    arrow_order: Vec<String>,
+    arrows: HashMap<String, Value>,
     subs: Vec<String>,
     // Callbacks, keyed by panel id.
     on_input: HashMap<String, Vec<Handler>>,
@@ -148,6 +153,70 @@ impl<'a> PanelBuilder<'a> {
     /// Register it on the canvas.
     pub fn show(self) {
         self.client.register_template_raw(&self.id, self.kind, self.data, self.place);
+    }
+}
+
+/// Builder for a managed canvas shape (geo/text/note/draw/line/highlight/frame).
+pub struct ShapeBuilder<'a> {
+    client: &'a Client,
+    id: String,
+    shape_type: String,
+    x: f64,
+    y: f64,
+    rotation: f64,
+    opacity: f64,
+    props: Map<String, Value>,
+}
+
+impl<'a> ShapeBuilder<'a> {
+    pub fn at(mut self, x: f64, y: f64) -> Self { self.x = x; self.y = y; self }
+    pub fn size(mut self, w: f64, h: f64) -> Self {
+        self.props.insert("w".into(), json!(w));
+        self.props.insert("h".into(), json!(h));
+        self
+    }
+    pub fn rotation(mut self, deg: f64) -> Self { self.rotation = deg; self }
+    pub fn opacity(mut self, o: f64) -> Self { self.opacity = o; self }
+    /// Set a shape prop (geo/color/fill/dash/size/text/points/…).
+    pub fn prop(mut self, key: &str, value: Value) -> Self {
+        self.props.insert(key.into(), value);
+        self
+    }
+    /// Place the shape on the canvas.
+    pub fn show(self) {
+        let msg = json!({
+            "type": "shape", "id": self.id, "shapeType": self.shape_type,
+            "x": self.x, "y": self.y, "rotation": self.rotation,
+            "opacity": self.opacity, "props": self.props,
+        });
+        self.client.record_shape(&self.id, &msg);
+        self.client.send(&msg);
+    }
+}
+
+/// Builder for an arrow bound between two endpoints (panels or shapes, by id).
+pub struct ArrowBuilder<'a> {
+    client: &'a Client,
+    id: String,
+    start: String,
+    end: String,
+    props: Map<String, Value>,
+}
+
+impl<'a> ArrowBuilder<'a> {
+    /// Set an arrow prop (color/dash/size/text/bend/arrowhead_start/_end).
+    pub fn prop(mut self, key: &str, value: Value) -> Self {
+        self.props.insert(key.into(), value);
+        self
+    }
+    /// Bind the arrow on the canvas.
+    pub fn show(self) {
+        let msg = json!({
+            "type": "arrow", "id": self.id,
+            "start": self.start, "end": self.end, "props": self.props,
+        });
+        self.client.record_arrow(&self.id, &msg);
+        self.client.send(&msg);
     }
 }
 
@@ -304,13 +373,17 @@ impl Client {
         self.send(&json!({"type": "update", "id": id, "payload": {key: value}}));
     }
 
-    /// Withdraw a panel.
+    /// Withdraw a panel, shape, or arrow this source owns.
     pub fn remove(&self, id: &str) {
         {
             let mut st = self.inner.state.lock().unwrap();
             st.reg_order.retain(|i| i != id);
             st.registers.remove(id);
             st.updates.remove(id);
+            st.shape_order.retain(|i| i != id);
+            st.shapes.remove(id);
+            st.arrow_order.retain(|i| i != id);
+            st.arrows.remove(id);
         }
         self.send(&json!({"type": "remove", "id": id}));
     }
@@ -383,6 +456,62 @@ impl Client {
         self.send_media(4, id, data);
     }
 
+    // -- managed shapes & arrows ---------------------------------------------
+    /// A managed canvas shape: `shape(id,"geo").at(x,y).size(w,h).prop(..).show()`.
+    /// Shape types: geo, text, note, draw, line, highlight, frame.
+    pub fn shape(&self, id: &str, shape_type: &str) -> ShapeBuilder<'_> {
+        ShapeBuilder {
+            client: self, id: id.into(), shape_type: shape_type.into(),
+            x: 0.0, y: 0.0, rotation: 0.0, opacity: 1.0, props: Map::new(),
+        }
+    }
+    /// A geometric shape (rectangle/ellipse/diamond/star/…): sugar for
+    /// `shape(id,"geo").prop("geo", kind)`.
+    pub fn geo(&self, id: &str, kind: &str) -> ShapeBuilder<'_> {
+        self.shape(id, "geo").prop("geo", json!(kind))
+    }
+    /// An arrow bound between two endpoints (panels or shapes, by id).
+    pub fn arrow(&self, id: &str, start: &str, end: &str) -> ArrowBuilder<'_> {
+        ArrowBuilder {
+            client: self, id: id.into(), start: start.into(), end: end.into(),
+            props: Map::new(),
+        }
+    }
+    /// Edit a managed shape live. Keys x/y/rotation/opacity move it; all others
+    /// merge into its props (the `shape_update` frame; folded for replay).
+    pub fn update_shape<I, K>(&self, id: &str, fields: I)
+    where I: IntoIterator<Item = (K, Value)>, K: Into<String> {
+        let mut top = Map::new();
+        let mut props = Map::new();
+        for (k, v) in fields {
+            let k = k.into();
+            if matches!(k.as_str(), "x" | "y" | "rotation" | "opacity") {
+                top.insert(k, v);
+            } else {
+                props.insert(k, v);
+            }
+        }
+        let mut msg = json!({"type": "shape_update", "id": id});
+        {
+            let o = msg.as_object_mut().unwrap();
+            for (k, v) in &top { o.insert(k.clone(), v.clone()); }
+            if !props.is_empty() {
+                o.insert("props".into(), Value::Object(props.clone()));
+            }
+        }
+        // Fold into the stored shape so a reconnect replays current state.
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            if let Some(shape) = st.shapes.get_mut(id).and_then(|s| s.as_object_mut()) {
+                for (k, v) in &top { shape.insert(k.clone(), v.clone()); }
+                if let Some(sp) = shape.get_mut("props").and_then(Value::as_object_mut) {
+                    for (k, v) in &props { sp.insert(k.clone(), v.clone()); }
+                }
+            }
+        }
+        self.send(&msg);
+    }
+
     // -- reading the canvas --------------------------------------------------
     /// Resolve a panel's composed id from its `name` (its own or a peer's).
     pub fn find(&self, name: &str) -> Option<String> {
@@ -410,6 +539,18 @@ impl Client {
         if !st.registers.contains_key(id) { st.reg_order.push(id.into()); }
         st.registers.insert(id.into(), msg.clone());
         st.updates.remove(id);
+    }
+
+    fn record_shape(&self, id: &str, msg: &Value) {
+        let mut st = self.inner.state.lock().unwrap();
+        if !st.shapes.contains_key(id) { st.shape_order.push(id.into()); }
+        st.shapes.insert(id.into(), msg.clone());
+    }
+
+    fn record_arrow(&self, id: &str, msg: &Value) {
+        let mut st = self.inner.state.lock().unwrap();
+        if !st.arrows.contains_key(id) { st.arrow_order.push(id.into()); }
+        st.arrows.insert(id.into(), msg.clone());
     }
 
     fn send(&self, msg: &Value) {
@@ -489,6 +630,12 @@ impl Client {
         }
         for (id, payload) in &st.updates {
             out.push(json!({"type": "update", "id": id, "payload": payload}).to_string());
+        }
+        for id in &st.shape_order {
+            if let Some(s) = st.shapes.get(id) { out.push(s.to_string()); }
+        }
+        for id in &st.arrow_order {
+            if let Some(a) = st.arrows.get(id) { out.push(a.to_string()); }
         }
         for id in &st.subs {
             out.push(json!({"type": "subscribe", "id": id}).to_string());
