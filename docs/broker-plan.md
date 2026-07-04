@@ -87,9 +87,13 @@ envelope; owners hold the bytes; role-gated tokens/endpoints fail closed
 over a hub). **THE DEFAULT IS FLIPPED**: plain
 `serve()` now prefers danvasd when the binary is present (embedded-only
 features and `broker=False`/`DANVAS_EMBEDDED=1` fall back; `broker=True`
-demands it; danvasd grew `--host` for LAN binds). What remains: per-role
-prop OVERLAYS (deferred), `persist=`/hot-reload re-scope, and
-DISTRIBUTION (CI wheels bundling the binary, TLS in dial-out, release).
+demands it; danvasd grew `--host` for LAN binds). **CROSS-OS CI IS GREEN**
+(`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
+each platform's binary to the 38-assertion harness (plus the Python-hub
+reference everywhere and the full suite on Win/Linux); a `v*` tag attaches
+the three binaries to a GitHub release. What remains: cut the first tag,
+wheels bundling the binary (`pip install danvas[broker]`), TLS in
+dial-out, and the deferred overlays / persist re-scope.
 
 **The declared endgame (Daniel, 2026-07-04): the broker is THE
 implementation.** Once uploads/downloads land and the default flips, the
