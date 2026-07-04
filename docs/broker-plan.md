@@ -87,7 +87,16 @@ envelope; owners hold the bytes; role-gated tokens/endpoints fail closed
 over a hub). **THE DEFAULT IS FLIPPED**: plain
 `serve()` now prefers danvasd when the binary is present (embedded-only
 features and `broker=False`/`DANVAS_EMBEDDED=1` fall back; `broker=True`
-demands it; danvasd grew `--host` for LAN binds). **CROSS-OS CI IS GREEN**
+demands it; danvasd grew `--host` for LAN binds). **hot_reload NOW RUNS
+THROUGH THE BROKER** (`20e6cac`) — the proof that language-specific dev
+features layer ON the polyglot core rather than needing the embedded
+server: the file-watch monitor owns ONE danvasd across worker restarts,
+workers dial in as the `host` source, and RETENTION holds the UI across
+each edit (no 502, no reconnect — strictly better than embedded). This
+reframes "embedded-only" from "broker-incompatible" to "owner-process
+concerns not yet reworked to drive the owner against the broker"; the same
+rework retires `persist=`/`desktop=`/`tunnel=`/`merge_server`/hosting and
+then the embedded server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
 (`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
 each platform's binary to the 38-assertion harness (plus the Python-hub
 reference everywhere and the full suite on Win/Linux); a `v*` tag attaches
