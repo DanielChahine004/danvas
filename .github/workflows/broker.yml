@@ -115,6 +115,25 @@ jobs:
             broker/target/release/${{ matrix.exe }}
             dist/*.whl
 
+  python-compat:
+    # The wheels claim >=3.9; prove the package actually imports and its suite
+    # passes on the floor (3.9) and a fresh ceiling (3.13), not just 3.12.
+    # Pure-Python check — no danvasd build (its behaviour is Python-agnostic).
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest httpx2 numpy plotly opencv-python-headless
+      - run: python -m pytest tests/ -q
+
   release:
     # Tag v* -> the binaries become a GitHub release: what a user on any OS
     # points $DANVASD at (or drops on PATH) so serve()'s broker default works.
