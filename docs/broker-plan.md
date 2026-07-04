@@ -156,12 +156,15 @@ behind; danvasd stays real-time) plus **deployment/dependencies** — NOT the
 "5–20× throughput" originally guessed (raw fan-out is comparable, ~90–100k
 small frames/s on both). For normal workloads the two are indistinguishable.
 
-Two real findings the benchmark surfaced: (1) danvasd does **no per-viewer
-conflation** yet — under overload it backpressures the *source*, which is
-wrong for media (one slow viewer would throttle the camera for everyone);
-the `queue="latest"` story needs to cross the hub. (2) danvasd's fan-out
-clones the frame string per browser under the global lock — the suspected
-ceiling if raw throughput ever matters (it doesn't at these scales).
+One remaining finding: (2) danvasd's fan-out clones the frame string per
+browser under the global lock — the suspected ceiling if raw throughput
+ever matters (it doesn't at these scales). **(1) FIXED**: per-connection
+conflation — a slow viewer's backed-up buffer coalesces `update`/media
+frames by panel id (latest-wins, order-critical frames untouched), so it
+stays bounded and current without throttling the source or fast viewers
+(the hub-side `queue="latest"` ceiling; matters most for video). Deterministic
+Rust unit tests in `broker/src/main.rs` (`cargo test`); runs in CI on all
+three OSes.
 
 ## What already pins the design
 

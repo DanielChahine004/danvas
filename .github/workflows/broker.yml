@@ -49,6 +49,10 @@ jobs:
         working-directory: broker
         run: cargo build --release
 
+      - name: Unit tests (danvasd internals — conflation, etc.)
+        working-directory: broker
+        run: cargo test --release
+
       - name: Install danvas + test deps
         run: |
           python -m pip install --upgrade pip

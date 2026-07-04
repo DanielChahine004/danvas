@@ -30,7 +30,6 @@ use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use include_dir::{include_dir, Dir};
 use serde_json::{json, Map, Value};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 const PROTOCOL_VERSION: u64 = 1;
 const FREEZE_OPACITY: f64 = 0.45;
@@ -45,7 +44,108 @@ enum Out {
     B(Vec<u8>),
 }
 
-type Tx = UnboundedSender<Out>;
+/// Per-connection outbound buffer with *latest-wins conflation under
+/// backpressure*. Below the threshold every frame is delivered in order
+/// (fifo, the common case). Once a slow viewer's buffer backs up past
+/// CONFLATE_THRESHOLD, further `update`/media frames for a panel REPLACE that
+/// panel's already-pending frame in place instead of appending — so a slow
+/// viewer's memory stays bounded and it always sees the *latest* state,
+/// without throttling the source or the other viewers. This is the hub-side
+/// `queue="latest"` safety ceiling (matters most for video: one slow phone
+/// must not stall the camera for everyone).
+const CONFLATE_THRESHOLD: usize = 64;
+
+#[derive(Default)]
+struct ConnOut {
+    items: std::collections::BTreeMap<u64, Out>,
+    latest: HashMap<String, u64>, // conflate key -> seq of its pending item
+    seq: u64,
+}
+
+impl ConnOut {
+    fn push(&mut self, out: Out) {
+        // Only conflate when this connection is already behind; otherwise
+        // preserve strict order.
+        if self.items.len() >= CONFLATE_THRESHOLD {
+            if let Some(key) = conflate_key(&out) {
+                if let Some(&seq) = self.latest.get(&key) {
+                    if let Some(slot) = self.items.get_mut(&seq) {
+                        *slot = out; // latest wins, keeps queue position
+                        return;
+                    }
+                }
+                let seq = self.seq;
+                self.seq += 1;
+                self.items.insert(seq, out);
+                self.latest.insert(key, seq);
+                return;
+            }
+        }
+        let seq = self.seq;
+        self.seq += 1;
+        self.items.insert(seq, out);
+    }
+
+    fn drain(&mut self) -> Vec<Out> {
+        self.latest.clear();
+        std::mem::take(&mut self.items).into_values().collect()
+    }
+}
+
+/// The conflation key for a frame, or None for order-critical frames
+/// (register/remove/arrow/shape/draw/chat/presence/response/file_*/...).
+/// Only ever called on the slow path (buffer already backed up), so the
+/// per-frame parse is acceptable.
+fn conflate_key(out: &Out) -> Option<String> {
+    match out {
+        Out::T(text) => {
+            let v: Value = serde_json::from_str(text).ok()?;
+            if v.get("type").and_then(Value::as_str) == Some("update") {
+                let id = v.get("id").and_then(Value::as_str)?;
+                Some(format!("u:{id}"))
+            } else {
+                None
+            }
+        }
+        Out::B(data) => {
+            // Media envelopes ([code][idLen][id][payload]) conflate by
+            // (code,id); FILE transfers (code 6) never conflate.
+            if data.len() < 2 || data[0] == BIN_FILE {
+                return None;
+            }
+            let id = bin_id(data)?;
+            Some(format!("b:{}:{id}", data[0]))
+        }
+    }
+}
+
+/// A connection's send handle: an ordered/conflating buffer plus a waker for
+/// its writer task. `send` is non-blocking and never drops frames (it may
+/// coalesce them under backpressure).
+struct Conn {
+    out: std::sync::Mutex<ConnOut>,
+    wake: tokio::sync::Notify,
+}
+
+impl Conn {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            out: std::sync::Mutex::new(ConnOut::default()),
+            wake: tokio::sync::Notify::new(),
+        })
+    }
+
+    fn send(&self, out: Out) {
+        self.out.lock().unwrap().push(out);
+        self.wake.notify_one();
+    }
+
+    fn drain(&self) -> Vec<Out> {
+        self.out.lock().unwrap().drain()
+    }
+}
+
+type Tx = Arc<Conn>;
 
 #[derive(Default)]
 struct Source {
@@ -835,18 +935,28 @@ async fn handle(
     let color = VIEWER_COLORS[(conn_id as usize) % VIEWER_COLORS.len()];
 
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = unbounded_channel::<Out>();
-    let writer = tokio::spawn(async move {
-        while let Some(out) = rx.recv().await {
-            let msg = match out {
-                Out::T(t) => Message::Text(t),
-                Out::B(b) => Message::Binary(b),
-            };
-            if sink.send(msg).await.is_err() {
-                break;
+    let tx = Conn::new();
+    let writer = {
+        let conn = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                let batch = conn.drain();
+                if batch.is_empty() {
+                    conn.wake.notified().await;
+                    continue;
+                }
+                for out in batch {
+                    let msg = match out {
+                        Out::T(t) => Message::Text(t),
+                        Out::B(b) => Message::Binary(b),
+                    };
+                    if sink.send(msg).await.is_err() {
+                        return;
+                    }
+                }
             }
-        }
-    });
+        })
+    };
 
     // Welcome first, always — the client's version check reads it.
     let welcome = {
@@ -970,7 +1080,7 @@ async fn handle(
 fn source_down(h: &mut Hub, label: &str, tx: &Tx) {
     let mut went_offline = false;
     let frames: Vec<String> = if let Some(src) = h.sources.get_mut(label) {
-        if src.tx.as_ref().map(|t| t.same_channel(tx)).unwrap_or(false) {
+        if src.tx.as_ref().map(|t| Arc::ptr_eq(t, tx)).unwrap_or(false) {
             src.live = false;
             src.tx = None;
             went_offline = true;
@@ -1138,18 +1248,28 @@ async fn dial_out(
         }
         if let Ok((stream, _)) = connect_async(request).await {
             let (mut sink, mut read) = stream.split();
-            let (tx, mut rx) = unbounded_channel::<Out>();
-            let writer = tokio::spawn(async move {
-                while let Some(out) = rx.recv().await {
-                    let msg = match out {
-                        Out::T(t) => TMsg::Text(t),
-                        Out::B(b) => TMsg::Binary(b),
-                    };
-                    if sink.send(msg).await.is_err() {
-                        break;
+            let tx = Conn::new();
+            let writer = {
+                let conn = tx.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let batch = conn.drain();
+                        if batch.is_empty() {
+                            conn.wake.notified().await;
+                            continue;
+                        }
+                        for out in batch {
+                            let msg = match out {
+                                Out::T(t) => TMsg::Text(t),
+                                Out::B(b) => TMsg::Binary(b),
+                            };
+                            if sink.send(msg).await.is_err() {
+                                return;
+                            }
+                        }
                     }
-                }
-            });
+                })
+            };
             let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
             attach_source(&hub, &label, conn_id, tx.clone());
             while let Some(Ok(msg)) = read.next().await {
@@ -1833,5 +1953,87 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod conflation_tests {
+    use super::*;
+
+    fn t(s: &str) -> Out { Out::T(s.to_string()) }
+    fn drained_texts(c: &mut ConnOut) -> Vec<String> {
+        c.drain().into_iter().filter_map(|o| match o {
+            Out::T(s) => Some(s), _ => None }).collect()
+    }
+
+    #[test]
+    fn below_threshold_keeps_everything_in_order() {
+        let mut c = ConnOut::default();
+        for i in 0..10 {
+            c.push(t(&format!(r#"{{"type":"update","id":"p","payload":{{"v":{i}}}}}"#)));
+        }
+        // fifo: all 10 kept, in order
+        let out = drained_texts(&mut c);
+        assert_eq!(out.len(), 10);
+        assert!(out[0].contains(r#""v":0"#) && out[9].contains(r#""v":9"#));
+    }
+
+    #[test]
+    fn above_threshold_conflates_same_panel_latest_wins() {
+        let mut c = ConnOut::default();
+        // fill past the threshold with OTHER panels so we're in slow mode
+        for i in 0..CONFLATE_THRESHOLD {
+            c.push(t(&format!(r#"{{"type":"update","id":"x{i}","payload":{{}}}}"#)));
+        }
+        // now hammer one panel — should collapse to a single latest frame
+        for v in 0..100 {
+            c.push(t(&format!(r#"{{"type":"update","id":"hot","payload":{{"v":{v}}}}}"#)));
+        }
+        let out = drained_texts(&mut c);
+        let hot: Vec<_> = out.iter().filter(|s| s.contains(r#""id":"hot""#)).collect();
+        assert_eq!(hot.len(), 1, "same-panel updates must coalesce to one");
+        assert!(hot[0].contains(r#""v":99"#), "latest value wins");
+        // and it kept its queue position (after the x* frames), not reordered
+        assert_eq!(out.len(), CONFLATE_THRESHOLD + 1);
+    }
+
+    #[test]
+    fn order_critical_frames_never_conflate() {
+        let mut c = ConnOut::default();
+        for i in 0..CONFLATE_THRESHOLD {
+            c.push(t(&format!(r#"{{"type":"update","id":"x{i}","payload":{{}}}}"#)));
+        }
+        // register + remove for the same id must both survive (never merged)
+        c.push(t(r#"{"type":"register","id":"z","component":"React"}"#));
+        c.push(t(r#"{"type":"remove","id":"z"}"#));
+        c.push(t(r#"{"type":"register","id":"z","component":"React"}"#));
+        let out = drained_texts(&mut c);
+        let z = out.iter().filter(|s| s.contains(r#""id":"z""#)).count();
+        assert_eq!(z, 3, "register/remove are order-critical, never dropped");
+    }
+
+    #[test]
+    fn media_conflates_by_code_and_id_but_not_file() {
+        let mut c = ConnOut::default();
+        for i in 0..CONFLATE_THRESHOLD {
+            c.push(t(&format!(r#"{{"type":"update","id":"x{i}","payload":{{}}}}"#)));
+        }
+        let vid = |n: u8| {
+            let id = b"cam";
+            let mut f = vec![1u8, id.len() as u8]; // code 1 = VIDEO
+            f.extend_from_slice(id);
+            f.push(n);
+            Out::B(f)
+        };
+        for n in 0..50 { c.push(vid(n)); }
+        // two FILE transfers (code 6) with the same reqId must NOT merge
+        let file = |n: u8| Out::B(vec![6u8, 2, b'r', b'q', n]);
+        c.push(file(1));
+        c.push(file(2));
+        let batch = c.drain();
+        let vids = batch.iter().filter(|o| matches!(o, Out::B(b) if b[0]==1)).count();
+        let files = batch.iter().filter(|o| matches!(o, Out::B(b) if b[0]==6)).count();
+        assert_eq!(vids, 1, "video frames coalesce to the latest");
+        assert_eq!(files, 2, "FILE transfers never conflate");
     }
 }
