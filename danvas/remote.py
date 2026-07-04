@@ -376,8 +376,27 @@ def _dispatch_hub_frame(bridge, msg):
         if v is not None:
             v["cursor"] = msg.get("pos") or msg.get("cursor")
         return
+    if kind == "chat":
+        # The broker relays + replays chat among browsers itself; deliver it to
+        # any Python chat sinks (canvas.on_chat) too, so a canvas can react to
+        # what viewers say the same way it does embedded.
+        for sink in list(getattr(bridge, "_chat_sinks", [])):
+            try:
+                sink(msg)
+            except Exception:
+                import traceback as _tb
+                _tb.print_exc()
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
+        # A Python-managed shape (canvas.geo/text/line/…) moved/resized in the
+        # browser: store the new geometry (it replays on reload) and relay it to
+        # the other clients, exactly as the embedded server does — the owner
+        # isn't a component, so it wouldn't be found above.
+        if kind == "layout":
+            shape = bridge._shapes.get(msg.get("id"))
+            if shape is not None:
+                bridge._apply_shape_layout(shape, dict(msg), None)
         return
     if kind == "input":
         payload = msg.get("payload") or {}
@@ -516,10 +535,14 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     the socket (class-swap onto :class:`_RemoteBridge`), so components,
     handlers, and live setters work unchanged.
 
-    Known gaps vs the embedded server (why this isn't the default yet):
-    managed shapes, chat, presence/cursors, ``on_request`` replies,
-    roles/per-viewer overlays, upload/download endpoints, ``persist=``,
-    hot reload, and the hosting button don't cross the hub yet.
+    Feature parity: panels/handlers/live setters, arrows, ink, media, auth,
+    ``persist=``, tunnels, desktop, hot reload, the hosting button, native
+    merging, background workers, ``view=``, ``debug=``, ``merge_server=``, the
+    UI-affordance gating, ``on_request`` replies, presence/cursors →
+    ``canvas.viewers``, managed-shape moves, and chat sinks all cross the hub.
+    Remaining tail (advanced/interactive): the Inspector spawn, ``screenshot``/
+    snapshot round-trips, the panel graveyard/restore, and ``on_draw`` don't
+    cross yet.
     """
     import subprocess
     import time as _time
