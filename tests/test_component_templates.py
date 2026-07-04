@@ -327,6 +327,35 @@ def test_serve_broker_snapshot_round_trips():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_inspector_toggle_spawns_panel():
+    # Tier-2 tail: the toolbar Inspector toggle routes to the owner through the
+    # broker and spawns the Inspector panel (which then appears to browsers).
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    canvas = danvas.Canvas(); canvas.label("x", "hi")
+    # private local bind -> Inspector defaults ON
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                await asyncio.sleep(0.3)
+                await ws.send(json.dumps({"type": "ui", "action": "toggle_inspector",
+                                          "center": {"x": 200, "y": 200}}))
+                end = time.monotonic() + 5
+                while time.monotonic() < end:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if (m.get("type") == "register"
+                            and "__ui_inspector__" in json.dumps(m)):
+                        return
+                raise AssertionError("Inspector panel never registered")
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():

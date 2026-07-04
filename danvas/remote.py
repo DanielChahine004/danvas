@@ -415,6 +415,19 @@ def _dispatch_hub_frame(bridge, msg):
                 waiter["error"] = msg.get("error")
             waiter["event"].set()
         return
+    if kind == "ui":
+        # A native-UI request routed to the owner (the broker keeps hosting
+        # actions to itself). Today that's the toolbar Inspector toggle, gated
+        # by the same flag advertised in welcome — spawn/close it on the canvas.
+        if (msg.get("action") == "toggle_inspector"
+                and getattr(bridge, "_ui_inspector", False)
+                and bridge._canvas is not None):
+            try:
+                bridge._canvas._toggle_ui_inspector(at=msg.get("center"))
+            except Exception:
+                import traceback as _tb
+                _tb.print_exc()
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         # A Python-managed shape (canvas.geo/text/line/…) moved/resized in the
@@ -567,10 +580,9 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     ``persist=``, tunnels, desktop, hot reload, the hosting button, native
     merging, background workers, ``view=``, ``debug=``, ``merge_server=``, the
     UI-affordance gating, ``on_request`` replies, presence/cursors →
-    ``canvas.viewers``, managed-shape moves, and chat sinks all cross the hub.
-    Remaining tail (advanced/interactive): the Inspector spawn, ``screenshot``/
-    snapshot round-trips, the panel graveyard/restore, and ``on_draw`` don't
-    cross yet.
+    ``canvas.viewers``, managed-shape moves, chat sinks, ``on_draw``, the panel
+    graveyard/restore, ``save()``/``screenshot()`` round-trips, and the toolbar
+    Inspector all cross the hub — the broker is the universal serving path.
     """
     import subprocess
     import time as _time

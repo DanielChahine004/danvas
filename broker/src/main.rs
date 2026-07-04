@@ -1901,11 +1901,23 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         return;
     }
     if kind == "ui" {
-        // The 🌐 hosting button: widen this (private) broker's reach live.
+        // The 🌐 hosting button: widen this (private) broker's reach live —
+        // handled by the broker itself.
         let action = frame.get("action").and_then(Value::as_str).unwrap_or("");
         if matches!(action, "host_lan" | "host_lan_off" | "host_tunnel" | "host_tunnel_off") {
             if hub.lock().unwrap().ui_hosting {
                 tokio::spawn(hosting_action(hub.clone(), action.to_string()));
+            }
+            return;
+        }
+        // Other native-UI requests (e.g. toggle_inspector) belong to the canvas
+        // owner: route to the sources so the host can act (spawn/close the
+        // Inspector). A dial-in peer with no canvas ignores it.
+        let h = hub.lock().unwrap();
+        let text = frame.to_string();
+        for src in h.sources.values() {
+            if let Some(tx) = &src.tx {
+                let _ = tx.send(Out::T(text.clone()));
             }
         }
         return;

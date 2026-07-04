@@ -2408,6 +2408,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             exposure = self._resolve_exposure(host, tunnel, ui_inspector,
                                               ui_graveyard, cursors)
             self._public_bind = exposure.public_bind
+            # Mirror the gate onto the bridge too: the browser's toolbar
+            # Inspector toggle is routed back here, and the source-side handler
+            # honours the same flag before spawning the Inspector.
+            self._bridge._ui_inspector = exposure.ui_inspector
             default_private = host in ("127.0.0.1", "localhost") and not tunnel
             _ui_hosting = (bool(ui_hosting) if ui_hosting is not None
                            else default_private)
