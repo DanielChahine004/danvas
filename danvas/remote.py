@@ -405,6 +405,16 @@ def _dispatch_hub_frame(bridge, msg):
     if kind == "restore":
         bridge._restore_object(msg.get("id"))
         return
+    if kind in ("snapshot", "image"):
+        # A browser answered canvas.save()/screenshot(): hand the reply to the
+        # blocked waiter (correlated by reqId), exactly as the embedded server.
+        waiter = bridge._snapshot_waiters.get(msg.get("reqId"))
+        if waiter is not None:
+            waiter["data"] = msg.get("data")
+            if kind == "image":
+                waiter["error"] = msg.get("error")
+            waiter["event"].set()
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         # A Python-managed shape (canvas.geo/text/line/…) moved/resized in the

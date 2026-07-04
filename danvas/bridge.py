@@ -2484,7 +2484,7 @@ class Bridge:
         Requires at least one open client.
         """
         self._warn_if_blocking_on_dispatch("canvas.save()")
-        if not self._connections:
+        if not (self._connections or self._viewers):
             raise RuntimeError("no connected browser to read the canvas from")
         req_id = uuid.uuid4().hex
         waiter = {"event": threading.Event(), "data": None}
@@ -2510,7 +2510,7 @@ class Bridge:
         at least one open client (the browser is the only thing that can render).
         """
         self._warn_if_blocking_on_dispatch("canvas.screenshot()")
-        if not self._connections:
+        if not (self._connections or self._viewers):
             raise RuntimeError("no connected browser to capture from")
         req_id = uuid.uuid4().hex
         waiter = {"event": threading.Event(), "data": None, "error": None}

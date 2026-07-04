@@ -1571,6 +1571,15 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         h.fanout_browsers_except(&text, conn_id);
         return;
     }
+    if kind == "get_snapshot" || kind == "get_image" {
+        // The host asks a browser for the free-form document / a rendered PNG
+        // (canvas.save()/screenshot()); the browser is the only thing that can
+        // answer. Relay to the browsers; the reply (snapshot/image, correlated
+        // by reqId) routes back to the sources.
+        let h = hub.lock().unwrap();
+        h.fanout_browsers(&frame.to_string());
+        return;
+    }
     if kind == "graveyard_update" {
         let mut h = hub.lock().unwrap();
         let Some(src) = h.sources.get(label) else { return };
@@ -1879,6 +1888,18 @@ async fn spawn_tunnel(bin: &str, port: u16) -> Result<(std::process::Child, Stri
 
 fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
     let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+    if kind == "snapshot" || kind == "image" {
+        // A browser's reply to a host get_snapshot/get_image: route to the
+        // sources (the requesting source matches by reqId; others ignore it).
+        let h = hub.lock().unwrap();
+        let text = frame.to_string();
+        for src in h.sources.values() {
+            if let Some(tx) = &src.tx {
+                let _ = tx.send(Out::T(text.clone()));
+            }
+        }
+        return;
+    }
     if kind == "ui" {
         // The 🌐 hosting button: widen this (private) broker's reach live.
         let action = frame.get("action").and_then(Value::as_str).unwrap_or("");

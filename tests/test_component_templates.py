@@ -293,6 +293,40 @@ def test_serve_broker_graveyard_and_restore():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_snapshot_round_trips():
+    # Tier-2 tail: canvas.save()/screenshot() round-trip through the broker — the
+    # host's get_snapshot reaches a browser and the browser's reply routes back.
+    import threading
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    canvas = danvas.Canvas(); canvas.label("x", "hi")
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                await asyncio.sleep(0.3)               # settle presence
+                result = {}
+                def ask():
+                    result["doc"] = canvas._bridge.request_snapshot(timeout=8)
+                t = threading.Thread(target=ask, daemon=True); t.start()
+                # play the browser: answer the get_snapshot with a document
+                while True:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "get_snapshot":
+                        await ws.send(json.dumps({"type": "snapshot",
+                                                  "reqId": m["reqId"],
+                                                  "data": {"records": [1, 2, 3]}}))
+                        break
+                t.join(8)
+                assert result.get("doc") == {"records": [1, 2, 3]}
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():
