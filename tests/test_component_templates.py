@@ -427,7 +427,8 @@ def test_canvas_authored_in_rust_no_python_serving():
 
 # -- the default flip: serve() prefers the broker ---------------------------------
 
-def test_serve_auto_resolves_to_broker(monkeypatch):
+def test_serve_resolves_to_broker(monkeypatch):
+    # serve() always routes through the broker — there is no embedded fallback.
     import danvas.remote as remote_mod
     calls = {}
 
@@ -441,32 +442,18 @@ def test_serve_auto_resolves_to_broker(monkeypatch):
     monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
 
     c = danvas.Canvas()
-    out = c.serve(port=1234, open_browser=False, block=False)   # plain serve()
+    out = c.serve(port=1234, open_browser=False, block=False)
     assert out is c and calls["port"] == 1234                   # broker path
-
-    # embedded-only features fall back to the embedded server
+    # even a feature that used to force the embedded server (persist=) now rides
+    # the broker — serve_via_broker is still the one call.
     calls.clear()
-    called_embedded = {}
-    monkeypatch.setattr(
-        danvas.Canvas, "_maybe_handoff_reload",
-        lambda self, *a, **k: (_ for _ in ()).throw(SystemExit))
-    c2 = danvas.Canvas()
-    import pytest as _pytest
-    with _pytest.raises(SystemExit):
-        c2.serve(persist=True, open_browser=False, block=False)
-    assert not calls                                            # broker skipped
-
-    # DANVAS_EMBEDDED force-disables
-    monkeypatch.setenv("DANVAS_EMBEDDED", "1")
-    c3 = danvas.Canvas()
-    with _pytest.raises(SystemExit):
-        c3.serve(open_browser=False, block=False)
-    assert not calls
+    danvas.Canvas().serve(persist=True, open_browser=False, block=False)
+    assert calls.get("persist") is True
 
 
-def test_serve_auto_falls_back_when_broker_wont_launch(monkeypatch):
-    # A found-but-unlaunchable binary (wrong arch, corrupt) must NOT break
-    # serve() in auto mode — it falls back to the embedded server.
+def test_serve_raises_when_broker_wont_launch(monkeypatch):
+    # A found-but-unlaunchable binary (wrong arch, corrupt) surfaces as
+    # _BrokerUnavailable — there is no in-process fallback to swallow it.
     import danvas.remote as remote_mod
     from danvas.remote import _BrokerUnavailable
 
@@ -476,21 +463,9 @@ def test_serve_auto_falls_back_when_broker_wont_launch(monkeypatch):
     monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
 
     import pytest as _pytest
-    # Sentinel for "fell through to the embedded server": stub its block=False
-    # entry point (the handoff now runs BEFORE the broker branch, so it can't
-    # be the sentinel any more).
-    monkeypatch.setattr(
-        danvas.Canvas, "_serve_background",
-        lambda self, *a, **k: (_ for _ in ()).throw(SystemExit("embedded")))
     c = danvas.Canvas()
-    with _pytest.warns(UserWarning, match="broker unavailable"):
-        with _pytest.raises(SystemExit, match="embedded"):   # reached embedded
-            c.serve(open_browser=False, block=False)
-
-    # broker=True (explicit) instead surfaces the failure
-    c2 = danvas.Canvas()
     with _pytest.raises(_BrokerUnavailable):
-        c2.serve(broker=True, open_browser=False, block=False)
+        c.serve(open_browser=False, block=False)
 
 
 def test_serve_desktop_routes_through_broker(monkeypatch):

@@ -64,7 +64,7 @@ def canvas_url():
                   x=200, y=430, w=220, h=110, decorative=True)
 
     port = _free_port()
-    canvas.serve(port=port, open_browser=False, hot_reload=False, block=False, broker=False)
+    canvas.serve(port=port, open_browser=False, hot_reload=False, block=False)
     time.sleep(1.5)
     try:
         yield f"http://127.0.0.1:{port}"

@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     # this import never runs at import time — no runtime dependency added.
     from typing_extensions import Unpack
 
-from . import server
 from . import _ledger
 from ._flags import LAYOUT_FLAGS
 from .kernel import spawn
@@ -2341,220 +2340,86 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         tldraw-free, so no production licence key is needed. The argument is
         accepted (and discarded) only so older call sites don't break.
 
-        ``broker=True`` (EXPERIMENTAL) serves through the ``danvasd`` binary
-        instead of the embedded Python server: the broker owns the port and
-        the UI survives this process; this process dials in as the ``host``
-        source. Panels, handlers, live setters, arrows, ink, media, and auth
-        work; managed shapes, chat, presence, ``on_request``, roles,
-        upload/download endpoints, ``persist=`` and hot reload don't cross
-        the hub yet — see :func:`danvas.remote.serve_via_broker`.
+        Serving always goes through the ``danvasd`` binary broker: it owns the
+        port so the canvas UI survives this process, which dials in as the
+        ``host`` source. The whole serve() surface routes through it (see
+        :func:`danvas.remote.serve_via_broker`). ``broker`` is accepted for
+        back-compat and ignored — there is no in-process Python server anymore
+        (``python -m danvas.merge`` remains for a neutral aggregator).
         """
-        # THE DEFAULT IS THE BROKER. broker="auto" serves through danvasd
-        # whenever the binary is available and no embedded-only feature is
-        # requested; broker=False forces the embedded Python server (also the
-        # automatic fallback when the binary is missing); broker=True demands
-        # the binary and raises without it. DANVAS_EMBEDDED=1 force-disables
-        # globally. EVERY serve() feature now works through the broker —
-        # hot_reload, persist=, desktop=, tunnel=, merge_server=, and the live
-        # hosting button (each reworked to layer on the polyglot core). The
-        # embedded server is now purely a fallback (no binary / won't launch /
-        # DANVAS_EMBEDDED=1).
-        broker_required = broker is True   # explicit demand vs "auto"
-        if broker == "auto":
-            from .remote import _find_danvasd
-            embedded_only = bool(os.environ.get("DANVAS_EMBEDDED"))
-            broker = (not embedded_only) and _find_danvasd() is not None
-        # Hot-reload monitor/worker split FIRST (for both serving modes). The
-        # monitor-parent path exits inside this call; a worker returns and
-        # continues to serve (broker or embedded).
+        # danvasd (the binary broker) is the ONE serving path: it owns the port,
+        # so the canvas UI outlives this process, which dials in as the ``host``
+        # source. Every serve() feature routes through it (see serve_via_broker).
+        # There is no in-process Python fallback — serve() finds or builds
+        # danvasd and raises _BrokerUnavailable if it can't. (The Python hub
+        # still exists as ``python -m danvas.merge`` — the neutral aggregator and
+        # the conformance reference — it just isn't how a Canvas serves itself.)
+        # The ``broker`` argument is accepted for back-compat and ignored.
+        del broker
+        # Hot-reload monitor/worker split FIRST: the monitor-parent path exits
+        # inside this call; a worker returns and continues to serve.
         handoff = self._maybe_handoff_reload(hot_reload, block, port, tunnel,
-                                             tunnel_provider, watch,
-                                             broker=broker)
+                                             tunnel_provider, watch, broker=True)
         if namespace is not None:
             self._namespace = namespace
         if handoff.should_return:
             return self
         if handoff.open_browser is not None:
             open_browser = handoff.open_browser
-        if broker:
-            from .remote import serve_via_broker, _BrokerUnavailable
-            # Under hot_reload the monitor spawned danvasd once and set
-            # _danvas_BROKER_PORT; workers dial into it rather than spawn.
-            existing = os.environ.get("_danvas_BROKER_PORT")
-            existing = int(existing) if existing else None
-            # Python-side setup that rides the host source (so it lands the same
-            # whether we serve embedded or through the broker): the debug frame
-            # tap, and the initial view — folded into the broker's welcome.
-            if debug:
-                self._bridge.add_frame_tap(self._debug_frame)
-            serve_view = self._normalize_view(view)
-            if serve_view is not None:
-                self._bridge._view = {**(self._bridge._view or {}), **serve_view}
-            # merge_server=: the address the broker advertises a "Merge…" button
-            # for; self_url is how that server dials back to reach this canvas
-            # (loopback for a local bind, else the LAN IP — a tunnel's public URL
-            # isn't known here, so merge_server suits a local/LAN canvas).
-            _self_url = None
-            if merge_server:
-                if host in ("127.0.0.1", "localhost", ""):
-                    _self_url = f"127.0.0.1:{port}"
-                else:
-                    from .server import _lan_ip
-                    _self_url = f"{_lan_ip() or host}:{port}"
-            # UI-affordance gating is the owner's call (Inspector/graveyard/cursor
-            # reporting all expose viewer state, so they default on only for a
-            # private local bind). Resolve here and pass the decision as flags so
-            # the broker's welcome gates exactly like the embedded server's.
-            exposure = self._resolve_exposure(host, tunnel, ui_inspector,
-                                              ui_graveyard, cursors)
-            self._public_bind = exposure.public_bind
-            # Mirror the gate onto the bridge too: the browser's toolbar
-            # Inspector toggle is routed back here, and the source-side handler
-            # honours the same flag before spawning the Inspector.
-            self._bridge._ui_inspector = exposure.ui_inspector
-            default_private = host in ("127.0.0.1", "localhost") and not tunnel
-            _ui_hosting = (bool(ui_hosting) if ui_hosting is not None
-                           else default_private)
-            try:
-                # Native window (desktop=True, or a baked exe) points at the
-                # broker's URL just as it would the embedded server's — a pure
-                # client-side retarget.
-                _use_desktop = (bool(getattr(sys, "frozen", False))
-                                if desktop is None else bool(desktop))
-                return serve_via_broker(
-                    self, port=existing or port, open_browser=open_browser,
-                    block=block, password=password, passwords=passwords,
-                    host=host, existing_port=existing, persist=persist,
-                    desktop=_use_desktop, window_title=window_title,
-                    window_size=window_size, tunnel=tunnel,
-                    tunnel_provider=tunnel_provider,
-                    merge_server=merge_server, self_url=_self_url,
-                    ui_inspector=exposure.ui_inspector,
-                    ui_graveyard=exposure.ui_graveyard,
-                    cursors=exposure.cursors, ui_hosting=_ui_hosting)
-            except _BrokerUnavailable as exc:
-                if broker_required:   # explicitly demanded -> surface it
-                    raise
-                # broker="auto": the binary is missing or won't run here;
-                # fall through to the embedded server so serve() still works.
-                warnings.warn(f"broker unavailable ({exc}); serving with the "
-                              "embedded server", stacklevel=2)
-        # Under hot reload the persistent monitor process owns the tunnel, so this
-        # worker must not open its own — but it's still publicly reachable
-        # *through* that tunnel, so every public-exposure decision stays keyed on
-        # `tunnel`, not `own_tunnel`. Outside hot reload they're identical.
-        own_tunnel = tunnel and os.environ.get("_danvas_RELOAD_WORKER") != "1"
-        # A tunnel publishes the loopback bind to the entire internet; treat it
-        # as a public bind for exposure/telemetry decisions.
-        # Resolve how far this serve reaches and the telemetry defaults (UI
-        # Inspector + cursor reporting).
-        exposure = self._resolve_exposure(host, tunnel, ui_inspector,
-                                          ui_graveyard, cursors)
-        self._public_bind = exposure.public_bind
-        self._bridge._ui_inspector = exposure.ui_inspector
-        # The 🌐 hosting button: lets a viewer widen a private canvas's reach
-        # (LAN listener / public tunnel) live. Widening exposure is a real
-        # decision, so it defaults on ONLY for a private local bind — the same
-        # rule as the Inspector — and once the canvas is already LAN-bound or
-        # tunneled there's nothing for it to do anyway.
-        default_private = host in ("127.0.0.1", "localhost") and not tunnel
-        self._bridge._ui_hosting = (bool(ui_hosting) if ui_hosting is not None
-                                    else default_private)
-        self._bridge._hosting.update(host=host, port=port)
-        self._bridge._ui_graveyard = exposure.ui_graveyard
-        self._bridge._cursors = exposure.cursors
-        # When a password is set, advertise it so the frontend offers a built-in
-        # sign-out button (clears the session cookie via /__logout__, then the
-        # login page reappears — letting a viewer switch accounts). No auth → no
-        # button, nothing to sign out of.
-        self._bridge._auth = bool(password or passwords)
-        # Optional note rendered on the password page (e.g. which password each
-        # kind of viewer should enter). Stored on the bridge; create_app reads it.
-        self._bridge._login_message = login_message
-        # Optional standing merge server (serve(merge_server=...)): advertised in
-        # the welcome frame so this canvas's UI shows a "Merge…" button that
-        # navigates there, pre-seeded with this canvas. ``_self_url`` is the
-        # address the merge server dials back to reach this canvas — the loopback
-        # for a local bind, else the LAN IP (a tunneled self-merge would need the
-        # public URL, which isn't known here, so merge_server suits a LAN/local
-        # canvas). Both are None when merge_server isn't set (no button shown).
-        if merge_server:
-            if host in ("127.0.0.1", "localhost", ""):
-                self._bridge._self_url = f"127.0.0.1:{port}"
-            else:
-                from .server import _lan_ip
-                self._bridge._self_url = f"{_lan_ip() or host}:{port}"
-            self._bridge._merge_server = merge_server
-        # serve(merge=True) — on by default — turns this canvas into a hub: the 🧩
-        # merge panel appears and you can pull *other* canvases' panels in (by URL,
-        # or ?sources=) alongside this canvas's own, with no restart. It stays inert
-        # (no upstream connections, negligible overhead) until you add a source.
-        # Enabled here rather than at construction so ``import danvas`` doesn't pull
-        # in the websocket *client* stack until a canvas actually serves.
-        if merge and self._bridge._merge is None:
-            from .merge import _MergeHost
-            # merge_retain (default True): a merged source that dies keeps its
-            # panels on this hub, frozen (dimmed, non-operable) at their
-            # last-known state, until it reconnects (see _MergeHost.retain);
-            # False drops them instead.
-            self._bridge._merge = _MergeHost(self._bridge, retain=merge_retain)
-        # Apply any canvas.merge() calls made before serving (a protected source's
-        # password rides along). A no-op when merging is off.
-        if self._bridge._merge is not None and self._pending_merges:
-            for url, pw, offset in self._pending_merges:
-                self._bridge._merge.add_source(url, password=pw, offset=offset)
-            self._pending_merges = []
-        # Wire logging: a frame tap that prints every JSON frame (and binary
-        # summaries) with the component's friendly name. ASCII arrows on purpose
-        # — Windows consoles often run cp1252, which can't print "▼"/"▲".
+        from .remote import serve_via_broker
+        # Under hot_reload the monitor spawned danvasd once and set
+        # _danvas_BROKER_PORT; workers dial into it rather than spawn.
+        existing = os.environ.get("_danvas_BROKER_PORT")
+        existing = int(existing) if existing else None
+        # Python-side setup that rides the host source: the debug frame tap, the
+        # initial view (folded into the broker's welcome), the login-page note,
+        # and dispatch-history recording (canvas.trace_history).
         if debug:
             self._bridge.add_frame_tap(self._debug_frame)
-        # Merge serve's view onto any config already set via set_view() rather
-        # than clobbering it, so `set_view(ui=False); serve()` (or bake(), which
-        # calls serve with no view) keeps the earlier settings. An explicit
-        # serve(view=...) still wins key-by-key.
         serve_view = self._normalize_view(view)
         if serve_view is not None:
             self._bridge._view = {**(self._bridge._view or {}), **serve_view}
-        # Arm dispatch-history recording (canvas.trace_history): from now on every
-        # handler dispatch is recorded into a bounded ring, so a trace panel opened
-        # later shows what already happened. In the serving worker only (the
-        # monitor returned above). Shallow unless deep tracing is also turned on.
+        self._bridge._login_message = login_message
         self._bridge._trace_recording = True
-        # Start any registered background workers now -- we're in the serving
-        # process (the hot-reload monitor returned above), so producer loops that
-        # grab single-owner resources (a camera, a serial port) run here, never
-        # in the monitor.
-        self._start_background()
-        # Wire persistence (serve(persist=...)): load the saved formation +
-        # drawings now (before any client connects, so the seed replays on
-        # connect) and arm the debounced autosave. In the serving worker only --
-        # the hot-reload monitor returned above, so it never reads/writes the
-        # file or races the worker for it.
-        if persist:
-            self._persist_setup(persist)
-        # Native-window mode: default to on only inside a baked executable, so a
-        # plain `python script.py` still opens the browser. Blocks on the webview
-        # loop (main thread), so the non-blocking branch below is skipped.
-        use_desktop = bool(getattr(sys, "frozen", False)) if desktop is None \
-            else bool(desktop)
-        # permessage-deflate is worth its CPU only on a bandwidth-constrained
-        # public tunnel, not a fast local/LAN link (see server._ws_opts). Keyed
-        # on `tunnel`, not `own_tunnel`: a hot-reload worker serves *through* the
-        # monitor's tunnel, so it's still a tunneled (slow-link) bind.
-        compress = tunnel
-        if use_desktop:
-            self._serve_desktop(port, host, own_tunnel, tunnel_provider,
-                                window_title, window_size, password,
-                                passwords=passwords, compress=compress)
-            return self
-        if not block:
-            self._serve_background(port, open_browser, host, password,
-                                   passwords, own_tunnel, tunnel_provider, wait,
-                                   compress=compress)
-            return self
-        self._serve_blocking(port, open_browser, host, password, passwords,
-                             own_tunnel, tunnel_provider, compress=compress)
+        # merge_server=: the address the broker advertises a "Merge…" button for;
+        # self_url is how that server dials back to reach this canvas (loopback
+        # for a local bind, else the LAN IP — a tunnel's public URL isn't known
+        # here, so merge_server suits a local/LAN canvas).
+        _self_url = None
+        if merge_server:
+            if host in ("127.0.0.1", "localhost", ""):
+                _self_url = f"127.0.0.1:{port}"
+            else:
+                from .server import _lan_ip
+                _self_url = f"{_lan_ip() or host}:{port}"
+        # UI-affordance gating is the owner's call (Inspector/graveyard/cursor
+        # reporting all expose viewer state, so they default on only for a
+        # private local bind). Resolve here and pass the decision as flags so the
+        # broker's welcome gates exactly like the embedded server's did.
+        exposure = self._resolve_exposure(host, tunnel, ui_inspector,
+                                          ui_graveyard, cursors)
+        self._public_bind = exposure.public_bind
+        # Mirror the Inspector gate onto the bridge: the browser's toolbar toggle
+        # is routed back here, and the source-side handler honours the flag.
+        self._bridge._ui_inspector = exposure.ui_inspector
+        default_private = host in ("127.0.0.1", "localhost") and not tunnel
+        _ui_hosting = (bool(ui_hosting) if ui_hosting is not None
+                       else default_private)
+        # Native window (desktop=True, or a baked exe) points at the broker's URL
+        # just as a browser would — a pure client-side retarget.
+        _use_desktop = (bool(getattr(sys, "frozen", False))
+                        if desktop is None else bool(desktop))
+        return serve_via_broker(
+            self, port=existing or port, open_browser=open_browser,
+            block=block, password=password, passwords=passwords,
+            host=host, existing_port=existing, persist=persist,
+            desktop=_use_desktop, window_title=window_title,
+            window_size=window_size, tunnel=tunnel,
+            tunnel_provider=tunnel_provider,
+            merge_server=merge_server, self_url=_self_url,
+            ui_inspector=exposure.ui_inspector,
+            ui_graveyard=exposure.ui_graveyard,
+            cursors=exposure.cursors, ui_hosting=_ui_hosting)
 
     def _resolve_exposure(self, host, tunnel, ui_inspector, ui_graveyard, cursors):
         """Resolve how far this serve() reaches, plus the telemetry defaults.
@@ -2663,81 +2528,6 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             self._bridge._reload = True
             return _ReloadHandoff(False, False)
         return _ReloadHandoff(False, None)
-
-    def _serve_background(self, port, open_browser, host, password, passwords,
-                          own_tunnel, tunnel_provider, wait, compress=False):
-        """Start the server in a daemon thread and return (serve(block=False)).
-
-        ``wait`` blocks briefly until the event loop is ready so the first
-        post-serve insert is guaranteed to broadcast.
-        """
-        self._server = server.run_background(
-            self._bridge, port=port, open_browser=open_browser, host=host,
-            password=password, passwords=passwords, compress=compress,
-        )
-        if wait:
-            self._wait_until_ready()
-        self._serving = True
-        if own_tunnel:
-            self._start_tunnel(port, tunnel_provider)
-
-    def _serve_blocking(self, port, open_browser, host, password, passwords,
-                        own_tunnel, tunnel_provider, compress=False):
-        """Run the server on this thread until shutdown (serve(block=True))."""
-        self._serving = True
-        if own_tunnel:
-            self._start_tunnel(port, tunnel_provider)
-        try:
-            server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host, password=password, passwords=passwords,
-                       compress=compress)
-        finally:
-            self._persist_flush()  # capture final state (no-op when persist off)
-            self._stop_tunnel()
-
-    def _serve_desktop(self, port, host, tunnel, tunnel_provider, title, size,
-                       password=None, passwords=None, compress=False):
-        """Serve in the background and show the canvas in a native window.
-
-        Used by desktop mode (a baked executable, or ``serve(desktop=True)``).
-        Falls back to a normal blocking browser serve if pywebview is missing, so
-        a build without the desktop extra still runs — just in the browser.
-        """
-        try:
-            import webview
-        except ImportError:
-            warnings.warn(
-                "pywebview is not installed; opening in the browser instead. "
-                "Install the desktop extra: pip install 'danvas[desktop]'"
-            )
-            self._serving = True
-            if tunnel:
-                self._start_tunnel(port, tunnel_provider)
-            try:
-                server.run(self._bridge, port=port, open_browser=True, host=host,
-                           password=password, passwords=passwords,
-                           compress=compress)
-            finally:
-                self._stop_tunnel()
-            return
-        # Start the server in the background, then drive the window on the main
-        # thread (pywebview requires that). webview.start() blocks until the
-        # window closes; tear the server down afterwards.
-        self._server = server.run_background(
-            self._bridge, port=port, open_browser=False, host=host,
-            password=password, passwords=passwords, compress=compress,
-        )
-        self._wait_until_ready()
-        self._serving = True
-        if tunnel:
-            self._start_tunnel(port, tunnel_provider)
-        try:
-            width, height = size
-            webview.create_window(title, f"http://127.0.0.1:{port}",
-                                  width=int(width), height=int(height))
-            webview.start()
-        finally:
-            self.stop()
 
     def bake(self, name="danvas", *, icon=None, onefile=True, windowed=True,
              distpath="dist", entry=None, exclude=None, include=None,
@@ -2900,6 +2690,9 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._persist_flush()
         if self._server is not None:
             self._server.should_exit = True
+        broker = getattr(self, "_broker", None)
+        if broker is not None:
+            broker.stop()   # ends the dial-in (and the broker proc we spawned)
         self._stop_tunnel()
 
     def wait(self):
@@ -2907,10 +2700,23 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Use this at the end of a *script* that started the server with
         ``serve(block=False)`` (and then, say, spun up worker threads): without
-        it the script would fall off the end and exit, killing the daemon server
-        thread. ``Ctrl+C`` triggers a clean shutdown. A no-op if the server isn't
-        running in the background (nothing to wait on).
+        it the script would fall off the end and exit, dropping this process's
+        dial-in to the broker. ``Ctrl+C`` triggers a clean shutdown. A no-op if
+        nothing is running in the background.
         """
+        broker = getattr(self, "_broker", None)
+        if broker is not None:
+            # Broker mode: the UI lives in danvasd; park this process (its
+            # dial-in keeps the handlers live) until the broker exits or Ctrl+C.
+            proc = getattr(broker, "proc", None)
+            try:
+                while proc is None or proc.poll() is None:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                self.stop()
+            return
         if self._server is None:
             return
         try:

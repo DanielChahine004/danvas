@@ -538,8 +538,8 @@ def _find_danvasd():
 
 
 class _BrokerUnavailable(RuntimeError):
-    """The broker binary is absent or won't launch — the caller falls back to
-    the embedded server (raised only from the broker launch path)."""
+    """The broker binary is absent or won't launch. serve() is broker-only, so
+    this propagates to the caller (there is no in-process fallback)."""
 
 
 class BrokerHandle:
@@ -632,8 +632,8 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                 break
             except OSError:
                 if proc.poll() is not None:
-                    # Won't launch (wrong arch, corrupt, missing lib): not
-                    # fatal — the auto path falls back to the embedded server.
+                    # Won't launch (wrong arch, corrupt, missing lib): surface
+                    # it — serve() is broker-only, there's nothing to fall to.
                     raise _BrokerUnavailable(
                         f"danvasd exited on startup (code {proc.returncode})")
                 _time.sleep(0.1)
