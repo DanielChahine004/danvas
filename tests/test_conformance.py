@@ -1166,3 +1166,96 @@ def test_graveyard_roundtrip_through_the_hub(hub):
             back = await src.recv_until(lambda m: m.get("type") == "restore")
             assert back["id"] == "gp"
     _run(go())
+
+
+# -- roles: multi-password login + role-filtered egress --------------------------
+
+@pytest.fixture(scope="module")
+def roles_hub():
+    """A hub with role passwords (DANVAS_ROLE_PASSWORDS=admin=a1,viewer=v1)."""
+    port = _free_port()
+    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
+    if cmd_tpl:
+        cmd = [p.format(port=port, password="") for p in cmd_tpl.split("|")]
+    else:
+        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
+               "--no-open"]
+    env = dict(os.environ)
+    env["DANVAS_ROLE_PASSWORDS"] = "admin=a1,viewer=v1"
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    raise RuntimeError(f"hub exited early: {cmd}")
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("hub never started")
+        yield port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_roles_gate_login_visibility_and_input(roles_hub):
+    port = roles_hub
+    assert _login(port, "nope") is None
+    tok_admin = _login(port, "a1")
+    tok_view = _login(port, "v1")
+    assert tok_admin and tok_view
+
+    async def go():
+        src_ws = await ws_connect(
+            f"ws://127.0.0.1:{port}/ws?source=1&label=r1", max_size=None,
+            additional_headers={"Cookie": f"pc_session={tok_admin}"})
+        admin_ws = await ws_connect(
+            f"ws://127.0.0.1:{port}/ws", max_size=None,
+            additional_headers={"Cookie": f"pc_session={tok_admin}"})
+        view_ws = await ws_connect(
+            f"ws://127.0.0.1:{port}/ws", max_size=None,
+            additional_headers={"Cookie": f"pc_session={tok_view}"})
+        try:
+            src, adm, vw = Peer(src_ws), Peer(admin_ws), Peer(view_ws)
+            w = await adm.recv_until(lambda m: m.get("type") == "welcome")
+            assert w["you"]["role"] == "admin"        # role is server-trusted
+            await src.recv_until(lambda m: m.get("type") == "welcome")
+            await src.send({"type": "register", "id": "secret", "name": "sA",
+                            "component": "React", "props": {},
+                            "roles": ["admin"]})
+            await src.send({"type": "register", "id": "open", "name": "sB",
+                            "component": "React", "props": {}})
+            areg = await adm.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "sA")
+            await adm.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "sB")
+            # the viewer sees only the open panel — live AND in a fresh replay
+            await vw.recv_until(
+                lambda m: m.get("type") == "register" and m.get("name") == "sB")
+            await asyncio.sleep(0.3)
+            assert not [m for m in vw.frames if m.get("name") == "sA"]
+            # updates to the admin panel are filtered the same way
+            await src.send({"type": "update", "id": "secret",
+                            "payload": {"value": 9}})
+            await adm.recv_until(
+                lambda m: m.get("type") == "update" and m.get("id") == areg["id"])
+            await asyncio.sleep(0.3)
+            assert not [m for m in vw.frames
+                        if m.get("type") == "update" and m.get("id") == areg["id"]]
+            # a forged input on the role-hidden panel is dropped at the hub
+            await vw.send({"type": "input", "id": areg["id"],
+                           "payload": {"value": 1}})
+            await asyncio.sleep(0.4)
+            assert not [m for m in src.frames if m.get("type") == "input"]
+        finally:
+            await src_ws.close()
+            await admin_ws.close()
+            await view_ws.close()
+    asyncio.run(asyncio.wait_for(go(), timeout=40))

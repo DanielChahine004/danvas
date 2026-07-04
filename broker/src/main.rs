@@ -125,9 +125,12 @@ struct Hub {
     /// Hub-native annotation ink (bare record ids): record id -> record.
     drawings: HashMap<String, Value>,
     /// --password gate: None = open. Sessions are opaque server-minted
-    /// tokens carried in the pc_session cookie (PROTOCOL.md §transport).
+    /// tokens carried in the pc_session cookie (PROTOCOL.md §transport);
+    /// each maps to the login ROLE (None for the single shared password).
+    /// DANVAS_ROLE_PASSWORDS=role=pw,role2=pw2 defines role logins.
     password: Option<String>,
-    sessions: HashSet<String>,
+    role_passwords: Vec<(String, String)>,
+    sessions: HashMap<String, Option<String>>,
     /// Dialed-out sources (merge_add): label -> the retrying dial task, so
     /// merge_remove can stop it for good.
     dial_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
@@ -214,20 +217,32 @@ fn normalize_source_uri(spec: &str) -> Option<(String, String)> {
 }
 
 impl Hub {
-    fn authed(&self, headers: &HeaderMap) -> bool {
-        if self.password.is_none() {
-            return true;
+    fn protected(&self) -> bool {
+        self.password.is_some() || !self.role_passwords.is_empty()
+    }
+
+    /// Ok(role) when the request carries a valid session (role None for the
+    /// shared password / an open hub); Err(()) when it must be refused.
+    fn session_role(&self, headers: &HeaderMap) -> Result<Option<String>, ()> {
+        if !self.protected() {
+            return Ok(None);
         }
         let Some(cookies) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())
         else {
-            return false;
+            return Err(());
         };
-        cookies.split(';').any(|c| {
-            c.trim()
-                .strip_prefix("pc_session=")
-                .map(|t| self.sessions.contains(t))
-                .unwrap_or(false)
-        })
+        for c in cookies.split(';') {
+            if let Some(t) = c.trim().strip_prefix("pc_session=") {
+                if let Some(role) = self.sessions.get(t) {
+                    return Ok(role.clone());
+                }
+            }
+        }
+        Err(())
+    }
+
+    fn authed(&self, headers: &HeaderMap) -> bool {
+        self.session_role(headers).is_ok()
     }
 }
 
@@ -426,6 +441,33 @@ impl Hub {
     }
 }
 
+fn viewer_role(h: &Hub, conn_id: u64) -> Option<String> {
+    h.viewers
+        .get(&conn_id)
+        .and_then(|v| v.get("role"))
+        .and_then(Value::as_str)
+        .map(String::from)
+}
+
+/// The role allowlist a relayed panel declared ([] = everyone). `frame` lets
+/// a register be checked before it lands in the cache.
+fn panel_roles(src: &Source, nsid: &str, frame: Option<&Value>) -> Vec<String> {
+    frame
+        .or_else(|| src.registers.get(nsid))
+        .and_then(|r| r.get("roles"))
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+        .unwrap_or_default()
+}
+
+fn role_may_see(role: &Option<String>, roles: &[String]) -> bool {
+    roles.is_empty()
+        || role
+            .as_deref()
+            .map(|r| roles.iter().any(|x| x == r))
+            .unwrap_or(false)
+}
+
 fn now_hex() -> String {
     let ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -452,9 +494,21 @@ async fn main() {
             _ => {}
         }
     }
+    let role_passwords: Vec<(String, String)> = std::env::var("DANVAS_ROLE_PASSWORDS")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .filter_map(|pair| {
+                    pair.split_once('=')
+                        .map(|(r, p)| (r.trim().to_string(), p.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let hub = Arc::new(Mutex::new(Hub {
         run_id: now_hex(),
         password,
+        role_passwords,
         ledger: std::env::var("DANVAS_LEDGER").ok().as_deref().and_then(open_ledger),
         ..Default::default()
     }));
@@ -472,18 +526,29 @@ async fn main() {
 
 async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl IntoResponse {
     let mut h = hub.lock().unwrap();
-    let ok = match (&h.password, form_password(&body)) {
-        (Some(pw), Some(given)) => &given == pw,
-        (None, _) => true, // open hub: the login is a no-op redirect
-        _ => false,
+    let given = form_password(&body);
+    // Which login is this? The shared --password maps to role None; a role
+    // password maps to its role. An open hub redirects as a no-op.
+    let role: Option<Option<String>> = if !h.protected() {
+        Some(None)
+    } else {
+        match &given {
+            Some(g) if h.password.as_ref() == Some(g) => Some(None),
+            Some(g) => h
+                .role_passwords
+                .iter()
+                .find(|(_, pw)| pw == g)
+                .map(|(r, _)| Some(r.clone())),
+            None => None,
+        }
     };
-    if !ok {
+    let Some(role) = role else {
         return (StatusCode::UNAUTHORIZED,
                 [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
                 LOGIN_PAGE).into_response();
-    }
+    };
     let token = format!("{}{}", now_hex(), CONN_SEQ.fetch_add(1, Ordering::Relaxed));
-    h.sessions.insert(token.clone());
+    h.sessions.insert(token.clone(), role);
     (StatusCode::SEE_OTHER,
      [(header::LOCATION, "/".to_string()),
       (header::SET_COOKIE,
@@ -565,13 +630,21 @@ async fn ws_handler(
     headers: HeaderMap,
     State(hub): State<Arc<Mutex<Hub>>>,
 ) -> impl IntoResponse {
-    if !hub.lock().unwrap().authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, "login required").into_response();
-    }
-    ws.on_upgrade(move |socket| handle(socket, q, hub)).into_response()
+    let role = match hub.lock().unwrap().session_role(&headers) {
+        Ok(r) => r,
+        Err(()) => {
+            return (StatusCode::UNAUTHORIZED, "login required").into_response()
+        }
+    };
+    ws.on_upgrade(move |socket| handle(socket, q, role, hub)).into_response()
 }
 
-async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hub>>) {
+async fn handle(
+    socket: WebSocket,
+    q: HashMap<String, String>,
+    role: Option<String>,
+    hub: Arc<Mutex<Hub>>,
+) {
     let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
     let is_source = q.get("source").map(|v| !v.is_empty()).unwrap_or(false);
     let label = q
@@ -609,7 +682,8 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             "type": "welcome",
             "protocol": PROTOCOL_VERSION,
             "you": {"id": format!("v{conn_id}"), "name": display_name,
-                     "color": color, "device": "desktop", "role": null},
+                     "color": color, "device": "desktop",
+                     "role": role.clone()},
             "runId": h.run_id,
             "view": if h.hub_view.is_empty() { Value::Null }
                     else { Value::Object(h.hub_view.clone()) },
@@ -625,7 +699,7 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
         h.conns.insert(conn_id, tx.clone());
         h.viewers.insert(conn_id, json!({
             "id": format!("v{conn_id}"), "name": display_name,
-            "color": color, "device": "desktop", "role": null,
+            "color": color, "device": "desktop", "role": role.clone(),
         }));
         let p = h.presence_frame().to_string();
         h.fanout_all(&p);
@@ -642,12 +716,17 @@ async fn handle(socket: WebSocket, q: HashMap<String, String>, hub: Arc<Mutex<Hu
             let mut h = hub.lock().unwrap();
             h.browsers.insert(conn_id, tx.clone());
             h.conns.insert(conn_id, tx.clone());
-            let mut out: Vec<String> = h
-                .sources
-                .values()
-                .flat_map(|s| Hub::cached_frames(s))
-                .map(|f| f.to_string())
-                .collect();
+            let mut out: Vec<String> = Vec::new();
+            for s in h.sources.values() {
+                for f in Hub::cached_frames(s) {
+                    if let Some(cid) = f.get("id").and_then(Value::as_str) {
+                        if !role_may_see(&role, &panel_roles(s, cid, Some(&f))) {
+                            continue; // role-hidden panel: not replayed
+                        }
+                    }
+                    out.push(f.to_string());
+                }
+            }
             if !h.drawings.is_empty() {
                 out.push(json!({"type": "draw", "diff": {
                     "added": h.drawings.clone().into_iter()
@@ -1077,7 +1156,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             if !src.registers.contains_key(&nsid) {
                 src.reg_order.push(nsid.clone());
             }
-            src.registers.insert(nsid, frame.clone());
+            src.registers.insert(nsid.clone(), frame.clone());
         }
         "update" => {
             let (ox, oy) = h.sources.get(label).map(|s| s.offset).unwrap_or((0.0, 0.0));
@@ -1107,7 +1186,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             let (ox, oy) = src.offset;
             shift_xy(frame.as_object_mut().unwrap(), ox, oy);
             let src = h.sources.get_mut(label).unwrap();
-            src.shapes.insert(nsid, frame.clone());
+            src.shapes.insert(nsid.clone(), frame.clone());
         }
         "shape_update" => {
             let (ox, oy) = h.sources.get(label).map(|s| s.offset).unwrap_or((0.0, 0.0));
@@ -1142,12 +1221,31 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
                 }
             }
             let src = h.sources.get_mut(label).unwrap();
-            src.arrows.insert(nsid, frame.clone());
+            src.arrows.insert(nsid.clone(), frame.clone());
         }
         _ => {}
     }
     let text = frame.to_string();
-    h.fanout_browsers(&text);
+    let roles = h
+        .sources
+        .get(label)
+        .map(|s| panel_roles(s, &nsid, Some(&frame)))
+        .unwrap_or_default();
+    if roles.is_empty() {
+        h.fanout_browsers(&text);
+    } else {
+        // Role egress: frames tied to a role-restricted panel reach only
+        // viewers whose login role is on the allowlist.
+        let ids: Vec<u64> = h.browsers.keys().cloned().collect();
+        for bid in ids {
+            let vrole = viewer_role(&h, bid);
+            if role_may_see(&vrole, &roles) {
+                if let Some(tx) = h.browsers.get(&bid) {
+                    let _ = tx.send(Out::T(text.clone()));
+                }
+            }
+        }
+    }
 }
 
 fn compose_endpoint(h: &Hub, own_tag: &str, r: &str) -> String {
@@ -1442,6 +1540,16 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         "input" | "set_props" | "layout" | "request" | "graveyard" | "restore" => {
             let Some((tag, rest)) = cid.split_once(':') else { return };
             let mut h = hub.lock().unwrap();
+            // Role ingress: a petition on a role-hidden panel is forged (that
+            // viewer's browser never rendered it) — swallow before routing.
+            let vrole = viewer_role(&h, conn_id);
+            if let Some(owner) = h.tag_to_label.get(tag).cloned() {
+                if let Some(src) = h.sources.get(&owner) {
+                    if !role_may_see(&vrole, &panel_roles(src, &cid, None)) {
+                        return;
+                    }
+                }
+            }
             ledger_record(&h, kind, Some(&cid), &frame);
             if kind == "request" {
                 if let Some(req_id) = frame.get("reqId").and_then(Value::as_str) {

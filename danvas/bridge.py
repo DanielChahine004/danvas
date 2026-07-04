@@ -853,6 +853,12 @@ class Bridge:
         name = getattr(component, "name", None)
         if name:
             msg["name"] = name
+        # The role allowlist, declared on the wire so a HUB can enforce
+        # egress for panels it relays (the owner still enforces for its own
+        # viewers). Empty/absent = visible to everyone. Additive field.
+        roles = list(getattr(component, "_roles", []) or [])
+        if roles:
+            msg["roles"] = roles
         # Which process executes this panel's handlers: the serving canvas's
         # own panels say "host"; a RemoteCanvas stamps its dial-in label; a hub
         # re-stamps relayed panels with the source's label. Purely descriptive

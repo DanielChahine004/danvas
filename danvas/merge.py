@@ -292,8 +292,9 @@ class _Upstream:
 class _Conn:
     """One browser connected to the merge server and the sources it has chosen."""
 
-    def __init__(self, ws):
+    def __init__(self, ws, role=None):
         self.ws = ws
+        self.role = role       # login role (server-trusted), None when open
         self.sources = set()   # upstream.key it currently sees
         # Per-source hide is purely client-side (a render filter in the browser),
         # so the server keeps every source's frames flowing and holds no hidden
@@ -840,9 +841,27 @@ class _MergeHost:
         so a hidden panel stays live and current for when it's shown again.)"""
         return [c for c in self._conns.values() if up.key in c.sources]
 
+    @staticmethod
+    def _roles_of(up, cid):
+        """The role allowlist a relayed panel declared, [] = everyone."""
+        reg = up.registers.get(cid)
+        return (reg or {}).get("roles") or []
+
+    @staticmethod
+    def _role_may_see(role, roles):
+        return not roles or role in roles
+
     def _fanout_upstream(self, up, msg, exclude=None):
+        # Role egress for relayed panels: a frame tied to a role-restricted
+        # panel only reaches viewers whose login role is allowed.
+        roles = []
+        cid = msg.get("id")
+        if isinstance(cid, str):
+            roles = self._roles_of(up, cid)
         for conn in self._interested(up):
             if conn is exclude:
+                continue
+            if roles and not self._role_may_see(conn.role, roles):
                 continue
             self._loop.create_task(self._safe_send(conn.ws, msg))
 
@@ -882,6 +901,11 @@ class _MergeHost:
         if up._task is None and not up.dialin:
             up._task = self._loop.create_task(self._run_upstream(up))
         for msg in up.cached_frames():
+            cid = msg.get("id")
+            if isinstance(cid, str):
+                roles = self._roles_of(up, cid)
+                if roles and not self._role_may_see(conn.role, roles):
+                    continue
             self._loop.create_task(self._safe_send(conn.ws, msg))
 
     def _release(self, conn, key):
@@ -974,7 +998,7 @@ class _MergeHost:
         if qp and qp.get("source"):
             self._attach_dialin(ws, qp)
             return
-        conn = _Conn(ws)
+        conn = _Conn(ws, role=self.bridge._viewers.get(ws, {}).get("role"))
         self._conns[ws] = conn
         # Dial-in sources are canvas-wide: every browser sees them, frozen
         # replay included when one is offline-retained — and the roster must
@@ -1209,6 +1233,9 @@ class _MergeHost:
         up = self._tag_to_upstream.get(tag)
         if up is None:
             return False  # a bare id (the hub's own panel) — the base handles it
+        roles = self._roles_of(up, cid)
+        if roles and not self._role_may_see(conn.role, roles):
+            return True   # role-hidden: swallow the forged petition entirely
         if kind in ("subscribe", "unsubscribe"):
             # Subscriptions to a merged panel live at the hub: the hub relays a
             # copy of forwarded input frames itself (the owner never needs to
@@ -1382,7 +1409,8 @@ class Merge:
         self._tunnel = None
 
     def serve(self, port=8080, open_browser=True, host="127.0.0.1", block=True,
-              tunnel=False, tunnel_provider="cloudflared", password=None):
+              tunnel=False, tunnel_provider="cloudflared", password=None,
+              passwords=None):
         """Start the merge server.
 
         With ``block=True`` (default) this blocks until shutdown. With
@@ -1393,11 +1421,19 @@ class Merge:
         page once; dial-in sources authenticate with ``password=`` on
         :class:`~danvas.SourceClient` / :func:`danvas.connect`.
         """
-        self._bridge._auth = bool(password)
+        # DANVAS_ROLE_PASSWORDS=role=pw,role2=pw2 — the env twin (what the
+        # conformance harness uses so one spawn template fits every hub).
+        if passwords is None:
+            env_pw = os.environ.get("DANVAS_ROLE_PASSWORDS")
+            if env_pw:
+                passwords = dict(
+                    pair.split("=", 1) for pair in env_pw.split(",")
+                    if "=" in pair)
+        self._bridge._auth = bool(password or passwords)
         if not block:
             self._server = server.run_background(
                 self._bridge, port=port, open_browser=open_browser, host=host,
-                compress=tunnel, password=password,
+                compress=tunnel, password=password, passwords=passwords,
             )
             if tunnel:
                 self._start_tunnel(port, tunnel_provider)
@@ -1406,7 +1442,8 @@ class Merge:
             self._start_tunnel(port, tunnel_provider)
         try:
             server.run(self._bridge, port=port, open_browser=open_browser,
-                       host=host, compress=tunnel, password=password)
+                       host=host, compress=tunnel, password=password,
+                       passwords=passwords)
         finally:
             self._stop_tunnel()
 
