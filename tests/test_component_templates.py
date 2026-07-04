@@ -202,6 +202,33 @@ def test_serve_broker_on_request_round_trips():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_presence_populates_viewers():
+    # Tier-2 parity: the broker owns the roster; the host mirrors presence so
+    # canvas.viewers reflects the browser audience (and excludes the host's own
+    # dial-in, matching the embedded server's semantics).
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    canvas = danvas.Canvas(); canvas.label("x", "hi")
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws?vname=alice",
+                                  max_size=None, max_queue=None):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    names = {v.get("name") for v in canvas.viewers}
+                    if "alice" in names:
+                        assert "host" not in names   # host isn't its own viewer
+                        return
+                    await asyncio.sleep(0.1)
+                raise AssertionError(f"alice never appeared; saw {canvas.viewers}")
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():

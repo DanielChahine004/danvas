@@ -311,6 +311,12 @@ def _dispatch_hub_frame(bridge, msg):
     process's panels go through the real dispatch machinery (handler threading
     modes and the authoritative echo included)."""
     kind = msg.get("type")
+    if kind == "welcome":
+        # Learn our own dial-in viewer id so the mirrored roster can exclude it
+        # — canvas.viewers is the *browser* audience, as under the embedded
+        # server (where the host isn't itself a viewer).
+        bridge._own_viewer_id = (msg.get("you") or {}).get("id")
+        return
     if kind == "file_pull":
         # The hub is asking for a download token's bytes on a browser's
         # behalf (this process owns them). Reply file_meta + a FILE binary
@@ -342,6 +348,33 @@ def _dispatch_hub_frame(bridge, msg):
         if pushes is None:
             pushes = bridge._pending_pushes = {}
         pushes[msg.get("reqId")] = msg
+        return
+    if kind == "presence":
+        # The broker owns the roster; mirror it so canvas.viewers works the same
+        # as under the embedded server. Keyed by viewer id (the embedded server
+        # keys by socket, but canvas.viewers only reads .values(), and broker-
+        # routed frames carry no socket). Any per-viewer cursor the broker
+        # streams is merged in so canvas.viewers[i]["cursor"] survives a roster
+        # refresh.
+        prev = {v.get("id"): v for v in bridge._viewers.values()}
+        own = getattr(bridge, "_own_viewer_id", None)
+        merged = {}
+        for v in (msg.get("viewers") or []):
+            vid = v.get("id")
+            if vid == own:
+                continue                       # the host isn't its own viewer
+            cur = prev.get(vid, {}).get("cursor")
+            if cur is not None and "cursor" not in v:
+                v = {**v, "cursor": cur}
+            merged[vid] = v
+        bridge._viewers = merged
+        return
+    if kind == "cursor":
+        # High-rate pointer report for one viewer: fold it onto that viewer's
+        # roster entry (canvas.viewers[i]["cursor"]).
+        v = bridge._viewers.get(msg.get("id"))
+        if v is not None:
+            v["cursor"] = msg.get("pos") or msg.get("cursor")
         return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
