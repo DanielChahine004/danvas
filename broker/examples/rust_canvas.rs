@@ -8,8 +8,11 @@
 //!
 //!     cargo run --example rust_canvas
 //!     # that's it — it spawns danvasd itself if nothing is serving the port,
-//!     # opens the browser, and dials in. (Against an already-running hub —
-//!     # danvasd OR a Python canvas — it just dials in.)
+//!     # opens the browser, and dials in. Ctrl+C ends BOTH (script + the
+//!     # broker it spawned). Pass --keep-broker to leave the broker up so the
+//!     # canvas survives this program (retention holds the panels). Against
+//!     # an already-running hub — danvasd OR a Python canvas — it just dials
+//!     # in and never touches the hub's lifetime.
 //!
 //! This is the seed of the `danvas-source` crate: connect, replay-on-
 //! reconnect, heartbeat, register_template, on_input — the whole dial-in
@@ -49,21 +52,41 @@ fn template_register(
 #[tokio::main]
 async fn main() {
     let mut port: u16 = 8080;
+    let mut keep_broker = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        if a == "--port" {
-            if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
-                port = p;
+        match a.as_str() {
+            "--port" => {
+                if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
+                    port = p;
+                }
             }
+            "--keep-broker" => keep_broker = true,
+            _ => {}
         }
+    }
+    // A broker WE spawn is our child: Ctrl+C tears the whole canvas down in
+    // one gesture (the plain dev loop). --keep-broker opts into the survivor
+    // workflow instead. A hub that was already running is never ours to kill.
+    let spawned: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    {
+        let spawned = spawned.clone();
+        tokio::spawn(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            if let Some(mut child) = spawned.lock().unwrap().take() {
+                let _ = child.kill();
+                println!("
+[rust-canvas] stopped (broker too)");
+            }
+            std::process::exit(0);
+        });
     }
     let templates: Value = serde_json::from_str(TEMPLATES).expect("templates");
     let uri = format!("ws://127.0.0.1:{port}/ws?source=1&label=rust-canvas");
 
     // No hub on the port? Spawn danvasd ourselves — the Rust twin of
-    // Python's serve(broker=True). The broker is deliberately left running
-    // when this program exits: the UI surviving the script IS the model
-    // (retention holds the panels; rerun this program and it heals).
+    // Python's serve(broker=True).
     if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
         let broker = std::env::var("DANVASD").ok().or_else(|| {
             let sibling = std::env::current_exe().ok()?.parent()?.parent()?
@@ -75,9 +98,15 @@ async fn main() {
             .spawn()
         {
             Ok(child) => {
-                println!("[rust-canvas] spawned danvasd (pid {}) on :{port} — \
-                          it outlives this program; kill it to stop serving",
-                         child.id());
+                if keep_broker {
+                    println!("[rust-canvas] spawned danvasd (pid {}) on :{port} \
+                              -- --keep-broker: it outlives this program",
+                             child.id());
+                } else {
+                    println!("[rust-canvas] spawned danvasd on :{port} -- \
+                              Ctrl+C stops the canvas (script + broker)");
+                    *spawned.lock().unwrap() = Some(child);
+                }
                 for _ in 0..100 {
                     if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
                         break;
