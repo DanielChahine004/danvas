@@ -133,10 +133,13 @@ jobs:
       - name: Stage binaries + wheels (+ a pure fallback wheel)
         run: |
           mkdir -p out
-          cp dist/danvasd-windows-x86_64/danvasd.exe out/danvasd-windows-x86_64.exe
-          cp dist/danvasd-linux-x86_64/danvasd out/danvasd-linux-x86_64
-          cp dist/danvasd-macos-arm64/danvasd out/danvasd-macos-arm64
-          cp dist/*/dist/*.whl out/ 2>/dev/null || true
+          # download-artifact preserves the uploaded paths, so binaries nest
+          # under <artifact>/broker/target/release/ and wheels under
+          # <artifact>/dist/ — find them by pattern, don't assume flat paths.
+          cp dist/danvasd-windows-x86_64/broker/target/release/danvasd.exe out/danvasd-windows-x86_64.exe
+          cp dist/danvasd-linux-x86_64/broker/target/release/danvasd out/danvasd-linux-x86_64
+          cp dist/danvasd-macos-arm64/broker/target/release/danvasd out/danvasd-macos-arm64
+          find dist -name '*.whl' -exec cp {} out/ \;
           # a pure py3-none-any wheel (no binary) for every other platform
           pip install build
           python -m build --wheel --outdir out
