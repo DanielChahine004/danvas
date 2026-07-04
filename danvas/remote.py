@@ -387,6 +387,13 @@ def _dispatch_hub_frame(bridge, msg):
                 import traceback as _tb
                 _tb.print_exc()
         return
+    if kind == "draw":
+        # Free-form ink the broker relays among browsers is delivered here too,
+        # so the canonical record set stays in step and canvas.on_draw observers
+        # fire — the same fold + tap the embedded server does. (The broker owns
+        # relay/replay; we only mirror state and notify, we don't re-broadcast.)
+        bridge._apply_draw(msg.get("diff") or {})
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         # A Python-managed shape (canvas.geo/text/line/…) moved/resized in the

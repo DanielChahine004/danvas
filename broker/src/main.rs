@@ -1966,6 +1966,15 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                             let _ = btx.send(Out::T(text.clone()));
                         }
                     }
+                    // Also deliver hub-native ink to the sources: a serving
+                    // canvas observes free-form drawing via canvas.on_draw, and
+                    // (unlike the per-render replay) a live diff belongs in a
+                    // source's stream. Sources that don't observe ink ignore it.
+                    for src in h.sources.values() {
+                        if let Some(tx) = &src.tx {
+                            let _ = tx.send(Out::T(text.clone()));
+                        }
+                    }
                 }
             }
         }

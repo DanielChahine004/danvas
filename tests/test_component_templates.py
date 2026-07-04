@@ -229,6 +229,37 @@ def test_serve_broker_presence_populates_viewers():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_on_draw_fires():
+    # Tier-2 tail: free-form ink drawn in the browser reaches canvas.on_draw
+    # through the broker (danvasd fans hub-native ink to sources too).
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    canvas = danvas.Canvas(); canvas.label("x", "hi")
+    seen = []
+    canvas.on_draw(lambda ev: seen.append(ev))
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                # wait past welcome, then draw a bare (hub-native) record
+                await asyncio.sleep(0.4)
+                await ws.send(json.dumps({"type": "draw", "diff": {
+                    "added": {"ink1": {"id": "ink1", "x": 3, "props": {}}},
+                    "updated": {}, "removed": {}}}))
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if any(ev["added"] for ev in seen):
+                        return
+                    await asyncio.sleep(0.1)
+                raise AssertionError("on_draw never fired")
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():
