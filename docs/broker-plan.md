@@ -77,13 +77,24 @@ the existing bridge class-swaps onto the socket, the UI survives the script.
 
 **The declared goal is broker-by-default.** The gate is canvas-surface
 parity, harness-pinned like everything else. Rows still to cross the hub
-before the default flips (harness at 35 — shapes, request/response,
-presence, chat, `set_view`, define/style shared assets, and the graveyard
-flow all landed; cursors stay config-gated/unpinned): **roles/per-viewer
-overlays** and **upload/download HTTP endpoints** are the two design-shaped
-rows left, plus `persist=` under the transplant and the hot-reload
-interplay (both may be re-scoped: the hub ledger + retention already cover
-most of what they exist for in broker mode). Then: cross-platform release builds in CI, `pip install
+before the default flips (harness at 36 — shapes, request/response,
+presence, chat, `set_view`, shared assets, graveyard, and **roles** all
+landed; roles = multi-password login + wire-declared allowlists + hub-side
+egress/ingress enforcement, the row that mattered most for the declared
+endgame): **upload/download HTTP endpoints** is the one design-shaped row
+left, plus `persist=`/hot-reload under the transplant (likely re-scoped —
+ledger + retention cover most of their broker-mode value) and per-role
+prop OVERLAYS (update(roles=...) content slices — deferred, rarely used
+without multi-role setups that now exist, so pin it when someone needs it).
+
+**The declared endgame (Daniel, 2026-07-04): the broker is THE
+implementation.** Once uploads/downloads land and the default flips, the
+Python package's serving half (server.py, the bridge's hub role, merge.py's
+hub) becomes legacy behind `broker=False`, then gets removed in a major
+version — every fix/feature lands once in danvasd for all languages, and
+Python's dependency list shrinks to the websocket client. The bridge's SDK
+half (components, handler dispatch) stays: that IS the Python binding.
+Prereq for full removal: TLS in danvasd's dial-out (tunneled sources). Then: cross-platform release builds in CI, `pip install
 danvas[broker]` wheels bundling the binary, flip `broker=` default with an
 escape hatch (`broker=False`), a bare-binary GitHub release. Known
 unpinned semantics: per-connection vs canvas-wide merge_add scoping;
