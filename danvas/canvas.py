@@ -2362,7 +2362,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         broker_required = broker is True   # explicit demand vs "auto"
         if broker == "auto":
             from .remote import _find_danvasd
-            embedded_only = bool(persist or desktop or tunnel or merge_server
+            embedded_only = bool(desktop or tunnel or merge_server
                                  or os.environ.get("DANVAS_EMBEDDED"))
             broker = (not embedded_only) and _find_danvasd() is not None
         # Hot-reload monitor/worker split FIRST (for both serving modes). The
@@ -2387,7 +2387,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 return serve_via_broker(
                     self, port=existing or port, open_browser=open_browser,
                     block=block, password=password, passwords=passwords,
-                    host=host, existing_port=existing)
+                    host=host, existing_port=existing, persist=persist)
             except _BrokerUnavailable as exc:
                 if broker_required:   # explicitly demanded -> surface it
                     raise

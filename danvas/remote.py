@@ -457,7 +457,7 @@ class BrokerHandle:
 
 def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                      password=None, passwords=None, host="127.0.0.1",
-                     existing_port=None):
+                     existing_port=None, persist=False):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -532,6 +532,18 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     client._replay_hook = _replay
     client.on_frame(lambda m: _dispatch_hub_frame(bridge, m))
     client._binary_hook = lambda data: _hub_binary(bridge, data)
+    # persist= is an OWNER-side feature (the owner serialises its own canvas
+    # state) — it works the same through the broker. Restore BEFORE connecting
+    # so the saved layout/values ride the initial replay (no default->restored
+    # flicker); the autosave arms on hub-routed layout/input the same way.
+    # (Free-form drawings are hub-native, so ink doesn't round-trip through the
+    # broker — layout + input values do, which is the bulk of persist's value.)
+    if persist:
+        try:
+            canvas._persist_setup(persist)
+        except Exception:
+            import traceback as _tb
+            _tb.print_exc()
     client.connect()
     canvas._serving = True
     canvas._broker = BrokerHandle(proc, client)
