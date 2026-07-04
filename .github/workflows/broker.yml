@@ -90,8 +90,8 @@ jobs:
           DANVAS_HUB_CMD="$BIN|--port|{port}|--password|{password}" \
             python -m pytest tests/test_conformance.py -q
 
-      - name: Polyglot proof (danvasd + the Rust SDK example, all OSes)
-        run: python -m pytest tests/test_polyglot.py -q
+      - name: Rust SDK proof (danvasd + the danvas-source examples, all OSes)
+        run: python -m pytest tests/test_polyglot.py tests/test_rust_media.py tests/test_rust_shapes.py tests/test_rust_interact.py tests/test_rust_canvas_state.py -q
 
       - name: Full Python suite (Windows + Linux)
         if: matrix.os != 'macos-latest'

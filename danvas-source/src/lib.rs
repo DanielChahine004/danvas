@@ -25,6 +25,32 @@
 //! The connection runs on a background thread with its own tokio runtime;
 //! every method here is sync and non-blocking. Handlers run on one ordered
 //! dispatch thread (a slow handler delays later events, not the socket).
+//!
+//! # Coverage
+//!
+//! The SDK spans the whole wire protocol (v1), so a Rust peer does everything a
+//! browser or a Python process can:
+//!
+//! - **panels** — native built-ins from the shared template asset
+//!   ([`slider`](Client::slider)/[`label`](Client::label)/[`button`](Client::button)/
+//!   `toggle`/`text_field`/`markdown`/[`video`](Client::video)/[`audio`](Client::audio)),
+//!   [`register`](Client::register) for anything else, [`update`](Client::update)/
+//!   [`remove`](Client::remove), and [`on_input`](Client::on_input)/[`on_layout`](Client::on_layout).
+//! - **media** — [`send_video`](Client::send_video)/[`send_audio`](Client::send_audio)/
+//!   [`push_binary`](Client::push_binary) out, [`on_binary`](Client::on_binary) in.
+//! - **shapes & arrows** — [`shape`](Client::shape)/[`geo`](Client::geo)/
+//!   [`arrow`](Client::arrow)/[`update_shape`](Client::update_shape).
+//! - **interaction & multiuser** — [`on_request`](Client::on_request),
+//!   [`viewers`](Client::viewers)/[`on_presence`](Client::on_presence)/
+//!   [`on_cursor`](Client::on_cursor), [`chat`](Client::chat)/[`on_chat`](Client::on_chat).
+//! - **canvas state** — [`set_view`](Client::set_view),
+//!   [`define`](Client::define)/[`style`](Client::style),
+//!   [`order`](Client::order), [`draw`](Client::draw)/[`on_draw`](Client::on_draw),
+//!   [`get_snapshot`](Client::get_snapshot)/[`get_image`](Client::get_image).
+//! - **the shared plane** — [`set_props`](Client::set_props)/[`subscribe`](Client::subscribe)/
+//!   [`find`](Client::find) to edit and observe *anyone's* panels.
+//!
+//! See `examples/` (media, shapes, interact, canvas_state, two_languages).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
