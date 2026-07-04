@@ -1611,7 +1611,8 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         return;
     }
     if !matches!(kind.as_str(),
-                 "register" | "update" | "remove" | "arrow" | "shape" | "shape_update") {
+                 "register" | "update" | "remove" | "arrow" | "shape"
+                 | "shape_update" | "order") {
         client_frame(hub, conn_id, frame);
         return;
     }

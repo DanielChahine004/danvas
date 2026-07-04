@@ -41,6 +41,8 @@ type Handler = std::sync::Arc<dyn Fn(&Value) + Send + Sync + 'static>;
 type BinHandler = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
 /// A request handler: given the request `data`, return the reply value.
 type RequestHandler = std::sync::Arc<dyn Fn(&Value) -> Value + Send + Sync + 'static>;
+/// A snapshot/screenshot reply handler (given the reply `data`).
+type SnapHandler = std::sync::Arc<dyn Fn(&Value) + Send + Sync + 'static>;
 
 /// One frame off the socket, on its way to the ordered dispatch thread: a JSON
 /// canvas frame, or a binary media envelope (video/audio/opaque input).
@@ -72,6 +74,13 @@ struct State {
     on_presence: Vec<Handler>,
     on_cursor: Vec<Handler>,
     on_chat: Vec<Handler>,
+    on_draw: Vec<Handler>,
+    // Canvas state kept for replay: the camera/chrome + shared React assets.
+    view: Map<String, Value>,
+    shared_components: Map<String, Value>,
+    shared_styles: String,
+    // Pending get_snapshot/get_image replies, keyed by reqId.
+    snapshot_cbs: HashMap<String, SnapHandler>,
     // Local mirror of the whole canvas we joined (id -> entry). Eventually
     // consistent, folded from the hub's register/update stream.
     panels: HashMap<String, PanelEntry>,
@@ -100,6 +109,7 @@ struct Inner {
     tx: UnboundedSender<Out>,       // frames -> the socket task
     dispatch: UnboundedSender<Inbound>, // inbound frames -> the handler thread
     connected: Arc<AtomicBool>,
+    seq: std::sync::atomic::AtomicU64, // monotonic reqId source (snapshots)
 }
 
 enum Out {
@@ -253,6 +263,7 @@ impl Client {
             tx,
             dispatch: dtx,
             connected: connected.clone(),
+            seq: std::sync::atomic::AtomicU64::new(0),
         });
         let client = Client { inner: inner.clone() };
 
@@ -475,6 +486,82 @@ impl Client {
         self.inner.state.lock().unwrap().on_chat.push(std::sync::Arc::new(f));
     }
 
+    // -- canvas state (view / shared assets / ink / z-order / snapshot) -------
+    /// Set the camera/chrome (x/y/zoom/locked/ui/grid/read_only/…); folds into
+    /// the hub view and replays on reconnect.
+    pub fn set_view<I, K>(&self, fields: I)
+    where I: IntoIterator<Item = (K, Value)>, K: Into<String> {
+        let delta: Map<String, Value> =
+            fields.into_iter().map(|(k, v)| (k.into(), v)).collect();
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            for (k, v) in &delta { st.view.insert(k.clone(), v.clone()); }
+        }
+        self.send(&json!({"type": "view", "view": delta}));
+    }
+    /// Register a shared React component by name (canvas.define) — usable in
+    /// every React panel. Replays before registers so panels mount with it.
+    pub fn define(&self, name: &str, source: &str) {
+        let shared = {
+            let mut st = self.inner.state.lock().unwrap();
+            st.shared_components.insert(name.into(), json!(source));
+            self.shared_frame(&st)
+        };
+        self.send(&shared);
+    }
+    /// Set the global stylesheet (canvas.style).
+    pub fn style(&self, css: &str) {
+        let shared = {
+            let mut st = self.inner.state.lock().unwrap();
+            st.shared_styles = css.into();
+            self.shared_frame(&st)
+        };
+        self.send(&shared);
+    }
+    /// Restack a panel/shape: op is "front"/"back"/"forward"/"backward".
+    pub fn order(&self, id: &str, op: &str) {
+        self.send(&json!({"type": "order", "id": id, "op": op}));
+    }
+    /// Bring a panel/shape to the top.
+    pub fn to_front(&self, id: &str) { self.order(id, "front"); }
+    /// Send a panel/shape to the bottom.
+    pub fn to_back(&self, id: &str) { self.order(id, "back"); }
+    /// Send a free-form ink diff (`{added,updated,removed}` of tldraw records) —
+    /// hub-native annotation relayed to every viewer.
+    pub fn draw(&self, diff: Value) {
+        self.send(&json!({"type": "draw", "diff": diff}));
+    }
+    /// React to free-form drawing (viewers drawing/moving/erasing): `f(draw_frame)`.
+    pub fn on_draw<F: Fn(&Value) + Send + Sync + 'static>(&self, f: F) {
+        self.inner.state.lock().unwrap().on_draw.push(std::sync::Arc::new(f));
+    }
+    /// Ask a connected browser for the free-form document (canvas.save's half):
+    /// `cb(data)` fires when a browser replies. Needs an open tab.
+    pub fn get_snapshot<F: Fn(&Value) + Send + Sync + 'static>(&self, cb: F) {
+        let req = self.next_req();
+        self.inner.state.lock().unwrap()
+            .snapshot_cbs.insert(req.clone(), std::sync::Arc::new(cb));
+        self.send(&json!({"type": "get_snapshot", "reqId": req, "panelIds": []}));
+    }
+    /// Ask a connected browser to render `shape_ids` (empty = whole page) to a
+    /// PNG; `cb(reply)` fires with `{data: <base64>}` or `{error}`.
+    pub fn get_image<F: Fn(&Value) + Send + Sync + 'static>(
+        &self, shape_ids: Vec<String>, cb: F) {
+        let req = self.next_req();
+        self.inner.state.lock().unwrap()
+            .snapshot_cbs.insert(req.clone(), std::sync::Arc::new(cb));
+        self.send(&json!({"type": "get_image", "reqId": req, "shapeIds": shape_ids}));
+    }
+
+    fn next_req(&self) -> String {
+        let n = self.inner.seq.fetch_add(1, Ordering::SeqCst);
+        format!("rs{n}")
+    }
+    fn shared_frame(&self, st: &State) -> Value {
+        json!({"type": "shared", "components": st.shared_components,
+               "styles": st.shared_styles})
+    }
+
     // -- binary media (the binary envelope) ----------------------------------
     /// Send a media envelope of `code` for panel `id` (see PROTOCOL.md codes).
     pub fn send_media(&self, code: u8, id: &str, data: &[u8]) {
@@ -686,6 +773,18 @@ impl Client {
                     self.inner.state.lock().unwrap().on_chat.clone();
                 for h in &hs { h(msg); }
             }
+            "draw" => {
+                let hs: Vec<Handler> =
+                    self.inner.state.lock().unwrap().on_draw.clone();
+                for h in &hs { h(msg); }
+            }
+            "snapshot" | "image" => {
+                // A browser's reply to our get_snapshot/get_image: fire the
+                // callback registered under this reqId (once).
+                let req = msg.get("reqId").and_then(Value::as_str).unwrap_or("");
+                let cb = self.inner.state.lock().unwrap().snapshot_cbs.remove(req);
+                if let Some(cb) = cb { cb(msg); }
+            }
             _ => {}
         }
     }
@@ -695,6 +794,10 @@ impl Client {
     fn replay_frames(&self) -> Vec<String> {
         let st = self.inner.state.lock().unwrap();
         let mut out = Vec::new();
+        // Shared assets first, so React panels mount with their components/styles.
+        if !st.shared_components.is_empty() || !st.shared_styles.is_empty() {
+            out.push(self.shared_frame(&st).to_string());
+        }
         for id in &st.reg_order {
             if let Some(reg) = st.registers.get(id) { out.push(reg.to_string()); }
         }
@@ -706,6 +809,9 @@ impl Client {
         }
         for id in &st.arrow_order {
             if let Some(a) = st.arrows.get(id) { out.push(a.to_string()); }
+        }
+        if !st.view.is_empty() {
+            out.push(json!({"type": "view", "view": st.view}).to_string());
         }
         for id in &st.subs {
             out.push(json!({"type": "subscribe", "id": id}).to_string());
