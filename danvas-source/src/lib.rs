@@ -38,6 +38,14 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 const TEMPLATES: &str = include_str!("../../danvas/templates/components.json");
 
 type Handler = std::sync::Arc<dyn Fn(&Value) + Send + Sync + 'static>;
+type BinHandler = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
+
+/// One frame off the socket, on its way to the ordered dispatch thread: a JSON
+/// canvas frame, or a binary media envelope (video/audio/opaque input).
+enum Inbound {
+    Json(Value),
+    Bin { code: u8, id: String, data: Vec<u8> },
+}
 
 #[derive(Default)]
 struct State {
@@ -49,6 +57,7 @@ struct State {
     // Callbacks, keyed by panel id.
     on_input: HashMap<String, Vec<Handler>>,
     on_layout: HashMap<String, Vec<Handler>>,
+    on_binary: HashMap<String, Vec<BinHandler>>,
     frame_taps: Vec<Handler>,
     // Local mirror of the whole canvas we joined (id -> entry). Eventually
     // consistent, folded from the hub's register/update stream.
@@ -76,17 +85,38 @@ struct Inner {
     templates: Value,
     state: Mutex<State>,
     tx: UnboundedSender<Out>,       // frames -> the socket task
-    dispatch: UnboundedSender<Value>, // inbound frames -> the handler thread
+    dispatch: UnboundedSender<Inbound>, // inbound frames -> the handler thread
     connected: Arc<AtomicBool>,
 }
 
 enum Out {
     Text(String),
-    // The writer already relays binary media envelopes; a send path (images/
-    // video/files) is the SDK's next capability. Kept so that lands as a pure
-    // addition, not a signature change.
-    #[allow(dead_code)]
     Binary(Vec<u8>),
+}
+
+/// The binary envelope: `[code][idLen][id bytes][payload]` (PROTOCOL.md
+/// §binary envelope) — the same framing the Python hub and browser use.
+fn bin_frame(code: u8, id: &str, payload: &[u8]) -> Vec<u8> {
+    let idb = id.as_bytes();
+    let mut v = Vec::with_capacity(2 + idb.len() + payload.len());
+    v.push(code);
+    v.push(idb.len() as u8);
+    v.extend_from_slice(idb);
+    v.extend_from_slice(payload);
+    v
+}
+
+fn parse_bin(data: &[u8]) -> Option<(u8, String, Vec<u8>)> {
+    if data.len() < 2 {
+        return None;
+    }
+    let code = data[0];
+    let idlen = data[1] as usize;
+    if data.len() < 2 + idlen {
+        return None;
+    }
+    let id = String::from_utf8_lossy(&data[2..2 + idlen]).into_owned();
+    Some((code, id, data[2 + idlen..].to_vec()))
 }
 
 /// Builder for a native built-in panel (from the template asset).
@@ -137,7 +167,7 @@ impl Client {
         let templates: Value = serde_json::from_str(TEMPLATES)
             .map_err(|e| format!("bad templates asset: {e}"))?;
         let (tx, rx) = unbounded_channel::<Out>();
-        let (dtx, drx) = unbounded_channel::<Value>();
+        let (dtx, drx) = unbounded_channel::<Inbound>();
         let connected = Arc::new(AtomicBool::new(false));
         let inner = Arc::new(Inner {
             label: label.to_string(),
@@ -154,8 +184,8 @@ impl Client {
             let c = client.clone();
             std::thread::spawn(move || {
                 let mut drx = drx;
-                while let Some(frame) = drx.blocking_recv() {
-                    c.handle(&frame);
+                while let Some(inbound) = drx.blocking_recv() {
+                    c.handle_inbound(inbound);
                 }
             });
         }
@@ -207,13 +237,23 @@ impl Client {
     pub fn button(&self, id: &str) -> PanelBuilder<'_> {
         self.tpl_builder(id, "button")
     }
-    /// Any templated built-in (slider/label/button/toggle/text_field/markdown).
+    /// A native video panel — stream JPEG frames to it with [`send_video`].
+    pub fn video(&self, id: &str) -> PanelBuilder<'_> {
+        self.tpl_builder(id, "video")
+    }
+    /// A native audio panel — stream int16 PCM to it with [`send_audio`].
+    pub fn audio(&self, id: &str) -> PanelBuilder<'_> {
+        self.tpl_builder(id, "audio")
+    }
+    /// Any templated built-in (slider/label/button/toggle/text_field/markdown/
+    /// video/audio).
     pub fn panel(&self, id: &str, kind: &str) -> PanelBuilder<'_> {
         // kind must be &'static in the builder; leak-free via a match.
         let k: &'static str = match kind {
             "slider" => "slider", "label" => "label", "button" => "button",
             "toggle" => "toggle", "text_field" => "text_field",
-            "markdown" => "markdown", _ => "label",
+            "markdown" => "markdown", "video" => "video", "audio" => "audio",
+            _ => "label",
         };
         self.tpl_builder(id, k)
     }
@@ -317,6 +357,31 @@ impl Client {
     pub fn on_frame<F: Fn(&Value) + Send + Sync + 'static>(&self, f: F) {
         self.inner.state.lock().unwrap().frame_taps.push(std::sync::Arc::new(f));
     }
+    /// Handle raw binary a browser sends to panel `id` (canvas.sendBinary /
+    /// requestCamera / requestMicrophone → `@on_binary`): `f(bytes)`.
+    pub fn on_binary<F: Fn(&[u8]) + Send + Sync + 'static>(&self, id: &str, f: F) {
+        self.inner.state.lock().unwrap()
+            .on_binary.entry(id.into()).or_default().push(std::sync::Arc::new(f));
+    }
+
+    // -- binary media (the binary envelope) ----------------------------------
+    /// Send a media envelope of `code` for panel `id` (see PROTOCOL.md codes).
+    pub fn send_media(&self, code: u8, id: &str, data: &[u8]) {
+        let _ = self.inner.tx.send(Out::Binary(bin_frame(code, id, data)));
+    }
+    /// Stream one JPEG frame to a [`video`](Self::video) panel (code VIDEO=1).
+    pub fn send_video(&self, id: &str, jpeg: &[u8]) {
+        self.send_media(1, id, jpeg);
+    }
+    /// Stream int16-LE PCM to an [`audio`](Self::audio) panel (code AUDIO=2).
+    pub fn send_audio(&self, id: &str, pcm: &[u8]) {
+        self.send_media(2, id, pcm);
+    }
+    /// Push opaque bytes to a React panel this source authored (code REACT=4)
+    /// — the zero-copy `canvas.onFrame` stream in the panel's JSX.
+    pub fn push_binary(&self, id: &str, data: &[u8]) {
+        self.send_media(4, id, data);
+    }
 
     // -- reading the canvas --------------------------------------------------
     /// Resolve a panel's composed id from its `name` (its own or a peer's).
@@ -349,6 +414,22 @@ impl Client {
 
     fn send(&self, msg: &Value) {
         let _ = self.inner.tx.send(Out::Text(msg.to_string()));
+    }
+
+    /// Route one inbound frame off the ordered dispatch thread.
+    fn handle_inbound(&self, inbound: Inbound) {
+        match inbound {
+            Inbound::Json(v) => self.handle(&v),
+            Inbound::Bin { code, id, data } => self.handle_binary(code, &id, &data),
+        }
+    }
+
+    /// A binary media envelope from the hub: opaque input a browser sent to one
+    /// of this source's panels (camera/mic/sendBinary) → its `on_binary`.
+    fn handle_binary(&self, _code: u8, id: &str, data: &[u8]) {
+        let hs: Vec<BinHandler> = self.inner.state.lock().unwrap()
+            .on_binary.get(id).cloned().unwrap_or_default();
+        for h in &hs { h(data); }
     }
 
     /// Route one inbound frame: taps see all; input/layout hit their handlers;
@@ -489,7 +570,13 @@ async fn session_loop(
                         msg = read.next() => match msg {
                             Some(Ok(Message::Text(t))) => {
                                 if let Ok(v) = serde_json::from_str::<Value>(&t) {
-                                    let _ = inner.dispatch.send(v);
+                                    let _ = inner.dispatch.send(Inbound::Json(v));
+                                }
+                            }
+                            Some(Ok(Message::Binary(b))) => {
+                                if let Some((code, id, data)) = parse_bin(&b) {
+                                    let _ = inner.dispatch.send(
+                                        Inbound::Bin { code, id, data });
                                 }
                             }
                             Some(Ok(_)) => {}

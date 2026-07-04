@@ -44,6 +44,11 @@ _BUILDERS = {
     "toggle": lambda: danvas.Toggle(["A", "B"]),
     "text_field": lambda: danvas.TextField(),
     "markdown": lambda: danvas.Markdown(""),
+    # Streaming media: React panels whose frames ride the binary envelope. An
+    # SDK now drives that envelope (send_video/send_audio + on_binary), so their
+    # register shape belongs in the shared asset like any other native panel.
+    "video": lambda: danvas.VideoFeed("cam"),
+    "audio": lambda: danvas.AudioFeed("mic"),
 }
 
 

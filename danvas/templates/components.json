@@ -2,6 +2,23 @@
  "_generated_by": "scripts/gen_component_templates.py",
  "_note": "language-neutral register templates for the built-in panels; merge user kwargs over `data`, json-encode into props.data",
  "templates": {
+  "audio": {
+   "component": "React",
+   "data": {
+    "channels": 1,
+    "sampleRate": 16000
+   },
+   "props": {
+    "autoH": false,
+    "autoW": false,
+    "css": "",
+    "h": 120,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const sampleRate = (props && props.sampleRate) || 16000;\n  const channels = (props && props.channels) || 1;\n  const [on, setOn] = React.useState(false);\n  const ctxRef = React.useRef(null);\n  const nextRef = React.useRef(0);\n  const onRef = React.useRef(false);\n  React.useEffect(() => { onRef.current = on; }, [on]);\n  React.useEffect(() => {\n    const LEAD = 0.12;\n    return canvas.onFrame((payload) => {\n      const ctx = ctxRef.current;\n      if (!onRef.current || !ctx || !(payload instanceof ArrayBuffer)) return;\n      let n = payload.byteLength;\n      n -= n % 2;\n      const pcm = new Int16Array(payload, 0, n / 2);\n      const frames = Math.floor(pcm.length / channels);\n      if (!frames) return;\n      const buf = ctx.createBuffer(channels, frames, sampleRate);\n      for (let ch = 0; ch < channels; ch++) {\n        const out = buf.getChannelData(ch);\n        for (let i = 0; i < frames; i++) out[i] = pcm[i * channels + ch] / 32768;\n      }\n      const src = ctx.createBufferSource();\n      src.buffer = buf;\n      src.connect(ctx.destination);\n      const now = ctx.currentTime;\n      let start = nextRef.current;\n      if (start < now + 0.01) start = now + LEAD;\n      src.start(start);\n      nextRef.current = start + buf.duration;\n    });\n  }, [sampleRate, channels]);\n  React.useEffect(() => {\n    return () => {\n      const ctx = ctxRef.current;\n      if (ctx) ctx.close().catch(() => {});\n      ctxRef.current = null;\n    };\n  }, []);\n  const toggle = async () => {\n    if (!on) {\n      let ctx = ctxRef.current;\n      if (!ctx) {\n        const AC = window.AudioContext || window.webkitAudioContext;\n        ctx = new AC({ sampleRate });\n        ctxRef.current = ctx;\n      }\n      try { await ctx.resume(); } catch {}\n      nextRef.current = ctx.currentTime + 0.12;\n      setOn(true);\n    } else {\n      setOn(false);\n      const ctx = ctxRef.current;\n      if (ctx) ctx.suspend().catch(() => {});\n    }\n  };\n  return (\n    <div style={{ display: \"flex\", flexDirection: \"column\", justifyContent: \"center\", gap: 8, padding: 12 }}>\n      <button\n        onClick={toggle}\n        style={{\n          alignSelf: \"flex-start\",\n          padding: \"6px 12px\",\n          border: \"none\",\n          borderRadius: 6,\n          fontSize: 14,\n          fontWeight: 600,\n          cursor: \"pointer\",\n          background: on ? \"var(--pc-accent)\" : \"var(--pc-off-bg, #e5e7eb)\",\n          color: on ? \"var(--pc-accent-text, #fff)\" : \"var(--pc-off-text, #374151)\",\n        }}\n      >\n        {on ? \"\ud83d\udd0a Audio on\" : \"\ud83d\udd08 Enable audio\"}\n      </button>\n      <div style={{ fontSize: 12, color: \"var(--pc-muted, #9ca3af)\" }}>\n        {sampleRate} Hz \u00b7 {channels === 1 ? \"mono\" : channels + \" ch\"}\n      </div>\n    </div>\n  );\n}\n",
+    "w": 260,
+    "wasm": ""
+   }
+  },
   "button": {
    "component": "React",
    "data": {
@@ -112,6 +129,20 @@
     "libs": "[]",
     "source": "\nfunction Component({ canvas, value, props }) {\n  const initial = value != null ? value\n                : (props.value != null ? props.value : props.options[0]);\n  const [sel, setSel] = React.useState(initial);\n  React.useEffect(() => { if (value != null) setSel(value); }, [value]);\n  const _th = props._th || {};\n  return (\n    <>\n      <style>{`\n.pc-toggle{box-sizing:border-box;width:100%;height:100%;padding:10px 12px;\n display:flex;gap:6px;align-items:center;flex-wrap:wrap}\n.pc-toggle button{flex:1;min-width:0;padding:7px 10px;cursor:pointer;\n font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-off-text,#333333);\n background:var(--pc-off-bg,#eeeeee);border:1px solid var(--pc-border,#30363d);\n border-radius:7px;transition:background .12s}\n.pc-toggle button.sel{background:var(--pc-accent,#3b82f6);border-color:transparent;\n color:var(--pc-accent-text,#fff)}\n`}</style>\n      <div className=\"pc-toggle\" style={_th}>\n        {props.options.map((opt) => (\n          <button key={opt}\n            className={opt === sel ? \"sel\" : \"\"}\n            onClick={() => { setSel(opt); canvas.send({ value: opt }); }}>\n            {opt}\n          </button>\n        ))}\n      </div>\n    </>\n  );\n}\n",
     "w": 260,
+    "wasm": ""
+   }
+  },
+  "video": {
+   "component": "React",
+   "data": {},
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 280,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas }) {\n  const canvasRef = React.useRef(null);\n  const [live, setLive] = React.useState(false);\n  React.useEffect(() => {\n    const el = canvasRef.current;\n    if (!el) return;\n    // canvas.paintFrame decodes frames off the main thread (createImageBitmap) and\n    // blits them with the GPU-fast bitmaprenderer context, coalescing bursts so a\n    // slow tab catches up to the newest frame rather than queuing stale ones.\n    return canvas.paintFrame(el, { onActive: () => setLive(true) });\n  }, [canvas]);\n  return (\n    <div style={{ flex: 1, display: \"flex\", alignItems: \"center\", justifyContent: \"center\",\n      background: \"var(--pc-video-bg, #000)\", borderRadius: 4, overflow: \"hidden\", height: \"100%\" }}>\n      <canvas ref={canvasRef}\n        style={{ width: \"100%\", height: \"100%\", objectFit: \"contain\",\n          pointerEvents: \"none\", display: live ? \"block\" : \"none\" }} />\n      {!live && <span style={{ color: \"var(--pc-muted)\", fontSize: 13 }}>no signal</span>}\n    </div>\n  );\n}\n",
+    "w": 340,
     "wasm": ""
    }
   }
