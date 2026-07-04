@@ -39,6 +39,8 @@ const TEMPLATES: &str = include_str!("../../danvas/templates/components.json");
 
 type Handler = std::sync::Arc<dyn Fn(&Value) + Send + Sync + 'static>;
 type BinHandler = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
+/// A request handler: given the request `data`, return the reply value.
+type RequestHandler = std::sync::Arc<dyn Fn(&Value) -> Value + Send + Sync + 'static>;
 
 /// One frame off the socket, on its way to the ordered dispatch thread: a JSON
 /// canvas frame, or a binary media envelope (video/audio/opaque input).
@@ -63,7 +65,13 @@ struct State {
     on_input: HashMap<String, Vec<Handler>>,
     on_layout: HashMap<String, Vec<Handler>>,
     on_binary: HashMap<String, Vec<BinHandler>>,
+    on_request: HashMap<String, RequestHandler>,   // one answer per panel
     frame_taps: Vec<Handler>,
+    // Multiuser: the browser audience + chat/cursor observers.
+    viewers: Vec<Value>,
+    on_presence: Vec<Handler>,
+    on_cursor: Vec<Handler>,
+    on_chat: Vec<Handler>,
     // Local mirror of the whole canvas we joined (id -> entry). Eventually
     // consistent, folded from the hub's register/update stream.
     panels: HashMap<String, PanelEntry>,
@@ -436,6 +444,36 @@ impl Client {
         self.inner.state.lock().unwrap()
             .on_binary.entry(id.into()).or_default().push(std::sync::Arc::new(f));
     }
+    /// Answer a browser's `await canvas.request(data)` on panel `id`: the
+    /// closure's return value resolves the caller's Promise. One answer per
+    /// panel (a later call replaces it), matching the Python contract.
+    pub fn on_request<F: Fn(&Value) -> Value + Send + Sync + 'static>(&self, id: &str, f: F) {
+        self.inner.state.lock().unwrap()
+            .on_request.insert(id.into(), std::sync::Arc::new(f));
+    }
+
+    // -- multiuser (presence / cursors / chat) -------------------------------
+    /// The current browser audience (id/name/color/device/role), folded from
+    /// the hub's presence stream.
+    pub fn viewers(&self) -> Vec<Value> {
+        self.inner.state.lock().unwrap().viewers.clone()
+    }
+    /// React to the roster changing (a viewer joins/leaves/renames): `f(frame)`.
+    pub fn on_presence<F: Fn(&Value) + Send + Sync + 'static>(&self, f: F) {
+        self.inner.state.lock().unwrap().on_presence.push(std::sync::Arc::new(f));
+    }
+    /// React to a viewer's pointer moving (needs serve(cursors=True)): `f(frame)`.
+    pub fn on_cursor<F: Fn(&Value) + Send + Sync + 'static>(&self, f: F) {
+        self.inner.state.lock().unwrap().on_cursor.push(std::sync::Arc::new(f));
+    }
+    /// Post a chat line to the shared room.
+    pub fn chat(&self, text: &str) {
+        self.send(&json!({"type": "chat", "text": text}));
+    }
+    /// React to a chat line (from any viewer or peer): `f(frame)`.
+    pub fn on_chat<F: Fn(&Value) + Send + Sync + 'static>(&self, f: F) {
+        self.inner.state.lock().unwrap().on_chat.push(std::sync::Arc::new(f));
+    }
 
     // -- binary media (the binary envelope) ----------------------------------
     /// Send a media envelope of `code` for panel `id` (see PROTOCOL.md codes).
@@ -616,6 +654,38 @@ impl Client {
                 }
             }
             "remove" => { self.inner.state.lock().unwrap().panels.remove(&id); }
+            "request" => {
+                // A browser's canvas.request(data) for one of our panels: run
+                // the handler and reply by reqId (the hub routes it to the asker).
+                let h = self.inner.state.lock().unwrap().on_request.get(&id).cloned();
+                if let Some(h) = h {
+                    let data = msg.get("data").cloned().unwrap_or(Value::Null);
+                    let req_id = msg.get("reqId").cloned().unwrap_or(Value::Null);
+                    let result = h(&data);
+                    self.send(&json!({"type": "response", "reqId": req_id,
+                                      "result": result}));
+                }
+            }
+            "presence" => {
+                let vs = msg.get("viewers").and_then(Value::as_array)
+                    .cloned().unwrap_or_default();
+                let hs: Vec<Handler> = {
+                    let mut st = self.inner.state.lock().unwrap();
+                    st.viewers = vs;
+                    st.on_presence.clone()
+                };
+                for h in &hs { h(msg); }
+            }
+            "cursor" | "cursor_gone" => {
+                let hs: Vec<Handler> =
+                    self.inner.state.lock().unwrap().on_cursor.clone();
+                for h in &hs { h(msg); }
+            }
+            "chat" => {
+                let hs: Vec<Handler> =
+                    self.inner.state.lock().unwrap().on_chat.clone();
+                for h in &hs { h(msg); }
+            }
             _ => {}
         }
     }
