@@ -26,12 +26,16 @@ jobs:
           - os: windows-latest
             artifact: danvasd-windows-x86_64
             exe: danvasd.exe
+            wheel_plat: win_amd64
           - os: ubuntu-latest
             artifact: danvasd-linux-x86_64
             exe: danvasd
+            target: x86_64-unknown-linux-musl
+            wheel_plat: manylinux2014_x86_64
           - os: macos-latest
             artifact: danvasd-macos-arm64
             exe: danvasd
+            wheel_plat: macosx_11_0_arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -40,6 +44,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: musl tools (linux, for a static binary that runs on any distro)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - uses: actions/setup-python@v5
         with:
@@ -47,7 +57,13 @@ jobs:
 
       - name: Build danvasd (release)
         working-directory: broker
-        run: cargo build --release
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/${{ matrix.exe }} target/release/${{ matrix.exe }}
+          else
+            cargo build --release
+          fi
 
       - name: Unit tests (danvasd internals — conflation, etc.)
         working-directory: broker
@@ -71,10 +87,26 @@ jobs:
         if: matrix.os != 'macos-latest'
         run: python -m pytest tests/ -q
 
+      - name: Build the offline wheel (binary bundled)
+        run: |
+          python -m pip install build wheel
+          mkdir -p danvas/_bin
+          cp broker/target/release/${{ matrix.exe }} danvas/_bin/
+          python -m build --wheel
+          # setup.py tags win/mac natively; a musl-static linux binary has no
+          # glibc dep, so relabel linux_x86_64 -> manylinux2014 (installs
+          # broadly). Runs only where a wheel with that tag exists.
+          for w in dist/*linux_x86_64.whl; do
+            [ -e "$w" ] || continue
+            mv "$w" "${w/linux_x86_64/manylinux2014_x86_64}"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: broker/target/release/${{ matrix.exe }}
+          path: |
+            broker/target/release/${{ matrix.exe }}
+            dist/*.whl
 
   release:
     # Tag v* -> the binaries become a GitHub release: what a user on any OS
@@ -88,12 +120,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: Stage per-OS names
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Stage binaries + wheels (+ a pure fallback wheel)
         run: |
           mkdir -p out
           cp dist/danvasd-windows-x86_64/danvasd.exe out/danvasd-windows-x86_64.exe
           cp dist/danvasd-linux-x86_64/danvasd out/danvasd-linux-x86_64
           cp dist/danvasd-macos-arm64/danvasd out/danvasd-macos-arm64
+          cp dist/*/dist/*.whl out/ 2>/dev/null || true
+          # a pure py3-none-any wheel (no binary) for every other platform
+          pip install build
+          python -m build --wheel --outdir out
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*

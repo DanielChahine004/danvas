@@ -407,13 +407,24 @@ def _hub_binary(bridge, data):
 
 
 def _find_danvasd():
-    """Locate the danvasd binary: $DANVASD, the repo's cargo output, or PATH."""
+    """Locate the danvasd binary, in priority order: ``$DANVASD`` (explicit
+    override), the copy bundled in the installed wheel (``danvas/_bin/``), a
+    local cargo build (dev checkout), then ``PATH``.
+
+    The bundled path is why a platform wheel makes ``serve()`` broker-by-
+    default with no download: pip picks the wheel for the user's OS, the
+    binary rides inside it, and this finds it offline. A pure ``py3-none-any``
+    install (other platforms) has no ``_bin/`` and falls through to the
+    embedded server."""
     import shutil
+    exe = "danvasd.exe" if os.name == "nt" else "danvasd"
     cand = os.environ.get("DANVASD")
     if cand and os.path.exists(cand):
         return cand
+    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_bin", exe)
+    if os.path.exists(bundled):
+        return bundled
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    exe = "danvasd.exe" if os.name == "nt" else "danvasd"
     for profile in ("release", "debug"):
         p = os.path.join(here, "broker", "target", profile, exe)
         if os.path.exists(p):
