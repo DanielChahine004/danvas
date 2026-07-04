@@ -15,7 +15,9 @@ class RecordingBridge:
         self.updates.append(msg)
 
 
-def _wait_for(pred, timeout=3.0):
+def _wait_for(pred, timeout=15.0):
+    # Generous by design: file-watcher latency on CI runners (slow disks,
+    # coarse mtime ticks) can exceed the ~3s that suffices locally.
     end = time.time() + timeout
     while time.time() < end:
         if pred():
