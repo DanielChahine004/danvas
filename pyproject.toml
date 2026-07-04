@@ -30,15 +30,17 @@ license = "AGPL-3.0-or-later"
 # travel with the package.
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Daniel Chahine", email = "daniel.chahine004@gmail.com" }]
+# Minimal by design: serving is the danvasd binary (bundled in platform wheels),
+# and both serve() and danvas.connect() dial in over the websockets *client*, so
+# the base install carries no server stack. The FastAPI/uvicorn hub is optional
+# (danvas[hub]) — needed only to run the Python reference hub `python -m
+# danvas.merge`, not to serve or connect to a canvas.
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
     "websockets>=12",
     # ~10x faster JSON encoding for the wire than stdlib json (the dominant
-    # per-broadcast cost on the single event-loop thread). Ships prebuilt wheels
-    # for every common platform; danvas/bridge.py falls back to stdlib json
-    # transparently if it's ever unavailable, so it's a free speedup, not a hard
-    # requirement.
+    # per-broadcast cost). Ships prebuilt wheels for every common platform;
+    # danvas/bridge.py falls back to stdlib json transparently if it's ever
+    # unavailable, so it's a free speedup, not a hard requirement.
     "orjson>=3.9",
 ]
 classifiers = [
@@ -60,6 +62,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# The Python reference hub: `python -m danvas.merge` (a neutral, compute-less
+# aggregator) runs on FastAPI/uvicorn. Not needed to serve a canvas (that's the
+# danvasd binary) or to connect to one — only to run the Python hub itself.
+hub = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 # Public-internet hosting (Canvas.serve(tunnel=True)). pycloudflared downloads
 # and caches the cloudflared binary on first use, so no manual install is needed.
 # Optional: tunnelling also works with a system-installed cloudflared/localtunnel.

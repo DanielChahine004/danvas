@@ -79,7 +79,7 @@ jobs:
       - name: Install danvas + test deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest httpx2 numpy plotly opencv-python-headless
+          pip install -e .[hub] pytest httpx2 numpy plotly opencv-python-headless
 
       - name: Conformance — Python hub (the reference)
         run: python -m pytest tests/test_conformance.py -q
@@ -141,7 +141,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest httpx numpy plotly opencv-python-headless
+          pip install -e .[hub] pytest httpx numpy plotly opencv-python-headless
       - run: python -m pytest tests/ -q
 
   release:

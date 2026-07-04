@@ -495,7 +495,7 @@ def _hub_binary(bridge, data):
                 or "application/octet-stream",
                 "data": None if dest else payload, "path": None}
         if dest:
-            from .server import _safe_upload_path
+            from ._net import _safe_upload_path
             try:
                 target = _safe_upload_path(dest, filename)
                 with open(target, "wb") as f:

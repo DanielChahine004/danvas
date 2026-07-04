@@ -27,6 +27,10 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
+# Dependency-free helpers live in _net so the broker path can use them without
+# the server stack; re-exported here so server.py's own callers are unchanged.
+from ._net import _lan_ip, _safe_upload_path  # noqa: F401
+
 # Cookie that carries a viewer's auth session token once they pass the password
 # page. The token is random per session and validated server-side, so the
 # password itself never rides in a cookie.
@@ -68,24 +72,6 @@ def _ws_opts(compress):
     into the broadcast fan-out budget); on a bandwidth-constrained public tunnel
     they are. uvicorn exposes a single global switch, so we pick per bind."""
     return {**_WS_OPTS, "ws_per_message_deflate": bool(compress)}
-
-
-def _lan_ip():
-    """Best-effort LAN IP of this machine — the address other devices dial.
-
-    Opens a UDP socket toward a public address to discover which local interface
-    routes outward, then reads that interface's IP. No packets are actually sent,
-    and it works offline as long as a network interface is up. Returns ``None``
-    if no route can be determined.
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        s.close()
 
 
 def _announce(host, port):
@@ -173,28 +159,6 @@ class _FrontendStatic(StaticFiles):
 
 class _UploadTooLarge(Exception):
     """Raised mid-stream when an upload exceeds the panel's ``max_size``."""
-
-
-def _safe_upload_path(dest_root, filename):
-    """Resolve ``filename`` to a path strictly inside ``dest_root``.
-
-    The browser supplies the filename, so it's untrusted: ``basename`` strips any
-    directory parts (``../`` included) and the result is re-checked against the
-    realpath of the root, so an upload can never land outside the destination.
-    Collisions get a ``-1``/``-2`` suffix rather than overwriting.
-    """
-    name = os.path.basename(filename) or "upload.bin"
-    root = os.path.realpath(dest_root)
-    target = os.path.realpath(os.path.join(root, name))
-    if target != root and not target.startswith(root + os.sep):
-        raise ValueError("upload filename escapes the destination directory")
-    if not os.path.exists(target):
-        return target
-    base, ext = os.path.splitext(target)
-    i = 1
-    while os.path.exists(f"{base}-{i}{ext}"):
-        i += 1
-    return f"{base}-{i}{ext}"
 
 
 async def _stream_upload_to_disk(request, target, max_size):

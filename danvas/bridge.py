@@ -26,7 +26,16 @@ import warnings
 _log = logging.getLogger("danvas")
 from collections import deque
 
-from fastapi import WebSocketDisconnect
+try:
+    from fastapi import WebSocketDisconnect
+except ImportError:
+    # The server stack (danvas[hub]) isn't installed — this is a light
+    # client/broker install. WebSocketDisconnect is only used by the embedded
+    # WebSocket handler below, which such an install never reaches (it dials
+    # into danvasd instead of running the FastAPI app), so a stand-in that keeps
+    # the name defined is enough.
+    class WebSocketDisconnect(Exception):  # noqa: N818
+        pass
 
 from ._flags import LAYOUT_FLAGS
 from ._protocol import BINARY_FRAME_CODES, PROTOCOL_VERSION

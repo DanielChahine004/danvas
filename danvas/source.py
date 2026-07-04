@@ -42,7 +42,7 @@ import queue
 import threading
 import traceback
 
-from .merge import _authenticate, _parse_source
+from ._dialin import _authenticate, _parse_source
 
 _HEARTBEAT_S = 10.0     # the hub reaps connections silent for ~30s
 _RECONNECT_S = 1.0

@@ -2390,7 +2390,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             if host in ("127.0.0.1", "localhost", ""):
                 _self_url = f"127.0.0.1:{port}"
             else:
-                from .server import _lan_ip
+                from ._net import _lan_ip
                 _self_url = f"{_lan_ip() or host}:{port}"
         # UI-affordance gating is the owner's call (Inspector/graveyard/cursor
         # reporting all expose viewer state, so they default on only for a
