@@ -461,7 +461,9 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
                      existing_port=None, persist=False, desktop=False,
                      window_title="danvas", window_size=(1200, 800),
                      tunnel=False, tunnel_provider="cloudflared",
-                     merge_server=None, self_url=None):
+                     merge_server=None, self_url=None,
+                     ui_inspector=False, ui_graveyard=False, cursors=False,
+                     ui_hosting=None):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -501,6 +503,15 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             cmd += ["--merge-server", str(merge_server)]
             if self_url:
                 cmd += ["--self-url", str(self_url)]
+        # UI-affordance gating (Inspector/graveyard/cursor reporting/hosting
+        # button): the owner resolved these against the bind; pass the decision
+        # so the broker's welcome matches the embedded server's gating.
+        _b = lambda v: "1" if v else "0"
+        cmd += ["--ui-inspector", _b(ui_inspector),
+                "--ui-graveyard", _b(ui_graveyard),
+                "--cursors", _b(cursors)]
+        if ui_hosting is not None:
+            cmd += ["--ui-hosting", _b(ui_hosting)]
         env = dict(os.environ)
         if passwords:
             # Role logins ride the env contract both hubs share.

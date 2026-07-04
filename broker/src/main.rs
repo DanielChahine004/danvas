@@ -262,6 +262,13 @@ struct Hub {
     /// server dials back to reach this canvas.
     merge_server: Option<String>,
     self_url: Option<String>,
+    /// UI-affordance gating, baked into every browser's welcome. The owner
+    /// (serve()) resolves the default (Inspector/cursors default on only for a
+    /// private local bind) and passes the decision as a flag, so a broker-served
+    /// canvas gates exactly like the embedded one.
+    ui_inspector: bool,
+    ui_graveyard: bool,
+    cursors: bool,
     /// The 🌐 hosting button: on for a private loopback bind (like the
     /// Inspector). port is filled in main so host_lan/host_tunnel know it.
     ui_hosting: bool,
@@ -659,6 +666,13 @@ async fn main() {
     let mut password: Option<String> = None;
     let mut merge_server: Option<String> = None;
     let mut self_url: Option<String> = None;
+    // UI gating: None = the broker's own default (loopback-only), Some = the
+    // owner's explicit decision passed through from serve().
+    let mut ui_inspector: Option<bool> = None;
+    let mut ui_graveyard: Option<bool> = None;
+    let mut ui_hosting: Option<bool> = None;
+    let mut cursors: Option<bool> = None;
+    let as_bool = |v: Option<String>| v.map(|s| s == "1" || s == "true");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -678,6 +692,10 @@ async fn main() {
             "--password" => password = args.next().filter(|s| !s.is_empty()),
             "--merge-server" => merge_server = args.next().filter(|s| !s.is_empty()),
             "--self-url" => self_url = args.next().filter(|s| !s.is_empty()),
+            "--ui-inspector" => ui_inspector = as_bool(args.next()),
+            "--ui-graveyard" => ui_graveyard = as_bool(args.next()),
+            "--ui-hosting" => ui_hosting = as_bool(args.next()),
+            "--cursors" => cursors = as_bool(args.next()),
             _ => {}
         }
     }
@@ -698,6 +716,9 @@ async fn main() {
         role_passwords,
         merge_server,
         self_url,
+        ui_inspector: ui_inspector.unwrap_or(false),
+        ui_graveyard: ui_graveyard.unwrap_or(false),
+        cursors: cursors.unwrap_or(false),
         ledger: std::env::var("DANVAS_LEDGER").ok().as_deref().and_then(open_ledger),
         ..Default::default()
     }));
@@ -705,8 +726,9 @@ async fn main() {
         let mut h = hub.lock().unwrap();
         h.host_port = port;
         // Like the Inspector: the live hosting button is on only for a private
-        // loopback bind (nothing to widen once it's already LAN/public).
-        h.ui_hosting = host.is_loopback();
+        // loopback bind (nothing to widen once it's already LAN/public) — unless
+        // the owner passed an explicit decision through serve().
+        h.ui_hosting = ui_hosting.unwrap_or_else(|| host.is_loopback());
     }
     let addr = SocketAddr::from((host, port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
@@ -1047,8 +1069,11 @@ async fn handle(
             "mergeHost": true,
             "mergeServer": h.merge_server,
             "selfUrl": h.self_url,
-            "uiInspector": false, "uiGraveyard": false,
+            "uiInspector": h.ui_inspector, "uiGraveyard": h.ui_graveyard,
             "uiHosting": h.ui_hosting,
+            "cursors": h.cursors,
+            "auth": h.protected(),
+            "reload": false,
             "hosting": h.hosting_state(),
         })
     };

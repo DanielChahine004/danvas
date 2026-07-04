@@ -2401,6 +2401,16 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 else:
                     from .server import _lan_ip
                     _self_url = f"{_lan_ip() or host}:{port}"
+            # UI-affordance gating is the owner's call (Inspector/graveyard/cursor
+            # reporting all expose viewer state, so they default on only for a
+            # private local bind). Resolve here and pass the decision as flags so
+            # the broker's welcome gates exactly like the embedded server's.
+            exposure = self._resolve_exposure(host, tunnel, ui_inspector,
+                                              ui_graveyard, cursors)
+            self._public_bind = exposure.public_bind
+            default_private = host in ("127.0.0.1", "localhost") and not tunnel
+            _ui_hosting = (bool(ui_hosting) if ui_hosting is not None
+                           else default_private)
             try:
                 # Native window (desktop=True, or a baked exe) points at the
                 # broker's URL just as it would the embedded server's — a pure
@@ -2414,7 +2424,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                     desktop=_use_desktop, window_title=window_title,
                     window_size=window_size, tunnel=tunnel,
                     tunnel_provider=tunnel_provider,
-                    merge_server=merge_server, self_url=_self_url)
+                    merge_server=merge_server, self_url=_self_url,
+                    ui_inspector=exposure.ui_inspector,
+                    ui_graveyard=exposure.ui_graveyard,
+                    cursors=exposure.cursors, ui_hosting=_ui_hosting)
             except _BrokerUnavailable as exc:
                 if broker_required:   # explicitly demanded -> surface it
                     raise

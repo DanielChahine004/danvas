@@ -137,6 +137,14 @@ def test_serve_broker_forwards_view_background_and_merge_server():
                 assert (welcome.get("view") or {}).get("zoom") == 2.0
                 # serve(merge_server=...) advertised for the "Merge…" button
                 assert welcome.get("mergeServer") == "127.0.0.1:9999"
+                # UI gating: a private local bind (no password, no tunnel)
+                # defaults the Inspector/graveyard/cursors/hosting button ON and
+                # advertises no auth — the same truth-table as the embedded hub.
+                assert welcome.get("uiInspector") is True
+                assert welcome.get("uiGraveyard") is True
+                assert welcome.get("cursors") is True
+                assert welcome.get("uiHosting") is True
+                assert welcome.get("auth") is False
                 # the background loop ran (through the broker) and its content
                 # reaches the browser — either as a live update (browser already
                 # connected) or folded into the replayed register (browser
