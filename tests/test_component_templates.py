@@ -260,6 +260,39 @@ def test_serve_broker_on_draw_fires():
         canvas._broker.stop()
 
 
+@pytest.mark.skipif(_danvasd() is None, reason="danvasd binary not built")
+def test_serve_broker_graveyard_and_restore():
+    # Tier-2 tail: a browser deleting (and restoring) a managed panel routes to
+    # the owner through the broker and toggles its graveyard state as embedded.
+    from websockets.asyncio.client import connect as ws_connect
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    canvas = danvas.Canvas(); panel = canvas.label("doomed", "here")
+    canvas.serve(broker=True, port=port, open_browser=False, block=False)
+    try:
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None,
+                                  max_queue=None) as ws:
+                reg = None
+                while reg is None:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                    if m.get("type") == "register" and m.get("name") == "doomed":
+                        reg = m
+                await ws.send(json.dumps({"type": "graveyard", "id": reg["id"]}))
+                end = time.monotonic() + 5
+                while not getattr(panel, "_graveyarded", False) and time.monotonic() < end:
+                    await asyncio.sleep(0.05)
+                assert getattr(panel, "_graveyarded", False), "graveyard didn't reach owner"
+                await ws.send(json.dumps({"type": "restore", "id": reg["id"]}))
+                end = time.monotonic() + 5
+                while getattr(panel, "_graveyarded", False) and time.monotonic() < end:
+                    await asyncio.sleep(0.05)
+                assert not getattr(panel, "_graveyarded", False), "restore didn't reach owner"
+        asyncio.run(asyncio.wait_for(go(), timeout=30))
+    finally:
+        canvas._broker.stop()
+
+
 # -- the all-Rust stack: danvasd serves, a Rust program authors the canvas -------
 
 def _rust_canvas_exe():

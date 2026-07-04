@@ -1664,21 +1664,7 @@ class Bridge:
                 _log.debug("dropped restore for %s: viewer not authorized",
                            msg.get("id"))
                 return
-            comp = self._graveyarded.pop(msg.get("id"), None)
-            if comp is not None:
-                comp._graveyarded = False
-                gk = getattr(comp, "_grave_kind", "panel")
-                if gk == "shape":
-                    self._shapes[comp.id] = comp
-                    self.broadcast(comp.register_message())
-                elif gk == "arrow":
-                    self._arrows[comp.id] = comp
-                    self.broadcast(comp.register_message())
-                else:
-                    comp._visible = True
-                    self.register_live(comp)
-                self._notify_mutation()  # persist the restore (serve(persist=))
-                self._dispatch.submit(self._refresh_graveyard)
+            self._restore_object(msg.get("id"))
         elif kind == "draw":
             # A browser relayed a free-form drawing change. Fold it into the
             # canonical record set and relay it to the *other* browsers so every
@@ -1936,6 +1922,30 @@ class Bridge:
 
     def _refresh_graveyard(self):
         self._broadcast_graveyard()
+
+    def _restore_object(self, comp_id):
+        """Bring a graveyarded object back to the live canvas, by its kind.
+
+        The twin of :meth:`_graveyard`; shared by the embedded ``restore`` frame
+        handler and the broker's source-side dispatcher so both resurrect an
+        object the same way (re-register a shape/arrow, re-show a panel).
+        """
+        comp = self._graveyarded.pop(comp_id, None)
+        if comp is None:
+            return
+        comp._graveyarded = False
+        gk = getattr(comp, "_grave_kind", "panel")
+        if gk == "shape":
+            self._shapes[comp.id] = comp
+            self.broadcast(comp.register_message())
+        elif gk == "arrow":
+            self._arrows[comp.id] = comp
+            self.broadcast(comp.register_message())
+        else:
+            comp._visible = True
+            self.register_live(comp)
+        self._notify_mutation()  # persist the restore (serve(persist=))
+        self._dispatch.submit(self._refresh_graveyard)
 
     def _graveyard(self, comp_id):
         """Handle a browser delete of any danvas-managed object.

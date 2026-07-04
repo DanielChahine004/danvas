@@ -394,6 +394,17 @@ def _dispatch_hub_frame(bridge, msg):
         # relay/replay; we only mirror state and notify, we don't re-broadcast.)
         bridge._apply_draw(msg.get("diff") or {})
         return
+    if kind == "graveyard":
+        # The broker routed a browser's delete of one of our objects (stripped to
+        # our own id): graveyard it (restorable, off the live canvas) as embedded.
+        cid = msg.get("id")
+        if (bridge._components.get(cid) or bridge._shapes.get(cid)
+                or bridge._arrows.get(cid)) is not None:
+            bridge._graveyard(cid)
+        return
+    if kind == "restore":
+        bridge._restore_object(msg.get("id"))
+        return
     comp = bridge._components.get(msg.get("id"))
     if comp is None:
         # A Python-managed shape (canvas.geo/text/line/…) moved/resized in the
