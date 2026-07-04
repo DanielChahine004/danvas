@@ -323,3 +323,54 @@ def test_serve_tunnel_opens_python_owned_tunnel_to_broker_port(monkeypatch):
     assert c._broker.tunnel is not None
     c._broker.stop()
     assert opened.get("stopped") is True          # torn down with the broker
+
+
+def test_danvasd_hosting_button_lan_share(monkeypatch):
+    # The 🌐 hosting button through the broker: danvasd emits uiHosting on a
+    # loopback bind, and host_lan binds a live LAN listener that actually
+    # serves. (danvasd-specific parity with the Canvas embedded server, not a
+    # both-hubs conformance item — the merge hub has no hosting button.)
+    from danvas.remote import _find_danvasd
+    binary = _find_danvasd()
+    if binary is None:
+        import pytest as _pytest
+        _pytest.skip("danvasd binary not built")
+    import socket, subprocess, time, json, asyncio, urllib.request
+    from websockets.asyncio.client import connect as ws_connect
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    proc = subprocess.Popen([binary, "--port", str(port)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(60):
+            try:
+                socket.create_connection(("127.0.0.1", port), 0.5).close(); break
+            except OSError: time.sleep(0.1)
+
+        async def go():
+            async with ws_connect(f"ws://127.0.0.1:{port}/ws", max_size=None) as ws:
+                w = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                assert w.get("uiHosting") is True                    # button on
+                assert (w.get("hosting") or {}).get("local")
+                await ws.send(json.dumps({"type": "ui", "action": "host_lan"}))
+                lan = None
+                end = asyncio.get_event_loop().time() + 8
+                while asyncio.get_event_loop().time() < end:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                    if m.get("type") == "hosting" and m.get("lan"):
+                        lan = m["lan"]; break
+                assert lan and lan.startswith("http://")             # LAN url
+                with urllib.request.urlopen(lan, timeout=4) as r:
+                    assert r.status == 200                           # it serves
+                await ws.send(json.dumps({"type": "ui", "action": "host_lan_off"}))
+                end = asyncio.get_event_loop().time() + 5
+                off = False
+                while asyncio.get_event_loop().time() < end:
+                    m = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                    if m.get("type") == "hosting" and m.get("lan") is None:
+                        off = True; break
+                assert off
+        asyncio.run(asyncio.wait_for(go(), timeout=40))
+    finally:
+        proc.terminate()
+        try: proc.wait(timeout=5)
+        except subprocess.TimeoutExpired: proc.kill()

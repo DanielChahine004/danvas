@@ -2354,11 +2354,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         # requested; broker=False forces the embedded Python server (also the
         # automatic fallback when the binary is missing); broker=True demands
         # the binary and raises without it. DANVAS_EMBEDDED=1 force-disables
-        # globally. Embedded-only today: persist=, desktop windows, tunnels,
-        # merge_server, and the hosting button. hot_reload is NOT embedded-only
-        # any more — it runs through the broker (the monitor owns one danvasd;
-        # workers dial in; retention holds the UI across each restart, so the
-        # browser never even disconnects across an edit).
+        # globally. EVERY serve() feature now works through the broker —
+        # hot_reload, persist=, desktop=, tunnel=, merge_server=, and the live
+        # hosting button (each reworked to layer on the polyglot core). The
+        # embedded server is now purely a fallback (no binary / won't launch /
+        # DANVAS_EMBEDDED=1).
         broker_required = broker is True   # explicit demand vs "auto"
         if broker == "auto":
             from .remote import _find_danvasd

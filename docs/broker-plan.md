@@ -104,10 +104,15 @@ hub-native so drawings don't round-trip; layout + values do. **`desktop=` DONE**
 the third category, a CLIENT-SIDE convenience (after owner-process and
 owner-state): the native pywebview window just points at the broker's URL
 instead of the embedded server's; pywebview-missing falls back to the
-browser. So every KIND of embedded-only feature now has a demonstrated
-broker path. Left: `tunnel=` (tunnel danvasd's port — the monitor already
-owns tunnels), `merge_server`, hosting button → then delete the embedded
-server (delete-the-bridge endgame). **CROSS-OS CI IS GREEN**
+browser. **EVERY EMBEDDED-ONLY FEATURE NOW RUNS THROUGH THE BROKER**:
+`tunnel=` (Python owns a tunnel to danvasd's port), `merge_server=`
+(danvasd `--merge-server` welcome flag), and the **live hosting button**
+(danvasd binds a second LAN listener live + spawns cloudflared for
+host_tunnel; verified the LAN listener actually serves). `embedded_only`
+is now just `DANVAS_EMBEDDED` — the embedded server is a pure fallback (no
+binary / won't launch / forced). The bridge's serving half can be deleted
+whenever desired; its SDK half (components, handlers) stays as the Python
+binding. DELETE-THE-BRIDGE endgame REACHED. **CROSS-OS CI IS GREEN**
 (`eb4d5f9`): every push builds danvasd on Windows/Linux/macOS and holds
 each platform's binary to the 38-assertion harness (plus the Python-hub
 reference everywhere and the full suite on Win/Linux); a `v*` tag attaches

@@ -256,6 +256,16 @@ struct Hub {
     /// server dials back to reach this canvas.
     merge_server: Option<String>,
     self_url: Option<String>,
+    /// The 🌐 hosting button: on for a private loopback bind (like the
+    /// Inspector). port is filled in main so host_lan/host_tunnel know it.
+    ui_hosting: bool,
+    host_port: u16,
+    lan_url: Option<String>,
+    tunnel_url: Option<String>,
+    hosting_busy: Option<String>,
+    hosting_error: Option<String>,
+    lan_shutdown: Option<tokio::sync::watch::Sender<bool>>,
+    tunnel_child: Option<std::process::Child>,
     /// In-flight file pulls (HTTP download -> owning source): reqId ->
     /// (meta, bytes, sources-still-undeclined).
     pending_files: HashMap<String, (Option<Value>, Option<Vec<u8>>, usize)>,
@@ -524,6 +534,24 @@ impl Hub {
         json!({"type": "merge_sources", "sources": sources})
     }
 
+    fn hosting_state(&self) -> Value {
+        json!({
+            "type": "hosting",
+            "local": format!("http://127.0.0.1:{}", self.host_port),
+            "lan": self.lan_url,
+            "tunnel": self.tunnel_url,
+            "busy": self.hosting_busy,
+            "error": self.hosting_error,
+        })
+    }
+
+    fn broadcast_hosting(&self) {
+        let text = self.hosting_state().to_string();
+        for tx in self.conns.values() {
+            let _ = tx.send(Out::T(text.clone()));
+        }
+    }
+
     fn presence_frame(&self) -> Value {
         let viewers: Vec<Value> = self.viewers.values().cloned().collect();
         json!({"type": "presence", "count": viewers.len(), "viewers": viewers})
@@ -594,6 +622,19 @@ fn now_hex() -> String {
 
 static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// The router — rebuilt for the live LAN listener the 🌐 button can add.
+fn build_app(hub: Arc<Mutex<Hub>>) -> Router {
+    Router::new()
+        .route("/ws", get(ws_handler))
+        .route("/__auth__", post(auth_handler))
+        .route("/__describe__", get(describe_handler))
+        .route("/__download__/:token", get(download_handler))
+        .route("/__upload__/:token", post(upload_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))
+        .fallback(get(static_handler))
+        .with_state(hub)
+}
+
 #[tokio::main]
 async fn main() {
     let mut port: u16 = 8080;
@@ -643,19 +684,17 @@ async fn main() {
         ledger: std::env::var("DANVAS_LEDGER").ok().as_deref().and_then(open_ledger),
         ..Default::default()
     }));
-    let app = Router::new()
-        .route("/ws", get(ws_handler))
-        .route("/__auth__", post(auth_handler))
-        .route("/__describe__", get(describe_handler))
-        .route("/__download__/:token", get(download_handler))
-        .route("/__upload__/:token", post(upload_handler))
-        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))
-        .fallback(get(static_handler))
-        .with_state(hub);
+    {
+        let mut h = hub.lock().unwrap();
+        h.host_port = port;
+        // Like the Inspector: the live hosting button is on only for a private
+        // loopback bind (nothing to widen once it's already LAN/public).
+        h.ui_hosting = host.is_loopback();
+    }
     let addr = SocketAddr::from((host, port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     println!("[danvasd] serving ws://{addr}/ws");
-    axum::serve(listener, app).await.expect("serve");
+    axum::serve(listener, build_app(hub.clone())).await.expect("serve");
 }
 
 async fn auth_handler(State(hub): State<Arc<Mutex<Hub>>>, body: String) -> impl IntoResponse {
@@ -984,7 +1023,9 @@ async fn handle(
             "mergeHost": true,
             "mergeServer": h.merge_server,
             "selfUrl": h.self_url,
-            "uiInspector": false, "uiGraveyard": false, "uiHosting": false,
+            "uiInspector": false, "uiGraveyard": false,
+            "uiHosting": h.ui_hosting,
+            "hosting": h.hosting_state(),
         })
     };
     let _ = tx.send(Out::T(welcome.to_string()));
@@ -1599,8 +1640,165 @@ fn compose_endpoint(h: &Hub, own_tag: &str, r: &str) -> String {
 
 /// A frame from a browser (or a source acting as a peer): petitions on
 /// composed panels route to the owner; subscriptions live at the hub.
+/// Best-effort LAN IPv4 (the address other devices dial): open a UDP socket
+/// toward a public address and read which local interface routes out.
+fn lan_ip() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("8.8.8.8:80").ok()?;
+    Some(sock.local_addr().ok()?.ip().to_string())
+}
+
+/// Find cloudflared: $CLOUDFLARED, then PATH.
+fn find_cloudflared() -> Option<String> {
+    if let Ok(p) = std::env::var("CLOUDFLARED") {
+        if std::path::Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    let exe = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
+    let which = if cfg!(windows) { "where" } else { "which" };
+    let out = std::process::Command::new(which).arg(exe).output().ok()?;
+    if out.status.success() {
+        let path = String::from_utf8_lossy(&out.stdout);
+        let first = path.lines().next()?.trim().to_string();
+        if !first.is_empty() {
+            return Some(first);
+        }
+    }
+    None
+}
+
+/// One live hosting change (LAN listener up/down, tunnel up/down), then
+/// broadcast the new state. Errors land in the state, never panic the hub.
+async fn hosting_action(hub: Arc<Mutex<Hub>>, action: String) {
+    {
+        let mut h = hub.lock().unwrap();
+        h.hosting_busy = Some(action.clone());
+        h.hosting_error = None;
+        h.broadcast_hosting();
+    }
+    let mut err: Option<String> = None;
+    match action.as_str() {
+        "host_lan" => {
+            let already = hub.lock().unwrap().lan_url.is_some();
+            if !already {
+                match lan_ip() {
+                    None => err = Some("no LAN address found".into()),
+                    Some(ip) => {
+                        let port = hub.lock().unwrap().host_port;
+                        let addr: SocketAddr = format!("{ip}:{port}").parse().unwrap();
+                        match tokio::net::TcpListener::bind(addr).await {
+                            Err(e) => err = Some(format!("LAN bind failed: {e}")),
+                            Ok(listener) => {
+                                let (tx, mut rx) = tokio::sync::watch::channel(false);
+                                let app = build_app(hub.clone());
+                                tokio::spawn(async move {
+                                    let _ = axum::serve(listener, app)
+                                        .with_graceful_shutdown(async move {
+                                            let _ = rx.changed().await;
+                                        })
+                                        .await;
+                                });
+                                let mut h = hub.lock().unwrap();
+                                h.lan_url = Some(format!("http://{ip}:{port}"));
+                                h.lan_shutdown = Some(tx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "host_lan_off" => {
+            let mut h = hub.lock().unwrap();
+            if let Some(tx) = h.lan_shutdown.take() {
+                let _ = tx.send(true);
+            }
+            h.lan_url = None;
+        }
+        "host_tunnel" => {
+            let already = hub.lock().unwrap().tunnel_url.is_some();
+            if !already {
+                match find_cloudflared() {
+                    None => err = Some(
+                        "cloudflared not found (set $CLOUDFLARED or install it)".into()),
+                    Some(bin) => {
+                        let port = hub.lock().unwrap().host_port;
+                        match spawn_tunnel(&bin, port).await {
+                            Err(e) => err = Some(e),
+                            Ok((child, url)) => {
+                                let mut h = hub.lock().unwrap();
+                                h.tunnel_child = Some(child);
+                                h.tunnel_url = Some(url);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "host_tunnel_off" => {
+            let mut h = hub.lock().unwrap();
+            if let Some(mut c) = h.tunnel_child.take() {
+                let _ = c.kill();
+            }
+            h.tunnel_url = None;
+        }
+        _ => {}
+    }
+    let mut h = hub.lock().unwrap();
+    h.hosting_busy = None;
+    h.hosting_error = err;
+    h.broadcast_hosting();
+}
+
+/// Spawn `cloudflared tunnel --url http://127.0.0.1:port` and read the
+/// trycloudflare URL it prints on stderr.
+async fn spawn_tunnel(bin: &str, port: u16) -> Result<(std::process::Child, String), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(bin)
+        .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}"),
+               "--no-autoupdate"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cloudflared failed to start: {e}"))?;
+    let stderr = child.stderr.take().ok_or("no cloudflared stderr")?;
+    // cloudflared prints the URL within a few seconds; scan its stderr.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let re_host = "trycloudflare.com";
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(i) = line.find("https://") {
+                let url: String = line[i..]
+                    .split_whitespace().next().unwrap_or("").to_string();
+                if url.contains(re_host) {
+                    let _ = tx.send(url);
+                    return;
+                }
+            }
+        }
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(url) => Ok((child, url)),
+        Err(_) => {
+            let _ = child.kill();
+            Err("cloudflared did not report a URL in time".into())
+        }
+    }
+}
+
 fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
     let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+    if kind == "ui" {
+        // The 🌐 hosting button: widen this (private) broker's reach live.
+        let action = frame.get("action").and_then(Value::as_str).unwrap_or("");
+        if matches!(action, "host_lan" | "host_lan_off" | "host_tunnel" | "host_tunnel_off") {
+            if hub.lock().unwrap().ui_hosting {
+                tokio::spawn(hosting_action(hub.clone(), action.to_string()));
+            }
+        }
+        return;
+    }
     if kind == "draw" {
         // A viewer's ink edit: records under a source's namespace route back
         // to that owner (stripped); bare records are hub-native annotation,
