@@ -599,7 +599,16 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     else:
         binary = _find_danvasd()
         if binary is None:
-            raise _BrokerUnavailable("danvasd binary not found")
+            raise _BrokerUnavailable(
+                "danvasd (the serving binary) was not found. Serving is "
+                "broker-only -- there is no in-process Python server. Fix by "
+                "one of:\n"
+                "  - install a platform wheel that bundles it: pip install danvas\n"
+                "  - point $DANVASD at a danvasd binary\n"
+                "  - build it from a checkout: cargo build --release "
+                "--manifest-path broker/Cargo.toml\n"
+                "(a binary-less install can still danvas.connect() into a "
+                "canvas that is already being served.)")
         cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
         if password:
             cmd += ["--password", str(password)]
