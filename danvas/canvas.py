@@ -2194,7 +2194,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
               window_size=(1200, 800), password=None, passwords=None,
               login_message=None, persist=False, hot_reload=False, debug=False,
               namespace=None, tldraw_license_key=None, watch=None,
-              merge_server=None, merge=True, merge_retain=True, broker=False):
+              merge_server=None, merge=True, merge_retain=True, broker="auto"):
         """Start the server and open the browser.
 
         With ``block=True`` (the default) this runs the server and blocks until
@@ -2349,10 +2349,24 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         upload/download endpoints, ``persist=`` and hot reload don't cross
         the hub yet — see :func:`danvas.remote.serve_via_broker`.
         """
+        # THE DEFAULT IS THE BROKER. broker="auto" serves through danvasd
+        # whenever the binary is available and no embedded-only feature is
+        # requested; broker=False forces the embedded Python server (also the
+        # automatic fallback when the binary is missing); broker=True demands
+        # the binary and raises without it. DANVAS_EMBEDDED=1 force-disables
+        # globally. Embedded-only today: hot_reload, persist=, desktop
+        # windows, tunnels, merge_server, and the hosting button.
+        if broker == "auto":
+            from .remote import _find_danvasd
+            embedded_only = bool(hot_reload or persist or desktop or tunnel
+                                 or merge_server
+                                 or os.environ.get("DANVAS_EMBEDDED"))
+            broker = (not embedded_only) and _find_danvasd() is not None
         if broker:
             from .remote import serve_via_broker
             return serve_via_broker(self, port=port, open_browser=open_browser,
-                                    block=block, password=password)
+                                    block=block, password=password,
+                                    passwords=passwords, host=host)
         # Hot-reload / reload pre-flight handoff. May exit (the import
         # pre-flight), hand off to the file-watch monitor (return early), or
         # force open_browser off when a reload restart should reuse the tab.

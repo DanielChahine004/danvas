@@ -174,3 +174,38 @@ def test_canvas_authored_in_rust_no_python_serving():
         if rust is not None:
             rust.kill()
         broker.kill()
+
+
+# -- the default flip: serve() prefers the broker ---------------------------------
+
+def test_serve_auto_resolves_to_broker(monkeypatch):
+    import danvas.remote as remote_mod
+    calls = {}
+
+    def fake_serve_via_broker(canvas, **kw):
+        calls.update(kw)
+        return canvas
+    monkeypatch.setattr(remote_mod, "serve_via_broker", fake_serve_via_broker)
+
+    c = danvas.Canvas()
+    out = c.serve(port=1234, open_browser=False, block=False)   # plain serve()
+    assert out is c and calls["port"] == 1234                   # broker path
+
+    # embedded-only features fall back to the embedded server
+    calls.clear()
+    called_embedded = {}
+    monkeypatch.setattr(
+        danvas.Canvas, "_maybe_handoff_reload",
+        lambda self, *a, **k: (_ for _ in ()).throw(SystemExit))
+    c2 = danvas.Canvas()
+    import pytest as _pytest
+    with _pytest.raises(SystemExit):
+        c2.serve(persist=True, open_browser=False, block=False)
+    assert not calls                                            # broker skipped
+
+    # DANVAS_EMBEDDED force-disables
+    monkeypatch.setenv("DANVAS_EMBEDDED", "1")
+    c3 = danvas.Canvas()
+    with _pytest.raises(SystemExit):
+        c3.serve(open_browser=False, block=False)
+    assert not calls

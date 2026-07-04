@@ -440,7 +440,7 @@ class BrokerHandle:
 
 
 def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
-                     password=None):
+                     password=None, passwords=None, host="127.0.0.1"):
     """EXPERIMENTAL: serve this canvas THROUGH the danvasd binary.
 
     The broker owns the port (frontend, browsers, retention, ledger, merging);
@@ -463,10 +463,15 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
         raise RuntimeError(
             "danvasd binary not found — set $DANVASD, put danvasd on PATH, "
             "or build broker/ (cargo build --release)")
-    cmd = [binary, "--port", str(port)]
+    cmd = [binary, "--port", str(port), "--host", str(host or "127.0.0.1")]
     if password:
         cmd += ["--password", str(password)]
-    proc = subprocess.Popen(cmd)
+    env = dict(os.environ)
+    if passwords:
+        # Role logins ride the env contract both hubs share.
+        env["DANVAS_ROLE_PASSWORDS"] = ",".join(
+            f"{r}={pw}" for r, pw in passwords.items())
+    proc = subprocess.Popen(cmd, env=env)
     import socket as _socket
     deadline = _time.time() + 15
     while _time.time() < deadline:
@@ -482,7 +487,8 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
         raise RuntimeError("danvasd never opened its port")
 
     bridge = canvas._bridge
-    client = SourceClient(f"127.0.0.1:{port}", label="host", password=password)
+    login = password or (next(iter(passwords.values())) if passwords else None)
+    client = SourceClient(f"127.0.0.1:{port}", label="host", password=login)
     # Transplant: the existing bridge (components already bound to it) becomes
     # socket-backed in place — every outbound path now rides the dial-in.
     bridge.__class__ = _RemoteBridge

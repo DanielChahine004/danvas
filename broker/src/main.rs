@@ -486,6 +486,7 @@ static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
 #[tokio::main]
 async fn main() {
     let mut port: u16 = 8080;
+    let mut host = std::net::IpAddr::from([127, 0, 0, 1]);
     let mut password: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -493,6 +494,14 @@ async fn main() {
             "--port" => {
                 if let Some(p) = args.next().and_then(|v| v.parse().ok()) {
                     port = p;
+                }
+            }
+            "--host" => {
+                if let Some(h) = args.next() {
+                    let h = if h == "localhost" { "127.0.0.1".into() } else { h };
+                    if let Ok(ip) = h.parse() {
+                        host = ip;
+                    }
                 }
             }
             "--password" => password = args.next().filter(|s| !s.is_empty()),
@@ -526,7 +535,7 @@ async fn main() {
         .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))
         .fallback(get(static_handler))
         .with_state(hub);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from((host, port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     println!("[danvasd] serving ws://{addr}/ws");
     axum::serve(listener, app).await.expect("serve");

@@ -84,10 +84,12 @@ egress/ingress enforcement, the row that mattered most for the declared
 endgame): **THE PARITY BOARD IS CLEAR** (harness at 38):
 uploads AND downloads cross both hubs (file_pull/file_push + the FILE
 envelope; owners hold the bytes; role-gated tokens/endpoints fail closed
-over a hub). What remains is by choice, not gap: per-role prop OVERLAYS
-(deferred until a real multi-role app needs them), `persist=`/hot-reload
-re-scope under the transplant (ledger + retention cover most of it), then
-THE DEFAULT FLIP and distribution.
+over a hub). **THE DEFAULT IS FLIPPED**: plain
+`serve()` now prefers danvasd when the binary is present (embedded-only
+features and `broker=False`/`DANVAS_EMBEDDED=1` fall back; `broker=True`
+demands it; danvasd grew `--host` for LAN binds). What remains: per-role
+prop OVERLAYS (deferred), `persist=`/hot-reload re-scope, and
+DISTRIBUTION (CI wheels bundling the binary, TLS in dial-out, release).
 
 **The declared endgame (Daniel, 2026-07-04): the broker is THE
 implementation.** Once uploads/downloads land and the default flips, the

@@ -820,6 +820,7 @@ budget) on the fly.
 | `password` | – | gate the whole canvas behind one password (session cookie) |
 | `passwords` | – | `{role: password}` for role-based access |
 | `login_message` | – | host note on the password page |
+| `broker` | `"auto"` | serve through the `danvasd` binary when available (UI survives your script); `False` = embedded Python server, `True` = require the binary |
 | `merge` | `True` | this canvas is a merge hub (🧩 panel to pull other canvases in); `False` disables it |
 | `merge_server` | – | URL of a standing merge server; adds a **Merge…** button (only when `merge=False`) |
 | `tunnel` | `False` | expose publicly through a tunnel |
@@ -841,15 +842,17 @@ default only inside a baked executable (`sys.frozen`).
 
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
-**Serve through the binary broker (experimental)** — `serve(broker=True)`
-hands the port to `danvasd` (the ~6 MB dependency-free Rust broker): browsers
-talk to the binary, your Python process dials in as the `host` source, and
-**the UI survives your script crashing** — restart it and the canvas heals.
-Panels, handlers, live setters, arrows, ink, media, and `password=` work
-through it today; managed shapes, chat, `on_request`, roles, uploads and
-`persist=` don't cross the hub yet (why it isn't the default — tracked in
-[docs/broker-plan.md](docs/broker-plan.md)). Locate the binary via `$DANVASD`,
-`PATH`, or a repo build (`cargo build --release` in `broker/`).
+**The broker is the default.** When the `danvasd` binary is available
+(`$DANVASD`, `PATH`, or a repo build), plain `serve()` hands the port to it —
+the ~6 MB dependency-free Rust broker serves browsers, your Python process
+dials in as the `host` source, and **the UI survives your script crashing**:
+restart it and the canvas heals. Everything crosses the broker — panels,
+handlers, media, ink, shapes, arrows, chat, presence, roles, request/response,
+uploads, downloads — pinned by a conformance harness both implementations
+pass. `serve(broker=False)` (or `DANVAS_EMBEDDED=1`) keeps the embedded
+Python server, which is also the automatic fallback when the binary is
+missing or an embedded-only feature is used (`hot_reload`, `persist=`,
+`desktop=`, `tunnel=`, `merge_server=`, the hosting button).
 
 **Widen (or narrow) reach live (🌐 Hosting)** — a private, local-only canvas
 gets a **Hosting** button (above Merge) showing where it's reachable, with
