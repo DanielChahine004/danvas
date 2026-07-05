@@ -465,9 +465,70 @@ fn fold_state(src: &mut Source, nsid: &str, payload: Map<String, Value>) {
             }
         }
     }
+    // The streaming-figure channel (PROTOCOL.md, update-payload vocabulary):
+    // a full `plot` supersedes any pending `plot_extend`, and a `plot_extend`
+    // folds INTO the cached figure (append per trace index, capped at `max`)
+    // -- so a late-joining browser replays the complete curve, and a
+    // reconnecting one never double-applies the last delta.
+    if rest.contains_key("plot") {
+        if let Some(u) = src.updates.get_mut(nsid) {
+            u.remove("plot_extend");
+        }
+    } else if let Some(ext) = rest.remove("plot_extend") {
+        let folded = src
+            .updates
+            .get_mut(nsid)
+            .and_then(|u| u.get_mut("plot"))
+            .map(|fig| apply_plot_extend(fig, &ext))
+            .unwrap_or(false);
+        if !folded {
+            // Nothing to fold into (no full figure seen yet): keep the last
+            // delta as before -- a partial replay beats an empty one.
+            rest.insert("plot_extend".into(), ext);
+        }
+    }
     if !rest.is_empty() {
         src.updates.entry(nsid.to_string()).or_default().extend(rest);
     }
+}
+
+/// Append a `plot_extend` delta ({indices, x, y, max}) into a cached Plotly
+/// figure, mirroring the frontend's Plotly.extendTraces application. Returns
+/// false when the figure/delta shapes don't line up (caller keeps the delta).
+fn apply_plot_extend(fig: &mut Value, ext: &Value) -> bool {
+    let Some(data) = fig.get_mut("data").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(indices) = ext.get("indices").and_then(Value::as_array) else {
+        return false;
+    };
+    let (Some(xs), Some(ys)) = (ext.get("x").and_then(Value::as_array),
+                                ext.get("y").and_then(Value::as_array)) else {
+        return false;
+    };
+    let max = ext.get("max").and_then(Value::as_u64).map(|m| m as usize);
+    for (k, ti) in indices.iter().enumerate() {
+        let Some(ti) = ti.as_u64().map(|t| t as usize) else { continue };
+        let Some(trace) = data.get_mut(ti).and_then(Value::as_object_mut) else {
+            continue;
+        };
+        for (axis, deltas) in [("x", xs), ("y", ys)] {
+            let add = deltas.get(k).and_then(Value::as_array).cloned()
+                .unwrap_or_default();
+            let arr = trace.entry(axis.to_string())
+                .or_insert_with(|| Value::Array(vec![]));
+            if let Some(a) = arr.as_array_mut() {
+                a.extend(add);
+                if let Some(m) = max {
+                    if a.len() > m {
+                        let cut = a.len() - m;
+                        a.drain(0..cut);
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Shift a frame's top-level or payload x/y by (dx, dy) where present.

@@ -106,15 +106,18 @@ frame for a panel that is `locked`, non-`operable`, role-hidden, or
 bytes, so a browser's `GET /__download__/<token>` at the hub triggers a pull:
 hub → sources `{"type": "file_pull", "token", "reqId"}` (broadcast — tokens
 are opaque); the owner replies `{"type": "file_meta", "reqId", "ok": true,
-"filename"}` followed by a FILE envelope carrying the bytes; non-owners reply
-`ok: false`. First success streams out as the HTTP response; all-declined or
-15 s → 404. Role-gated tokens are declined over a hub (fail closed).
+"filename"}` followed by a FILE envelope carrying the bytes; **every other
+source MUST reply `ok: false`** — a source that stays silent leaves the hub
+waiting out its full 15 s deadline before it can 404, so decline-fast is a
+conformance requirement (tests/test_sdk_conformance.py asserts it). First
+success streams out as the HTTP response; all-declined or 15 s → 404. Role-gated tokens are declined over a hub (fail closed).
 
 **Uploads** mirror it: the hub's `POST /__upload__/<token>?name=...` (raw
 body) broadcasts `{"type": "file_push", "token", "reqId", "name",
 "content_type"}` followed by a FILE envelope with the bytes; the owning
 source delivers to its endpoint handler and replies `{"type": "file_ack",
-"reqId", "ok": true, "name", "size"}` (non-owners `ok: false`); the hub
+"reqId", "ok": true, "name", "size"}` (**non-owners MUST ack `ok: false`**,
+same decline-fast rule as pulls); the hub
 answers the HTTP request from the ack. Owner-side `max_size` and role gates
 apply at the owner (role-gated endpoints fail closed over a hub).
 
@@ -221,8 +224,15 @@ payload's top-level `x`/`y`/`w`/`h`/`rotation`/`opacity`/lock flags/
 `frameColor` patch the panel's frame; `data_patch` merges changed fields into
 the data blob; `post` is a value pushed straight to the mounted panel;
 `post_style` restyles live; `plot`/`plot_extend` are the streaming-figure
-channel (`plot` replaces and supersedes any pending `plot_extend`). A panel's
-contract lists which of these it uses.
+channel. A panel's contract lists which of these it uses.
+
+Hubs that cache update payloads for replay MUST honour the streaming-figure
+semantics rather than merging by key: a full `plot` supersedes any pending
+`plot_extend`, and a cached `plot_extend` folds INTO the cached figure
+(append per trace index, capped at `max`) — otherwise a late-joining client
+replays a stale figure plus one dangling delta, and a reconnecting one
+double-applies the last point. `danvasd` implements this
+(`apply_plot_extend`); `tests/test_broker_replay.py` asserts it.
 
 ## The shared property plane
 
@@ -262,3 +272,33 @@ canvases do — is the same frame vocabulary with the connection direction
 reversed, plus replay-to-connecting-clients duties.) Everything else (roles,
 overlays, containers, shapes) is optional and additive — a client that
 ignores those frames still composes correctly.
+
+## Appendix: the persist file (owner-side state)
+
+`serve(persist=...)` is an **owner** feature — the serving process saves its
+own canvas state and restores it before (re)connecting, so nothing here rides
+the wire — but the format is specified so a non-Python owner can implement
+the same durability.
+
+The JSON form (`*.canvas.json`, written atomically via temp-file + rename,
+debounced ~1 s after each user edit):
+
+```json
+{
+  "layout": {
+    "components": [{"name", "id", "x", "y", "w", "h", "rotation", "opacity",
+                     ...lock/chrome flags..., "state"?}],
+    "arrows":     [{"name", "start", "end", "props"}]
+  },
+  "drawings": { "<record id>": <ink record>, ... }
+}
+```
+
+`components[].state` is the user-set value of an input control (a slider's
+value, a toggle's choice) — content panels omit it, since re-running the
+program reproduces their state. Matching on **name** (not the per-run id) is
+what lets a restore survive a process restart. `drawings` is the free-form
+ink record set exactly as the `draw` frames carry it. A path ending in
+`.db`/`.sqlite`/`.sqlite3` selects an append-only SQLite ledger holding the
+same snapshot shape plus an events table; the JSON file is the interchange
+form.
