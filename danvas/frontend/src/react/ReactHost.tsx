@@ -116,8 +116,10 @@ function loadWasm(b64: string): Promise<any> {
 // a thunk returning a dynamic import (its own lazy chunk), keyed separately from
 // CDN URLs so the namespaces never collide. Plot/LivePlot/Histogram request
 // scope=["plotly"].
+// The cartesian dist (not basic): Histogram renders `heatmap` traces, which
+// basic lacks — Plotly silently degrades them to a meaningless scatter line.
 const LOCAL_MODULES: Record<string, () => Promise<any>> = {
-  plotly: () => import('plotly.js-basic-dist-min'),
+  plotly: () => import('plotly.js-cartesian-dist-min'),
 }
 
 function loadLib(name: string): Promise<any> {
