@@ -37,42 +37,88 @@ def _free_port():
     return port
 
 
-@pytest.fixture(scope="module")
-def hub():
-    """Spawn the hub under test once for the module; yield its port."""
+def _danvasd_path():
+    exe = os.environ.get("DANVASD")
+    if exe and os.path.isfile(exe):
+        return exe
+    name = "danvasd.exe" if os.name == "nt" else "danvasd"
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel in ("broker/target/release", "broker/target/debug"):
+        p = os.path.join(root, rel, name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _hub_impls():
+    """The hub implementations to parametrize over.
+
+    Both hubs exist on purpose — danvasd is the shipping engine, the Python
+    merge hub is the executable reference — and running the whole suite
+    against BOTH is what keeps the duplication from drifting. DANVAS_HUB_CMD
+    still overrides to a single candidate (a '|'-separated template with
+    {port} and optional {password}).
+    """
+    env = os.environ.get("DANVAS_HUB_CMD")
+    if env:
+        return [pytest.param(env, id="env")]
+    params = [pytest.param(
+        sys.executable + "|-m|danvas.merge|--port|{port}|--no-open"
+        "|--password|{password}", id="python")]
+    exe = _danvasd_path()
+    params.append(pytest.param(
+        (exe + "|--port|{port}|--password|{password}") if exe else None,
+        id="danvasd",
+        marks=[] if exe else pytest.mark.skip(reason="danvasd not built")))
+    return params
+
+
+def _spawn_hub(cmd_tpl, password=""):
+    """Spawn one hub from a '|'-template; wait for its port; return (proc, port).
+
+    An empty --password is an open bind on both hubs, so one template serves
+    the open and the secure fixtures alike.
+    """
     port = _free_port()
-    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
-    if cmd_tpl:
-        # A {password} placeholder formats to empty here — both hubs treat an
-        # empty --password as an open bind, so one template serves both the
-        # open and the secure fixture.
-        cmd = [part.format(port=port, password="")
-               for part in cmd_tpl.split("|")]
-    else:
-        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
-               "--no-open"]
+    cmd = [part.format(port=port, password=password)
+           for part in cmd_tpl.split("|")]
+    if password == "":
+        # Both hubs accept --password "" as open, but dropping the pair keeps
+        # process listings honest.
+        while "--password" in cmd:
+            i = cmd.index("--password")
+            del cmd[i:i + 2]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+            return proc, port
+        except OSError:
+            if proc.poll() is not None:
+                raise RuntimeError(f"hub exited early: {cmd}")
+            time.sleep(0.1)
+    proc.kill()
+    raise RuntimeError(f"hub never opened port {port}: {cmd}")
+
+
+def _stop_hub(proc):
+    proc.terminate()
     try:
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            try:
-                s = socket.create_connection(("127.0.0.1", port), timeout=0.5)
-                s.close()
-                break
-            except OSError:
-                if proc.poll() is not None:
-                    raise RuntimeError(f"hub exited early: {cmd}")
-                time.sleep(0.1)
-        else:
-            raise RuntimeError(f"hub never opened port {port}: {cmd}")
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+@pytest.fixture(scope="module", params=_hub_impls())
+def hub(request):
+    """Spawn the hub under test once per (module, implementation); yield its port."""
+    proc, port = _spawn_hub(request.param)
+    try:
         yield port
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _stop_hub(proc)
 
 
 class Peer:
@@ -529,40 +575,16 @@ def test_replayed_register_folds_text_content_too(hub):
 PASSWORD = "hunter2"
 
 
-@pytest.fixture(scope="module")
-def secure_hub():
-    """A password-protected hub. DANVAS_HUB_CMD may carry a {password}
-    placeholder; the default Python hub uses --password."""
-    port = _free_port()
-    cmd_tpl = os.environ.get("DANVAS_HUB_CMD")
-    if cmd_tpl and "{password}" in cmd_tpl:
-        cmd = [p.format(port=port, password=PASSWORD) for p in cmd_tpl.split("|")]
-    elif cmd_tpl:
-        pytest.skip("DANVAS_HUB_CMD given without a {password} placeholder")
-    else:
-        cmd = [sys.executable, "-m", "danvas.merge", "--port", str(port),
-               "--no-open", "--password", PASSWORD]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+@pytest.fixture(scope="module", params=_hub_impls())
+def secure_hub(request):
+    """A password-protected hub, per implementation ({password} in the template)."""
+    if "{password}" not in request.param:
+        pytest.skip("hub template has no {password} placeholder")
+    proc, port = _spawn_hub(request.param, password=PASSWORD)
     try:
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-                break
-            except OSError:
-                if proc.poll() is not None:
-                    raise RuntimeError(f"hub exited early: {cmd}")
-                time.sleep(0.1)
-        else:
-            raise RuntimeError(f"hub never opened port {port}: {cmd}")
         yield port
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _stop_hub(proc)
 
 
 def _login(port, password):
