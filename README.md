@@ -848,7 +848,7 @@ default only inside a baked executable (`sys.frozen`).
 **LAN** — `serve(host="0.0.0.0")` prints the network URL for other devices.
 
 **Serving is the binary broker.** `serve()` hands the port to `danvasd` — the
-~6 MB dependency-free Rust broker that serves the browser frontend — and your
+~7 MB dependency-free Rust broker that serves the browser frontend — and your
 Python process dials in as the `host` source, so **the UI survives your script
 crashing**: restart it and the canvas heals. Everything crosses the broker —
 panels, handlers, media, ink, shapes, arrows, chat, presence, roles,
@@ -1260,7 +1260,7 @@ import with `include=[...]`, skip a build-breaking dep with `exclude=[...]`.
 # How it works
 
 danvas is three parts over **one WebSocket**: the `danvasd` **binary broker** (a
-~6 MB dependency-free [Rust](broker/) server that owns the port and serves the
+~7 MB dependency-free [Rust](broker/) server that owns the port and serves the
 frontend), your **Python process** (which dials into it as the `host` source),
 and the pre-built [Preact](https://preactjs.com) **frontend** danvasd serves. You
 never touch the frontend — it ships compiled in the package, no Node or build
@@ -1269,6 +1269,23 @@ step. The Python side is minimal: base dependencies are just `websockets` +
 FastAPI/uvicorn hub is an optional `danvas[hub]` extra used only by `python -m
 danvas.merge`. The browser page loads ~0.1 MB gzipped, with Plotly fetched on
 demand only when you add a chart.
+
+**Measured on the wire** (loopback, release broker; reproduce with
+`python scripts/bench_wire.py`):
+
+| what | number |
+|---|---|
+| interaction round trip: browser → broker → owner handler → broker → browser | **median 0.3 ms**, p95 0.4 ms |
+| JSON state updates into the broker (one source) | ~80–95 k msg/s |
+| slow-viewer protection | conflation delivers latest-wins — a flooded viewer stays ~0.2 s behind, never builds a queue |
+| binary media relay (100 KB JPEG-sized frames) | ~3,400–4,300 fps ≈ 330–410 MB/s |
+| broker | 7 MB binary, ~9 MB RSS under load, ~220 ms spawn→serving |
+| browser payload | 118 KB gzipped (+464 KB Plotly, lazy-loaded only when a chart exists) |
+| dependencies | Python: `websockets` + `orjson`; Node SDK: **zero** |
+
+The stack between your code and the pixels is sub-millisecond — in practice
+latency is your network and the browser's render frame, and a 30 fps 1080p
+camera (~3 MB/s) uses ~1% of the relay's headroom.
 
 **One protocol, any language.** The broker and the frontend speak a single frozen
 wire contract — JSON frames plus a binary media envelope, versioned in
