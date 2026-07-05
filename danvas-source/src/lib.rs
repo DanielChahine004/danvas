@@ -849,6 +849,42 @@ impl Client {
     pub fn panels(&self) -> HashMap<String, PanelEntry> {
         self.inner.state.lock().unwrap().panels.clone()
     }
+    /// Build the row set an [`Inspector`](https://…) panel renders: one object per
+    /// panel this source has registered, in declaration order, with the columns
+    /// danvas's inspector expects (`name/label/type/value/visible/x/y/w/h`). Push
+    /// it with `update(ins_id, "data_patch", client.inspector_rows())` — the same
+    /// `data_patch` the Python Inspector sends on refresh.
+    pub fn inspector_rows(&self) -> Value {
+        let st = self.inner.state.lock().unwrap();
+        let mut rows = Vec::new();
+        for id in &st.reg_order {
+            let reg = match st.registers.get(id) { Some(r) => r, None => continue };
+            let props = reg.get("props").and_then(Value::as_object);
+            let getp = |k: &str| props.and_then(|p| p.get(k)).cloned();
+            let label = getp("label").and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_else(|| id.clone());
+            let component = reg.get("component").and_then(Value::as_str)
+                .unwrap_or("React").to_string();
+            let upd = st.updates.get(id);
+            let getu = |k: &str| upd.and_then(|u| u.get(k)).cloned();
+            let x = reg.get("x").cloned().or_else(|| getu("x")).unwrap_or(Value::Null);
+            let y = reg.get("y").cloned().or_else(|| getu("y")).unwrap_or(Value::Null);
+            // Current value: whatever the panel last streamed (post/value/text).
+            let value = getu("post").or_else(|| getu("value")).or_else(|| getu("text"));
+            let value_str = match value {
+                None | Some(Value::Null) => "None".to_string(),
+                Some(Value::String(s)) => format!("'{s}'"),
+                Some(v) => v.to_string(),
+            };
+            rows.push(json!({
+                "key": id, "name": id, "label": label, "type": component,
+                "value": value_str, "visible": true,
+                "x": x, "y": y, "w": getp("w").unwrap_or(Value::Null),
+                "h": getp("h").unwrap_or(Value::Null), "locked": false,
+            }));
+        }
+        json!({ "rows": rows })
+    }
     /// True while the socket is up.
     pub fn is_connected(&self) -> bool {
         self.inner.connected.load(Ordering::SeqCst)
