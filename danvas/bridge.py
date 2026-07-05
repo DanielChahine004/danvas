@@ -896,6 +896,11 @@ class Bridge:
         fc = getattr(component, "_frame_color", None)
         if fc is not None:
             msg["frameColor"] = fc
+        # Relative placement rides the register frame (PROTOCOL.md): the
+        # frontend places when x/y is absent and owns the cascade either way.
+        rel = getattr(component, "_rel", None)
+        if rel:
+            msg["rel"] = rel
         # Keep wheel local to the panel content (no canvas zoom) — sent only when
         # opted out of the default. Custom handles this inside its iframe instead.
         if not getattr(component, "_forward_wheel", True):
@@ -1011,6 +1016,10 @@ class Bridge:
             view_for_client = self._view_for(viewer["id"], role)
             await self._send(ws, {"type": "welcome", "you": viewer,
                                   "protocol": PROTOCOL_VERSION,
+                                  # This hub serves the rel-aware frontend
+                                  # (same dist as danvasd), so SDKs may hand
+                                  # relative placement to it (PROTOCOL.md).
+                                  "features": ["rel"],
                                   "uiInspector": self._ui_inspector,
                                   "uiGraveyard": self._ui_graveyard,
                                   "uiHosting": self._ui_hosting,
@@ -1914,8 +1923,16 @@ class Bridge:
         self._notify_mutation()
 
     def _cascade_height(self, comp, dh):
-        """When comp's height changes by dh, shift all panels anchored below= it."""
+        """When comp's height changes by dh, shift all panels anchored below= it.
+
+        Deps whose register frame carries `rel` are skipped: every serving
+        path ships the rel-aware frontend, which re-settles those chains
+        browser-side (one implementation, no wire round-trip). Only the
+        legacy two-anchor placements still cascade here.
+        """
         for dep, _gap in getattr(comp, "_below_deps", []):
+            if getattr(dep, "_rel", None):
+                continue
             if dep.id in self._components and dep.y is not None:
                 self._move_y(dep, dh)
 
@@ -2008,10 +2025,15 @@ class Bridge:
         if il is not None and il.get("y") is not None:
             il["y"] = new_y
         self.broadcast({"type": "update", "id": comp.id, "payload": {"y": new_y}})
+        # rel-carrying deps are the frontend's to cascade (see _cascade_height).
         for dep, _gap in getattr(comp, "_below_deps", []):
+            if getattr(dep, "_rel", None):
+                continue
             if dep.id in self._components and dep.y is not None:
                 self._move_y(dep, dh)
         for dep, _gap in getattr(comp, "_right_of_deps", []):
+            if getattr(dep, "_rel", None):
+                continue
             if dep.id in self._components and dep.y is not None:
                 self._move_y(dep, dh)
 

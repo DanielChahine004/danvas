@@ -24,12 +24,18 @@ const RECONNECT_MS = 1_000
 const DOWNLOAD_TTL_MS = 300_000
 
 // The language-neutral panel templates (the same asset the Python and Rust
-// SDKs ship). Override the path with $DANVAS_TEMPLATES outside a checkout.
-function loadTemplates() {
+// SDKs ship). Resolution order: $DANVAS_TEMPLATES, the repo-checkout path,
+// else FETCHED from the hub's /__templates__ on connect -- the no-shipping
+// option, version-matched to the hub's embedded frontend by construction.
+function loadLocalTemplates() {
   const path = process.env.DANVAS_TEMPLATES
     || join(dirname(fileURLToPath(import.meta.url)),
             '..', 'danvas', 'templates', 'components.json')
-  return JSON.parse(readFileSync(path, 'utf-8')).templates
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')).templates
+  } catch {
+    return null
+  }
 }
 
 function normalizeWs(url) {
@@ -72,8 +78,9 @@ const mintToken = () => randomBytes(24).toString('base64url')
 export class Client {
   constructor(url, label) {
     this._uri = `${normalizeWs(url)}${normalizeWs(url).includes('?') ? '&' : '?'}source=1&label=${label}&vname=${label}`
+    this._httpBase = normalizeWs(url).replace(/^ws/, 'http').replace(/\/ws$/, '')
     this.label = label
-    this._templates = loadTemplates()
+    this._templates = loadLocalTemplates()
     this._ws = null
     this._closing = false
     this._connected = null // resolver for the first connection
@@ -100,8 +107,8 @@ export class Client {
   }
 
   // -- lifecycle --------------------------------------------------------------
-  connect(timeoutMs = 10_000) {
-    if (this._ws) return Promise.resolve(this)
+  async connect(timeoutMs = 10_000) {
+    if (this._ws) return this
     const first = new Promise((resolve, reject) => {
       this._connected = resolve
       setTimeout(() => reject(new Error(`could not reach the hub at ${this._uri}`)),
@@ -110,7 +117,15 @@ export class Client {
     this._dial()
     this._heart = setInterval(() => this._sendRaw({ type: 'heartbeat' }),
                               HEARTBEAT_MS)
-    return first.then(() => this)
+    await first
+    if (!this._templates) {
+      // No local asset: fetch the hub's own copy (served by danvasd and the
+      // Python hub alike), guaranteed to match the frontend it embeds.
+      const resp = await fetch(`${this._httpBase}/__templates__`)
+      if (!resp.ok) throw new Error(`hub has no /__templates__ (${resp.status})`)
+      this._templates = (await resp.json()).templates
+    }
+    return this
   }
 
   close() {

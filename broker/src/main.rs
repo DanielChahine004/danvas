@@ -38,6 +38,12 @@ const FREEZE_OPACITY: f64 = 0.45;
 /// time — a browser points straight at danvasd, no Python anywhere.
 static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../danvas/frontend/dist");
 
+/// The language-neutral panel templates + contracts, served at /__templates__
+/// so an SDK can FETCH them from the hub it dials into instead of shipping a
+/// copy -- version-matched to this binary's embedded frontend by construction
+/// (PROTOCOL.md, authoring native panels).
+static TEMPLATES: &str = include_str!("../../danvas/templates/components.json");
+
 /// One outbound frame: the wire has text (JSON) and binary (media) kinds.
 enum Out {
     T(String),
@@ -713,6 +719,9 @@ fn build_app(hub: Arc<Mutex<Hub>>) -> Router {
         .route("/ws", get(ws_handler))
         .route("/__auth__", post(auth_handler))
         .route("/__describe__", get(describe_handler))
+        .route("/__templates__", get(|| async {
+            ([(header::CONTENT_TYPE, "application/json")], TEMPLATES)
+        }))
         .route("/__download__/:token", get(download_handler))
         .route("/__upload__/:token", post(upload_handler))
         .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))

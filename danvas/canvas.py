@@ -937,6 +937,20 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 _b._below_deps.append((component, gap))
             if _r is not None:
                 _r._right_of_deps.append((component, gap))
+            # The wire form of this placement (PROTOCOL.md, relative
+            # placement): with a single anchor the register frame carries
+            # `rel`, so a rel-aware frontend records the dependency edge and
+            # owns the height-settle cascade (see _cascade_height, which
+            # skips rel-carrying deps). A two-anchor placement (below=a,
+            # right_of=b) has no single-edge wire form and keeps the legacy
+            # owner-side cascade.
+            _rel_anchors = [(k, c) for k, c in (
+                ("below", _b), ("above", _a),
+                ("right_of", _r), ("left_of", _l)) if c is not None]
+            if len(_rel_anchors) == 1:
+                _kind, _anchor = _rel_anchors[0]
+                component._rel = {"kind": _kind, "anchor": _anchor.id,
+                                  "gap": gap}
         # Auto-layout: inside a `with canvas.grid(...)`/`column`/`row` block, a
         # panel given neither an explicit position nor a relative anchor takes the
         # next slot (and the layout's default slot size, unless w/h were given).
