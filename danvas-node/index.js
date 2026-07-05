@@ -338,6 +338,37 @@ export class Client {
       case 'remove':
         this.panels.delete(cid)
         break
+      case 'set_props': {
+        // The shared property plane, hub-routed: apply a peer's write on OUR
+        // panel and echo it — the owner's echoed state is canonical. A thin
+        // SDK folds placement keys like a layout and merges everything else
+        // into the panel's data blob (replay stays canonical), echoing a
+        // data_patch so every browser converges.
+        const reg = this._registers.get(cid)
+        if (!reg || !msg.props || typeof msg.props !== 'object') break
+        const echo = {}
+        const patch = {}
+        for (const [k, v] of Object.entries(msg.props)) {
+          if (['x', 'y', 'w', 'h', 'rotation', 'opacity'].includes(k)) {
+            const acc = this._updates.get(cid) || {}
+            acc[k] = v
+            this._updates.set(cid, acc)
+            echo[k] = v
+          } else {
+            patch[k] = v
+          }
+        }
+        if (Object.keys(patch).length) {
+          let blob = {}
+          try { blob = JSON.parse(reg.props.data || '{}') } catch { blob = {} }
+          reg.props.data = JSON.stringify({ ...blob, ...patch })
+          echo.data_patch = patch
+        }
+        if (Object.keys(echo).length) {
+          this._sendRaw({ type: 'update', id: cid, payload: echo })
+        }
+        break
+      }
       case 'file_pull': {
         // Broadcast: answer EVERY pull — silence would hang the hub's HTTP
         // reply for its full 15 s deadline (a protocol MUST).

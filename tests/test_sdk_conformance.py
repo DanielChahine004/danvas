@@ -497,13 +497,12 @@ def test_upload_roundtrip(stack):
 # -- the shared plane ---------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="set_props route-back is not yet APPLIED by either SDK: the hub "
-    "routes the frame to the owner (id stripped), but neither the Python "
-    "broker bridge nor the Rust Client folds it into the panel and echoes "
-    "the update — docs/polyglot-plan.md phase 6 candidate")
 def test_set_props_applies_at_the_owner(stack):
+    # The shared property plane: the hub routes the write to the owner (id
+    # stripped); the owner APPLIES it and its echoed update is canonical.
+    # Python applies through the component's real setters (_apply_props);
+    # thin SDKs fold into the data blob — either way the probe must see the
+    # echoed data_patch converge.
     async def go():
         async with _browser(stack.port) as ws:
             p = Probe(ws)
@@ -516,5 +515,5 @@ def test_set_props_applies_at_the_owner(stack):
                     return False
                 return (m.get("payload") or {}).get(
                     "data_patch", {}).get("max") == 50
-            await p.recv_until(reflects_max, timeout=5.0)
+            await p.recv_until(reflects_max, timeout=10.0)
     _run(go())

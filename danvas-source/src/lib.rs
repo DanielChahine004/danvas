@@ -1408,6 +1408,60 @@ impl Client {
                     self.inner.state.lock().unwrap().on_draw.clone();
                 for h in &hs { h(msg); }
             }
+            "set_props" => {
+                // The shared property plane, hub-routed: apply another peer's
+                // write on OUR panel and echo the result -- the owner's echoed
+                // state is canonical (PROTOCOL.md). A thin SDK has no typed
+                // setters, so "apply" is: placement keys fold as a layout
+                // would; everything else merges into the panel's data blob
+                // (register + replay stay canonical) and echoes as a
+                // data_patch so every browser converges.
+                let Some(props) = msg.get("props").and_then(Value::as_object)
+                    .cloned() else { return };
+                let mut echo = Map::new();
+                let mut data_patch = Map::new();
+                {
+                    let mut st = self.inner.state.lock().unwrap();
+                    if !st.registers.contains_key(&id) {
+                        return; // not ours (or a shape) -- nothing to apply
+                    }
+                    for (k, v) in props {
+                        if matches!(k.as_str(),
+                                    "x" | "y" | "w" | "h" | "rotation"
+                                    | "opacity") {
+                            st.updates.entry(id.clone()).or_default()
+                                .insert(k.clone(), v.clone());
+                            echo.insert(k, v);
+                        } else {
+                            data_patch.insert(k, v);
+                        }
+                    }
+                    if !data_patch.is_empty() {
+                        // Fold into the cached register's data blob so this
+                        // source's own replay carries the new values.
+                        if let Some(props_obj) = st.registers.get_mut(&id)
+                            .and_then(|r| r.get_mut("props"))
+                            .and_then(Value::as_object_mut)
+                        {
+                            let mut blob: Map<String, Value> = props_obj
+                                .get("data").and_then(Value::as_str)
+                                .and_then(|s| serde_json::from_str(s).ok())
+                                .unwrap_or_default();
+                            for (k, v) in &data_patch {
+                                blob.insert(k.clone(), v.clone());
+                            }
+                            props_obj.insert("data".into(), json!(
+                                serde_json::to_string(&blob).unwrap()));
+                        }
+                        echo.insert("data_patch".into(),
+                                    Value::Object(data_patch));
+                    }
+                }
+                if !echo.is_empty() {
+                    self.send(&json!({"type": "update", "id": id,
+                                      "payload": echo}));
+                }
+            }
             "file_pull" => {
                 // The hub asks for a download token's bytes on a browser's
                 // behalf (broadcast — tokens are opaque): stream file_meta +

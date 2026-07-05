@@ -457,6 +457,17 @@ def _dispatch_hub_frame(bridge, msg):
         bridge._dispatch.submit(
             lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
             bridge._dispatch_request(c, r, d, None))
+    elif kind == "set_props":
+        # The shared property plane, hub-routed: the broker delivered another
+        # peer's write on OUR panel (id already stripped). Apply through the
+        # component's real setters — the same _apply_props the embedded server
+        # used, so validation and the echoed broadcast are one code path. The
+        # broker gated roles; over a hub the writer is authoritative, so only
+        # a hard lock refuses (PROTOCOL.md § the shared property plane).
+        if not getattr(comp, "locked", False):
+            bridge._dispatch.submit(
+                lambda c=comp, p=dict(msg.get("props") or {}):
+                bridge._apply_props(c, p))
 
 
 # -- serve(broker=True): the binary broker serves; this process is a source --
