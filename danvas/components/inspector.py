@@ -61,8 +61,11 @@ _COLS_BY_VIEW = {
 # driven by ``canvas.send`` (actions back to Python) and ``canvas.viewport`` (the
 # live framing readout) instead of a built-in editor. Authored as a plain string
 # so its JSX braces survive — nothing is substituted. Reads the table/detail data
-# Python pushes as ``props.rows``/``props.cols``/``props.detail``/``props.source``
-# (each a JSON string, matching the former shape props).
+# the owner pushes as ``props.rows``/``props.cols``/``props.detail``/``props.source``
+# — each accepted as EITHER a JSON string (what this Python component sends,
+# matching the former shape props) or plain JSON (what a non-Python SDK naturally
+# sends); tolerant parsing here is the polyglot contract, so no SDK has to know
+# which fields were historically double-encoded.
 _INSPECTOR_SOURCE = r"""
 function ViewReadout({ canvas }) {
   // The current viewport (canvas centre + zoom) — the x/y/zoom serve(view=...)
@@ -177,13 +180,16 @@ function Component({ canvas, props }) {
   // Which row is drilled into (its key), or null for the table view.
   const [selected, setSelected] = React.useState(null);
 
-  let rows = [];
-  try { rows = JSON.parse(props.rows) || []; } catch { rows = []; }
+  // Tolerant reads: a JSON string (Python) or plain JSON (other SDKs).
+  const asJson = (v, fallback) => {
+    if (v == null || v === "") return fallback;
+    if (typeof v !== "string") return v;
+    try { return JSON.parse(v) ?? fallback; } catch { return fallback; }
+  };
+  const rows = asJson(props.rows, []);
   let cols = ["name", "label", "type", "value", "x", "y", "w", "h"];
-  try {
-    const parsed = JSON.parse(props.cols);
-    if (Array.isArray(parsed) && parsed.length) cols = parsed;
-  } catch { /* keep default */ }
+  const parsedCols = asJson(props.cols, null);
+  if (Array.isArray(parsedCols) && parsedCols.length) cols = parsedCols;
 
   const controlStyle = {
     fontSize: 12, padding: "3px 6px", border: "1px solid var(--pc-border-mid)",
@@ -192,8 +198,7 @@ function Component({ canvas, props }) {
 
   // --- detail (drill-down) view -------------------------------------------
   if (selected != null) {
-    let detail = null;
-    try { detail = JSON.parse(props.detail || "null"); } catch { detail = null; }
+    const detail = asJson(props.detail, null);
     // Only show detail once it's arrived for the row we clicked (avoid stale).
     const ready = detail && detail.key === selected;
     return (
