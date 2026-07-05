@@ -81,21 +81,22 @@ fn main() {
         }
     };
 
-    // One column, chained below= like the .py — only the root is positioned.
+    // One column, chained below= like the .py — only the root is positioned;
+    // every panel takes its template-default size (the contract geometry).
 
     // 1. Label — also the live readout for the slider handler.
     c.label("lbl", "Hello from label").titled("Label")
-        .at(80.0, 80.0).size(240.0, 84.0).color(ROSE).show();
+        .at(80.0, 80.0).color(ROSE).show();
 
     // 2. Markdown
     c.panel("md", "markdown")
         .set("html", json!("<p><strong>Markdown</strong> \u{2014} supports \
              <code>code</code>, <em>italics</em>, lists, and more.</p>"))
-        .titled("Markdown").below("lbl").size(380.0, 240.0).color(AMBER).show();
+        .titled("Markdown").below("lbl").color(AMBER).show();
 
     // 3. Slider — a browser drag runs this Rust handler -> the label.
     c.slider("brightness", 0.0, 100.0, 50.0).titled("Slider")
-        .below("md").size(240.0, 96.0).color(YELLOW).show();
+        .below("md").color(YELLOW).show();
     let inner = c.clone();
     c.on_input("brightness", move |p| {
         let v = p.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -106,25 +107,25 @@ fn main() {
     // 4. Toggle
     c.panel("speed", "toggle").set("options", json!(["Off", "Slow", "Fast"]))
         .set("value", json!("Slow")).titled("Toggle")
-        .below("brightness").size(260.0, 84.0).color(TEAL).show();
+        .below("brightness").color(TEAL).show();
 
     // 5. Button
     c.button("ping").set("text", json!("Click me")).titled("Button")
-        .below("speed").size(200.0, 84.0).color(SKY).show();
+        .below("speed").color(SKY).show();
 
     // 6. Text field
     c.panel("input", "text_field").set("placeholder", json!("Type something\u{2026}"))
-        .titled("Text field").below("ping").size(240.0, 80.0).color(INDIGO).show();
+        .titled("Text field").below("ping").color(INDIGO).show();
 
     // 7. Table — three rows, like the .py.
     c.panel("scores", "table")
         .set("cols", json!(["Name", "Score"])).set("numeric", json!([false, true]))
         .set("rows", json!([["Alice", 92], ["Bob", 85], ["Carol", 78]]))
-        .titled("Table").below("input").size(520.0, 360.0).color(VIOLET).show();
+        .titled("Table").below("input").color(VIOLET).show();
 
     // 8. Plot — a sine curve (props._fig via a data_patch update).
     c.panel("chart", "plot").titled("Plot")
-        .below("scores").size(560.0, 420.0).color(PINK).show();
+        .below("scores").color(PINK).show();
     let xs: Vec<i32> = (0..20).collect();
     let ys: Vec<f64> = xs.iter().map(|&x| ((x as f64) * 0.4).sin()).collect();
     c.update("chart", "data_patch", json!({ "_fig": {
@@ -135,7 +136,7 @@ fn main() {
     // 9. Histogram — five epochs of drifting normals, binned by the SDK feed
     //    (the same fixed-bin density heatmap Histogram.add builds in Python).
     c.panel("hist", "histogram").titled("Histogram")
-        .below("chart").size(560.0, 420.0).color(CORAL).show();
+        .below("chart").color(CORAL).show();
     let mut hist = c.histogram_feed("hist", 30, Some(CORAL));
     let mut seed = 0x9e3779b97f4a7c15u64;
     for epoch in 0..5 {
@@ -147,7 +148,7 @@ fn main() {
     //     deltas on the wire, full figure folded for replay). Same cadence,
     //     jitter, and window as the .py background loop.
     c.panel("live", "live_plot").titled("Live plot")
-        .below("hist").size(560.0, 380.0).color(SAGE).show();
+        .below("hist").color(SAGE).show();
     let mut live = c.live_plot_feed("live", 300);
     std::thread::spawn(move || {
         let mut t = 0.0_f64;
@@ -168,17 +169,17 @@ fn main() {
     // 11. Image — the matplotlib figure (a data-URL PNG; encode your own
     //     bytes with danvas_source::data_url).
     c.panel("img", "image").set("src", json!(IMAGE_SRC.trim()))
-        .titled("Image").below("live").size(420.0, 320.0).color(SKY).show();
+        .titled("Image").below("live").color(SKY).show();
 
     // 12. Download: a click asks this process for the bytes (file_pull + FILE
     //     envelope through the hub), same content as the .py.
     c.panel("dl", "download").set("text", json!("Download hello.txt"))
-        .titled("Download").below("img").size(200.0, 84.0).color(SLATE).show();
+        .titled("Download").below("img").color(SLATE).show();
     c.on_download("dl", || ("hello.txt".into(), b"hello from danvas\n".to_vec()));
 
     // 13. Upload: mint a receiving endpoint and patch it into the panel's url.
     c.panel("up", "upload").set("text", json!("Choose a file"))
-        .titled("Upload").below("dl").size(240.0, 120.0).color(PLUM).show();
+        .titled("Upload").below("dl").color(PLUM).show();
     c.on_upload("up", |f| println!("[rust] upload: {} ({} bytes, {})",
                                    f.name, f.size, f.content_type));
 
@@ -186,18 +187,18 @@ fn main() {
     //     served by the SDK (Python FileBrowser's owner-side logic).
     let fb_root = std::env::current_dir().unwrap_or_else(|_| ".".into());
     c.file_browser("fb", fb_root)
-        .titled("File browser").below("up").size(320.0, 420.0).color(ROSE).show();
+        .titled("File browser").below("up").color(ROSE).show();
 
     // 15-16. Webview / Inspector. The inspector arrives fully wired: view
     // dropdown, Refresh, row drill-down, and the Trace event-log panel.
     c.panel("wv", "webview").set("url", json!("https://example.com"))
-        .titled("Webview").below("fb").size(800.0, 600.0).color(AMBER).show();
+        .titled("Webview").below("fb").color(AMBER).show();
     c.inspector("ins").titled("Inspector")
-        .below("wv").size(520.0, 320.0).color(TEAL).show();
+        .below("wv").color(TEAL).show();
 
     // 17. Audio feed — stream a 440 Hz tone so it actually plays (once enabled).
     c.audio("feed").titled("Audio feed")
-        .below("ins").size(260.0, 120.0).color(INDIGO).show();
+        .below("ins").color(INDIGO).show();
     let ac = c.clone();
     std::thread::spawn(move || {
         let (sr, freq) = (16000.0_f64, 440.0_f64);
@@ -217,12 +218,12 @@ fn main() {
     // 18. Webcam — the real camera when built `--features camera`, else the
     // baked animation (see spawn_webcam below).
     c.video("cam").titled("Webcam")
-        .below("feed").size(340.0, 280.0).color(SAGE).show();
+        .below("feed").color(SAGE).show();
     spawn_webcam(&c);
 
     // 19. Chat
     c.panel("room", "chat").titled("Chat")
-        .below("cam").size(320.0, 400.0).color(ROSE).show();
+        .below("cam").color(ROSE).show();
 
     // 20. Custom — a self-contained click-counter button, the same html/css/js
     // split as the .py; c.custom() wraps it with the base reset (content
@@ -232,7 +233,7 @@ fn main() {
         "button{font:14px sans-serif;padding:8px 16px;border-radius:6px;border:0;\
          background:#6b6bd4;color:#fff;cursor:pointer}",
         "var n=0;")
-        .titled("Custom").below("room").size(380.0, 320.0).color(AMBER).show();
+        .titled("Custom").below("room").color(AMBER).show();
 
     // Inspector: seed the table now that every panel is declared (the wired
     // panel handles Refresh/views/drill-down/Trace from here on).
