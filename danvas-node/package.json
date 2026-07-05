@@ -1,0 +1,9 @@
+{
+  "name": "danvas-node",
+  "version": "0.1.0",
+  "description": "Node SDK for danvas: dial into a canvas as a source and drive native panels. Zero dependencies (built on Node's own WebSocket); PROTOCOL.md is the contract, components.json's contract blocks are the panel reference.",
+  "type": "module",
+  "main": "index.js",
+  "license": "AGPL-3.0-or-later",
+  "engines": { "node": ">=22" }
+}

@@ -68,8 +68,13 @@ def _rust_target():
     return None
 
 
+def _node():
+    import shutil
+    return shutil.which("node")
+
+
 def _sdk_cmds():
-    """The SDK targets to parametrize over: env override, else both built-ins."""
+    """The SDK targets to parametrize over: env override, else the built-ins."""
     env = os.environ.get("DANVAS_SDK_CMD")
     if env:
         return [pytest.param(env.split("|"), id="env")]
@@ -81,6 +86,13 @@ def _sdk_cmds():
         [rust, "{port}"] if rust else None, id="rust",
         marks=[] if rust else pytest.mark.skip(
             reason="cargo build --example conformance_target first")))
+    node = _node()
+    node_target = os.path.join(_ROOT, "danvas-node", "conformance_target.js")
+    have_node = node and os.path.isfile(node_target)
+    params.append(pytest.param(
+        [node, node_target, "{port}"] if have_node else None, id="node",
+        marks=[] if have_node else pytest.mark.skip(
+            reason="node (>=22) not found")))
     return params
 
 

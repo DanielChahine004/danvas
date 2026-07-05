@@ -153,18 +153,19 @@ contract; test it.
   (currently an undocumented Python-side serialization) in a short appendix so
   any SDK can implement owner-side persist. Implementation optional; the spec
   is the deliverable.
-- **danvasd graceful shutdown flag** (`--idle-exit <secs>`?): a broker whose
-  last source is gone forever currently lives until killed — matters once
-  `serve()`-spawned brokers are common from multiple languages. (Decide: may
-  be a non-goal; retention is a feature.)
+- **danvasd graceful shutdown flag** — DECIDED: non-goal. Retention is a
+  feature (a dead source's panels freeze until the label re-dials), and every
+  self-serve path already owns its broker's lifetime (Rust `Broker` kills on
+  Drop; Python's serve owns the child process).
 
-## Phase 7 (stretch) — Prove it with a third SDK
+## Phase 7 (stretch) — Prove it with a third SDK — SHIPPED
 
-A ~500-line TypeScript/Node source SDK written **only** from PROTOCOL.md +
-the Phase-1 contracts + the Phase-4 suite, timed. It forces every remaining
-implicit assumption into the open, gives the JS ecosystem an entry point
-(Node hardware/robotics folks), and its line count is the metric for whether
-Phases 1–3 actually worked: it should need no `helpers.ts`.
+`danvas-node/` — ~430 lines, zero dependencies (Node ≥ 22's own WebSocket),
+written only from PROTOCOL.md + the contract blocks, no helpers file. It
+passed the full conformance suite on its FIRST run (9 passed, 1 xfail — the
+same shared-plane xfail as the other SDKs), and is now the suite's third
+permanent target (`pytest tests/test_sdk_conformance.py -k node`). The
+acceptance metric held: phases 1–4 made a new SDK an afternoon's work.
 
 ---
 
