@@ -10,6 +10,34 @@
 
 use danvas_source::Client;
 use serde_json::{json, Value};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/// The file-browser listing payload for `cwd` (sandboxed under `root`): folders
+/// first, then files, each alphabetical — the shape the FileBrowser panel reads.
+fn fb_listing(root: &Path, cwd: &Path) -> Value {
+    let mut entries: Vec<(String, bool, u64)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(cwd) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') { continue; }
+            let md = e.metadata().ok();
+            let is_dir = md.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = if is_dir { 0 } else { md.map(|m| m.len()).unwrap_or(0) };
+            entries.push((name, is_dir, size));
+        }
+    }
+    entries.sort_by(|a, b| (!a.1).cmp(&(!b.1))
+        .then(a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+    let items: Vec<Value> = entries.iter()
+        .map(|(n, d, s)| json!({"name": n, "dir": d, "size": s})).collect();
+    let display = match cwd.strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => "/".to_string(),
+        Ok(rel) => format!("/{}", rel.to_string_lossy().replace('\\', "/")),
+        Err(_) => "/".to_string(),
+    };
+    json!({"cwd": display, "atRoot": cwd == root, "selected": Value::Null, "entries": items})
+}
 
 const HISTOGRAM_FIG: &str = include_str!("assets/histogram_fig.json");
 const LIVEPLOT_FIG: &str = include_str!("assets/liveplot_fig.json");
@@ -131,6 +159,29 @@ fn main() {
     c.panel("up", "upload").set("text", json!("Choose a file"))
         .titled("Upload").at(748.0, 2602.0).size(240.0, 120.0).color(PLUM).show();
     c.panel("fb", "file_browser").titled("File browser").at(1012.0, 2703.0).size(320.0, 420.0).color(ROSE).show();
+    // A real, navigable directory listing served from Rust (root = cwd): push
+    // the initial listing, then answer the panel's ready/open/up click events.
+    let fb_root = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let fb_cwd = Arc::new(Mutex::new(fb_root.clone()));
+    c.update("fb", "post", fb_listing(&fb_root, &fb_cwd.lock().unwrap()));
+    let (fc, root2, cwd2) = (c.clone(), fb_root.clone(), fb_cwd.clone());
+    c.on_input("fb", move |p| {
+        let ev = p.get("event").and_then(|v| v.as_str()).unwrap_or("");
+        let mut d = cwd2.lock().unwrap();
+        match ev {
+            "up" => if *d != root2 {
+                if let Some(par) = d.parent() {
+                    if par.starts_with(&root2) || par == root2 { *d = par.to_path_buf(); }
+                }
+            },
+            "open" => if let Some(name) = p.get("name").and_then(|v| v.as_str()) {
+                let cand = d.join(name);
+                if cand.is_dir() && cand.starts_with(&root2) { *d = cand; }
+            },
+            _ => {} // "ready" (or a file open) — just (re)push the current listing
+        }
+        fc.update("fb", "post", fb_listing(&root2, &d));
+    });
     c.panel("wv", "webview").set("url", json!("https://example.com"))
         .titled("Webview").at(80.0, 3451.0).size(800.0, 600.0).color(AMBER).show();
     c.panel("ins", "inspector").titled("Inspector").at(904.0, 3661.0).size(520.0, 320.0).color(TEAL).show();

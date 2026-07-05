@@ -177,6 +177,7 @@ pub struct PanelBuilder<'a> {
     props: Map<String, Value>,   // raw prop overrides (label, html, …)
     place: Map<String, Value>,
     rel: Option<(&'static str, String, f64)>,  // (below/above/…, anchor, gap)
+    frame_color: Option<String>, // top-level frameColor (accent border/theme)
 }
 
 impl<'a> PanelBuilder<'a> {
@@ -194,10 +195,12 @@ impl<'a> PanelBuilder<'a> {
     pub fn titled(self, label: &str) -> Self {
         self.prop("label", json!(label))
     }
-    /// Per-panel accent colour ('#rrggbb') — scopes the theme like Python's
-    /// `color=` (sets the derived `_th` CSS variables in the panel's data).
+    /// Per-panel accent colour ('#rrggbb') — the twin of Python's `color=`: sets
+    /// the derived `_th` CSS variables in the data AND the top-level `frameColor`
+    /// (the accent the card frame/theme tints with).
     pub fn color(mut self, hex: &str) -> Self {
         self.data.insert("_th".into(), Value::Object(derive_theme(hex)));
+        self.frame_color = Some(hex.to_string());
         self
     }
     /// Place the panel.
@@ -248,7 +251,7 @@ impl<'a> PanelBuilder<'a> {
         let id = self.id.clone();
         let client = self.client.clone();
         self.client.register_template_raw(&id, &self.kind, self.data,
-                                          self.props, self.place);
+                                          self.props, self.place, self.frame_color);
         // Relative placement: resolve now if the anchor is positioned, else defer
         // to its first layout report. Explicit x/y always wins.
         if let (Some((kind, anchor, gap)), false) = (rel, has_xy) {
@@ -447,7 +450,8 @@ impl Client {
         let data = self.inner.templates["templates"][kind]["data"]
             .as_object().cloned().unwrap_or_default();
         PanelBuilder { client: self, id: id.into(), kind: kind.into(),
-                       data, props: Map::new(), place: Map::new(), rel: None }
+                       data, props: Map::new(), place: Map::new(), rel: None,
+                       frame_color: None }
     }
 
     /// A native slider. `.at(x,y).set("step",..).show()`.
@@ -480,7 +484,8 @@ impl Client {
     }
 
     fn register_template_raw(&self, id: &str, kind: &str, mut data: Map<String, Value>,
-                             overrides: Map<String, Value>, place: Map<String, Value>) {
+                             overrides: Map<String, Value>, place: Map<String, Value>,
+                             frame_color: Option<String>) {
         let tpl = &self.inner.templates["templates"][kind];
         let mut props = tpl["props"].as_object().cloned().unwrap_or_default();
         // template defaults are already in `data` via the builder; ensure any
@@ -504,6 +509,12 @@ impl Client {
             if let Some(v) = place.get(k) {
                 msg.as_object_mut().unwrap().insert(k.into(), v.clone());
             }
+        }
+        // Top-level frameColor (accent the card frame tints with) — like the
+        // Python component's color=; without it the card fills with the
+        // translucent accent instead of a subtle framed tint.
+        if let Some(fc) = frame_color {
+            msg.as_object_mut().unwrap().insert("frameColor".into(), json!(fc));
         }
         self.record_register(id, &msg);
         self.send(&msg);
