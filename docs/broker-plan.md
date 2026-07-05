@@ -1,5 +1,13 @@
 # Roadmap: the shared-canvas architecture
 
+> **Status (2026-07-06): COMPLETE — superseded by
+> [polyglot-plan.md](polyglot-plan.md).** Everything below shipped: danvasd is
+> the sole serving path, the SDK story grew to three conformance-tested
+> languages (Python, Rust, Node), and the follow-on hardening (component
+> contracts, frontend-owned shim/theme/placement, the conformance and renderer
+> test nets) is tracked — also complete — in the polyglot plan. Kept as the
+> historical record of how the broker landed.
+
 Where things stand (2026-07-03): the protocol is frozen (PROTOCOL.md v1), the
 SQLite ledger and hub retention shipped, and the whole peer story landed —
 dial-in sources, the shared property plane (`set_props`/`subscribe`),
