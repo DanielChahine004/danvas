@@ -10,6 +10,15 @@ tokio = { version = "1", features = ["rt", "macros", "net", "sync", "time"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 serde_json = "1"
+# Real-camera capture for the catalogue's webcam panel — optional so the default
+# build (and CI's `--examples`) needs no platform camera libs and uses the
+# baked animation instead. Enable with `--features camera`.
+nokhwa = { version = "0.10", features = ["input-native"], optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
+
+[features]
+# Capture the physical webcam in examples/catalogue.rs instead of the animation.
+camera = ["dep:nokhwa", "dep:image"]
 
 [[example]]
 name = "two_languages"

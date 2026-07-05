@@ -204,17 +204,10 @@ fn main() {
         }
     });
 
-    // 18. Webcam — STREAM the animation frames (~15 fps).
+    // 18. Webcam — the real camera when built `--features camera`, else the
+    // baked animation (see spawn_webcam below).
     c.video("cam").titled("Webcam").at(364.0, 4133.0).size(340.0, 280.0).color(SAGE).show();
-    let vc = c.clone();
-    std::thread::spawn(move || {
-        let mut i = 0usize;
-        loop {
-            vc.send_video("cam", WEBCAM[i % WEBCAM.len()]);
-            i += 1;
-            std::thread::sleep(std::time::Duration::from_millis(66));
-        }
-    });
+    spawn_webcam(&c);
 
     // 19. Chat
     c.panel("room", "chat").titled("Chat").at(728.0, 4350.0).size(320.0, 400.0).color(ROSE).show();
@@ -227,6 +220,96 @@ fn main() {
          <script>var n=0;</script>"))
         .titled("Custom").at(1072.0, 4500.0).size(380.0, 320.0).color(AMBER).show();
 
+    // Inspector: push the live panel table now that every panel is declared,
+    // and re-push whenever the browser hits Refresh (or switches source/trace).
+    c.update("ins", "data_patch", c.inspector_rows());
+    let ic = c.clone();
+    c.on_input("ins", move |_p| {
+        ic.update("ins", "data_patch", ic.inspector_rows());
+    });
+
     println!("[rust] catalogue live on :{port}; ctrl+c to stop");
     std::thread::park();
+}
+
+/// Stream the baked 24-frame animation as the webcam feed (~15 fps) — the
+/// default when the `camera` feature is off (no platform camera libs needed).
+#[cfg(not(feature = "camera"))]
+fn spawn_webcam(c: &Client) {
+    let vc = c.clone();
+    std::thread::spawn(move || {
+        let mut i = 0usize;
+        loop {
+            vc.send_video("cam", WEBCAM[i % WEBCAM.len()]);
+            i += 1;
+            std::thread::sleep(std::time::Duration::from_millis(66));
+        }
+    });
+}
+
+/// Capture the physical webcam and stream real JPEG frames — built with
+/// `--features camera`. Falls back to the baked animation if the camera can't
+/// be opened (busy, absent). MJPEG cameras pass through untouched; other
+/// formats are decoded to RGB and re-encoded to JPEG.
+#[cfg(feature = "camera")]
+fn spawn_webcam(c: &Client) {
+    use nokhwa::pixel_format::RgbFormat;
+    use nokhwa::utils::{CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType};
+    use nokhwa::Camera;
+
+    let vc = c.clone();
+    std::thread::spawn(move || {
+        let requested =
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let mut cam = match Camera::new(CameraIndex::Index(0), requested) {
+            Ok(cam) => cam,
+            Err(e) => {
+                eprintln!("[rust] camera open failed ({e}); using the animation");
+                return animate(vc);
+            }
+        };
+        if let Err(e) = cam.open_stream() {
+            eprintln!("[rust] camera stream failed ({e}); using the animation");
+            return animate(vc);
+        }
+        println!("[rust] webcam: streaming the real camera");
+        loop {
+            let frame = match cam.frame() {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("[rust] frame error: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+            };
+            // MJPEG cameras hand us a JPEG already — forward it untouched.
+            if frame.source_frame_format() == FrameFormat::MJPEG {
+                vc.send_video("cam", frame.buffer());
+                continue;
+            }
+            // Otherwise decode to RGB and JPEG-encode ourselves.
+            if let Ok(rgb) = frame.decode_image::<RgbFormat>() {
+                let (w, h) = (rgb.width(), rgb.height());
+                let mut jpg = Vec::new();
+                let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 75);
+                if image::ImageEncoder::write_image(
+                    enc, &rgb, w, h, image::ExtendedColorType::Rgb8,
+                ).is_ok() {
+                    vc.send_video("cam", &jpg);
+                }
+            }
+        }
+    });
+}
+
+/// The baked-animation loop, shared by the no-camera build and the camera
+/// build's fallback.
+#[cfg(feature = "camera")]
+fn animate(vc: Client) {
+    let mut i = 0usize;
+    loop {
+        vc.send_video("cam", WEBCAM[i % WEBCAM.len()]);
+        i += 1;
+        std::thread::sleep(std::time::Duration::from_millis(66));
+    }
 }
