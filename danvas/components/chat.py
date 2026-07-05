@@ -131,6 +131,14 @@ function Component({ canvas }) {
 
 
 class Chat(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {},
+        "updates": {},
+        "events": [],
+        "note": "hub-native: the shared room rides chat/set_name frames, "
+                "not per-panel updates",
+    }
     default_w = 320
     default_h = 400
 

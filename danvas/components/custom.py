@@ -46,6 +46,19 @@ _FULL_DOCUMENT_RE = re.compile(r"<\s*(?:!doctype|html|body)\b", re.IGNORECASE)
 
 class Custom(_EventRouter, BaseComponent):
     component = "Custom"
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {},
+        "props": {"html": "str -- the full iframe document; SDKs should "
+                          "prepend the interaction shim + canvas API "
+                          "(Python's _wrap/compose do this)"},
+        "updates": {"data_patch": "merge changed data fields",
+                    "post": "opaque value delivered to the document's "
+                            "canvas.onPush"},
+        "events": "free-form -- whatever the document's canvas.send posts",
+        "binary": "CUSTOM (code 3) out via push(); INPUT (code 5) in via "
+                  "the document's canvas.sendBinary",
+    }
     default_w = 380
     default_h = 320
     BINARY_TYPE = BINARY_CUSTOM

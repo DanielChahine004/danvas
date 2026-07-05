@@ -17,6 +17,13 @@ from .plot import Plot
 
 
 class Histogram(Plot):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"_fig": "object -- a Plotly figure {data, layout}; the "
+                         "histogram is a heatmap trace built by the owner"},
+        "updates": {"data_patch": "typically {_fig: <figure>}"},
+        "events": [],
+    }
     default_w = 560
     default_h = 360
 

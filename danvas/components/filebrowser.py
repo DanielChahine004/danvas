@@ -103,6 +103,15 @@ class FileBrowser(React):
     :func:`os.path.realpath` and rejected if they escape it (symlinks included).
     """
 
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {},
+        "updates": {"post": "the listing {cwd: str, atRoot: bool, selected: "
+                            "str|null, entries: [{name: str, dir: bool, "
+                            "size: number}]} -- owner-built, sandboxed"},
+        "events": [{"event": "ready|up"},
+                   {"event": "open", "name": "str"}],
+    }
     default_w = 320
     default_h = 420
 

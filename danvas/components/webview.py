@@ -37,6 +37,12 @@ function Component({ props }) {
 
 
 class WebView(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"url": "str"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [],
+    }
     default_w = 800
     default_h = 600
 

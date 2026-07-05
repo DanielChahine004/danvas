@@ -50,6 +50,12 @@ class Button(React):
     one-shot action. ``value`` reads the running click count.
     """
 
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"text": "str -- the button face"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [{}],  # a click sends an empty payload
+    }
     default_w = 200
     default_h = 84
 

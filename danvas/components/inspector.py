@@ -361,6 +361,18 @@ def _object_fields(obj):
 
 
 class Inspector(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"rows": "list|json-str -- the table rows",
+                 "cols": "list[str]|json-str",
+                 "detail": "object|json-str -- {key, type, repr, fields: "
+                           "[{field, type, value}], missing?}",
+                 "source": "str -- components|globals|system|canvas"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [{"action": "refresh|trace"},
+                   {"action": "source", "source": "str"},
+                   {"action": "detail", "key": "str|null"}],
+    }
     default_w = 520
     default_h = 320
 

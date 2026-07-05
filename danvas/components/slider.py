@@ -94,6 +94,16 @@ function Component({ canvas, value, props }) {
 
 
 class Slider(_ValuePersist, React):
+    # Language-neutral contract (rendered into templates/components.json):
+    # what an SDK sets/streams and what this panel emits. PROTOCOL.md explains.
+    CONTRACT = {
+        "data": {"min": "number", "max": "number", "value": "number",
+                 "step": "number|null", "default": "number",
+                 "on_release": "bool -- fire input only when the drag ends"},
+        "updates": {"data_patch": "merge changed data fields",
+                    "post": "the current value (number)"},
+        "events": [{"value": "number"}],
+    }
     default_w = 240
     default_h = 96
 

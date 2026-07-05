@@ -50,6 +50,13 @@ function Component({ canvas, value, props }) {
 
 
 class Toggle(_ValuePersist, React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"options": "list[str]", "value": "str"},
+        "updates": {"data_patch": "merge changed data fields",
+                    "post": "the new value (str)"},
+        "events": [{"value": "str"}],
+    }
     default_w = 260
     default_h = 84
 

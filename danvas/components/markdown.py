@@ -63,6 +63,13 @@ function Component({{ props }}) {{
 
 
 class Markdown(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"html": "str -- rendered HTML (Python converts markdown; "
+                         "other SDKs send HTML directly)"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [],
+    }
     default_w = 380
     default_h = 240
 

@@ -256,6 +256,24 @@ pub struct PanelBuilder<'a> {
 impl<'a> PanelBuilder<'a> {
     /// Override a data field (min/max/value/text/options/...).
     pub fn set(mut self, key: &str, value: Value) -> Self {
+        // Debug builds check the key against the template's contract (the
+        // machine-readable statement of the panel's authorable fields —
+        // PROTOCOL.md § component contracts): a typo'd field would otherwise
+        // vanish silently into the data blob.
+        #[cfg(debug_assertions)]
+        {
+            let declared = &self.client.inner.templates["templates"]
+                [self.kind.as_str()]["contract"]["data"];
+            if let Some(fields) = declared.as_object() {
+                if !fields.contains_key(key) {
+                    eprintln!(
+                        "[danvas] warning: `{key}` is not a declared data \
+                         field of the `{}` template — see its contract in \
+                         components.json (typo, or update the CONTRACT)",
+                        self.kind);
+                }
+            }
+        }
         self.data.insert(key.into(), value);
         self
     }

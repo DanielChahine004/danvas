@@ -422,6 +422,17 @@ function Component({ canvas, props }) {
 
 
 class Table(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"cols": "list[str]", "rows": "list[list]",
+                 "numeric": "list[bool]", "pageSize": "number",
+                 "dists": "list|null -- per-column distribution bars",
+                 "profiles": "list|null -- per-column summary stats",
+                 "editable": "bool"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [{"selected": "list[number] -- selected row indexes"},
+                   {"edited": "object {row: number, col: number, value}"}],
+    }
     default_w = 520
     default_h = 360
 

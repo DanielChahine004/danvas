@@ -1,9 +1,25 @@
 {
  "_generated_by": "scripts/gen_component_templates.py",
- "_note": "language-neutral register templates for the built-in panels; merge user kwargs over `data`, json-encode into props.data",
+ "_note": "language-neutral register templates for the built-in panels; merge user kwargs over `data`, json-encode into props.data. Each template's `contract` declares what an SDK sets/sends and what the panel emits \u2014 see PROTOCOL.md \u00a7 component contracts",
  "templates": {
   "audio": {
    "component": "React",
+   "contract": {
+    "binary": "receives AUDIO (code 2): int16-LE PCM streamed by the owner",
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "channels": "number",
+     "sampleRate": "number"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": false,
+     "h": 120,
+     "w": 260
+    },
+    "updates": {}
+   },
    "data": {
     "channels": 1,
     "sampleRate": 16000
@@ -21,6 +37,24 @@
   },
   "button": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "text": "str -- the button face"
+    },
+    "encoded": [],
+    "events": [
+     {}
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 84,
+     "w": 200
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "_th": {},
     "text": "button"
@@ -38,6 +72,20 @@
   },
   "chat": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 400,
+     "w": 320
+    },
+    "note": "hub-native: the shared room rides chat/set_name frames, not per-panel updates",
+    "updates": {}
+   },
    "data": {
     "_th": {}
    },
@@ -54,6 +102,26 @@
   },
   "custom": {
    "component": "Custom",
+   "contract": {
+    "binary": "CUSTOM (code 3) out via push(); INPUT (code 5) in via the document's canvas.sendBinary",
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": "free-form -- whatever the document's canvas.send posts",
+    "geometry": {
+     "auto_h": false,
+     "h": 320,
+     "w": 380
+    },
+    "props": {
+     "html": "str -- the full iframe document; SDKs should prepend the interaction shim + canvas API (Python's _wrap/compose do this)"
+    },
+    "updates": {
+     "data_patch": "merge changed data fields",
+     "post": "opaque value delivered to the document's canvas.onPush"
+    }
+   },
    "data": {},
    "props": {
     "h": 320,
@@ -65,6 +133,28 @@
   },
   "download": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "text": "str -- the button face"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 84,
+     "w": 200
+    },
+    "requests": {
+     "click": {
+      "returns": "{url: str, filename: str} -- a minted /__download__/<token> URL",
+      "sends": "{}"
+     }
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "text": "Download"
    },
@@ -81,6 +171,29 @@
   },
   "file_browser": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "event": "ready|up"
+     },
+     {
+      "event": "open",
+      "name": "str"
+     }
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 420,
+     "w": 320
+    },
+    "updates": {
+     "post": "the listing {cwd: str, atRoot: bool, selected: str|null, entries: [{name: str, dir: bool, size: number}]} -- owner-built, sandboxed"
+    }
+   },
    "data": {
     "_th": {}
    },
@@ -97,6 +210,22 @@
   },
   "histogram": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_fig": "object -- a Plotly figure {data, layout}; the histogram is a heatmap trace built by the owner",
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": false,
+     "h": 360,
+     "w": 560
+    },
+    "updates": {
+     "data_patch": "typically {_fig: <figure>}"
+    }
+   },
    "data": {},
    "props": {
     "autoH": false,
@@ -111,6 +240,23 @@
   },
   "image": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "fit": "str -- CSS object-fit (contain/cover/fill)",
+     "src": "str -- a data: URL or http(s) URL"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 320,
+     "w": 420
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "_th": {},
     "fit": "contain",
@@ -129,6 +275,37 @@
   },
   "inspector": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "cols": "list[str]|json-str",
+     "detail": "object|json-str -- {key, type, repr, fields: [{field, type, value}], missing?}",
+     "rows": "list|json-str -- the table rows",
+     "source": "str -- components|globals|system|canvas"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "action": "refresh|trace"
+     },
+     {
+      "action": "source",
+      "source": "str"
+     },
+     {
+      "action": "detail",
+      "key": "str|null"
+     }
+    ],
+    "geometry": {
+     "auto_h": false,
+     "h": 320,
+     "w": 520
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "cols": "[\"name\", \"label\", \"type\", \"value\", \"visible\", \"x\", \"y\", \"w\", \"h\"]",
     "detail": "",
@@ -148,6 +325,23 @@
   },
   "label": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "text": "str"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 84,
+     "w": 240
+    },
+    "updates": {
+     "data_patch": "merge changed data fields",
+     "post": "the new text (str)"
+    }
+   },
    "data": {
     "_th": {},
     "text": ""
@@ -165,6 +359,22 @@
   },
   "live_plot": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": false,
+     "h": 380,
+     "w": 560
+    },
+    "updates": {
+     "plot": "a full Plotly figure {data, layout} (replaces)",
+     "plot_extend": "{indices: list[number], x: list[list], y: list[list], max: number|null} appended via Plotly.extendTraces"
+    }
+   },
    "data": {},
    "props": {
     "autoH": false,
@@ -179,6 +389,22 @@
   },
   "markdown": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "html": "str -- rendered HTML (Python converts markdown; other SDKs send HTML directly)"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 240,
+     "w": 380
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "_th": {},
     "html": ""
@@ -196,6 +422,22 @@
   },
   "plot": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_fig": "object -- a Plotly figure {data, layout}",
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": false,
+     "h": 420,
+     "w": 560
+    },
+    "updates": {
+     "data_patch": "typically {_fig: <figure>}"
+    }
+   },
    "data": {},
    "props": {
     "autoH": false,
@@ -210,6 +452,32 @@
   },
   "slider": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "default": "number",
+     "max": "number",
+     "min": "number",
+     "on_release": "bool -- fire input only when the drag ends",
+     "step": "number|null",
+     "value": "number"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "value": "number"
+     }
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 96,
+     "w": 240
+    },
+    "updates": {
+     "data_patch": "merge changed data fields",
+     "post": "the current value (number)"
+    }
+   },
    "data": {
     "_th": {},
     "default": 0,
@@ -232,6 +500,35 @@
   },
   "table": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "cols": "list[str]",
+     "dists": "list|null -- per-column distribution bars",
+     "editable": "bool",
+     "numeric": "list[bool]",
+     "pageSize": "number",
+     "profiles": "list|null -- per-column summary stats",
+     "rows": "list[list]"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "selected": "list[number] -- selected row indexes"
+     },
+     {
+      "edited": "object {row: number, col: number, value}"
+     }
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 360,
+     "w": 520
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "_th": {},
     "cols": [
@@ -379,6 +676,29 @@
   },
   "text_field": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "multiline": "bool",
+     "placeholder": "str",
+     "value": "str"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "value": "str"
+     }
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 80,
+     "w": 240
+    },
+    "updates": {
+     "data_patch": "merge changed data fields",
+     "post": "the new value (str)"
+    }
+   },
    "data": {
     "_th": {},
     "multiline": false,
@@ -398,6 +718,28 @@
   },
   "toggle": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "options": "list[str]",
+     "value": "str"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "value": "str"
+     }
+    ],
+    "geometry": {
+     "auto_h": true,
+     "h": 84,
+     "w": 260
+    },
+    "updates": {
+     "data_patch": "merge changed data fields",
+     "post": "the new value (str)"
+    }
+   },
    "data": {
     "_th": {},
     "options": [
@@ -419,6 +761,25 @@
   },
   "upload": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "accept": "str -- input accept filter, empty for any",
+     "multiple": "bool",
+     "text": "str -- the drop-zone caption",
+     "url": "str -- the POST target /__upload__/<token>, minted and registered by the owner"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 120,
+     "w": 240
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "accept": "",
     "multiple": false,
@@ -438,6 +799,20 @@
   },
   "video": {
    "component": "React",
+   "contract": {
+    "binary": "receives VIDEO (code 1): JPEG frame bytes streamed by the owner",
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 280,
+     "w": 340
+    },
+    "updates": {}
+   },
    "data": {},
    "props": {
     "autoH": true,
@@ -452,6 +827,22 @@
   },
   "webview": {
    "component": "React",
+   "contract": {
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin",
+     "url": "str"
+    },
+    "encoded": [],
+    "events": [],
+    "geometry": {
+     "auto_h": true,
+     "h": 600,
+     "w": 800
+    },
+    "updates": {
+     "data_patch": "merge changed data fields"
+    }
+   },
    "data": {
     "url": "https://example.com"
    },

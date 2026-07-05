@@ -38,6 +38,13 @@ function Component({ props }) {
 
 
 class Image(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"src": "str -- a data: URL or http(s) URL",
+                 "fit": "str -- CSS object-fit (contain/cover/fill)"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [],
+    }
     default_w = 420
     default_h = 320
 

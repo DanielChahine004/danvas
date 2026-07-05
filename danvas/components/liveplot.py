@@ -127,6 +127,15 @@ def _ema(values, weight):
 
 
 class LivePlot(_React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {},
+        "updates": {"plot": "a full Plotly figure {data, layout} (replaces)",
+                    "plot_extend": "{indices: list[number], x: list[list], "
+                                   "y: list[list], max: number|null} appended "
+                                   "via Plotly.extendTraces"},
+        "events": [],
+    }
     default_w = 560
     default_h = 380
 

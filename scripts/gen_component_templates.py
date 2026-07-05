@@ -77,6 +77,38 @@ def _strip_volatile(kind, data):
     return data
 
 
+def _contract(comp):
+    """The component's declared contract, finished with the derivable parts.
+
+    Every templated component class declares a ``CONTRACT`` (data field types,
+    update keys consumed, input payload shapes emitted, request round-trips,
+    binary envelope usage, legacy ``encoded`` fields) — the machine-readable
+    half of what an SDK must know to drive the panel; PROTOCOL.md's "component
+    contracts" section is the human-readable half. Geometry and the universal
+    ``_th`` theme field are derived here rather than repeated on each class.
+    """
+    declared = getattr(type(comp), "CONTRACT", None)
+    if declared is None:
+        raise SystemExit(
+            f"{type(comp).__name__} has no CONTRACT declaration — every "
+            "templated component must declare one (see PROTOCOL.md)")
+    contract = dict(declared)
+    data = dict(contract.get("data", {}))
+    # Universal: every panel accepts the derived accent-theme CSS variables
+    # (what a `color=`/`.color()` sets); no class declares it individually.
+    data.setdefault("_th", "object -- accent theme CSS variables, derived "
+                           "from an accent color; frameColor is its "
+                           "top-level register-frame twin")
+    contract["data"] = data
+    contract.setdefault("encoded", [])
+    contract["geometry"] = {
+        "w": getattr(comp, "default_w", None),
+        "h": getattr(comp, "default_h", None),
+        "auto_h": bool(getattr(comp, "_auto_h", False)),
+    }
+    return contract
+
+
 def build():
     out = {}
     for kind, make in _BUILDERS.items():
@@ -90,11 +122,15 @@ def build():
             "component": comp.component,
             "props": props,
             "data": data,
+            "contract": _contract(comp),
         }
     return {
         "_generated_by": "scripts/gen_component_templates.py",
         "_note": "language-neutral register templates for the built-in panels;"
-                 " merge user kwargs over `data`, json-encode into props.data",
+                 " merge user kwargs over `data`, json-encode into props.data."
+                 " Each template's `contract` declares what an SDK sets/sends"
+                 " and what the panel emits — see PROTOCOL.md § component"
+                 " contracts",
         "templates": out,
     }
 

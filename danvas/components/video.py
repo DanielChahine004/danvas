@@ -44,6 +44,13 @@ function Component({ canvas }) {
 
 
 class VideoFeed(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {},
+        "updates": {},
+        "events": [],
+        "binary": "receives VIDEO (code 1): JPEG frame bytes streamed by the owner",
+    }
     default_w = 340
     default_h = 280
     BINARY_TYPE = BINARY_VIDEO

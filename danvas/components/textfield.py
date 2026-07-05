@@ -71,6 +71,13 @@ class TextField(_ValuePersist, React):
     focus. Multiline: fires on focus-loss. ``value`` reads the last committed text.
     """
 
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"placeholder": "str", "multiline": "bool", "value": "str"},
+        "updates": {"data_patch": "merge changed data fields",
+                    "post": "the new value (str)"},
+        "events": [{"value": "str"}],
+    }
     default_w = 240
     default_h = 80
 

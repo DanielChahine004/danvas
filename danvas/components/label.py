@@ -40,6 +40,13 @@ def _str(v):
 
 
 class Label(React):
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"text": "str"},
+        "updates": {"data_patch": "merge changed data fields",
+                    "post": "the new text (str)"},
+        "events": [],
+    }
     default_w = 240
     default_h = 84
 

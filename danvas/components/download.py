@@ -98,6 +98,15 @@ class Download(React):
     :class:`~danvas.FileBrowser` — nothing the viewer sends selects a path.
     """
 
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"text": "str -- the button face"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [],
+        "requests": {"click": {"sends": "{}",
+                               "returns": "{url: str, filename: str} -- a "
+                                          "minted /__download__/<token> URL"}},
+    }
     default_w = 200
     default_h = 84
 

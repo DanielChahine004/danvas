@@ -222,6 +222,16 @@ class Upload(React):
     the most recently uploaded file.
     """
 
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"text": "str -- the drop-zone caption",
+                 "url": "str -- the POST target /__upload__/<token>, minted "
+                        "and registered by the owner",
+                 "accept": "str -- input accept filter, empty for any",
+                 "multiple": "bool"},
+        "updates": {"data_patch": "merge changed data fields"},
+        "events": [],
+    }
     default_w = 240
     default_h = 120
 

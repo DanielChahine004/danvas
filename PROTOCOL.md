@@ -169,6 +169,38 @@ props the frontend mounts. Those shapes ship as a language-neutral asset —
 template's `data`, JSON-encodes it into `props.data`, and sends the register.
 `SourceClient.register_template` is the reference.
 
+## Component contracts
+
+The wire protocol says how frames move; it deliberately says nothing about
+what a *particular panel* expects inside them. That layer — which data fields
+a slider has, which update keys a live plot consumes, what payload a file
+browser's clicks emit — is declared per template as a **`contract` block in
+`components.json`**, generated from a `CONTRACT` declaration on each Python
+component class (the same freshness test that guards the JSX guards these).
+The contract is the normative reference for SDK authors: implementing a panel
+means reading its contract, not the Python source.
+
+Each contract carries:
+
+| key | meaning |
+|---|---|
+| `data` | authorable data-blob fields → informal type strings (`"number"`, `"list[str]"`, `"str -- note"`). `_th` (the accent theme) is universal and auto-declared. |
+| `props` | register-prop-level fields outside the data blob (e.g. Custom's `html`) |
+| `updates` | the `update` payload keys the panel consumes → what each carries |
+| `events` | the `input` payload shapes the panel emits (browser → owner + subscribers) |
+| `requests` | `request`→`response` round-trips the panel makes and their reply shapes |
+| `binary` | how the panel uses the binary envelope, if at all |
+| `geometry` | default `w`/`h` and whether the panel auto-fits its height |
+| `encoded` | legacy string-double-encoded data fields — **frozen at empty**: template JSX must parse tolerantly (a JSON string from Python's `json.dumps` OR plain JSON from any other SDK) rather than SDKs encoding defensively |
+
+**Update-payload vocabulary** (frontend-defined, shared by all panels): a
+payload's top-level `x`/`y`/`w`/`h`/`rotation`/`opacity`/lock flags/
+`frameColor` patch the panel's frame; `data_patch` merges changed fields into
+the data blob; `post` is a value pushed straight to the mounted panel;
+`post_style` restyles live; `plot`/`plot_extend` are the streaming-figure
+channel (`plot` replaces and supersedes any pending `plot_extend`). A panel's
+contract lists which of these it uses.
+
 ## The shared property plane
 
 The canvas is a shared document: **any peer may write any panel's properties**

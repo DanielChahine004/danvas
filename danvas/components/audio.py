@@ -103,6 +103,13 @@ function Component({ canvas, props }) {
 
 class AudioFeed(_React):
     BINARY_TYPE = BINARY_REACT
+    # Language-neutral contract (see PROTOCOL.md section: component contracts).
+    CONTRACT = {
+        "data": {"sampleRate": "number", "channels": "number"},
+        "updates": {},
+        "events": [],
+        "binary": "receives AUDIO (code 2): int16-LE PCM streamed by the owner",
+    }
     default_w = 260
     default_h = 120
 
