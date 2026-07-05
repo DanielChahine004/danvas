@@ -13,48 +13,6 @@ use serde_json::{json, Value};
 
 use crate::{Client, PanelBuilder};
 
-/// The interaction shim Python's Custom component prepends to a panel's HTML
-/// (custom.py): a Custom panel is a sandboxed iframe, so canvas gestures made
-/// over it never reach the parent document — this script forwards them.
-/// Wheel → `__danvas_wheel` (scroll-to-zoom over the panel, like everywhere
-/// else), right-drag → `__danvas_pan` (screen-coord deltas so the pan can't
-/// feed back on itself), a sub-4px right-click → `__danvas_menu` (the canvas
-/// context menu), and the single-key tool shortcuts (v/h/d/… + Escape, never
-/// from a form field or with a modifier) → `__danvas_key`. Only the cid-free
-/// forwarders are here; the Python component also injects a per-panel canvas
-/// API (update/request/error reporting), which needs the composed panel id.
-const CUSTOM_SHIM: &str = concat!(
-    "<script>",
-    "window.addEventListener('wheel',function(e){e.preventDefault();",
-    "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');",
-    "},{passive:false,capture:true});",
-    "var _pan=false,_sx=0,_sy=0,_pm=0;",
-    "window.addEventListener('pointerdown',function(e){",
-    "if(e.button===2){_pan=true;_sx=e.screenX;_sy=e.screenY;_pm=0;",
-    "try{document.documentElement.setPointerCapture(e.pointerId);}catch(_){}}",
-    "},true);",
-    "window.addEventListener('pointermove',function(e){",
-    "if(!_pan)return;var dx=e.screenX-_sx,dy=e.screenY-_sy;_sx=e.screenX;_sy=e.screenY;",
-    "_pm+=Math.abs(dx)+Math.abs(dy);",
-    "parent.postMessage({__danvas_pan:{dx:dx,dy:dy}},'*');",
-    "},true);",
-    "window.addEventListener('pointerup',function(e){",
-    "if(e.button===2){_pan=false;",
-    "if(_pm<=4)parent.postMessage({__danvas_menu:{x:e.clientX,y:e.clientY}},'*');}",
-    "},true);",
-    "window.addEventListener('contextmenu',function(e){e.preventDefault();},true);",
-    "var _shortcuts='vhdrolatnep';",
-    "window.addEventListener('keydown',function(e){",
-    "if(e.ctrlKey||e.metaKey||e.altKey)return;",
-    "var t=e.target||{};var tn=(t.tagName||'');",
-    "if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT'||t.isContentEditable)return;",
-    "var k=e.key.length===1?e.key.toLowerCase():e.key;",
-    "if(k==='Escape'||_shortcuts.indexOf(k)>=0)",
-    "parent.postMessage({__danvas_key:{key:e.key}},'*');",
-    "});",
-    "</script>",
-);
-
 /// Bytes → a `data:` URL (what an `image` panel's `src` data field takes) —
 /// the encoding half of Python's `canvas.image()`. Pass the real MIME type
 /// (`"image/png"`, `"image/jpeg"`, …).
@@ -412,34 +370,22 @@ impl Client {
         self.panel(id, "inspector")
     }
 
-    /// A Custom panel (raw HTML/CSS/JS in a sandboxed iframe), assembled the
-    /// way Python's `canvas.custom(html, css=, js=)` does: an HTML *fragment*
-    /// is wrapped with the shared base reset (sane margins, `box-sizing`,
-    /// transparent background, content flex-centred in the frame) while a
-    /// *complete page* (its own `<html>`/`<body>`/doctype) is left untouched;
-    /// the canvas interaction shim is prepended either way, so scroll-to-zoom,
-    /// right-drag pan, the context menu, and tool shortcuts work over the
-    /// iframe exactly like over the bare canvas. Pass `""` for unused parts.
+    /// A Custom panel (raw HTML/CSS/JS in a sandboxed iframe). The frontend
+    /// owns the rest (customShim.ts): it wraps a bare fragment with the base
+    /// reset (content centred) and injects the `canvas` API + the interaction
+    /// shim — scroll-to-zoom, right-drag pan, context menu, tool shortcuts —
+    /// keyed by the browser-local panel id. This just merges the parts; pass
+    /// `""` for unused ones.
     pub fn custom(&self, id: &str, html: &str, css: &str, js: &str) -> PanelBuilder<'_> {
-        let lower = html.to_ascii_lowercase();
-        let full_page = css.is_empty() && js.is_empty()
-            && ["<!doctype", "<html", "<body"].iter().any(|t| lower.contains(t));
-        let doc = if full_page {
-            html.to_string()
-        } else {
-            // The same reset/centering Custom.compose builds in Python.
-            format!(
-                "<style>\
-                 * {{ box-sizing: border-box; margin: 0; padding: 0;\
-                 font-family: system-ui, sans-serif; }}\
-                 body {{ background: transparent; display: flex;\
-                 justify-content: center; align-items: center;\
-                 min-height: 100vh; overflow: hidden; }}\
-                 {css}</style>{html}<script>{js}</script>"
-            )
-        };
-        self.panel(id, "custom")
-            .prop("html", json!(format!("{CUSTOM_SHIM}{doc}")))
+        let mut doc = String::new();
+        if !css.is_empty() {
+            doc.push_str(&format!("<style>{css}</style>"));
+        }
+        doc.push_str(html);
+        if !js.is_empty() {
+            doc.push_str(&format!("<script>{js}</script>"));
+        }
+        self.panel(id, "custom").prop("html", json!(doc))
     }
 
     /// The streaming feed for a registered `live_plot` panel — see [`LivePlot`].

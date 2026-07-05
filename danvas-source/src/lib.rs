@@ -286,11 +286,11 @@ impl<'a> PanelBuilder<'a> {
     pub fn titled(self, label: &str) -> Self {
         self.prop("label", json!(label))
     }
-    /// Per-panel accent colour ('#rrggbb') — the twin of Python's `color=`: sets
-    /// the derived `_th` CSS variables in the data AND the top-level `frameColor`
-    /// (the accent the card frame/theme tints with).
+    /// Per-panel accent colour ('#rrggbb') — the twin of Python's `color=`.
+    /// Sets the register frame's top-level `frameColor`; the frontend derives
+    /// the `_th` CSS-variable palette from it (theme.ts), so the color math
+    /// lives in the shared renderer, not in every SDK.
     pub fn color(mut self, hex: &str) -> Self {
-        self.data.insert("_th".into(), Value::Object(derive_theme(hex)));
         self.frame_color = Some(hex.to_string());
         self
     }
@@ -364,60 +364,6 @@ impl<'a> PanelBuilder<'a> {
             client.defer_relative(id, kind, anchor, gap, new_w, new_h);
         }
     }
-}
-
-/// Per-panel accent theme, matching danvas/components/_theme.py::derive — the
-/// `_th` CSS-variable dict a colored panel spreads on its root element.
-fn derive_theme(hex: &str) -> Map<String, Value> {
-    let (r, g, b) = parse_hex(hex);
-    let (rf, gf, bf) = (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
-    let (h, l, s) = rgb_to_hls(rf, gf, bf);
-    let (dr, dg, db) = hls_to_rgb(h, (l * 0.75).clamp(0.0, 1.0), s);
-    let lum = 0.2126 * rf.powf(2.2) + 0.7152 * gf.powf(2.2) + 0.0722 * bf.powf(2.2);
-    let txt = if lum < 0.18 { "#fff" } else { "#1a1a2e" };
-    let mut m = Map::new();
-    m.insert("--pc-accent".into(), json!(hex_of(r, g, b)));
-    m.insert("--pc-accent-dk".into(),
-             json!(hex_of((dr * 255.0).round() as u8, (dg * 255.0).round() as u8,
-                          (db * 255.0).round() as u8)));
-    m.insert("--pc-accent-t".into(), json!(format!("rgba({r},{g},{b},.35)")));
-    m.insert("--pc-accent-text".into(), json!(txt));
-    m
-}
-
-fn parse_hex(s: &str) -> (u8, u8, u8) {
-    let s = s.trim().trim_start_matches('#');
-    let s = if s.len() == 3 {
-        s.chars().flat_map(|c| [c, c]).collect::<String>()
-    } else { s.to_string() };
-    let v = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or(0);
-    (v(0), v(2), v(4))
-}
-fn hex_of(r: u8, g: u8, b: u8) -> String { format!("#{r:02x}{g:02x}{b:02x}") }
-
-fn rgb_to_hls(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
-    let (maxc, minc) = (r.max(g).max(b), r.min(g).min(b));
-    let l = (minc + maxc) / 2.0;
-    if (maxc - minc).abs() < f64::EPSILON { return (0.0, l, 0.0); }
-    let d = maxc - minc;
-    let s = if l <= 0.5 { d / (maxc + minc) } else { d / (2.0 - maxc - minc) };
-    let (rc, gc, bc) = ((maxc - r) / d, (maxc - g) / d, (maxc - b) / d);
-    let h = if r >= maxc { bc - gc }
-        else if g >= maxc { 2.0 + rc - bc } else { 4.0 + gc - rc };
-    (((h / 6.0) % 1.0 + 1.0) % 1.0, l, s)
-}
-fn hls_to_rgb(h: f64, l: f64, s: f64) -> (f64, f64, f64) {
-    if s == 0.0 { return (l, l, l); }
-    let m2 = if l <= 0.5 { l * (1.0 + s) } else { l + s - l * s };
-    let m1 = 2.0 * l - m2;
-    let v = |mut hue: f64| {
-        hue = (hue % 1.0 + 1.0) % 1.0;
-        if hue < 1.0 / 6.0 { m1 + (m2 - m1) * hue * 6.0 }
-        else if hue < 0.5 { m2 }
-        else if hue < 2.0 / 3.0 { m1 + (m2 - m1) * (2.0 / 3.0 - hue) * 6.0 }
-        else { m1 }
-    };
-    (v(h + 1.0 / 3.0), v(h), v(h - 1.0 / 3.0))
 }
 
 /// Builder for a managed canvas shape (geo/text/note/draw/line/highlight/frame).
@@ -1666,21 +1612,3 @@ async fn http_login(ws_uri: &str, password: &str) -> Option<String> {
     None
 }
 
-#[cfg(test)]
-mod theme_tests {
-    use super::derive_theme;
-    fn dk(hex: &str) -> String {
-        derive_theme(hex)["--pc-accent-dk"].as_str().unwrap().to_string()
-    }
-    #[test]
-    fn derive_matches_python_theme() {
-        // ground truth from danvas/components/_theme.py::derive
-        for (hex, expect_dk) in [
-            ("#e05c7a", "#c7264b"), ("#e0923a", "#b76e1d"), ("#c8b400", "#968700"),
-            ("#2aab8a", "#208068"), ("#3a8fd4", "#246ca6"), ("#6b6bd4", "#3636b9"),
-        ] {
-            assert_eq!(dk(hex), expect_dk, "dk mismatch for {hex}");
-            assert_eq!(derive_theme(hex)["--pc-accent"].as_str().unwrap(), hex);
-        }
-    }
-}

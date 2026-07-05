@@ -8,6 +8,7 @@
 import { transform as transformJsx } from 'sucrase'
 import React from 'preact/compat'
 import { useEditor, useValue } from './EngineContext'
+import { deriveTheme } from './theme'
 import { paintFrameStream, type PaintFrameOpts } from './frame'
 import { navMode } from '../engine/camera'
 import {
@@ -290,6 +291,14 @@ export default function ReactHost({ shape }: { shape: any }) {
     userProps = JSON.parse(shape.props.data || '{}')
   } catch {
     userProps = {}
+  }
+  // No owner-sent accent theme? Derive it from the frame's accent color, so
+  // an SDK only ever sends `frameColor` and the palette math lives here once
+  // (theme.ts). An explicit `_th` (older wheels) or a live post_style wins.
+  if (!userProps._th) {
+    const fc = (shape.meta as any)?.frameColor
+    const th = typeof fc === 'string' ? deriveTheme(fc) : null
+    if (th) userProps = { ...userProps, _th: th }
   }
   if (liveStyle !== null) userProps = { ...userProps, _th: liveStyle }
 

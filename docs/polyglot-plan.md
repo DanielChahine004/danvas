@@ -51,28 +51,30 @@ inspector without reading any Python source.
 The frontend is already the shared renderer; make it the shared *component
 logic* too, so `helpers.rs`-style transliterations stop being necessary.
 
-- **histogram**: the JSX accepts raw `{values: [...], step}` updates and does
-  binning/density/figure client-side (keep `_fig` data_patch working for
-  back-compat). Python `Histogram.add` and Rust `histogram_feed` shrink to
-  "stream the samples". Kills numpy-vs-Rust drift; identical visuals by
-  construction.
-- **live_plot**: the JSX accepts `{sample: {trace: value}, x?}` and owns the
-  rolling window + EMA smoothing client-side (keep `plot`/`plot_extend`).
-  Replay = the buffer the panel itself accumulated + a periodic snapshot fold.
-- **custom**: the frontend's `CustomView` injects the canvas-API helper +
-  interaction shim (wheel/pan/menu/keys) itself, guarded by a marker so
-  Python-prepended documents aren't double-injected. Then delete the ~150-line
-  script builders from `custom.py` and the shim copy from `helpers.rs` — one
-  implementation, and every SDK's custom panels get the full `canvas.*` API
-  (update/request/sendBinary), not just gesture forwarding.
-- **theme**: the frontend derives the `_th` CSS variables from the top-level
-  `frameColor` when `data._th` is absent — SDKs stop reimplementing
-  `derive_theme` (the Rust copy + its parity test become dead code to remove).
-- **NOT moved**: file-browser navigation (sandboxing is owner-side security),
-  download content resolution (host decides what bytes leave the machine).
-
-Acceptance: `helpers.rs` loses its figure-building code; the .py and .rs
-catalogues render pixel-identical plots from ~5-line feeds.
+- **custom** — SHIPPED: the frontend's `CustomView` injects the canvas-API
+  helper + interaction shim (customShim.ts), guarded by the `window.canvas=`
+  marker so owner-wrapped documents (older wheels, persisted canvases) pass
+  through. The script builders left `custom.py` (only the h/w="auto" fit
+  script stays owner-side — it needs the owner's flags and is matched by
+  source window); the shim copy left `helpers.rs`. Bonus fix: the injected id
+  is the *browser-local composed* id, so `canvas.send()` from an iframe now
+  routes correctly through a hub (an owner-baked id loses its namespace tag).
+  `forwardWheel` rides register props as the wheel opt-out.
+- **theme** — SHIPPED: the frontend derives `_th` from the top-level
+  `frameColor` when `data._th` is absent (theme.ts, the port of
+  `_theme.derive`); owner-sent `_th`/post_style still wins. Rust's
+  `derive_theme` + parity test deleted; `.color()` sends one hex string.
+- **histogram / live_plot figure-building — DEFERRED, deliberately.** Moving
+  the buffers client-side breaks the replay model (a late-joining browser
+  needs the accumulated state, so the owner must hold it anyway), and the
+  wire form is already delta-efficient (`plot_extend`). What *could* move is
+  only the figure styling (palette/EMA/margins) — low value against the churn
+  of new update keys in bridge.ts, both SDKs, and the broker's replay cache.
+  Revisit only if a third SDK finds the feeds burdensome; they are ~60 lines
+  each and conformance-tested.
+- **NOT moved** (by design): file-browser navigation (sandboxing is
+  owner-side security), download content resolution (host decides what bytes
+  leave the machine).
 
 ## Phase 3 — Protocol-ify relative placement
 

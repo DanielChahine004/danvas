@@ -1,13 +1,16 @@
 // The sandboxed iframe that hosts a Custom panel's HTML (port of canvas.jsx's
 // CustomView). The iframe's `window.canvas` shim (send/onPush/sendBinary/
-// requestCamera/...) is injected Python-side in custom.py, so this component only
-// does the parent half: render the srcDoc, push Python `push()` data INTO the
-// iframe over postMessage (zero-copy for binary), and relay panel errors back to
-// Python. The outbound iframe messages (send/binary/wheel/fit/camera/mic) are
-// handled by the global window listener in bridge.ts.
-import { useCallback, useEffect, useRef } from 'preact/hooks'
+// requestCamera/...) is injected HERE (customShim.ts) for any document that
+// doesn't already carry one — so a panel authored by any SDK gets the full
+// in-iframe API with the browser-local composed id. This component also does
+// the parent half: render the srcDoc, push owner `push()` data INTO the
+// iframe over postMessage (zero-copy for binary), and relay panel errors back
+// to the owner. The outbound iframe messages (send/binary/wheel/fit/camera/
+// mic) are handled by the global window listener in bridge.ts.
+import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks'
 import { useEditor, useValue } from './EngineContext'
 import { sendPanelError, componentIdOf, registerLive, unregisterLive } from '../bridge'
+import { prepareCustomDoc } from './customShim'
 
 // The canvas theme variables forwarded into a themed=True iframe so its CSS can
 // use var(--pc-*) and track dark mode (a sandboxed iframe can't inherit them).
@@ -71,11 +74,19 @@ export function CustomView({ shape }: { shape: any }) {
     return () => window.removeEventListener('message', onMessage)
   }, [id])
 
+  // Owner-wrapped documents pass through; bare ones get the helper + (for
+  // fragments) the base reset, keyed by this browser's composed panel id.
+  const srcDoc = useMemo(
+    () => prepareCustomDoc(shape.props.html || '', id,
+                           shape.props.forwardWheel !== false),
+    [shape.props.html, shape.props.forwardWheel, id],
+  )
+
   return (
     <iframe
       ref={ref}
       title={shape.props.label}
-      srcDoc={shape.props.html}
+      srcDoc={srcDoc}
       // allow-scripts lets interactive content run; no allow-same-origin keeps the
       // user HTML sandboxed. allow-popups-to-escape-sandbox lets target=_blank
       // links open as normal tabs.

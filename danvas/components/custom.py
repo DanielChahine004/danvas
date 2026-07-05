@@ -49,9 +49,15 @@ class Custom(_EventRouter, BaseComponent):
     # Language-neutral contract (see PROTOCOL.md section: component contracts).
     CONTRACT = {
         "data": {},
-        "props": {"html": "str -- the full iframe document; SDKs should "
-                          "prepend the interaction shim + canvas API "
-                          "(Python's _wrap/compose do this)"},
+        "props": {"html": "str -- the iframe document; a bare fragment is "
+                          "fine (the frontend wraps it with the base reset "
+                          "and injects the canvas API + interaction shim "
+                          "unless the document already carries a "
+                          "window.canvas= marker)",
+                  "forwardWheel": "bool -- forward wheel to canvas zoom "
+                                  "(default true)",
+                  "permissions": "str|null -- iframe allow= policy",
+                  "themed": "bool -- follow the canvas theme variables"},
         "updates": {"data_patch": "merge changed data fields",
                     "post": "opaque value delivered to the document's "
                             "canvas.onPush"},
@@ -124,191 +130,20 @@ class Custom(_EventRouter, BaseComponent):
         self._init_routing(event_key)
 
     def _wrap(self, html):
-        """Prepend the ``canvas`` helper, tagged with this component's id.
+        """Prepend the owner-side prelude to the iframe document.
 
-        ``send`` posts back to the app (tagged with the id so the bridge knows
-        which panel spoke). ``onPush`` is the receive side: it subscribes to the
-        ``message`` events that :meth:`push` delivers and hands your callback the
-        raw payload, so the iframe never has to unwrap ``__danvas`` itself.
+        The ``canvas`` API and the canvas-gesture forwarding moved to the
+        frontend (``customShim.ts``): CustomView injects them into any
+        document that doesn't already carry a ``window.canvas=`` marker, with
+        the *browser-local* composed panel id baked in -- id-correct through a
+        hub (an owner-baked id loses its namespace tag), and SDKs in other
+        languages need no copy of the script. Only the content-fit script
+        stays owner-side: it depends on this panel's ``h="auto"``/``w="auto"``
+        flags, and the parent matches its reports by source window, not id.
         """
-        # json.dumps keeps the id safely quoted inside the script literal.
-        cid = json.dumps(self.id)
-        helper = (
-            "<script>window.canvas={"
-            "send:function(data){"
-            f"parent.postMessage({{__danvas:{cid},data:data}},'*');"
-            "},"
-            # sendBinary transfers the ArrayBuffer zero-copy to the parent window,
-            # which re-encodes it into the binary WebSocket frame and sends it to
-            # Python. The buffer is detached after transfer (standard ArrayBuffer
-            # transfer semantics), so callers should not reuse it.
-            "sendBinary:function(buf){"
-            "var ab=buf instanceof ArrayBuffer?buf:(buf.buffer||buf);"
-            f"parent.postMessage({{__danvas_binary:{cid},data:ab}},'*',[ab]);"
-            "},"
-            "onPush:function(fn){window.addEventListener('message',function(e){"
-            "if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}"
-            "});},"
-            # request(data) -> Promise: the awaitable twin of send(). The parent
-            # runs the matching @on_request handler and posts its return value back,
-            # matched by a per-call reqId — the postMessage equivalent of a React
-            # panel's canvas.request(). Mirrors that API exactly.
-            "request:function(data){return new Promise(function(res,rej){"
-            "var rid='r'+Math.random().toString(36).slice(2)+Date.now();"
-            "function h(e){if(e.data&&e.data.__danvas_response===rid){"
-            "window.removeEventListener('message',h);"
-            "if(e.data.ok){res(e.data.data);}else{rej(new Error(e.data.error||'request failed'));}}}"
-            "window.addEventListener('message',h);"
-            f"parent.postMessage({{__danvas_request:{cid},reqId:rid,data:data}},'*');"
-            "});},"
-            # setView({x,y,zoom}): pan/zoom the canvas to centre a point (any subset
-            # of the keys; omitted axes stay put) — the write-twin of viewport().
-            "setView:function(view){"
-            f"parent.postMessage({{__danvas_setview:view||{{}}}},'*');"
-            "},"
-            # viewport(cb): cb is called now and on every camera move with the live
-            # {x,y,zoom} of the canvas centre. Returns an unsubscribe. Same shape and
-            # semantics as the React panel's canvas.viewport().
-            "viewport:function(cb){"
-            "function h(e){if(e.data&&e.data.__danvas_viewport!==undefined){cb(e.data.__danvas_viewport);}}"
-            "window.addEventListener('message',h);"
-            f"parent.postMessage({{__danvas_viewport:{cid},action:'sub'}},'*');"
-            "return function(){window.removeEventListener('message',h);"
-            f"parent.postMessage({{__danvas_viewport:{cid},action:'unsub'}},'*');}};"
-            "},"
-            # chat: the canvas-wide shared room, mirroring the React panel's
-            # canvas.chat — send(text), setName(name), history() (a Promise here,
-            # since the log lives across the iframe boundary), subscribe(cb) (each
-            # new line; returns an unsubscribe) and identity(cb) (this viewer's
-            # id/name/colour now and on change). Chat is global, so these messages
-            # carry no panel id.
-            "chat:{"
-            "send:function(text){parent.postMessage({__danvas_chat:{action:'send',text:text}},'*');},"
-            "setName:function(name){parent.postMessage({__danvas_chat:{action:'setName',name:name}},'*');},"
-            "history:function(){return new Promise(function(res){"
-            "var rid='c'+Math.random().toString(36).slice(2)+Date.now();"
-            "function h(e){if(e.data&&e.data.__danvas_chat_reply===rid){"
-            "window.removeEventListener('message',h);res(e.data.log||[]);}}"
-            "window.addEventListener('message',h);"
-            "parent.postMessage({__danvas_chat:{action:'history',reqId:rid}},'*');});},"
-            "subscribe:function(cb){"
-            "function h(e){if(e.data&&e.data.__danvas_chat_msg!==undefined){cb(e.data.__danvas_chat_msg);}}"
-            "window.addEventListener('message',h);"
-            "parent.postMessage({__danvas_chat:{action:'sub'}},'*');"
-            "return function(){window.removeEventListener('message',h);"
-            "parent.postMessage({__danvas_chat:{action:'unsub'}},'*');};},"
-            "identity:function(cb){"
-            "function h(e){if(e.data&&e.data.__danvas_chat_identity!==undefined){cb(e.data.__danvas_chat_identity);}}"
-            "window.addEventListener('message',h);"
-            "parent.postMessage({__danvas_chat:{action:'idsub'}},'*');"
-            "return function(){window.removeEventListener('message',h);"
-            "parent.postMessage({__danvas_chat:{action:'idunsub'}},'*');};}"
-            "},"
-            # requestCamera / releaseCamera: getUserMedia cannot run inside a
-            # sandboxed iframe (null origin blocks the permission grant even with
-            # allow="camera"). These methods ask the parent page to open the
-            # camera and relay JPEG frames via push_binary — each frame arrives in
-            # canvas.onPush as an ArrayBuffer, same as panel.push_binary() from
-            # Python. opts: { width, height, fps, quality } (all optional).
-            "requestCamera:function(opts){"
-            f"parent.postMessage({{__danvas_camera:{cid},action:'start',opts:opts||{{}}}},'*');"
-            "},"
-            "releaseCamera:function(){"
-            f"parent.postMessage({{__danvas_camera:{cid},action:'stop'}},'*');"
-            "},"
-            # requestMicrophone / releaseMicrophone: same sandbox constraint as
-            # camera — getUserMedia({audio}) is blocked in a null-origin iframe.
-            # The parent captures mic audio, converts to int16 PCM, and relays
-            # each chunk the same way: sendBinary up to Python (@on_binary) and
-            # liveHandlers down to canvas.onPush as an ArrayBuffer. A JSON
-            # {event:'mic_start', sampleRate, channels} is sent first so Python
-            # knows the stream parameters before audio data arrives.
-            # opts: { bufferSize } (optional, default 4096 samples ≈ 85–93ms).
-            "requestMicrophone:function(opts){"
-            f"parent.postMessage({{__danvas_mic:{cid},action:'start',opts:opts||{{}}}},'*');"
-            "},"
-            "releaseMicrophone:function(){"
-            f"parent.postMessage({{__danvas_mic:{cid},action:'stop'}},'*');"
-            "}"
-            "};"
-            # themed=True: the parent forwards the canvas's live --pc-* variables and
-            # dark/light flag (on load and on every theme toggle). Apply them to
-            # :root so the panel's CSS can use var(--pc-bg) etc. and track dark mode,
-            # exactly like an inline React panel. A no-op for an un-themed panel (the
-            # parent never sends it).
-            "window.addEventListener('message',function(e){"
-            "if(e.data&&e.data.__danvas_theme){"
-            "var t=e.data.__danvas_theme,r=document.documentElement;"
-            "for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}"
-            "r.style.colorScheme=t.dark?'dark':'light';}});"
-            # JS errors and unhandled promise rejections are reported back to
-        # Python via postMessage so they surface in the terminal.
-        "window.onerror=function(msg,src,line,col,err){"
-        f"parent.postMessage({{__danvas_error:{{id:{cid},"
-        "msg:msg+(src?' ('+src+':'+line+')':'')}},'*');"
-        "return false;};"
-        "window.addEventListener('unhandledrejection',function(e){"
-        "var r=e.reason;"
-        f"parent.postMessage({{__danvas_error:{{id:{cid},"
-        "msg:'Unhandled rejection: '+(r&&r.message||String(r))}},'*');});"
-        # Wheel inside the iframe can't reach the parent (cross-document) and the
-            # canvas can't preventDefault an event in a sandboxed frame. Swallow every
-            # wheel here and forward the delta + cursor to the parent, which zooms the
-            # canvas at that point — so scroll-to-zoom works over a panel exactly like
-            # over the bare canvas. (danvas zooms on wheel everywhere; React panels
-            # don't wheel-scroll their content either, so this just makes Custom
-            # panels consistent.) Capture phase so we win over any content (e.g.
-            # Plotly) wheel handler.
-            + (
-                "window.addEventListener('wheel',function(e){e.preventDefault();"
-                "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');"
-                "},{passive:false,capture:true});"
-                if self._forward_wheel else ""
-            ) +
-            # Right-drag inside the iframe pans the canvas: the parent can't see these
-            # events (cross-document), so forward the deltas. Pointer-capture keeps the
-            # drag alive if the cursor leaves the frame. A right-click that didn't drag
-            # (<=4px) opens the canvas context menu there — parity with the bare canvas
-            # and React panels. The browser context menu is always suppressed.
-            # Pan deltas from screenX/screenY (absolute physical-screen coords): they
-            # don't change when the panel moves under a stationary cursor, so the pan
-            # can't feed back on itself (the iframe-relative clientX would, since the
-            # pan moves the iframe). `_pm` accumulates the drag distance to tell a
-            # click (-> context menu) from a drag.
-            "var _pan=false,_sx=0,_sy=0,_pm=0;"
-            "window.addEventListener('pointerdown',function(e){"
-            "if(e.button===2){_pan=true;_sx=e.screenX;_sy=e.screenY;_pm=0;"
-            "try{document.documentElement.setPointerCapture(e.pointerId);}catch(_){}}"
-            "},true);"
-            "window.addEventListener('pointermove',function(e){"
-            "if(!_pan)return;var dx=e.screenX-_sx,dy=e.screenY-_sy;_sx=e.screenX;_sy=e.screenY;"
-            "_pm+=Math.abs(dx)+Math.abs(dy);"
-            "parent.postMessage({__danvas_pan:{dx:dx,dy:dy}},'*');"
-            "},true);"
-            "window.addEventListener('pointerup',function(e){"
-            "if(e.button===2){_pan=false;"
-            "if(_pm<=4)parent.postMessage({__danvas_menu:{x:e.clientX,y:e.clientY}},'*');}"
-            "},true);"
-            "window.addEventListener('contextmenu',function(e){e.preventDefault();},true);"
-            # Canvas tool shortcuts (v/h/d/r/o/l/a/t/n/e/p + Escape) don't reach the
-            # parent once the iframe has keyboard focus (clicking/orbiting inside it
-            # focuses the iframe's own document). Forward just those keys — never
-            # while typing in a field, never with a modifier — so pressing `v` to
-            # switch back to the select tool works over a panel like anywhere else.
-            "var _shortcuts='vhdrolatnep';"
-            "window.addEventListener('keydown',function(e){"
-            "if(e.ctrlKey||e.metaKey||e.altKey)return;"
-            "var t=e.target||{};var tn=(t.tagName||'');"
-            "if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT'||t.isContentEditable)return;"
-            "var k=e.key.length===1?e.key.toLowerCase():e.key;"
-            "if(k==='Escape'||_shortcuts.indexOf(k)>=0)"
-            "parent.postMessage({__danvas_key:{key:e.key}},'*');"
-            "});"
-            "</script>"
-        )
         if self._auto_h or self._auto_w:
-            helper += self._fit_script(cid)
-        return helper + html
+            return self._fit_script(json.dumps(self.id)) + html
+        return html
 
     def _fit_script(self, cid):
         """The in-iframe content-fit script for ``h="auto"`` / ``w="auto"``.
@@ -439,6 +274,9 @@ class Custom(_EventRouter, BaseComponent):
         props["html"] = self._wrap(self._document())
         props["permissions"] = self._permissions
         props["themed"] = self._themed
+        # The frontend injects the interaction shim; this flag is its wheel
+        # opt-out (panels whose content does its own wheel handling).
+        props["forwardWheel"] = self._forward_wheel
         return props
 
     def update(self, html=None, css=None, js=None):

@@ -28,6 +28,8 @@ _BRIDGE_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "bridge.ts")
 _CUSTOM_VIEW_TSX = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
                                 "CustomView.tsx")
 _CUSTOM_PY = os.path.join(_ROOT, "danvas", "components", "custom.py")
+_CUSTOM_SHIM_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
+                               "customShim.ts")
 _GEN_JS = os.path.join(_ROOT, "danvas", "frontend", "src",
                        "protocol.generated.js")
 _GEN_SCRIPT = os.path.join(_ROOT, "scripts", "gen_protocol.py")
@@ -154,12 +156,18 @@ def test_merge_message_types_out_consumed_by_frontend():
 # frontend relay + CustomView) and require each side's key set to equal the
 # canonical IFRAME_MESSAGE_KEYS exactly: an extra key (typo / undeclared) or a
 # missing one (declared but unused on a side) both fail here.
-def test_iframe_keys_python_side_match_protocol():
+def test_iframe_keys_shim_side_match_protocol():
+    # The in-iframe helper moved from custom.py to the frontend
+    # (customShim.ts injects it with the browser-local id); custom.py keeps
+    # only the owner-side content-fit script. Together the two producer files
+    # must still cover the canonical key set exactly.
     canonical = set(_protocol.IFRAME_MESSAGE_KEYS.values())
-    used = set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_PY)))
+    used = set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_SHIM_TS)))
+    used |= set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_PY)))
     assert used == canonical, (
-        "custom.py iframe keys disagree with _protocol.IFRAME_MESSAGE_KEYS; "
-        f"only in custom.py: {used - canonical}, "
+        "customShim.ts + custom.py iframe keys disagree with "
+        "_protocol.IFRAME_MESSAGE_KEYS; "
+        f"only in the shim side: {used - canonical}, "
         f"only in _protocol: {canonical - used}")
 
 
