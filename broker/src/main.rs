@@ -1060,6 +1060,11 @@ async fn handle(
         json!({
             "type": "welcome",
             "protocol": PROTOCOL_VERSION,
+            // Additive capabilities of this hub + its embedded frontend
+            // (PROTOCOL.md § relative placement): "rel" = register frames may
+            // carry relative placement, resolved and cascaded browser-side —
+            // an SDK seeing it switches off its own placement fallbacks.
+            "features": ["rel"],
             "you": {"id": format!("v{conn_id}"), "name": display_name,
                      "color": color, "device": "desktop",
                      "role": role.clone()},

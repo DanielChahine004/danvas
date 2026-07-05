@@ -150,6 +150,10 @@ struct State {
     downloads: HashMap<String, (String, Vec<u8>, std::time::Instant)>,
     uploads: HashMap<String, UploadHandler>,
     pending_pushes: HashMap<String, Value>,
+    // Additive hub capabilities from the welcome frame ("rel": the frontend
+    // resolves and cascades relative placement itself -- the SDK-side
+    // fallbacks stay quiet when it's advertised).
+    hub_features: Vec<String>,
     // Layout-cascade edges (Python's _below_deps/_right_of_deps): anchor id ->
     // panels placed below/right_of it. When the anchor's height settles
     // differently in the browser (auto-height content fitting), every
@@ -348,7 +352,7 @@ impl<'a> PanelBuilder<'a> {
         // update. Python resolves `below=` at insert time for the same reason.
         // An unpositioned anchor defers to its first layout report instead.
         let mut deferred = None;
-        if let (Some((kind, anchor, gap)), false) = (rel, has_xy) {
+        if let (Some((kind, anchor, gap)), false) = (rel.clone(), has_xy) {
             client.record_y_dep(kind, &anchor, &id);
             match client.resolve_relative(kind, &anchor, gap, new_w, new_h) {
                 Some((x, y)) => {
@@ -358,8 +362,13 @@ impl<'a> PanelBuilder<'a> {
                 None => deferred = Some((kind, anchor, gap)),
             }
         }
+        // The register frame carries rel either way: on a rel-aware hub the
+        // FRONTEND places (when x/y is absent) and re-settles the chain when
+        // heights change; the local resolution above keeps chains
+        // deterministic with no browser attached.
         self.client.register_template_raw(&id, &self.kind, self.data,
-                                          self.props, self.place, self.frame_color);
+                                          self.props, self.place,
+                                          self.frame_color, rel);
         if let Some((kind, anchor, gap)) = deferred {
             client.defer_relative(id, kind, anchor, gap, new_w, new_h);
         }
@@ -538,7 +547,8 @@ impl Client {
 
     fn register_template_raw(&self, id: &str, kind: &str, mut data: Map<String, Value>,
                              overrides: Map<String, Value>, place: Map<String, Value>,
-                             frame_color: Option<String>) {
+                             frame_color: Option<String>,
+                             rel: Option<(&'static str, String, f64)>) {
         let tpl = &self.inner.templates["templates"][kind];
         let mut props = tpl["props"].as_object().cloned().unwrap_or_default();
         // template defaults are already in `data` via the builder; ensure any
@@ -568,6 +578,14 @@ impl Client {
         // translucent accent instead of a subtle framed tint.
         if let Some(fc) = frame_color {
             msg.as_object_mut().unwrap().insert("frameColor".into(), json!(fc));
+        }
+        // Relative placement rides the register frame (PROTOCOL.md): explicit
+        // x/y (when the SDK resolved the chain locally) wins at the frontend,
+        // but the rel still records the dependency edge that drives the
+        // browser-side height-settle cascade.
+        if let Some((kind_r, anchor, gap)) = rel {
+            msg.as_object_mut().unwrap().insert("rel".into(),
+                json!({"kind": kind_r, "anchor": anchor, "gap": gap}));
         }
         self.record_register(id, &msg);
         self.send(&msg);
@@ -1237,6 +1255,13 @@ impl Client {
         let kind = msg.get("type").and_then(Value::as_str).unwrap_or("");
         let id = msg.get("id").and_then(Value::as_str).unwrap_or("").to_string();
         match kind {
+            "welcome" => {
+                let feats = msg.get("features").and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str)
+                        .map(String::from).collect())
+                    .unwrap_or_default();
+                self.inner.state.lock().unwrap().hub_features = feats;
+            }
             "input" => {
                 let payload = msg.get("payload").cloned().unwrap_or(Value::Null);
                 // Clone the handler Arcs OUT of the lock, then call them
@@ -1270,9 +1295,11 @@ impl Client {
                                 e.insert(k.into(), v.clone());
                             }
                         }
+                        let hub_rel = st.hub_features.iter().any(|f| f == "rel");
                         if let (Some(old), Some(new)) = (old_h, new_h) {
                             let dh = new - old;
-                            if dh.abs() > 0.5 {
+                            // The frontend owns the cascade on rel-aware hubs.
+                            if dh.abs() > 0.5 && !hub_rel {
                                 let entry = st.casc_pending
                                     .entry(id.clone()).or_insert((0.0, 0));
                                 entry.0 += dh;

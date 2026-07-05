@@ -58,7 +58,7 @@ replay again and must rebuild from it.
 
 | type | meaning |
 |---|---|
-| `register` | a panel exists: `{id, component, props, x, y, w, h, ...flags}` |
+| `register` | a panel exists: `{id, component, props, x, y, w, h, ...flags}`; may carry `rel` (relative placement, below) |
 | `update` | partial state: `{id, payload: {...}}` — merge into the panel |
 | `remove` | `{id}` — the panel is gone |
 | `arrow` / `shape` / `shape_update` | connector arrows and managed shapes |
@@ -168,6 +168,29 @@ props the frontend mounts. Those shapes ship as a language-neutral asset —
 `scripts/gen_component_templates.py`) — so an SDK merges user kwargs over a
 template's `data`, JSON-encodes it into `props.data`, and sends the register.
 `SourceClient.register_template` is the reference.
+
+## Relative placement (`rel`)
+
+A register frame may carry an optional additive field:
+
+```json
+"rel": {"kind": "below", "anchor": "<panel id, owner-side>", "gap": 16}
+```
+
+(`kind` ∈ `below | above | right_of | left_of`; `gap` in px, default 16.)
+A hub advertising `"features": ["rel"]` in its `welcome` ships a frontend that
+**resolves and maintains** it: when the frame has no explicit `x`/`y`, the
+browser places the panel against the anchor's live geometry (falling back to
+the auto-flow if the anchor is unknown) and reports the position back as a
+`layout` frame with `auto: true` so the owner folds it into replay; whenever
+an anchor's *height* settles differently (auto-fit content, a resize), every
+panel anchored on it — transitively — re-settles in the same browser frame,
+with the moves reported back the same way. Explicit `x`/`y` in the frame
+always wins for initial placement (an SDK that resolved the chain locally, or
+a folded-back drag), but `rel` still records the dependency edge that drives
+the cascade. Hubs relay `rel` opaquely; against a hub that doesn't advertise
+the feature, placement and cascading are the SDK's own to provide (the
+Python `below=` and the Rust SDK's local resolution are reference fallbacks).
 
 ## Component contracts
 

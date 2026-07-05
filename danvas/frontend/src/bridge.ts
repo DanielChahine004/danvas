@@ -97,6 +97,13 @@ function resetFlow(): void {
   containers.clear()
   panelToContainer.clear()
   containerParent.clear()
+  relSpecs.clear()
+  relDeps.clear()
+  relCascadeQueue.clear()
+  if (relCascadeTimer) {
+    clearTimeout(relCascadeTimer)
+    relCascadeTimer = null
+  }
 }
 
 // Shortest-column masonry: balance the auto-placed panels across columns by
@@ -155,6 +162,96 @@ function relayoutFlow(): void {
 function scheduleRelayout(): void {
   if (relayoutTimer) clearTimeout(relayoutTimer)
   relayoutTimer = setTimeout(relayoutFlow, 150)
+}
+
+// --- relative placement (the register frame's `rel` field) -------------------
+// A register may carry {rel: {kind: below|above|right_of|left_of, anchor: <id>,
+// gap: px}} — resolved HERE, the one place that always knows live geometry, so
+// every SDK's below() chaining is one implementation instead of N (PROTOCOL.md
+// § relative placement). Explicit x/y in the frame wins (the SDK resolved it,
+// or a folded-back drag); the rel still records the dependency edge, so when
+// an anchor's HEIGHT settles differently (auto-fit content, a user resize) the
+// chain re-settles in the same frame — no wire round-trip, no flicker. The
+// anchor id arrives owner-side (hubs don't parse rel), so it's qualified with
+// the registering panel's own namespace tag.
+const relSpecs = new Map<string, { anchor: string; kind: string; gap: number }>()
+const relDeps = new Map<string, Set<string>>() // anchor shapeId -> dep shapeIds
+const relCascadeQueue = new Set<string>()
+let relCascadeTimer: any = null
+
+function recordRel(shapeId: string, componentId: string, rel: any) {
+  const i = componentId.lastIndexOf(':')
+  const tag = i >= 0 ? componentId.slice(0, i + 1) : ''
+  const anchor = createShapeId(tag + String(rel.anchor))
+  const spec = {
+    anchor,
+    kind: String(rel.kind || 'below'),
+    gap: typeof rel.gap === 'number' ? rel.gap : 16,
+  }
+  relSpecs.set(shapeId, spec)
+  if (!relDeps.has(anchor)) relDeps.set(anchor, new Set())
+  relDeps.get(anchor)!.add(shapeId)
+  return spec
+}
+
+function resolveRel(
+  spec: { anchor: string; kind: string; gap: number },
+  depW: any,
+  depH: any,
+): { x: number; y: number } | null {
+  const a = store.peek(spec.anchor) as any
+  if (!a || typeof a.x !== 'number' || typeof a.y !== 'number') return null
+  const aw = typeof a.props?.w === 'number' ? a.props.w : 0
+  const ah = typeof a.props?.h === 'number' ? a.props.h : 0
+  const w = typeof depW === 'number' ? depW : 0
+  const h = typeof depH === 'number' ? depH : 0
+  switch (spec.kind) {
+    case 'above':
+      return { x: a.x, y: a.y - spec.gap - h }
+    case 'right_of':
+      return { x: a.x + aw + spec.gap, y: a.y }
+    case 'left_of':
+      return { x: a.x - spec.gap - w, y: a.y }
+    default: // below
+      return { x: a.x, y: a.y + ah + spec.gap }
+  }
+}
+
+// Re-settle every panel anchored (transitively) on `anchorSid` from its live
+// geometry; new positions are reported back so owners fold them into replay.
+function cascadeRel(anchorSid: string, seen: Set<string>): void {
+  const deps = relDeps.get(anchorSid)
+  if (!deps) return
+  for (const dep of Array.from(deps)) {
+    if (seen.has(dep)) continue // cycle guard
+    seen.add(dep)
+    const spec = relSpecs.get(dep)
+    const shape = store.peek(dep) as any
+    if (!spec || !shape) {
+      deps.delete(dep)
+      continue
+    }
+    const p = resolveRel(spec, shape.props?.w, shape.props?.h)
+    if (!p) continue
+    if (Math.abs(shape.x - p.x) >= 0.5 || Math.abs(shape.y - p.y) >= 0.5) {
+      applyRemote(() => store.patch(dep, { x: p.x, y: p.y }))
+      sendRaw({ type: 'layout', id: componentIdOf(dep), x: p.x, y: p.y, auto: true })
+    }
+    cascadeRel(dep, seen)
+  }
+}
+
+// Debounced per burst (a drag-resize streams h changes every frame).
+function scheduleRelCascade(anchorSid: string): void {
+  if (!relDeps.has(anchorSid)) return
+  relCascadeQueue.add(anchorSid)
+  if (relCascadeTimer) clearTimeout(relCascadeTimer)
+  relCascadeTimer = setTimeout(() => {
+    relCascadeTimer = null
+    const seen = new Set<string>()
+    for (const sid of relCascadeQueue) cascadeRel(sid, seen)
+    relCascadeQueue.clear()
+  }, 120)
 }
 
 // --- persistent layout containers (canvas.column / row / container) ----------
@@ -660,7 +757,24 @@ function registerComponent(msg: any): void {
   const props = msg.props || {}
   let px = msg.x
   let py = msg.y
-  const autoPlaced = typeof px !== 'number' || typeof py !== 'number'
+  // Relative placement: record the dependency edge whether or not the frame
+  // also carries x/y (an SDK may have resolved the chain itself; the edge
+  // still drives the height-settle cascade). Placement itself: explicit x/y
+  // wins, then rel against a known anchor, then the masonry flow.
+  const rel = msg.rel && typeof msg.rel === 'object'
+    && typeof msg.rel.anchor === 'string'
+    ? recordRel(shapeId, id, msg.rel) : null
+  let autoPlaced = typeof px !== 'number' || typeof py !== 'number'
+  let relPlaced = false
+  if (autoPlaced && rel) {
+    const p = resolveRel(rel, props.w, props.h)
+    if (p) {
+      px = p.x
+      py = p.y
+      relPlaced = true
+      autoPlaced = false
+    }
+  }
   if (autoPlaced) {
     const auto = nextPosition(props.w, props.h)
     if (typeof px !== 'number') px = auto.x
@@ -693,6 +807,9 @@ function registerComponent(msg: any): void {
     sendRaw({ type: 'layout', id, x: px, y: py, auto: true })
     flowItems.add(shapeId)
     scheduleRelayout()
+  } else if (relPlaced) {
+    // Pin the rel-resolved position back to the owner the same way.
+    sendRaw({ type: 'layout', id, x: px, y: py, auto: true })
   }
   // Frame every just-registered panel on first load when no explicit camera was
   // configured. Debounced so a burst of registers fits the whole set at once.
@@ -765,6 +882,9 @@ function updateComponent(id: string, payload: any): void {
   }
   if (typeof x === 'number' && typeof y === 'number') flowItems.delete(shapeId)
   applyRemote(() => store.patch(shapeId, patch))
+  // An owner-driven height change re-settles any rel chain hanging off this
+  // panel (parity with the owner-side cascade this replaces).
+  if (typeof (payload as any).h === 'number') scheduleRelCascade(shapeId)
 }
 
 // Change a managed panel's stacking order (Python to_front/to_back/forward/
@@ -843,6 +963,7 @@ store.subscribe((changes, source) => {
       prev.props.h !== next.props.h
     ) {
       if (isPanel) flowItems.delete(next.id) // a user gesture pins the panel out of the auto-flow
+      if (isPanel && prev.props.h !== next.props.h) scheduleRelCascade(next.id)
       dirtyShapes.add(next.id)
       any = true
     }
@@ -1029,6 +1150,9 @@ function removeComponent(id: string): void {
   styleBuffer.delete(id)
   const shapeId = createShapeId(id)
   managedIds.delete(shapeId)
+  relSpecs.delete(shapeId)
+  relDeps.delete(shapeId)
+  for (const deps of relDeps.values()) deps.delete(shapeId)
   if (store.has(shapeId)) applyRemote(() => store.remove(shapeId))
 }
 
@@ -1185,6 +1309,7 @@ export function fitNative(componentId: string, hostEl: HTMLElement, fit: { h?: n
   applyRemote(() => store.patch(shapeId, { props }))
   sendRaw(report)
   // The panel's footprint changed — re-pack whatever layout it belongs to.
+  if (props.h !== undefined) scheduleRelCascade(shapeId) // rel chains below it
   if (flowItems.has(shapeId)) scheduleRelayout() // masonry auto-flow
   settleArmedReflows(componentId) // a column.refit() group waiting on it
   autoRepackForPanel(componentId) // any Container tree this panel is in
@@ -1804,6 +1929,7 @@ function fitFromIframe(sourceWin: any, fit: any): void {
   if (props.h === undefined && props.w === undefined) return // settled — don't ping-pong
   applyRemote(() => store.patch(shapeId, { props }))
   sendRaw(report)
+  if (props.h !== undefined) scheduleRelCascade(shapeId)
   if (flowItems.has(shapeId)) scheduleRelayout()
   settleArmedReflows(fit.id)
   autoRepackForPanel(fit.id)
