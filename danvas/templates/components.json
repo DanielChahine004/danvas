@@ -36,6 +36,116 @@
     "wasm": ""
    }
   },
+  "chat": {
+   "component": "React",
+   "data": {
+    "_th": {}
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 400,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas }) {\n  const chat = canvas.chat;\n  const [me, setMe] = React.useState(null);\n  const [messages, setMessages] = React.useState(() => [...chat.history()]);\n  const [draft, setDraft] = React.useState(\"\");\n  const [nameDraft, setNameDraft] = React.useState(\"\");\n  const [editingName, setEditingName] = React.useState(false);\n  const listRef = React.useRef(null);\n\n  React.useEffect(() => chat.identity(setMe), []);\n\n  // Backfill from the retained log, then append each new line (deduped by msgId\n  // so the history/subscribe gap can't double-post).\n  React.useEffect(() => {\n    setMessages([...chat.history()]);\n    return chat.subscribe((entry) =>\n      setMessages((m) => (m.some((x) => x.msgId === entry.msgId) ? m : [...m, entry]))\n    );\n  }, []);\n\n  // While not actively editing, keep the name field showing our current name.\n  React.useEffect(() => {\n    if (me && !editingName) setNameDraft(me.name);\n  }, [me, editingName]);\n\n  // Keep the newest message in view.\n  React.useEffect(() => {\n    const el = listRef.current;\n    if (el) el.scrollTop = el.scrollHeight;\n  }, [messages]);\n\n  const send = () => {\n    const t = draft.trim();\n    if (!t) return;\n    chat.send(t);\n    setDraft(\"\");\n  };\n\n  const commitName = () => {\n    setEditingName(false);\n    const n = nameDraft.trim();\n    if (n && me && n !== me.name) chat.setName(n);\n    else if (me) setNameDraft(me.name);\n  };\n\n  const fieldStyle = {\n    fontSize: 13, padding: \"5px 8px\",\n    border: \"1px solid var(--pc-border-mid)\", borderRadius: 6,\n    background: \"var(--pc-input-bg)\", color: \"var(--pc-text)\",\n  };\n\n  return (\n    <div style={{ flex: 1, display: \"flex\", flexDirection: \"column\", minHeight: 0, gap: 6, height: \"100%\" }}>\n      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflow: \"auto\" }}>\n        {messages.length === 0 ? (\n          <div style={{ fontSize: 12, color: \"var(--pc-faint2)\", fontStyle: \"italic\", padding: 4 }}>\n            no messages yet \u2014 say hello\n          </div>\n        ) : (\n          messages.map((m) => (\n            <div key={m.msgId} style={{ fontSize: 13, lineHeight: 1.4, marginBottom: 3, wordBreak: \"break-word\" }}>\n              <span style={{ fontWeight: 700, color: m.color || \"var(--pc-text)\" }}>\n                {m.name}{me && m.id === me.id ? \" (you)\" : \"\"}:\n              </span>{\" \"}\n              <span style={{ color: \"var(--pc-text)\" }}>{m.text}</span>\n            </div>\n          ))\n        )}\n      </div>\n\n      <div style={{ display: \"flex\", gap: 6, alignItems: \"center\" }}>\n        <span style={{ fontSize: 11, color: \"var(--pc-muted)\" }}>name</span>\n        <input\n          value={nameDraft}\n          onChange={(e) => setNameDraft(e.target.value)}\n          onFocus={() => setEditingName(true)}\n          onBlur={commitName}\n          onKeyDown={(e) => { if (e.key === \"Enter\") e.currentTarget.blur(); }}\n          maxLength={24}\n          style={{ ...fieldStyle, flex: 1, minWidth: 0 }}\n          title=\"your display name \u2014 edit and press Enter\" />\n      </div>\n\n      <div style={{ display: \"flex\", gap: 6 }}>\n        <input\n          value={draft}\n          onChange={(e) => setDraft(e.target.value)}\n          onKeyDown={(e) => { if (e.key === \"Enter\") send(); }}\n          placeholder=\"message\u2026\"\n          style={{ ...fieldStyle, flex: 1, minWidth: 0 }} />\n        <button onClick={send} style={{\n          padding: \"5px 12px\", border: \"none\", borderRadius: 6, fontSize: 13,\n          fontWeight: 600, cursor: \"pointer\", background: \"var(--pc-accent)\",\n          color: \"var(--pc-accent-text)\",\n        }}>Send</button>\n      </div>\n    </div>\n  );\n}\n",
+    "w": 320,
+    "wasm": ""
+   }
+  },
+  "custom": {
+   "component": "Custom",
+   "data": {},
+   "props": {
+    "h": 320,
+    "html": "<script>window.canvas={send:function(data){parent.postMessage({__danvas:null,data:data},'*');},sendBinary:function(buf){var ab=buf instanceof ArrayBuffer?buf:(buf.buffer||buf);parent.postMessage({__danvas_binary:null,data:ab},'*',[ab]);},onPush:function(fn){window.addEventListener('message',function(e){if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}});},request:function(data){return new Promise(function(res,rej){var rid='r'+Math.random().toString(36).slice(2)+Date.now();function h(e){if(e.data&&e.data.__danvas_response===rid){window.removeEventListener('message',h);if(e.data.ok){res(e.data.data);}else{rej(new Error(e.data.error||'request failed'));}}}window.addEventListener('message',h);parent.postMessage({__danvas_request:null,reqId:rid,data:data},'*');});},setView:function(view){parent.postMessage({__danvas_setview:view||{}},'*');},viewport:function(cb){function h(e){if(e.data&&e.data.__danvas_viewport!==undefined){cb(e.data.__danvas_viewport);}}window.addEventListener('message',h);parent.postMessage({__danvas_viewport:null,action:'sub'},'*');return function(){window.removeEventListener('message',h);parent.postMessage({__danvas_viewport:null,action:'unsub'},'*');};},chat:{send:function(text){parent.postMessage({__danvas_chat:{action:'send',text:text}},'*');},setName:function(name){parent.postMessage({__danvas_chat:{action:'setName',name:name}},'*');},history:function(){return new Promise(function(res){var rid='c'+Math.random().toString(36).slice(2)+Date.now();function h(e){if(e.data&&e.data.__danvas_chat_reply===rid){window.removeEventListener('message',h);res(e.data.log||[]);}}window.addEventListener('message',h);parent.postMessage({__danvas_chat:{action:'history',reqId:rid}},'*');});},subscribe:function(cb){function h(e){if(e.data&&e.data.__danvas_chat_msg!==undefined){cb(e.data.__danvas_chat_msg);}}window.addEventListener('message',h);parent.postMessage({__danvas_chat:{action:'sub'}},'*');return function(){window.removeEventListener('message',h);parent.postMessage({__danvas_chat:{action:'unsub'}},'*');};},identity:function(cb){function h(e){if(e.data&&e.data.__danvas_chat_identity!==undefined){cb(e.data.__danvas_chat_identity);}}window.addEventListener('message',h);parent.postMessage({__danvas_chat:{action:'idsub'}},'*');return function(){window.removeEventListener('message',h);parent.postMessage({__danvas_chat:{action:'idunsub'}},'*');};}},requestCamera:function(opts){parent.postMessage({__danvas_camera:null,action:'start',opts:opts||{}},'*');},releaseCamera:function(){parent.postMessage({__danvas_camera:null,action:'stop'},'*');},requestMicrophone:function(opts){parent.postMessage({__danvas_mic:null,action:'start',opts:opts||{}},'*');},releaseMicrophone:function(){parent.postMessage({__danvas_mic:null,action:'stop'},'*');}};window.addEventListener('message',function(e){if(e.data&&e.data.__danvas_theme){var t=e.data.__danvas_theme,r=document.documentElement;for(var k in t.vars){r.style.setProperty(k,t.vars[k]);}r.style.colorScheme=t.dark?'dark':'light';}});window.onerror=function(msg,src,line,col,err){parent.postMessage({__danvas_error:{id:null,msg:msg+(src?' ('+src+':'+line+')':'')}},'*');return false;};window.addEventListener('unhandledrejection',function(e){var r=e.reason;parent.postMessage({__danvas_error:{id:null,msg:'Unhandled rejection: '+(r&&r.message||String(r))}},'*');});window.addEventListener('wheel',function(e){e.preventDefault();parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');},{passive:false,capture:true});var _pan=false,_sx=0,_sy=0,_pm=0;window.addEventListener('pointerdown',function(e){if(e.button===2){_pan=true;_sx=e.screenX;_sy=e.screenY;_pm=0;try{document.documentElement.setPointerCapture(e.pointerId);}catch(_){}}},true);window.addEventListener('pointermove',function(e){if(!_pan)return;var dx=e.screenX-_sx,dy=e.screenY-_sy;_sx=e.screenX;_sy=e.screenY;_pm+=Math.abs(dx)+Math.abs(dy);parent.postMessage({__danvas_pan:{dx:dx,dy:dy}},'*');},true);window.addEventListener('pointerup',function(e){if(e.button===2){_pan=false;if(_pm<=4)parent.postMessage({__danvas_menu:{x:e.clientX,y:e.clientY}},'*');}},true);window.addEventListener('contextmenu',function(e){e.preventDefault();},true);var _shortcuts='vhdrolatnep';window.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey||e.altKey)return;var t=e.target||{};var tn=(t.tagName||'');if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT'||t.isContentEditable)return;var k=e.key.length===1?e.key.toLowerCase():e.key;if(k==='Escape'||_shortcuts.indexOf(k)>=0)parent.postMessage({__danvas_key:{key:e.key}},'*');});</script><style>* { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }body { background: transparent; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }</style><b>custom</b><script></script>",
+    "permissions": "",
+    "themed": false,
+    "w": 380
+   }
+  },
+  "download": {
+   "component": "React",
+   "data": {
+    "text": "Download"
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 84,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const [busy, setBusy] = React.useState(false);\n  async function go() {\n    if (busy) return;\n    setBusy(true);\n    try {\n      const r = await canvas.request({});\n      if (r && r.url) {\n        const a = document.createElement(\"a\");\n        a.href = r.url;\n        if (r.filename) a.download = r.filename;\n        document.body.appendChild(a);\n        a.click();\n        a.remove();\n      }\n    } catch (e) {\n      console.error(\"danvas download failed:\", e);\n    } finally {\n      setBusy(false);\n    }\n  }\n  return (\n    <>\n      <style>{`\n.pc-download{box-sizing:border-box;width:100%;height:100%;padding:8px 12px;\n display:flex;align-items:center;justify-content:center;gap:8px;\n font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-off-text);\n background:var(--pc-off-bg);border:1px solid var(--pc-border);\n border-radius:8px;cursor:pointer;transition:background .12s}\n.pc-download:hover{background:var(--pc-border-mid)}\n.pc-download:active{transform:translateY(1px)}\n.pc-download:disabled{opacity:.6;cursor:default}\n.pc-download-ico{font-size:15px;line-height:1}\n`}</style>\n      <button className=\"pc-download\" disabled={busy} onClick={go}>\n        <span className=\"pc-download-ico\">{\"\\u2913\"}</span>\n        {busy ? \"Preparing\\u2026\" : props.text}\n      </button>\n    </>\n  );\n}\n",
+    "w": 200,
+    "wasm": ""
+   }
+  },
+  "file_browser": {
+   "component": "React",
+   "data": {
+    "_th": {}
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 420,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas, value }) {\n  React.useEffect(() => { canvas.send({ event: \"ready\" }); }, []);\n  const state = value || { cwd: \"/\", atRoot: true, selected: null, entries: [] };\n  function fmtSize(n) {\n    if (!n) return \"\";\n    const u = [\"B\", \"KB\", \"MB\", \"GB\", \"TB\"];\n    let i = 0;\n    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }\n    return (i ? n.toFixed(1) : n) + \" \" + u[i];\n  }\n  return (\n    <div className=\"pc-fb\">\n      <style>{`\n.pc-fb{height:100%;box-sizing:border-box;display:flex;flex-direction:column;\n font-family:system-ui,sans-serif;font-size:13px;background:#0f172a;color:#e2e8f0}\n.pc-fb-bar{display:flex;align-items:center;gap:6px;padding:6px 8px;\n background:#1e293b;border-bottom:1px solid #334155;flex:none}\n.pc-fb-up{cursor:pointer;border:1px solid #475569;background:#0f172a;\n color:#e2e8f0;border-radius:4px;padding:2px 8px;line-height:1.4}\n.pc-fb-up:disabled{opacity:.35;cursor:default}\n.pc-fb-cwd{font-family:ui-monospace,monospace;color:#94a3b8;overflow:hidden;\n text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;flex:1}\n.pc-fb-list{flex:1;overflow-y:auto}\n.pc-fb-row{display:flex;align-items:center;gap:8px;padding:4px 10px;\n cursor:pointer;user-select:none}\n.pc-fb-row:hover{background:#1e293b}\n.pc-fb-row.sel{background:#1d4ed8}\n.pc-fb-ico{width:16px;text-align:center;flex:none}\n.pc-fb-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}\n.pc-fb-sz{color:#64748b;font-variant-numeric:tabular-nums;flex:none}\n.pc-fb-row.sel .pc-fb-sz{color:#cbd5e1}\n.pc-fb-empty{padding:12px;color:#64748b}\n`}</style>\n      <div className=\"pc-fb-bar\">\n        <button className=\"pc-fb-up\" disabled={state.atRoot} title=\"up one level\"\n                onClick={() => canvas.send({ event: \"up\" })}>..</button>\n        <span className=\"pc-fb-cwd\">{state.cwd}</span>\n      </div>\n      <div className=\"pc-fb-list\">\n        {state.entries.length === 0\n          ? <div className=\"pc-fb-empty\">(empty)</div>\n          : state.entries.map((ent, i) => (\n              <div key={i} role=\"button\"\n                   className={\"pc-fb-row\" + (!ent.dir && ent.name === state.selected ? \" sel\" : \"\")}\n                   onClick={() => canvas.send({ event: \"open\", name: ent.name })}>\n                <span className=\"pc-fb-ico\">{ent.dir ? \"\ud83d\udcc1\" : \"\ud83d\udcc4\"}</span>\n                <span className=\"pc-fb-nm\">{ent.name}</span>\n                <span className=\"pc-fb-sz\">{ent.dir ? \"\" : fmtSize(ent.size)}</span>\n              </div>\n            ))}\n      </div>\n    </div>\n  );\n}\n",
+    "w": 320,
+    "wasm": ""
+   }
+  },
+  "histogram": {
+   "component": "React",
+   "data": {},
+   "props": {
+    "autoH": false,
+    "autoW": false,
+    "css": "",
+    "h": 420,
+    "libs": "[\"plotly\"]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const Plotly = libs.plotly;\n  const nodeRef = React.useRef(null);\n  const fig = props && props._fig;\n  React.useEffect(() => {\n    const node = nodeRef.current;\n    if (!node) return;\n    let raf = null;\n    let ro = null;\n    if (typeof ResizeObserver !== \"undefined\") {\n      ro = new ResizeObserver(() => {\n        if (raf) return;\n        raf = requestAnimationFrame(() => { raf = null; if (nodeRef.current) Plotly.Plots.resize(nodeRef.current); });\n      });\n      ro.observe(node);\n    }\n    return () => {\n      if (ro) ro.disconnect();\n      if (raf) cancelAnimationFrame(raf);\n      if (nodeRef.current) Plotly.purge(nodeRef.current);\n    };\n  }, []);\n  React.useEffect(() => {\n    const node = nodeRef.current;\n    if (!node || !fig) return;\n    // Omitting displayModeBar gives Plotly's hover-reveal toolbar (zoom, pan,\n    // box-zoom, autoscale, reset, download-PNG) \u2014 the analysis tools researchers\n    // expect on a chart. displaylogo:false drops the Plotly link. Full button set\n    // is kept: Plot renders arbitrary figures (incl. scatter, where box/lasso\n    // select are meaningful).\n    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displaylogo: false });\n  });\n  return (\n    <div style={{ flex: 1, width: \"100%\", minHeight: 0, position: \"relative\" }}>\n      {!fig && (\n        <div style={{ position: \"absolute\", inset: 0, display: \"flex\", alignItems: \"center\", justifyContent: \"center\", color: \"var(--pc-muted, #9ca3af)\", fontSize: 13 }}>\n          no data yet\n        </div>\n      )}\n      <div ref={nodeRef} style={{ width: \"100%\", height: \"100%\" }} />\n    </div>\n  );\n}\n",
+    "w": 560,
+    "wasm": ""
+   }
+  },
+  "image": {
+   "component": "React",
+   "data": {
+    "_th": {},
+    "fit": "contain",
+    "src": "data:image/png;base64,"
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 320,
+    "libs": "[]",
+    "source": "\nfunction Component({ props }) {\n  return (\n    <div className=\"pc-img\">\n      <style>{`\n.pc-img{width:100%;height:100%;box-sizing:border-box;display:flex;\n align-items:center;justify-content:center;background:#0b0f17}\n.pc-img img{max-width:100%;max-height:100%;display:block}\n`}</style>\n      {props.src\n        ? <img src={props.src} alt=\"\" style={{ objectFit: props.fit || \"contain\" }} />\n        : null}\n    </div>\n  );\n}\n",
+    "w": 420,
+    "wasm": ""
+   }
+  },
+  "inspector": {
+   "component": "React",
+   "data": {
+    "cols": "[\"name\", \"label\", \"type\", \"value\", \"visible\", \"x\", \"y\", \"w\", \"h\"]",
+    "detail": "",
+    "rows": "[]",
+    "source": "components"
+   },
+   "props": {
+    "autoH": false,
+    "autoW": false,
+    "css": "",
+    "h": 320,
+    "libs": "[]",
+    "source": "\nfunction ViewReadout({ canvas }) {\n  // The current viewport (canvas centre + zoom) \u2014 the x/y/zoom serve(view=...)\n  // and set_view() take. canvas.viewport calls back live as the camera moves.\n  const [v, setV] = React.useState(null);\n  React.useEffect(() => (canvas.viewport ? canvas.viewport(setV) : undefined), []);\n  if (!v) return null;\n  return (\n    <div\n      style={{\n        marginTop: 6, fontSize: 11, fontFamily: \"ui-monospace, monospace\",\n        color: \"var(--pc-muted)\", userSelect: \"text\", WebkitUserSelect: \"text\",\n        cursor: \"text\",\n      }}\n      title=\"current viewport \u2014 pass these to serve(view=...) or canvas.set_view() to fix this view\"\n    >\n      view: x={v.x} y={v.y} zoom={v.zoom.toFixed(2)}\n    </div>\n  );\n}\n\n// Drill-down: an object's type/repr header plus a field/type/value table.\nfunction DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {\n  const [query, setQuery] = React.useState(\"\");\n  const [typeFilter, setTypeFilter] = React.useState(\"all\");\n  // Reset filters when drilling into a different object.\n  React.useEffect(() => { setQuery(\"\"); setTypeFilter(\"all\"); }, [selected]);\n\n  const allFields = detail && Array.isArray(detail.fields) ? detail.fields : [];\n  const types = [\"all\", ...Array.from(new Set(allFields.map((f) => f.type))).sort()];\n  const selectable = { userSelect: \"text\", WebkitUserSelect: \"text\", cursor: \"text\" };\n  const q = query.toLowerCase();\n  const fields = allFields.filter(\n    (f) =>\n      (typeFilter === \"all\" || f.type === typeFilter) &&\n      (!q || String(f.field ?? \"\").toLowerCase().includes(q))\n  );\n  const filtered = q !== \"\" || typeFilter !== \"all\";\n  return (\n    <>\n      <div style={{ display: \"flex\", gap: 6, marginBottom: 6, alignItems: \"center\" }}>\n        <button style={{ ...controlStyle, cursor: \"pointer\" }} onClick={onBack}>\u2190 back</button>\n        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600,\n          overflow: \"hidden\", textOverflow: \"ellipsis\", whiteSpace: \"nowrap\" }}>\n          {selected}\n          {detail && <span style={{ fontWeight: 400, color: \"var(--pc-faint)\" }}> : {detail.type}</span>}\n        </span>\n        <button style={{ ...controlStyle, cursor: \"pointer\" }} onClick={onRefresh}>Refresh</button>\n      </div>\n      {detail && !detail.missing && allFields.length > 0 && (\n        <div style={{ display: \"flex\", gap: 6, marginBottom: 6, alignItems: \"center\" }}>\n          <input placeholder=\"search field\u2026\" value={query}\n            onChange={(e) => setQuery(e.target.value)}\n            style={{ ...controlStyle, flex: 1, minWidth: 0 }} />\n          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>\n            {types.map((t) => <option key={t} value={t}>{t}</option>)}\n          </select>\n        </div>\n      )}\n      <div style={{ flex: 1, minHeight: 0, overflow: \"auto\" }}>\n        {!detail ? (\n          <div style={{ fontSize: 12, color: \"var(--pc-faint2)\", padding: 6 }}>loading\u2026</div>\n        ) : detail.missing ? (\n          <div style={{ fontSize: 12, color: \"var(--pc-faint2)\", padding: 6 }}>no longer available</div>\n        ) : (\n          <>\n            <div style={{ fontSize: 12, fontFamily: \"ui-monospace, monospace\",\n              color: \"var(--pc-detail-text)\", background: \"var(--pc-detail-bg)\",\n              border: \"1px solid var(--pc-detail-border)\", borderRadius: 4,\n              padding: \"4px 6px\", marginBottom: 6, wordBreak: \"break-all\", ...selectable }}>\n              {detail.repr}\n            </div>\n            <table style={{ width: \"100%\", fontSize: 12, borderCollapse: \"collapse\" }}>\n              <thead>\n                <tr>\n                  {[\"field\", \"type\", \"value\"].map((c) => (\n                    <th key={c} style={{ textAlign: \"left\", padding: \"2px 6px\",\n                      borderBottom: \"1px solid var(--pc-border-mid)\", color: \"var(--pc-muted)\",\n                      position: \"sticky\", top: 0, background: \"var(--pc-bg)\" }}>{c}</th>\n                  ))}\n                </tr>\n              </thead>\n              <tbody>\n                {fields.length === 0 ? (\n                  <tr>\n                    <td colSpan={3} style={{ padding: 6, color: \"var(--pc-faint2)\", fontStyle: \"italic\" }}>\n                      {filtered ? \"no matching fields\" : \"no fields \u2014 see repr above\"}\n                    </td>\n                  </tr>\n                ) : (\n                  fields.map((f, i) => (\n                    <tr key={i}>\n                      <td style={{ padding: \"2px 6px\", borderBottom: \"1px solid var(--pc-border-soft)\", ...selectable }}>{f.field}</td>\n                      <td style={{ padding: \"2px 6px\", borderBottom: \"1px solid var(--pc-border-soft)\", color: \"var(--pc-faint)\" }}>{f.type}</td>\n                      <td style={{ padding: \"2px 6px\", borderBottom: \"1px solid var(--pc-border-soft)\",\n                        fontFamily: \"ui-monospace, monospace\", ...selectable }}>{f.value}</td>\n                    </tr>\n                  ))\n                )}\n              </tbody>\n            </table>\n          </>\n        )}\n      </div>\n    </>\n  );\n}\n\nfunction Component({ canvas, props }) {\n  const [query, setQuery] = React.useState(\"\");\n  const [typeFilter, setTypeFilter] = React.useState(\"all\");\n  // Which row is drilled into (its key), or null for the table view.\n  const [selected, setSelected] = React.useState(null);\n\n  let rows = [];\n  try { rows = JSON.parse(props.rows) || []; } catch { rows = []; }\n  let cols = [\"name\", \"label\", \"type\", \"value\", \"x\", \"y\", \"w\", \"h\"];\n  try {\n    const parsed = JSON.parse(props.cols);\n    if (Array.isArray(parsed) && parsed.length) cols = parsed;\n  } catch { /* keep default */ }\n\n  const controlStyle = {\n    fontSize: 12, padding: \"3px 6px\", border: \"1px solid var(--pc-border-mid)\",\n    borderRadius: 6, background: \"var(--pc-input-bg)\", color: \"var(--pc-text)\",\n  };\n\n  // --- detail (drill-down) view -------------------------------------------\n  if (selected != null) {\n    let detail = null;\n    try { detail = JSON.parse(props.detail || \"null\"); } catch { detail = null; }\n    // Only show detail once it's arrived for the row we clicked (avoid stale).\n    const ready = detail && detail.key === selected;\n    return (\n      <DetailView\n        selected={selected}\n        detail={ready ? detail : null}\n        onBack={() => { setSelected(null); canvas.send({ action: \"detail\", key: null }); }}\n        onRefresh={() => canvas.send({ action: \"detail\", key: selected })}\n        controlStyle={controlStyle} />\n    );\n  }\n\n  const types = [\"all\", ...Array.from(new Set(rows.map((r) => r.type))).sort()];\n  const q = query.toLowerCase();\n  const shown = rows.filter(\n    (r) =>\n      (typeFilter === \"all\" || r.type === typeFilter) &&\n      (!q || String(r.name ?? \"\").toLowerCase().includes(q))\n  );\n\n  const openDetail = (r) => {\n    const key = r.key ?? r.name;\n    if (!key) return;\n    setSelected(key);\n    canvas.send({ action: \"detail\", key });\n  };\n\n  const source = props.source || \"components\";\n  const switchSource = (next) => {\n    if (next === source) return;\n    setTypeFilter(\"all\"); // the type set differs between the two views\n    setQuery(\"\");\n    canvas.send({ action: \"source\", source: next });\n  };\n\n  return (\n    <>\n      <div style={{ display: \"flex\", gap: 6, marginBottom: 6, alignItems: \"center\" }}>\n        <select value={source} onChange={(e) => switchSource(e.target.value)} style={controlStyle} title=\"what to inspect\">\n          <option value=\"components\">panels</option>\n          <option value=\"canvas\">canvas</option>\n          <option value=\"globals\">globals</option>\n          <option value=\"system\">system</option>\n        </select>\n        <input placeholder=\"search name\u2026\" value={query}\n          onChange={(e) => setQuery(e.target.value)}\n          style={{ ...controlStyle, flex: 1, minWidth: 0 }} />\n        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={controlStyle}>\n          {types.map((t) => <option key={t} value={t}>{t}</option>)}\n        </select>\n        <button style={{ ...controlStyle, cursor: \"pointer\" }} onClick={() => canvas.send({ action: \"refresh\" })}>Refresh</button>\n        <button style={{ ...controlStyle, cursor: \"pointer\" }}\n          title=\"open the live dispatch-trace panel\"\n          onClick={() => canvas.send({ action: \"trace\" })}>Trace</button>\n      </div>\n      <div style={{ flex: 1, minHeight: 0, overflow: \"auto\" }}>\n        <table style={{ width: \"100%\", fontSize: 12, borderCollapse: \"collapse\" }}>\n          <thead>\n            <tr>\n              {cols.map((c) => (\n                <th key={c} style={{ textAlign: \"left\", padding: \"2px 6px\",\n                  borderBottom: \"1px solid var(--pc-border-mid)\", color: \"var(--pc-muted)\",\n                  position: \"sticky\", top: 0, background: \"var(--pc-bg)\" }}>{c}</th>\n              ))}\n            </tr>\n          </thead>\n          <tbody>\n            {shown.map((r, i) => (\n              <tr key={i} onClick={() => openDetail(r)} style={{ cursor: \"pointer\" }} title=\"click to inspect fields\">\n                {cols.map((c) => (\n                  <td key={c} style={{ padding: \"2px 6px\", borderBottom: \"1px solid var(--pc-border-soft)\",\n                    fontFamily: c === \"value\" ? \"ui-monospace, monospace\" : \"inherit\" }}>\n                    {String(r[c] ?? \"\")}\n                  </td>\n                ))}\n              </tr>\n            ))}\n          </tbody>\n        </table>\n      </div>\n      <ViewReadout canvas={canvas} />\n    </>\n  );\n}\n",
+    "w": 520,
+    "wasm": ""
+   }
+  },
   "label": {
    "component": "React",
    "data": {
@@ -53,6 +163,20 @@
     "wasm": ""
    }
   },
+  "live_plot": {
+   "component": "React",
+   "data": {},
+   "props": {
+    "autoH": false,
+    "autoW": false,
+    "css": "",
+    "h": 380,
+    "libs": "[\"plotly\"]",
+    "source": "\nfunction Component({ canvas }) {\n  const Plotly = libs.plotly;\n  const plotRef = React.useRef(null);\n  React.useEffect(() => {\n    const node = plotRef.current;\n    if (!node || !Plotly) return;\n    let pendingFull = null, pendingExt = null, raf = null, initialized = false;\n    const mergeExt = (acc, e) => {\n      if (!acc) return { indices: e.indices.slice(), x: e.x.map(a => a.slice()), y: e.y.map(a => a.slice()), max: e.max };\n      const pos = new Map(acc.indices.map((ti, k) => [ti, k]));\n      e.indices.forEach((ti, j) => {\n        if (pos.has(ti)) { const k = pos.get(ti); acc.x[k] = acc.x[k].concat(e.x[j]); acc.y[k] = acc.y[k].concat(e.y[j]); }\n        else { pos.set(ti, acc.indices.length); acc.indices.push(ti); acc.x.push(e.x[j].slice()); acc.y.push(e.y[j].slice()); }\n      });\n      acc.max = e.max;\n      return acc;\n    };\n    const adapt = () => {\n      if (!initialized) return;\n      const w = node.clientWidth || 0, h = node.clientHeight || 0;\n      if (!w || !h) return;\n      const small = w < 340 || h < 200;\n      Plotly.relayout(node, {\n        margin: small ? { l: 30, r: 10, t: 10, b: 24 } : { l: 40, r: 15, t: 15, b: 30 },\n        showlegend: !small,\n        \"font.size\": small ? 9 : 12,\n      }).catch(() => {});\n    };\n    const flush = () => {\n      raf = null;\n      if (!node) return;\n      if (pendingFull) {\n        const p = pendingFull; pendingFull = null; pendingExt = null;\n        // Hover-reveal toolbar (zoom/pan/box-zoom/autoscale/reset/download-PNG)\n        // so a live curve can be inspected and saved; displaylogo:false drops the\n        // Plotly link, and lasso/box-select are removed since they do nothing\n        // useful on a line/telemetry stream.\n        Plotly.react(node, (p.data || []).map(t => ({ ...t, x: [...(t.x || [])], y: [...(t.y || [])] })), p.layout || {}, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] })\n          .then(() => { initialized = true; adapt(); })\n          .catch(() => {});\n        return;\n      }\n      if (pendingExt && initialized) {\n        const e = pendingExt; pendingExt = null;\n        Plotly.extendTraces(node, { x: e.x, y: e.y }, e.indices, e.max);\n      }\n    };\n    const unsub = canvas.onFrame((plot) => {\n      if (plot && plot.__extend) pendingExt = mergeExt(pendingExt, plot.__extend);\n      else { pendingFull = plot; pendingExt = null; }\n      if (raf == null) raf = requestAnimationFrame(flush);\n    });\n    let resizeRaf = null, ro = null;\n    if (typeof ResizeObserver !== \"undefined\") {\n      ro = new ResizeObserver(() => {\n        if (resizeRaf != null) return;\n        resizeRaf = requestAnimationFrame(() => { resizeRaf = null; Plotly.Plots.resize(node); adapt(); });\n      });\n      ro.observe(node);\n    }\n    return () => {\n      unsub();\n      if (raf != null) cancelAnimationFrame(raf);\n      if (resizeRaf != null) cancelAnimationFrame(resizeRaf);\n      if (ro) ro.disconnect();\n      Plotly.purge(node);\n    };\n  }, []);\n  return <div ref={plotRef} style={{ flex: 1, width: \"100%\", minHeight: 0 }} />;\n}\n",
+    "w": 560,
+    "wasm": ""
+   }
+  },
   "markdown": {
    "component": "React",
    "data": {
@@ -67,6 +191,20 @@
     "libs": "[]",
     "source": "\nfunction Component({ props }) {\n  const _th = props._th || {};\n  return (\n    <>\n      <style>{`\n.pc-md{width:100%;max-height:100%;overflow:auto;box-sizing:border-box;padding:8px;\n font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;\n color:var(--pc-text)}\n.pc-md h1,.pc-md h2,.pc-md h3{margin:.4em 0 .3em;line-height:1.25}\n.pc-md h1{font-size:1.5em}.pc-md h2{font-size:1.3em}.pc-md h3{font-size:1.1em}\n.pc-md p{margin:.4em 0}.pc-md ul,.pc-md ol{margin:.4em 0;padding-left:1.4em}\n.pc-md a{color:var(--pc-accent)}\n.pc-md img{display:block;max-width:100%}\n.pc-md pre{background:var(--pc-code-bg);border-radius:6px;padding:8px;overflow:auto}\n.pc-md code{background:var(--pc-code-bg);border-radius:4px;padding:1px 4px;\n font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}\n.pc-md pre code{background:none;padding:0}\n.pc-md table{border-collapse:collapse}\n.pc-md th,.pc-md td{border:1px solid var(--pc-border);padding:3px 8px}\n`}</style>\n      <div className=\"pc-md\" style={_th}\n           dangerouslySetInnerHTML={{ __html: props.html || \"\" }} />\n    </>\n  );\n}\n",
     "w": 380,
+    "wasm": ""
+   }
+  },
+  "plot": {
+   "component": "React",
+   "data": {},
+   "props": {
+    "autoH": false,
+    "autoW": false,
+    "css": "",
+    "h": 420,
+    "libs": "[\"plotly\"]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const Plotly = libs.plotly;\n  const nodeRef = React.useRef(null);\n  const fig = props && props._fig;\n  React.useEffect(() => {\n    const node = nodeRef.current;\n    if (!node) return;\n    let raf = null;\n    let ro = null;\n    if (typeof ResizeObserver !== \"undefined\") {\n      ro = new ResizeObserver(() => {\n        if (raf) return;\n        raf = requestAnimationFrame(() => { raf = null; if (nodeRef.current) Plotly.Plots.resize(nodeRef.current); });\n      });\n      ro.observe(node);\n    }\n    return () => {\n      if (ro) ro.disconnect();\n      if (raf) cancelAnimationFrame(raf);\n      if (nodeRef.current) Plotly.purge(nodeRef.current);\n    };\n  }, []);\n  React.useEffect(() => {\n    const node = nodeRef.current;\n    if (!node || !fig) return;\n    // Omitting displayModeBar gives Plotly's hover-reveal toolbar (zoom, pan,\n    // box-zoom, autoscale, reset, download-PNG) \u2014 the analysis tools researchers\n    // expect on a chart. displaylogo:false drops the Plotly link. Full button set\n    // is kept: Plot renders arbitrary figures (incl. scatter, where box/lasso\n    // select are meaningful).\n    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displaylogo: false });\n  });\n  return (\n    <div style={{ flex: 1, width: \"100%\", minHeight: 0, position: \"relative\" }}>\n      {!fig && (\n        <div style={{ position: \"absolute\", inset: 0, display: \"flex\", alignItems: \"center\", justifyContent: \"center\", color: \"var(--pc-muted, #9ca3af)\", fontSize: 13 }}>\n          no data yet\n        </div>\n      )}\n      <div ref={nodeRef} style={{ width: \"100%\", height: \"100%\" }} />\n    </div>\n  );\n}\n",
+    "w": 560,
     "wasm": ""
    }
   },
@@ -89,6 +227,153 @@
     "libs": "[]",
     "source": "\nfunction Component({ canvas, value, props }) {\n  const initial = value != null ? value\n                : (props.value != null ? props.value : props.default);\n  const [v, setV] = React.useState(initial);\n  const [raw, setRaw] = React.useState(null);\n  React.useEffect(() => { if (value != null) setV(value); }, [value]);\n  const onRelease = props.on_release;\n  const lo = Number(props.min), hi = Number(props.max), st = Number(props.step);\n  const isFloat = String(props.step).indexOf(\".\") >= 0;\n  const show = isFloat ? Number(v).toFixed(2) : String(v);\n\n  function commit() {\n    if (raw === null) return;\n    const parsed = parseFloat(raw);\n    const clamped = isNaN(parsed) ? v : Math.max(lo, Math.min(hi, parsed));\n    const snapped = Math.round((clamped - lo) / st) * st + lo;\n    const clean = Math.round(snapped * 1e10) / 1e10;\n    setV(clean);\n    setRaw(null);\n    canvas.send({ value: clean });\n  }\n\n  const _th = props._th || {};\n  return (\n    <>\n      <style>{`\n.pc-slider{box-sizing:border-box;width:100%;height:100%;padding:10px 12px;\n display:flex;gap:10px;align-items:center;\n font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3)}\n.pc-slider input[type=range]{flex:1;min-width:0;accent-color:var(--pc-accent,#3b82f6)}\n.pc-slider .val{width:5ch;text-align:center;font-variant-numeric:tabular-nums;\n background:none;border:none;border-bottom:1px solid transparent;color:inherit;\n font:inherit;padding:0;cursor:text;outline:none}\n.pc-slider .val:hover{border-bottom-color:rgba(255,255,255,.25)}\n.pc-slider .val:focus{border-bottom-color:var(--pc-accent,#3b82f6);\n box-shadow:0 2px 0 var(--pc-accent-t,rgba(59,130,246,.3))}\n`}</style>\n      <div className=\"pc-slider\" style={_th}>\n        <input type=\"range\" min={props.min} max={props.max} step={props.step}\n          value={v}\n          onPointerDown={(e) => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} }}\n          onChange={(e) => {\n            const n = Number(e.target.value);\n            setV(n);\n            if (!onRelease) canvas.send({ value: n });\n          }}\n          onPointerUp={onRelease\n            ? (e) => canvas.send({ value: Number(e.target.value) })\n            : undefined} />\n        <input className=\"val\"\n          type=\"text\"\n          inputMode={isFloat ? \"decimal\" : \"numeric\"}\n          value={raw !== null ? raw : show}\n          onFocus={(e) => { setRaw(show); const t = e.target; requestAnimationFrame(() => t.select()); }}\n          onChange={(e) => setRaw(e.target.value)}\n          onBlur={commit}\n          onKeyDown={(e) => {\n            if (e.key === \"Enter\") { e.target.blur(); return; }\n            if (e.key === \"ArrowUp\" || e.key === \"ArrowDown\") {\n              e.preventDefault();\n              const delta = e.key === \"ArrowUp\" ? st : -st;\n              const clamped = Math.max(lo, Math.min(hi, v + delta));\n              const snapped = Math.round((clamped - lo) / st) * st + lo;\n              const clean = Math.round(snapped * 1e10) / 1e10;\n              setV(clean); setRaw(null); canvas.send({ value: clean });\n            }\n          }} />\n      </div>\n    </>\n  );\n}\n",
     "w": 240,
+    "wasm": ""
+   }
+  },
+  "table": {
+   "component": "React",
+   "data": {
+    "_th": {},
+    "cols": [
+     "Name",
+     "Score"
+    ],
+    "dists": [
+     {
+      "bars": [
+       {
+        "h": 1.0,
+        "title": "Alice: 1 (50%)",
+        "val": "Alice"
+       },
+       {
+        "h": 1.0,
+        "title": "Bob: 1 (50%)",
+        "val": "Bob"
+       }
+      ],
+      "cap": [
+       "2 unique"
+      ],
+      "num": false
+     },
+     {
+      "bars": [
+       {
+        "h": 1.0,
+        "hi": "85.5833",
+        "lo": "85",
+        "title": "85 \u2013 85.5833: 1 (50%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "86.1667",
+        "lo": "85.5833",
+        "title": "85.5833 \u2013 86.1667: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "86.75",
+        "lo": "86.1667",
+        "title": "86.1667 \u2013 86.75: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "87.3333",
+        "lo": "86.75",
+        "title": "86.75 \u2013 87.3333: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "87.9167",
+        "lo": "87.3333",
+        "title": "87.3333 \u2013 87.9167: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "88.5",
+        "lo": "87.9167",
+        "title": "87.9167 \u2013 88.5: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "89.0833",
+        "lo": "88.5",
+        "title": "88.5 \u2013 89.0833: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "89.6667",
+        "lo": "89.0833",
+        "title": "89.0833 \u2013 89.6667: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "90.25",
+        "lo": "89.6667",
+        "title": "89.6667 \u2013 90.25: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "90.8333",
+        "lo": "90.25",
+        "title": "90.25 \u2013 90.8333: 0 (0%)"
+       },
+       {
+        "h": 0.0,
+        "hi": "91.4167",
+        "lo": "90.8333",
+        "title": "90.8333 \u2013 91.4167: 0 (0%)"
+       },
+       {
+        "h": 1.0,
+        "hi": "92",
+        "lo": "91.4167",
+        "title": "91.4167 \u2013 92: 1 (50%)"
+       }
+      ],
+      "cap": [
+       "85",
+       "\u03bc 88.5",
+       "92"
+      ],
+      "num": true
+     }
+    ],
+    "numeric": [
+     false,
+     true
+    ],
+    "pageSize": 2000,
+    "profiles": [
+     {
+      "meta": "str",
+      "tip": "str  \u00b7  2 unique  \u00b7  2 / 2 filled"
+     },
+     {
+      "meta": "int",
+      "tip": "int  \u00b7  2 unique  \u00b7  2 / 2 filled  \u00b7  min 85  max 92  \u00b7  mean 88.5  median 88.5"
+     }
+    ],
+    "rows": [
+     [
+      "Alice",
+      "92"
+     ],
+     [
+      "Bob",
+      "85"
+     ]
+    ]
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 360,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const cols = props.cols || [];\n  const numeric = props.numeric || [];\n  const profiles = props.profiles || [];\n  const dists = props.dists || [];\n  const PAGE = props.pageSize || 2000;\n\n  // Local copy of rows so cell edits are visible immediately without waiting\n  // for a Python round-trip. Resets whenever Python pushes new props.\n  const [rows, setRows] = React.useState(props.rows || []);\n  React.useEffect(() => { setRows(props.rows || []); }, [props.rows]);\n  const total = rows.length;\n\n  const [sortCol, setSortCol] = React.useState(-1);\n  const [sortDir, setSortDir] = React.useState(0);  // 1 asc, -1 desc, 0 none\n  const [q, setQ] = React.useState(\"\");\n  const [colFilter, setColFilter] = React.useState(null);\n  const [page, setPage] = React.useState(1);\n  const [showIdx, setShowIdx] = React.useState(false);\n  const [hiddenCols, setHiddenCols] = React.useState(new Set());\n  const [colMenuOpen, setColMenuOpen] = React.useState(false);\n  const [showSel, setShowSel] = React.useState(false);\n  const [selectedRows, setSelectedRows] = React.useState(new Set());\n  const selAllRef = React.useRef(null);\n  const editable = !!props.editable;\n  const [editMode, setEditMode] = React.useState(false);\n  const [editCell, setEditCell] = React.useState(null);  // {ri, ci}\n  const [editVal, setEditVal] = React.useState(\"\");\n  const editRef = React.useRef(null);\n\n  // One lowercased haystack per row for the free-text filter. The \\u0001\n  // separator keeps a query from matching across a cell boundary.\n  const hay = React.useMemo(\n    () => rows.map((r) => r.join(\"\\u0001\").toLowerCase()), [rows]);\n\n  // view: the row indices left after filtering, in sorted order. Recomputed only\n  // when an input changes, then a page of it is rendered.\n  const view = React.useMemo(() => {\n    const ql = q.toLowerCase();\n    const idx = [];\n    for (let i = 0; i < total; i++) {\n      if (ql && hay[i].indexOf(ql) < 0) continue;\n      if (colFilter) {\n        let t = rows[i][colFilter.col];\n        if (t == null) t = \"\";\n        if (colFilter.num) {\n          const v = parseFloat(t);\n          if (isNaN(v) || v < colFilter.lo || v > colFilter.hi) continue;\n        } else if (t !== colFilter.val) continue;\n      }\n      idx.push(i);\n    }\n    if (sortCol >= 0 && sortDir !== 0) {\n      const c = sortCol, num = numeric[c], dir = sortDir;\n      idx.sort((a, b) => {\n        let va = rows[a][c], vb = rows[b][c];\n        if (num) {\n          va = parseFloat(va); vb = parseFloat(vb);\n          if (isNaN(va)) va = -Infinity;\n          if (isNaN(vb)) vb = -Infinity;\n        } else { va = (\"\" + va).toLowerCase(); vb = (\"\" + vb).toLowerCase(); }\n        if (va < vb) return -dir;\n        if (va > vb) return dir;\n        return 0;\n      });\n    }\n    return idx;\n  }, [q, colFilter, sortCol, sortDir, rows, hay, numeric, total]);\n\n  const npages = Math.max(1, Math.ceil(view.length / PAGE));\n  const pg = Math.min(Math.max(1, page), npages);  // clamp for render\n  const pageRows = view.slice((pg - 1) * PAGE, (pg - 1) * PAGE + PAGE);\n\n  React.useEffect(() => {\n    if (!selAllRef.current) return;\n    const nSelVis = view.filter((ri) => selectedRows.has(ri)).length;\n    selAllRef.current.indeterminate = nSelVis > 0 && nSelVis < view.length;\n  }, [selectedRows, view]);\n\n  function clickHeader(i) {\n    if (sortCol !== i) { setSortCol(i); setSortDir(1); return; }\n    const nd = sortDir === 1 ? -1 : (sortDir === -1 ? 0 : 1);\n    setSortDir(nd);\n    if (nd === 0) setSortCol(-1);\n  }\n  function pickBar(c, bar, num) {\n    const name = cols[c];\n    const cf = num\n      ? { col: c, num: true, lo: Number(bar.lo), hi: Number(bar.hi),\n          label: name + \" \\u2208 [\" + bar.lo + \", \" + bar.hi + \"]\" }\n      : { col: c, num: false, val: bar.val, label: name + \" = \" + bar.val };\n    setColFilter((p) => (p && p.col === c && p.label === cf.label) ? null : cf);\n    setPage(1);\n  }\n  function barSelected(c, bar, num) {\n    if (!colFilter || colFilter.col !== c) return false;\n    return num\n      ? (colFilter.num && colFilter.lo === Number(bar.lo) && colFilter.hi === Number(bar.hi))\n      : (!colFilter.num && colFilter.val === bar.val);\n  }\n  function gotoPage(v) { if (!isNaN(v)) setPage(Math.min(npages, Math.max(1, v))); }\n  function toggleCol(i) {\n    setHiddenCols((prev) => {\n      const s = new Set(prev);\n      s.has(i) ? s.delete(i) : s.add(i);\n      return s;\n    });\n  }\n  const visCols = cols.map((_, i) => i).filter((i) => !hiddenCols.has(i));\n  function toggleRow(ri) {\n    const s = new Set(selectedRows);\n    s.has(ri) ? s.delete(ri) : s.add(ri);\n    setSelectedRows(s);\n    canvas.send({ selected: [...s] });\n  }\n  function toggleAllVisible() {\n    const nSelVis = view.filter((ri) => selectedRows.has(ri)).length;\n    const s = new Set(selectedRows);\n    if (nSelVis === view.length) { view.forEach((ri) => s.delete(ri)); }\n    else { view.forEach((ri) => s.add(ri)); }\n    setSelectedRows(s);\n    canvas.send({ selected: [...s] });\n  }\n  function clearSelection() { setSelectedRows(new Set()); canvas.send({ selected: [] }); }\n\n  function startEdit(ri, ci) {\n    if (!editMode) return;\n    setEditCell({ ri, ci });\n    setEditVal(rows[ri][ci] == null ? \"\" : rows[ri][ci]);\n    setTimeout(() => editRef.current && editRef.current.select(), 0);\n  }\n  function commitEdit() {\n    if (!editCell) return;\n    const { ri, ci } = editCell;\n    setRows((prev) => {\n      const next = prev.map((r) => r.slice());\n      next[ri][ci] = editVal;\n      return next;\n    });\n    canvas.send({ edited: { row: ri, col: ci, value: editVal } });\n    setEditCell(null);\n  }\n  function cancelEdit() { setEditCell(null); }\n  React.useEffect(() => { if (!editMode) setEditCell(null); }, [editMode]);\n\n  function spark(c, dist) {\n    if (!dist || !dist.bars || !dist.bars.length) return null;\n    const n = dist.bars.length, bw = 120 / n;\n    return (\n      <svg className=\"pc-spark\" viewBox=\"0 0 120 28\" preserveAspectRatio=\"none\">\n        {dist.bars.map((bar, i) => {\n          const bh = Math.max(1, bar.h * 26);\n          return (\n            <rect key={i} x={i * bw} y={28 - bh} width={Math.max(1, bw - 1)} height={bh}\n                  className={barSelected(c, bar, dist.num) ? \"pc-sel\" : \"\"}\n                  onClick={() => pickBar(c, bar, dist.num)}>\n              <title>{bar.title}</title>\n            </rect>\n          );\n        })}\n      </svg>\n    );\n  }\n\n  const count = view.length === total\n    ? total.toLocaleString() + \" rows\"\n    : view.length.toLocaleString() + \" / \" + total.toLocaleString();\n\n  return (\n    <div className={\"pc-tbl\" + (editMode ? \" pc-editable\" : \"\")}>\n      <style>{`\n.pc-tbl{display:flex;flex-direction:column;height:100%;font-size:12px;\n background:#fff;color:#0f172a;border-radius:4px;overflow:hidden;box-sizing:border-box}\n.pc-tbl .pc-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;\n border-bottom:1px solid #e2e8f0;flex:none}\n.pc-tbl .pc-filter{flex:1;min-width:60px;padding:3px 6px;border:1px solid #cbd5e1;\n border-radius:4px;font-size:12px}\n.pc-tbl .pc-btn{padding:3px 8px;border:1px solid #cbd5e1;border-radius:4px;\n background:#f8fafc;cursor:pointer;font-size:11px;color:#334155}\n.pc-tbl .pc-btn.on{background:#2563eb;color:#fff;border-color:#2563eb}\n.pc-tbl .pc-count{color:#64748b;font-size:11px;white-space:nowrap}\n.pc-tbl .pc-scroll{overflow:auto;flex:1}\n.pc-tbl table{border-collapse:collapse;width:100%}\n.pc-tbl th,.pc-tbl td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;\n white-space:nowrap}\n.pc-tbl thead th{position:sticky;top:0;background:#f8fafc;font-weight:600;\n cursor:pointer;user-select:none}\n.pc-tbl .pc-th-meta{font-weight:400;color:#94a3b8;font-size:10px;margin-top:1px;\n white-space:nowrap}\n.pc-tbl .pc-th-null{color:#e11d48}\n.pc-tbl .pc-th-type-mix{color:#64748b;font-size:10px}\n.pc-tbl thead tr.pc-dist th{position:static;background:#fff;cursor:default;\n font-weight:400;padding:3px 6px;vertical-align:bottom}\n.pc-tbl tbody tr:nth-child(even) td{background:#f8fafc}\n.pc-tbl td{font-variant-numeric:tabular-nums}\n.pc-tbl .pc-arrow{color:#94a3b8;font-size:10px;margin-left:3px}\n.pc-tbl .pc-spark{width:100%;height:28px;display:block}\n.pc-tbl .pc-spark rect{fill:#60a5fa;cursor:pointer}\n.pc-tbl .pc-spark rect:hover{fill:#3b82f6}\n.pc-tbl .pc-spark rect.pc-sel{fill:#1d4ed8}\n.pc-tbl .pc-cap{color:#94a3b8;font-size:9px;margin-top:1px;display:flex;\n justify-content:space-between;gap:6px}\n.pc-tbl .pc-pager{display:flex;align-items:center;gap:3px;flex:none}\n.pc-tbl .pc-pg{border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;\n cursor:pointer;color:#334155;font-size:13px;line-height:1;padding:1px 7px}\n.pc-tbl .pc-pg:hover{background:#eef2f7}\n.pc-tbl .pc-page{width:46px;padding:3px 4px;border:1px solid #cbd5e1;\n border-radius:4px;font-size:11px;text-align:right}\n.pc-tbl .pc-pages{color:#64748b;font-size:11px;white-space:nowrap}\n.pc-tbl th.pc-idx,.pc-tbl td.pc-idx{color:#94a3b8;text-align:right;font-size:11px;\n min-width:2.5ch}\n.pc-tbl th.pc-idx{cursor:default;font-weight:500;user-select:none}\n.pc-tbl .pc-col-wrap{position:relative}\n.pc-tbl .pc-col-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;\n background:#fff;border:1px solid #e2e8f0;border-radius:6px;\n box-shadow:0 4px 12px rgba(0,0,0,.1);padding:4px 0;\n min-width:140px;max-height:220px;overflow-y:auto}\n.pc-tbl .pc-col-item{display:flex;align-items:center;gap:6px;padding:4px 10px;\n cursor:pointer;font-size:12px;color:#334155;white-space:nowrap;user-select:none}\n.pc-tbl .pc-col-item:hover{background:#f1f5f9}\n.pc-tbl .pc-col-item input[type=checkbox]{cursor:pointer;accent-color:#2563eb;\n flex:none}\n.pc-tbl .pc-overlay{position:fixed;inset:0;z-index:99}\n.pc-tbl th.pc-sel-col,.pc-tbl td.pc-sel-col{width:28px;min-width:28px;\n padding:2px 6px;text-align:center}\n.pc-tbl th.pc-sel-col{cursor:pointer;font-weight:400}\n.pc-tbl th.pc-sel-col input,.pc-tbl td.pc-sel-col input{cursor:pointer;\n accent-color:#2563eb}\n.pc-tbl.pc-editable tbody td{cursor:text}\n.pc-tbl td.pc-editing{padding:0}\n.pc-tbl td.pc-editing input{width:100%;padding:4px 8px;border:none;\n outline:2px solid #2563eb;outline-offset:-2px;font:inherit;\n background:#eff6ff;box-sizing:border-box}\n`}</style>\n      <div className=\"pc-bar\">\n        <input className=\"pc-filter\" placeholder=\"filter rows\\u2026\" value={q}\n               onChange={(e) => { setQ(e.target.value); setPage(1); }} />\n        <button className={\"pc-btn\" + (showIdx ? \" on\" : \"\")} title=\"show row index\"\n                onClick={() => setShowIdx((v) => !v)}>#</button>\n        <button className={\"pc-btn\" + (showSel ? \" on\" : \"\")} title=\"row selection\"\n                onClick={() => setShowSel((v) => !v)}>sel</button>\n        {editable\n          ? <button className={\"pc-btn\" + (editMode ? \" on\" : \"\")} title=\"toggle cell editing\"\n                    onClick={() => setEditMode((v) => !v)}>{\"\\u270e\"}</button>\n          : null}\n        <div className=\"pc-col-wrap\">\n          <button className={\"pc-btn\" + (hiddenCols.size ? \" on\" : \"\")} title=\"show/hide columns\"\n                  onClick={() => setColMenuOpen((v) => !v)}>cols {\"\\u25be\"}</button>\n          {colMenuOpen && (\n            <>\n              <div className=\"pc-overlay\" onClick={() => setColMenuOpen(false)} />\n              <div className=\"pc-col-menu\">\n                {cols.map((c, i) => (\n                  <label key={i} className=\"pc-col-item\">\n                    <input type=\"checkbox\" checked={!hiddenCols.has(i)}\n                           disabled={!hiddenCols.has(i) && visCols.length === 1}\n                           onChange={() => toggleCol(i)} />\n                    {c || (\"col \" + i)}\n                  </label>\n                ))}\n              </div>\n            </>\n          )}\n        </div>\n        {colFilter\n          ? <button className=\"pc-btn pc-chip on\" onClick={() => { setColFilter(null); setPage(1); }}>\n              {colFilter.label + \"  \\u2715\"}\n            </button>\n          : null}\n        {showSel && selectedRows.size > 0\n          ? <button className=\"pc-btn pc-chip on\" onClick={clearSelection}>\n              {selectedRows.size + \" selected  \\u2715\"}\n            </button>\n          : null}\n        <span className=\"pc-count\">{count}</span>\n        {npages > 1\n          ? <div className=\"pc-pager\">\n              <button className=\"pc-pg\" title=\"previous page\"\n                      onClick={() => gotoPage(pg - 1)}>{\"\\u2039\"}</button>\n              <input className=\"pc-page\" type=\"number\" min={1} max={npages} value={pg}\n                     title=\"page \\u2014 type a number or use the up/down arrows\"\n                     onChange={(e) => gotoPage(parseInt(e.target.value, 10))} />\n              <span className=\"pc-pages\">{\"/ \" + npages.toLocaleString()}</span>\n              <button className=\"pc-pg\" title=\"next page\"\n                      onClick={() => gotoPage(pg + 1)}>{\"\\u203a\"}</button>\n            </div>\n          : null}\n      </div>\n      <div className=\"pc-scroll\">\n        <table>\n          <thead>\n            <tr className=\"pc-head\">\n              {showSel\n                ? <th className=\"pc-sel-col\">\n                    <input type=\"checkbox\" ref={selAllRef}\n                           checked={view.length > 0 && view.every((ri) => selectedRows.has(ri))}\n                           onChange={toggleAllVisible} />\n                  </th>\n                : null}\n              {showIdx\n                ? <th className=\"pc-idx\" title=\"row index (0-based)\"\n                      onClick={() => { setSortCol(-1); setSortDir(0); }}>#</th>\n                : null}\n              {visCols.map((i) => (\n                <th key={i} data-num={numeric[i] ? 1 : 0}\n                    title={profiles[i] ? profiles[i].tip : \"\"}\n                    onClick={() => clickHeader(i)}>\n                  {cols[i]}\n                  <span className=\"pc-arrow\">\n                    {sortCol === i ? (sortDir === 1 ? \"\\u25B2\" : sortDir === -1 ? \"\\u25BC\" : \"\") : \"\"}\n                  </span>\n                  <div className=\"pc-th-meta\"\n                       dangerouslySetInnerHTML={{ __html: profiles[i] ? profiles[i].meta : \"\" }} />\n                </th>\n              ))}\n            </tr>\n            <tr className=\"pc-dist\">\n              {showSel ? <th className=\"pc-sel-col\"></th> : null}\n              {showIdx ? <th className=\"pc-idx\"></th> : null}\n              {visCols.map((i) => (\n                <th key={i}>\n                  {spark(i, dists[i])}\n                  {dists[i] && dists[i].cap\n                    ? <div className=\"pc-cap\">\n                        {dists[i].cap.map((s, k) => <span key={k}>{s}</span>)}\n                      </div>\n                    : null}\n                </th>\n              ))}\n            </tr>\n          </thead>\n          <tbody>\n            {pageRows.map((ri) => (\n              <tr key={ri}>\n                {showSel\n                  ? <td className=\"pc-sel-col\">\n                      <input type=\"checkbox\" checked={selectedRows.has(ri)}\n                             onChange={() => toggleRow(ri)} />\n                    </td>\n                  : null}\n                {showIdx ? <td className=\"pc-idx\">{ri}</td> : null}\n                {rows[ri].map((cell, ci) => {\n                  if (hiddenCols.has(ci)) return null;\n                  const isEditing = editCell && editCell.ri === ri && editCell.ci === ci;\n                  return (\n                    <td key={ci} className={isEditing ? \"pc-editing\" : \"\"}\n                        onClick={() => startEdit(ri, ci)}>\n                      {isEditing\n                        ? <input ref={editRef} value={editVal}\n                            onChange={(e) => setEditVal(e.target.value)}\n                            onBlur={commitEdit}\n                            onKeyDown={(e) => {\n                              if (e.key === \"Enter\") { e.preventDefault(); commitEdit(); }\n                              if (e.key === \"Escape\") { e.preventDefault(); cancelEdit(); }\n                            }} />\n                        : (cell == null ? \"\" : cell)}\n                    </td>\n                  );\n                })}\n              </tr>\n            ))}\n          </tbody>\n        </table>\n      </div>\n    </div>\n  );\n}\n",
+    "w": 520,
     "wasm": ""
    }
   },
@@ -132,6 +417,25 @@
     "wasm": ""
    }
   },
+  "upload": {
+   "component": "React",
+   "data": {
+    "accept": "",
+    "multiple": false,
+    "text": "Choose a file",
+    "url": ""
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 120,
+    "libs": "[]",
+    "source": "\nfunction Component({ canvas, props }) {\n  const inputRef = React.useRef(null);\n  const [pct, setPct] = React.useState(null);   // null = idle; 0..100 = busy\n  const [drag, setDrag] = React.useState(false);\n  const [msg, setMsg] = React.useState(\"\");\n\n  // Track this viewer's server-assigned identity (id/name/color) so the upload\n  // can be attributed to a person. The id is sent with the POST; Python resolves\n  // it against the live roster (see Bridge.resolve_viewer).\n  const viewerRef = React.useRef(null);\n  React.useEffect(() => canvas.chat.identity((v) => { viewerRef.current = v; }), []);\n\n  function uploadOne(file) {\n    return new Promise((resolve, reject) => {\n      const xhr = new XMLHttpRequest();\n      let url = props.url + \"?name=\" + encodeURIComponent(file.name);\n      const vid = viewerRef.current && viewerRef.current.id;\n      if (vid) url += \"&viewer=\" + encodeURIComponent(vid);\n      xhr.open(\"POST\", url);\n      if (file.type) xhr.setRequestHeader(\"Content-Type\", file.type);\n      xhr.upload.onprogress = (e) => {\n        if (e.lengthComputable) setPct(Math.round((e.loaded / e.total) * 100));\n      };\n      xhr.onload = () =>\n        (xhr.status >= 200 && xhr.status < 300)\n          ? resolve()\n          : reject(new Error(xhr.responseText || (\"HTTP \" + xhr.status)));\n      xhr.onerror = () => reject(new Error(\"network error\"));\n      xhr.send(file);\n    });\n  }\n\n  async function onFiles(list) {\n    const files = Array.from(list || []);\n    if (!files.length || pct !== null) return;\n    setMsg(\"\"); setPct(0);\n    try {\n      for (const f of files) await uploadOne(f);\n      setMsg(files.length === 1\n        ? (\"Uploaded \" + files[0].name)\n        : (\"Uploaded \" + files.length + \" files\"));\n    } catch (e) {\n      setMsg(\"Failed: \" + ((e && e.message) || e));\n    } finally {\n      setPct(null);\n      if (inputRef.current) inputRef.current.value = \"\";\n    }\n  }\n\n  return (\n    <>\n      <style>{`\n.pc-upload{box-sizing:border-box;width:100%;height:100%;padding:10px;\n display:flex;flex-direction:column;align-items:center;justify-content:center;\n gap:8px;text-align:center;\n font:600 13px system-ui,-apple-system,sans-serif;color:var(--pc-off-text);\n background:var(--pc-off-bg);\n border:1.5px dashed var(--pc-border);border-radius:8px;cursor:pointer;\n transition:background .12s,border-color .12s}\n.pc-upload:hover,.pc-upload.drag{background:var(--pc-border-mid);\n border-color:var(--pc-accent)}\n.pc-upload-ico{font-size:18px;line-height:1;margin-right:6px}\n.pc-upload-prog{width:100%;height:8px;border-radius:4px;\n background:var(--pc-border);overflow:hidden}\n.pc-upload-bar{height:100%;background:var(--pc-accent);transition:width .1s}\n.pc-upload-msg{font-weight:400;font-size:12px;color:var(--pc-muted);\n overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}\n`}</style>\n      <div className={\"pc-upload\" + (drag ? \" drag\" : \"\")}\n        onClick={() => { if (pct === null) inputRef.current && inputRef.current.click(); }}\n        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}\n        onDragLeave={() => setDrag(false)}\n        onDrop={(e) => { e.preventDefault(); setDrag(false); onFiles(e.dataTransfer.files); }}>\n        <input ref={inputRef} type=\"file\" style={{ display: \"none\" }}\n          accept={props.accept || undefined} multiple={!!props.multiple}\n          onChange={(e) => onFiles(e.target.files)} />\n        {pct === null\n          ? <div><span className=\"pc-upload-ico\">{\"\\u2191\"}</span>{props.text}</div>\n          : <div className=\"pc-upload-prog\"><div className=\"pc-upload-bar\"\n              style={{ width: pct + \"%\" }} /></div>}\n        {msg ? <div className=\"pc-upload-msg\">{msg}</div> : null}\n      </div>\n    </>\n  );\n}\n",
+    "w": 240,
+    "wasm": ""
+   }
+  },
   "video": {
    "component": "React",
    "data": {},
@@ -143,6 +447,22 @@
     "libs": "[]",
     "source": "\nfunction Component({ canvas }) {\n  const canvasRef = React.useRef(null);\n  const [live, setLive] = React.useState(false);\n  React.useEffect(() => {\n    const el = canvasRef.current;\n    if (!el) return;\n    // canvas.paintFrame decodes frames off the main thread (createImageBitmap) and\n    // blits them with the GPU-fast bitmaprenderer context, coalescing bursts so a\n    // slow tab catches up to the newest frame rather than queuing stale ones.\n    return canvas.paintFrame(el, { onActive: () => setLive(true) });\n  }, [canvas]);\n  return (\n    <div style={{ flex: 1, display: \"flex\", alignItems: \"center\", justifyContent: \"center\",\n      background: \"var(--pc-video-bg, #000)\", borderRadius: 4, overflow: \"hidden\", height: \"100%\" }}>\n      <canvas ref={canvasRef}\n        style={{ width: \"100%\", height: \"100%\", objectFit: \"contain\",\n          pointerEvents: \"none\", display: live ? \"block\" : \"none\" }} />\n      {!live && <span style={{ color: \"var(--pc-muted)\", fontSize: 13 }}>no signal</span>}\n    </div>\n  );\n}\n",
     "w": 340,
+    "wasm": ""
+   }
+  },
+  "webview": {
+   "component": "React",
+   "data": {
+    "url": "https://example.com"
+   },
+   "props": {
+    "autoH": true,
+    "autoW": false,
+    "css": "",
+    "h": 600,
+    "libs": "[]",
+    "source": "\nfunction Component({ props }) {\n  return (\n    <>\n      <style>{`\n.pc-webview{width:100%;height:100%;border:0;display:block;background:#fff}\n`}</style>\n      <iframe className=\"pc-webview\" src={props.url}\n        allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen\"\n        allowFullScreen />\n    </>\n  );\n}\n",
+    "w": 800,
     "wasm": ""
    }
   }

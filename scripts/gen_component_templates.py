@@ -38,6 +38,7 @@ OUT_PATH = os.path.join(_ROOT, "danvas", "templates", "components.json")
 # The authorable core: the interactive controls + the text/content basics.
 # (Media/stream panels need host-side machinery an SDK provides itself.)
 _BUILDERS = {
+    # Interactive controls + text/content basics.
     "slider": lambda: danvas.Slider(),
     "label": lambda: danvas.Label(""),
     "button": lambda: danvas.Button(),
@@ -49,7 +50,31 @@ _BUILDERS = {
     # register shape belongs in the shared asset like any other native panel.
     "video": lambda: danvas.VideoFeed("cam"),
     "audio": lambda: danvas.AudioFeed("mic"),
+    # Data/content panels: they render from data an SDK sets (Plotly figures via
+    # update, table rows, an image src, a page url, custom html). Host-machinery
+    # panels (upload endpoint, download token, file browsing, the inspector's
+    # live state) still register from the same shape — their *function* depends
+    # on the hub, but any language can author the panel.
+    "table": lambda: danvas.Table({"Name": ["Alice", "Bob"], "Score": [92, 85]}),
+    "plot": lambda: danvas.Plot(),
+    "histogram": lambda: danvas.Histogram(),
+    "live_plot": lambda: danvas.LivePlot(),
+    "image": lambda: danvas.Image(b""),
+    "webview": lambda: danvas.WebView("https://example.com"),
+    "custom": lambda: danvas.Custom(html="<b>custom</b>"),
+    "download": lambda: danvas.Download(source=b"", filename="file.txt", text="Download"),
+    "upload": lambda: danvas.Upload(text="Choose a file"),
+    "file_browser": lambda: danvas.FileBrowser(root="."),
+    "inspector": lambda: danvas.Inspector(),
+    "chat": lambda: danvas.Chat(),
 }
+
+# Per-instance fields that must not be baked into a reusable template (a minted
+# upload endpoint token, etc.) — blanked so the asset is stable/regenerable.
+def _strip_volatile(kind, data):
+    if kind == "upload" and isinstance(data.get("url"), str):
+        data["url"] = ""
+    return data
 
 
 def build():
@@ -59,6 +84,7 @@ def build():
         props = comp.register_props_for(None, None)
         data = json.loads(props.pop("data")) if isinstance(
             props.get("data"), str) else {}
+        data = _strip_volatile(kind, data)
         props.pop("label", None)          # per-instance, not template
         out[kind] = {
             "component": comp.component,
