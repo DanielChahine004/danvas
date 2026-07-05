@@ -1054,15 +1054,23 @@ def _():                                    # alongside the owner's handler
 
 (For other languages — or wire-level control — `danvas.SourceClient` is the
 minimal Python client underneath (`register`/`update`/`on_input` as raw frames),
-and [`danvas-source/`](danvas-source/) is a full **Rust** SDK that does the same;
-both are references for writing an SDK in any language against
-[PROTOCOL.md](PROTOCOL.md).)
+[`danvas-source/`](danvas-source/) is a full **Rust** SDK, and
+[`danvas-node/`](danvas-node/) is a zero-dependency **Node.js** one. Writing an
+SDK in a new language means reading two documents —
+[PROTOCOL.md](PROTOCOL.md) and the per-panel `contract` blocks in
+`danvas/templates/components.json` — and passing one command:
+`DANVAS_SDK_CMD="./my_target|{port}" pytest tests/test_sdk_conformance.py`.
+The Node SDK was written exactly that way, from the docs alone, and passed on
+its first run.)
 
 **Native panels from any language** — the built-in panels' register shapes
 (the React source + data defaults the frontend mounts) ship as a
 language-neutral asset, `danvas/templates/components.json`, so an SDK in any
-language renders a REAL slider/label/button/toggle/text field/markdown panel
-by merging kwargs over the template's data and sending one register frame.
+language renders a REAL slider/table/plot/file-browser/inspector panel by
+merging kwargs over the template's data and sending one register frame. Each
+template also carries a machine-readable `contract` (its data fields, the
+update keys it consumes, the events it emits), and every hub serves its own
+copy at `GET /__templates__` — so an SDK doesn't even ship the asset.
 `SourceClient.register_template("temp", "slider", min=0, max=100)` is the
 reference implementation of that move.
 
@@ -1267,10 +1275,13 @@ wire contract — JSON frames plus a binary media envelope, versioned in
 [PROTOCOL.md](PROTOCOL.md) / `danvas/_protocol.py`. Nothing about it is
 Python-specific, so any process that can open a WebSocket is a first-class peer:
 the Python binding here is one SDK, [`danvas-source/`](danvas-source/) is a Rust
-one, and the built-in panels ship as a language-neutral asset
-(`danvas/templates/components.json`) so an SDK in any language authors real native
-panels. The binary is the universal engine; each language brings only a thin
-client that wraps the protocol.
+one, [`danvas-node/`](danvas-node/) is a zero-dependency Node.js one, and the
+built-in panels ship as a language-neutral asset with per-panel contracts
+(`danvas/templates/components.json`, also served by every hub at
+`/__templates__`) so an SDK in any language authors real native panels. A
+conformance suite (`tests/test_sdk_conformance.py`) is the definition of done
+for a new SDK. The binary is the universal engine; each language brings only a
+thin client that wraps the protocol.
 
 **The model: Python owns state, the browser renders it.** Each panel is a Python
 *component* with a unique id. The **bridge** turns your calls into small JSON
