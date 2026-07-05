@@ -176,6 +176,7 @@ pub struct PanelBuilder<'a> {
     data: Map<String, Value>,
     props: Map<String, Value>,   // raw prop overrides (label, html, …)
     place: Map<String, Value>,
+    rel: Option<(&'static str, String, f64)>,  // (below/above/…, anchor, gap)
 }
 
 impl<'a> PanelBuilder<'a> {
@@ -210,10 +211,49 @@ impl<'a> PanelBuilder<'a> {
         self.place.insert("h".into(), json!(h));
         self
     }
+    /// Place this panel below an anchor (its own or a peer's id), `gap` px under
+    /// it and left-aligned — the twin of Python's `below=`. Resolved once the
+    /// anchor's position is known (deferred to the browser's report if needed),
+    /// so panels can be declared anchor-first in natural order. Default gap 16.
+    pub fn below(mut self, anchor: &str) -> Self {
+        self.rel = Some(("below", anchor.into(), 16.0));
+        self
+    }
+    /// Place this panel above an anchor (left-aligned, `gap` px over it).
+    pub fn above(mut self, anchor: &str) -> Self {
+        self.rel = Some(("above", anchor.into(), 16.0));
+        self
+    }
+    /// Place this panel to the right of an anchor (top-aligned, `gap` px beside).
+    pub fn right_of(mut self, anchor: &str) -> Self {
+        self.rel = Some(("right_of", anchor.into(), 16.0));
+        self
+    }
+    /// Place this panel to the left of an anchor (top-aligned, `gap` px beside).
+    pub fn left_of(mut self, anchor: &str) -> Self {
+        self.rel = Some(("left_of", anchor.into(), 16.0));
+        self
+    }
+    /// Override the relative-placement gap (default 16 px).
+    pub fn gap(mut self, g: f64) -> Self {
+        if let Some(r) = self.rel.as_mut() { r.2 = g; }
+        self
+    }
     /// Register it on the canvas.
     pub fn show(self) {
-        self.client.register_template_raw(&self.id, &self.kind, self.data,
+        let has_xy = self.place.contains_key("x") && self.place.contains_key("y");
+        let new_w = self.place.get("w").and_then(Value::as_f64);
+        let new_h = self.place.get("h").and_then(Value::as_f64);
+        let rel = self.rel.clone();
+        let id = self.id.clone();
+        let client = self.client.clone();
+        self.client.register_template_raw(&id, &self.kind, self.data,
                                           self.props, self.place);
+        // Relative placement: resolve now if the anchor is positioned, else defer
+        // to its first layout report. Explicit x/y always wins.
+        if let (Some((kind, anchor, gap)), false) = (rel, has_xy) {
+            client.place_relative(id, kind, anchor, gap, new_w, new_h);
+        }
     }
 }
 
@@ -407,7 +447,7 @@ impl Client {
         let data = self.inner.templates["templates"][kind]["data"]
             .as_object().cloned().unwrap_or_default();
         PanelBuilder { client: self, id: id.into(), kind: kind.into(),
-                       data, props: Map::new(), place: Map::new() }
+                       data, props: Map::new(), place: Map::new(), rel: None }
     }
 
     /// A native slider. `.at(x,y).set("step",..).show()`.
@@ -485,6 +525,56 @@ impl Client {
             st.updates.entry(id.into()).or_default().insert(key.into(), value.clone());
         }
         self.send(&json!({"type": "update", "id": id, "payload": {key: value}}));
+    }
+
+    /// Reposition a panel this source owns (x/y in canvas coords) — the wire
+    /// form a browser drag relays, folded for replay.
+    pub fn set_layout(&self, id: &str, x: f64, y: f64) {
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            let e = st.updates.entry(id.into()).or_default();
+            e.insert("x".into(), json!(x));
+            e.insert("y".into(), json!(y));
+        }
+        self.send(&json!({"type": "update", "id": id, "payload": {"x": x, "y": y}}));
+    }
+
+    /// Resolve a relative placement: if the anchor already has a position (in the
+    /// mirror) place now, else defer to its first layout report (one-shot).
+    fn place_relative(&self, id: String, kind: &'static str, anchor: String,
+                      gap: f64, new_w: Option<f64>, new_h: Option<f64>) {
+        let compute = move |ax: f64, ay: f64, aw: f64, ah: f64| -> (f64, f64) {
+            match kind {
+                "above" => (ax, ay - gap - new_h.unwrap_or(0.0)),
+                "right_of" => (ax + aw + gap, ay),
+                "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
+                _ => (ax, ay + ah + gap), // below
+            }
+        };
+        // Already positioned? place immediately from the mirror.
+        if let Some(e) = self.panel_entry(&anchor) {
+            let g = |k: &str| e.props.get(k).and_then(Value::as_f64)
+                .or_else(|| e.state.get(k).and_then(Value::as_f64));
+            if let (Some(ax), Some(ay)) = (g("x"), g("y")) {
+                let (x, y) = compute(ax, ay, g("w").unwrap_or(0.0), g("h").unwrap_or(0.0));
+                self.set_layout(&id, x, y);
+                return;
+            }
+        }
+        // Defer: one-shot on the anchor's first positioned layout report.
+        let client = self.clone();
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        self.on_layout(&anchor, move |frame| {
+            if done.load(Ordering::SeqCst) { return; }
+            let g = |k: &str| frame.get(k).and_then(Value::as_f64);
+            let (ax, ay) = match (g("x"), g("y")) {
+                (Some(a), Some(b)) => (a, b),
+                _ => return, // an h-only auto-height report: wait for x/y
+            };
+            done.store(true, Ordering::SeqCst);
+            let (x, y) = compute(ax, ay, g("w").unwrap_or(0.0), g("h").unwrap_or(0.0));
+            client.set_layout(&id, x, y);
+        });
     }
 
     /// Withdraw a panel, shape, or arrow this source owns.
