@@ -1,10 +1,9 @@
 //! A Rust remake of examples/catalogue.py — one column showcasing every native
-//! danvas panel, authored from the danvas-source SDK, matched to the Python
-//! catalogue panel-for-panel: same ids, card labels, colors, order, default
-//! sizes (so the frontend auto-cascades them identically), and populated data
-//! (table rows, a Plotly plot, a histogram, a *streaming* live plot, a
-//! matplotlib image, a streaming audio tone + video). One binary broker + one
-//! protocol, a Rust program drives the *same* full canvas.
+//! danvas panel, authored from the danvas-source SDK, matched panel-for-panel:
+//! same ids, card labels, rainbow colors, positions, and
+//! populated data (table rows, a Plotly plot, the real histogram, a *streaming*
+//! live plot, a matplotlib image, a *streaming* audio tone + webcam). One binary
+//! broker + one protocol, a Rust program drives the *same* full canvas.
 //!
 //!     danvasd --host 0.0.0.0 --port 8200
 //!     cargo run --example catalogue -- 8200
@@ -15,7 +14,21 @@ use serde_json::{json, Value};
 const HISTOGRAM_FIG: &str = include_str!("assets/histogram_fig.json");
 const LIVEPLOT_FIG: &str = include_str!("assets/liveplot_fig.json");
 const IMAGE_SRC: &str = include_str!("assets/image_src.txt");
-const FRAME: &[u8] = include_bytes!("rust_frame.jpg");
+/// A 24-frame webcam animation (scrolling scope) so the feed is visibly live.
+const WEBCAM: [&[u8]; 24] = [
+    include_bytes!("assets/webcam/f00.jpg"), include_bytes!("assets/webcam/f01.jpg"),
+    include_bytes!("assets/webcam/f02.jpg"), include_bytes!("assets/webcam/f03.jpg"),
+    include_bytes!("assets/webcam/f04.jpg"), include_bytes!("assets/webcam/f05.jpg"),
+    include_bytes!("assets/webcam/f06.jpg"), include_bytes!("assets/webcam/f07.jpg"),
+    include_bytes!("assets/webcam/f08.jpg"), include_bytes!("assets/webcam/f09.jpg"),
+    include_bytes!("assets/webcam/f10.jpg"), include_bytes!("assets/webcam/f11.jpg"),
+    include_bytes!("assets/webcam/f12.jpg"), include_bytes!("assets/webcam/f13.jpg"),
+    include_bytes!("assets/webcam/f14.jpg"), include_bytes!("assets/webcam/f15.jpg"),
+    include_bytes!("assets/webcam/f16.jpg"), include_bytes!("assets/webcam/f17.jpg"),
+    include_bytes!("assets/webcam/f18.jpg"), include_bytes!("assets/webcam/f19.jpg"),
+    include_bytes!("assets/webcam/f20.jpg"), include_bytes!("assets/webcam/f21.jpg"),
+    include_bytes!("assets/webcam/f22.jpg"), include_bytes!("assets/webcam/f23.jpg"),
+];
 
 const ROSE: &str = "#e05c7a";
 const AMBER: &str = "#e0923a";
@@ -36,8 +49,9 @@ fn main() {
         .expect("connect to danvasd");
     println!("[rust] catalogue connected on :{port}");
 
-    // No x/y — like the .py, the frontend auto-cascades in registration order.
-    // Sizes are the Python catalogue's resolved defaults, so the cascade matches.
+    // Explicit positions copied from the Python catalogue's resolved masonry
+    // layout, so the two are pixel-identical. (below=/right_of=/... exist on the
+    // builder too, for browser-driven relative placement.)
 
     // 1. Label — also the live readout for the slider handler.
     c.label("lbl", "Hello from label").titled("Label").at(80.0, 80.0).size(240.0, 84.0).color(ROSE).show();
@@ -94,9 +108,7 @@ fn main() {
     let mut base: Value = serde_json::from_str(LIVEPLOT_FIG).unwrap();
     let lc = c.clone();
     std::thread::spawn(move || {
-        let mut xs: Vec<f64> = Vec::new();
-        let mut yy: Vec<f64> = Vec::new();
-        let mut t = 0.0_f64;
+        let (mut xs, mut yy, mut t) = (Vec::new(), Vec::new(), 0.0_f64);
         loop {
             xs.push(t);
             yy.push((t * 0.5).sin());
@@ -113,22 +125,14 @@ fn main() {
     c.panel("img", "image").set("src", json!(IMAGE_SRC.trim()))
         .titled("Image").at(80.0, 2227.0).size(420.0, 320.0).color(SKY).show();
 
-    // 12. Download
+    // 12-16. Download / Upload / File browser / Webview / Inspector.
     c.panel("dl", "download").set("text", json!("Download hello.txt"))
         .titled("Download").at(524.0, 2507.0).size(200.0, 84.0).color(SLATE).show();
-
-    // 13. Upload
     c.panel("up", "upload").set("text", json!("Choose a file"))
         .titled("Upload").at(748.0, 2602.0).size(240.0, 120.0).color(PLUM).show();
-
-    // 14. File browser
     c.panel("fb", "file_browser").titled("File browser").at(1012.0, 2703.0).size(320.0, 420.0).color(ROSE).show();
-
-    // 15. Webview
     c.panel("wv", "webview").set("url", json!("https://example.com"))
         .titled("Webview").at(80.0, 3451.0).size(800.0, 600.0).color(AMBER).show();
-
-    // 16. Inspector
     c.panel("ins", "inspector").titled("Inspector").at(904.0, 3661.0).size(520.0, 320.0).color(TEAL).show();
 
     // 17. Audio feed — stream a 440 Hz tone so it actually plays (once enabled).
@@ -149,12 +153,16 @@ fn main() {
         }
     });
 
-    // 18. Webcam — stream the test frame.
+    // 18. Webcam — STREAM the animation frames (~15 fps).
     c.video("cam").titled("Webcam").at(364.0, 4133.0).size(340.0, 280.0).color(SAGE).show();
     let vc = c.clone();
-    std::thread::spawn(move || loop {
-        vc.send_video("cam", FRAME);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::spawn(move || {
+        let mut i = 0usize;
+        loop {
+            vc.send_video("cam", WEBCAM[i % WEBCAM.len()]);
+            i += 1;
+            std::thread::sleep(std::time::Duration::from_millis(66));
+        }
     });
 
     // 19. Chat
