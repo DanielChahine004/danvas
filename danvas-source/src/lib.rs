@@ -154,18 +154,6 @@ struct State {
     // resolves and cascades relative placement itself -- the SDK-side
     // fallbacks stay quiet when it's advertised).
     hub_features: Vec<String>,
-    // Layout-cascade edges (Python's _below_deps/_right_of_deps): anchor id ->
-    // panels placed below/right_of it. When the anchor's height settles
-    // differently in the browser (auto-height content fitting), every
-    // dependent shifts down by the delta, recursively — so a below() chain
-    // stays a chain instead of overlapping.
-    y_deps: HashMap<String, Vec<String>>,
-    // Debounced cascade shifts: anchor id -> (accumulated dh, generation).
-    // A drag-resize streams a layout report per frame; shifting the whole
-    // chain on each one makes every dependent stutter down the canvas. The
-    // deltas accumulate here and apply in ONE shift once the resize has been
-    // quiet for a beat (a stale generation means a newer report superseded us).
-    casc_pending: HashMap<String, (f64, u64)>,
     // Local mirror of the whole canvas we joined (id -> entry). Eventually
     // consistent, folded from the hub's register/update stream.
     panels: HashMap<String, PanelEntry>,
@@ -351,27 +339,22 @@ impl<'a> PanelBuilder<'a> {
         // would otherwise race (and win over) a position sent as a follow-up
         // update. Python resolves `below=` at insert time for the same reason.
         // An unpositioned anchor defers to its first layout report instead.
-        let mut deferred = None;
         if let (Some((kind, anchor, gap)), false) = (rel.clone(), has_xy) {
-            client.record_y_dep(kind, &anchor, &id);
-            match client.resolve_relative(kind, &anchor, gap, new_w, new_h) {
-                Some((x, y)) => {
-                    self.place.insert("x".into(), json!(x));
-                    self.place.insert("y".into(), json!(y));
-                }
-                None => deferred = Some((kind, anchor, gap)),
+            // Resolve locally when the anchor is known, so chains are
+            // deterministic with no browser attached; otherwise the frame's
+            // rel lets the hub's frontend place it at mount. Height-settle
+            // cascading is the frontend's entirely (PROTOCOL.md § relative
+            // placement) — the SDK-side fallback was deleted once every
+            // shipped hub advertised the "rel" feature.
+            if let Some((x, y)) = client.resolve_relative(kind, &anchor, gap,
+                                                          new_w, new_h) {
+                self.place.insert("x".into(), json!(x));
+                self.place.insert("y".into(), json!(y));
             }
         }
-        // The register frame carries rel either way: on a rel-aware hub the
-        // FRONTEND places (when x/y is absent) and re-settles the chain when
-        // heights change; the local resolution above keeps chains
-        // deterministic with no browser attached.
         self.client.register_template_raw(&id, &self.kind, self.data,
                                           self.props, self.place,
                                           self.frame_color, rel);
-        if let Some((kind, anchor, gap)) = deferred {
-            client.defer_relative(id, kind, anchor, gap, new_w, new_h);
-        }
     }
 }
 
@@ -643,21 +626,13 @@ impl Client {
         (get("x"), get("y"), get("w").unwrap_or(0.0), get("h").unwrap_or(0.0))
     }
 
-    /// Record the layout-cascade edge for a relative placement (mirrors Python
-    /// registering _below_deps whether or not placement was deferred).
-    fn record_y_dep(&self, kind: &str, anchor: &str, id: &str) {
-        if matches!(kind, "below" | "right_of") {
-            self.inner.state.lock().unwrap()
-                .y_deps.entry(anchor.into()).or_default().push(id.into());
-        }
-    }
-
     /// Resolve a relative placement against what this source already knows.
     /// The anchor's geometry is looked up in local knowledge first (registers
     /// carry the template's default size, placements fold as they go) — so a
     /// whole `.below()` chain rooted at one positioned panel resolves
     /// synchronously, browser or not — then the hub mirror (a peer's panel).
-    /// `None` when the anchor has no position anywhere yet.
+    /// `None` when the anchor has no position anywhere yet (the register's
+    /// `rel` then lets the frontend place it at mount).
     fn resolve_relative(&self, kind: &str, anchor: &str, gap: f64,
                         new_w: Option<f64>, new_h: Option<f64>)
         -> Option<(f64, f64)>
@@ -670,31 +645,6 @@ impl Client {
             "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
             _ => (ax, ay + ah + gap), // below
         })
-    }
-
-    /// Deferred relative placement: one-shot on the anchor's first positioned
-    /// layout report (the panel joins the browser's masonry flow meanwhile,
-    /// exactly like the Python `below=` with an unpositioned anchor).
-    fn defer_relative(&self, id: String, kind: &'static str, anchor: String,
-                      gap: f64, new_w: Option<f64>, new_h: Option<f64>) {
-        let client = self.clone();
-        let done = std::sync::Arc::new(AtomicBool::new(false));
-        self.on_layout(&anchor.clone(), move |frame| {
-            if done.load(Ordering::SeqCst) { return; }
-            let g = |k: &str| frame.get(k).and_then(Value::as_f64);
-            let (ax, ay) = match (g("x"), g("y")) {
-                (Some(a), Some(b)) => (a, b),
-                _ => return, // an h-only auto-height report: wait for x/y
-            };
-            done.store(true, Ordering::SeqCst);
-            let (x, y) = match kind {
-                "above" => (ax, ay - gap - new_h.unwrap_or(0.0)),
-                "right_of" => (ax + g("w").unwrap_or(0.0) + gap, ay),
-                "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
-                _ => (ax, ay + g("h").unwrap_or(0.0) + gap),
-            };
-            client.set_layout(&id, x, y);
-        });
     }
 
     /// Send one wire payload while folding a *different* payload into the
@@ -1278,62 +1228,16 @@ impl Client {
                 // below/right_of chain (Python's _cascade_height) — debounced,
                 // so a drag-resize shifts the chain once at the end, not per
                 // pointer-move frame.
-                let mut debounce_gen = None;
                 {
                     let mut st = self.inner.state.lock().unwrap();
                     if st.registers.contains_key(&id) {
-                        let old_h = st.updates.get(&id)
-                            .and_then(|u| u.get("h")).and_then(Value::as_f64)
-                            .or_else(|| st.registers.get(&id)
-                                .and_then(|r| r.get("props"))
-                                .and_then(|p| p.get("h"))
-                                .and_then(Value::as_f64));
-                        let new_h = msg.get("h").and_then(Value::as_f64);
                         let e = st.updates.entry(id.clone()).or_default();
                         for k in ["x", "y", "w", "h", "rotation"] {
                             if let Some(v) = msg.get(k).filter(|v| v.is_number()) {
                                 e.insert(k.into(), v.clone());
                             }
                         }
-                        let hub_rel = st.hub_features.iter().any(|f| f == "rel");
-                        if let (Some(old), Some(new)) = (old_h, new_h) {
-                            let dh = new - old;
-                            // The frontend owns the cascade on rel-aware hubs.
-                            if dh.abs() > 0.5 && !hub_rel {
-                                let entry = st.casc_pending
-                                    .entry(id.clone()).or_insert((0.0, 0));
-                                entry.0 += dh;
-                                entry.1 += 1;
-                                debounce_gen = Some(entry.1);
-                            }
-                        }
                     }
-                }
-                if let Some(gen) = debounce_gen {
-                    let client = self.clone();
-                    let anchor = id.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(
-                            std::time::Duration::from_millis(180));
-                        let mut shifts: Vec<(String, f64)> = Vec::new();
-                        {
-                            let mut st = client.inner.state.lock().unwrap();
-                            match st.casc_pending.get(&anchor) {
-                                // Still the latest report? Apply the whole
-                                // accumulated shift in one go.
-                                Some(&(dh, g)) if g == gen => {
-                                    st.casc_pending.remove(&anchor);
-                                    collect_y_shifts(&mut st, &anchor, dh,
-                                                     &mut shifts);
-                                }
-                                _ => return, // superseded by a newer report
-                            }
-                        }
-                        for (dep, new_y) in shifts {
-                            client.send(&json!({"type": "update", "id": dep,
-                                                "payload": {"y": new_y}}));
-                        }
-                    });
                 }
                 let hs: Vec<Handler> = self.inner.state.lock().unwrap()
                     .on_layout.get(&id).cloned().unwrap_or_default();
@@ -1537,25 +1441,6 @@ impl Client {
     }
 }
 
-/// Shift `anchor`'s below/right_of dependents by `dh`, recursively, folding
-/// each dependent's new y into the replay state and collecting the frames to
-/// send (caller sends outside the lock). The Rust `_cascade_height`.
-fn collect_y_shifts(st: &mut State, anchor: &str, dh: f64,
-                    out: &mut Vec<(String, f64)>) {
-    let deps: Vec<String> = st.y_deps.get(anchor).cloned().unwrap_or_default();
-    for dep in deps {
-        if out.iter().any(|(d, _)| d == &dep) { continue; } // cycle guard
-        let y = st.updates.get(&dep)
-            .and_then(|u| u.get("y")).and_then(Value::as_f64)
-            .or_else(|| st.registers.get(&dep)
-                .and_then(|r| r.get("y")).and_then(Value::as_f64));
-        let Some(y) = y else { continue };
-        let new_y = y + dh;
-        st.updates.entry(dep.clone()).or_default().insert("y".into(), json!(new_y));
-        out.push((dep.clone(), new_y));
-        collect_y_shifts(st, &dep, dh, out);
-    }
-}
 
 fn normalize_ws(url: &str) -> String {
     let t = url.trim();
