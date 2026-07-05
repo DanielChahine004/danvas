@@ -34,11 +34,11 @@ export function App() {
     } catch {
       editor.user.updateUserPreferences({ colorScheme: 'dark' })
     }
-    // Dev-only inspection hook (stripped from production builds) — used by the
-    // e2e checks and handy when debugging the engine from the console.
-    if ((import.meta as any).env?.DEV) {
-      ;(window as any).__danvas = { store, editor, camera, bridge: _debug }
-    }
+    // Inspection hook — the browser smoke suite (tests/test_frontend_smoke.py)
+    // asserts against the store of the REAL shipped build, so this is no
+    // longer dev-gated. It exposes nothing a same-origin console can't
+    // already reach, and it's handy when debugging the engine live.
+    ;(window as any).__danvas = { store, editor, camera, bridge: _debug }
     if (!connected) {
       connected = true
       connect()

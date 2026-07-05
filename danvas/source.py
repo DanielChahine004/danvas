@@ -132,7 +132,7 @@ class SourceClient:
         return self
 
     def register_template(self, cid, kind, name=None, x=None, y=None,
-                          w=None, h=None, **data):
+                          w=None, h=None, rel=None, **data):
         """Register a NATIVE built-in panel from the language-neutral template
         asset (``danvas/templates/components.json``): ``kind`` is one of
         slider/label/button/toggle/text_field/markdown; ``**data`` overrides
@@ -153,8 +153,11 @@ class SourceClient:
             props["w"] = w
         if h is not None:
             props["h"] = h
+        # rel rides the register frame itself (PROTOCOL.md § relative
+        # placement): {"kind": "below"|..., "anchor": <cid>, "gap": px} — a
+        # rel-aware hub's frontend places and cascades it.
         return self.register(cid, tpl["component"], props=props,
-                             name=name or cid, x=x, y=y)
+                             name=name or cid, x=x, y=y, rel=rel)
 
     def update(self, cid, **payload):
         """Stream new state for a registered panel."""
