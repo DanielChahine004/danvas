@@ -38,6 +38,18 @@
 //!   [`remove`](Client::remove), and [`on_input`](Client::on_input)/[`on_layout`](Client::on_layout).
 //! - **media** — [`send_video`](Client::send_video)/[`send_audio`](Client::send_audio)/
 //!   [`push_binary`](Client::push_binary) out, [`on_binary`](Client::on_binary) in.
+//! - **file transfer** — [`serve_bytes`](Client::serve_bytes)/[`on_download`](Client::on_download)
+//!   answer a download panel's click; [`upload_endpoint`](Client::upload_endpoint)/
+//!   [`on_upload`](Client::on_upload) receive a browser's files (the FILE
+//!   envelope + `file_pull`/`file_push` dance of PROTOCOL.md).
+//! - **self-contained serving** — [`serve`] spawns `danvasd`, dials in, and
+//!   opens the browser, so a Rust program owns its canvas end to end
+//!   (Python's `canvas.serve()` shape); [`Broker`] is the running-daemon handle.
+//! - **component logic** — [`live_plot_feed`](Client::live_plot_feed) (rolling
+//!   buffer + extend deltas), [`histogram_feed`](Client::histogram_feed)
+//!   (fixed-bin density heatmap), [`file_browser`](Client::file_browser)
+//!   (sandboxed navigation), [`data_url`] (image bytes → panel `src`) — the
+//!   owner-side logic the Python components implement, transliterated.
 //! - **shapes & arrows** — [`shape`](Client::shape)/[`geo`](Client::geo)/
 //!   [`arrow`](Client::arrow)/[`update_shape`](Client::update_shape).
 //! - **interaction & multiuser** — [`on_request`](Client::on_request),
@@ -51,6 +63,12 @@
 //!   [`find`](Client::find) to edit and observe *anyone's* panels.
 //!
 //! See `examples/` (media, shapes, interact, canvas_state, two_languages).
+
+mod helpers;
+mod serve;
+
+pub use helpers::{data_url, Histogram, LivePlot};
+pub use serve::{serve, Broker};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,6 +87,23 @@ type BinHandler = std::sync::Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
 type RequestHandler = std::sync::Arc<dyn Fn(&Value) -> Value + Send + Sync + 'static>;
 /// A snapshot/screenshot reply handler (given the reply `data`).
 type SnapHandler = std::sync::Arc<dyn Fn(&Value) + Send + Sync + 'static>;
+/// An upload receiver: fired once per file a browser sends to the endpoint.
+type UploadHandler = std::sync::Arc<dyn Fn(&UploadedFile) + Send + Sync + 'static>;
+
+/// One file a browser uploaded to an endpoint this source registered
+/// ([`upload_endpoint`](Client::upload_endpoint) / [`on_upload`](Client::on_upload)).
+/// `content_type` is browser-reported (advisory — don't trust it for security).
+#[derive(Clone, Debug)]
+pub struct UploadedFile {
+    pub name: String,
+    pub size: usize,
+    pub content_type: String,
+    pub data: Vec<u8>,
+}
+
+/// Download tokens live this long (matching the Python bridge's TTL): long
+/// enough for a HEAD+GET or a retry, short enough that a leaked URL dies.
+const DOWNLOAD_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// One frame off the socket, on its way to the ordered dispatch thread: a JSON
 /// canvas frame, or a binary media envelope (video/audio/opaque input).
@@ -107,6 +142,26 @@ struct State {
     shared_styles: String,
     // Pending get_snapshot/get_image replies, keyed by reqId.
     snapshot_cbs: HashMap<String, SnapHandler>,
+    // File transfer (PROTOCOL.md §file transfer). Downloads: token ->
+    // (filename, bytes, expiry) served on the hub's file_pull; not single-use
+    // (a HEAD+GET or a retry both work), purged by TTL. Uploads: stable
+    // endpoint token -> receiver. pending_pushes holds a file_push's meta
+    // until its FILE envelope lands (same socket, so ordering is guaranteed).
+    downloads: HashMap<String, (String, Vec<u8>, std::time::Instant)>,
+    uploads: HashMap<String, UploadHandler>,
+    pending_pushes: HashMap<String, Value>,
+    // Layout-cascade edges (Python's _below_deps/_right_of_deps): anchor id ->
+    // panels placed below/right_of it. When the anchor's height settles
+    // differently in the browser (auto-height content fitting), every
+    // dependent shifts down by the delta, recursively — so a below() chain
+    // stays a chain instead of overlapping.
+    y_deps: HashMap<String, Vec<String>>,
+    // Debounced cascade shifts: anchor id -> (accumulated dh, generation).
+    // A drag-resize streams a layout report per frame; shifting the whole
+    // chain on each one makes every dependent stutter down the canvas. The
+    // deltas accumulate here and apply in ONE shift once the resize has been
+    // quiet for a beat (a stale generation means a newer report superseded us).
+    casc_pending: HashMap<String, (f64, u64)>,
     // Local mirror of the whole canvas we joined (id -> entry). Eventually
     // consistent, folded from the hub's register/update stream.
     panels: HashMap<String, PanelEntry>,
@@ -136,6 +191,7 @@ struct Inner {
     dispatch: UnboundedSender<Inbound>, // inbound frames -> the handler thread
     connected: Arc<AtomicBool>,
     seq: std::sync::atomic::AtomicU64, // monotonic reqId source (snapshots)
+    started: std::time::Instant,       // for the inspector's uptime readouts
 }
 
 enum Out {
@@ -153,6 +209,23 @@ fn bin_frame(code: u8, id: &str, payload: &[u8]) -> Vec<u8> {
     v.extend_from_slice(idb);
     v.extend_from_slice(payload);
     v
+}
+
+/// An unguessable URL-safe token (24 random bytes, base64url) — the same
+/// entropy as the Python bridge's `secrets.token_urlsafe(24)`.
+fn mint_token() -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut raw = [0u8; 24];
+    getrandom::getrandom(&mut raw).expect("OS randomness");
+    let mut out = String::with_capacity(32);
+    for chunk in raw.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (chunk[1] as u32) << 8 | chunk[2] as u32;
+        for shift in [18, 12, 6, 0] {
+            out.push(ALPHABET[(n >> shift) as usize & 63] as char);
+        }
+    }
+    out
 }
 
 fn parse_bin(data: &[u8]) -> Option<(u8, String, Vec<u8>)> {
@@ -243,19 +316,34 @@ impl<'a> PanelBuilder<'a> {
         self
     }
     /// Register it on the canvas.
-    pub fn show(self) {
+    pub fn show(mut self) {
         let has_xy = self.place.contains_key("x") && self.place.contains_key("y");
         let new_w = self.place.get("w").and_then(Value::as_f64);
         let new_h = self.place.get("h").and_then(Value::as_f64);
         let rel = self.rel.clone();
         let id = self.id.clone();
         let client = self.client.clone();
+        // Relative placement is resolved BEFORE registering when the anchor's
+        // geometry is already known, so the register frame itself carries x/y —
+        // a positioned register never enters the browser's masonry flow, which
+        // would otherwise race (and win over) a position sent as a follow-up
+        // update. Python resolves `below=` at insert time for the same reason.
+        // An unpositioned anchor defers to its first layout report instead.
+        let mut deferred = None;
+        if let (Some((kind, anchor, gap)), false) = (rel, has_xy) {
+            client.record_y_dep(kind, &anchor, &id);
+            match client.resolve_relative(kind, &anchor, gap, new_w, new_h) {
+                Some((x, y)) => {
+                    self.place.insert("x".into(), json!(x));
+                    self.place.insert("y".into(), json!(y));
+                }
+                None => deferred = Some((kind, anchor, gap)),
+            }
+        }
         self.client.register_template_raw(&id, &self.kind, self.data,
                                           self.props, self.place, self.frame_color);
-        // Relative placement: resolve now if the anchor is positioned, else defer
-        // to its first layout report. Explicit x/y always wins.
-        if let (Some((kind, anchor, gap)), false) = (rel, has_xy) {
-            client.place_relative(id, kind, anchor, gap, new_w, new_h);
+        if let Some((kind, anchor, gap)) = deferred {
+            client.defer_relative(id, kind, anchor, gap, new_w, new_h);
         }
     }
 }
@@ -404,6 +492,7 @@ impl Client {
             dispatch: dtx,
             connected: connected.clone(),
             seq: std::sync::atomic::AtomicU64::new(0),
+            started: std::time::Instant::now(),
         });
         let client = Client { inner: inner.clone() };
 
@@ -550,32 +639,65 @@ impl Client {
         self.send(&json!({"type": "update", "id": id, "payload": {"x": x, "y": y}}));
     }
 
-    /// Resolve a relative placement: if the anchor already has a position (in the
-    /// mirror) place now, else defer to its first layout report (one-shot).
-    fn place_relative(&self, id: String, kind: &'static str, anchor: String,
-                      gap: f64, new_w: Option<f64>, new_h: Option<f64>) {
-        let compute = move |ax: f64, ay: f64, aw: f64, ah: f64| -> (f64, f64) {
-            match kind {
-                "above" => (ax, ay - gap - new_h.unwrap_or(0.0)),
-                "right_of" => (ax + aw + gap, ay),
-                "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
-                _ => (ax, ay + ah + gap), // below
-            }
+    /// A panel's geometry as this source knows it, merging (most recent first)
+    /// accumulated updates (set_layout / folded browser reports), the register
+    /// frame (top-level x/y, props w/h — template defaults included), and the
+    /// hub mirror (peers' panels). x/y may be unknown; w/h default to 0.
+    fn known_geom(&self, id: &str) -> (Option<f64>, Option<f64>, f64, f64) {
+        let st = self.inner.state.lock().unwrap();
+        let upd = st.updates.get(id);
+        let reg = st.registers.get(id);
+        let props = reg.and_then(|r| r.get("props")).and_then(Value::as_object);
+        let mirror = st.panels.get(id);
+        let get = |k: &str| {
+            upd.and_then(|u| u.get(k)).and_then(Value::as_f64)
+                .or_else(|| reg.and_then(|r| r.get(k)).and_then(Value::as_f64))
+                .or_else(|| props.and_then(|p| p.get(k)).and_then(Value::as_f64))
+                .or_else(|| mirror.and_then(|e| {
+                    e.state.get(k).and_then(Value::as_f64)
+                        .or_else(|| e.props.get(k).and_then(Value::as_f64))
+                }))
         };
-        // Already positioned? place immediately from the mirror.
-        if let Some(e) = self.panel_entry(&anchor) {
-            let g = |k: &str| e.props.get(k).and_then(Value::as_f64)
-                .or_else(|| e.state.get(k).and_then(Value::as_f64));
-            if let (Some(ax), Some(ay)) = (g("x"), g("y")) {
-                let (x, y) = compute(ax, ay, g("w").unwrap_or(0.0), g("h").unwrap_or(0.0));
-                self.set_layout(&id, x, y);
-                return;
-            }
+        (get("x"), get("y"), get("w").unwrap_or(0.0), get("h").unwrap_or(0.0))
+    }
+
+    /// Record the layout-cascade edge for a relative placement (mirrors Python
+    /// registering _below_deps whether or not placement was deferred).
+    fn record_y_dep(&self, kind: &str, anchor: &str, id: &str) {
+        if matches!(kind, "below" | "right_of") {
+            self.inner.state.lock().unwrap()
+                .y_deps.entry(anchor.into()).or_default().push(id.into());
         }
-        // Defer: one-shot on the anchor's first positioned layout report.
+    }
+
+    /// Resolve a relative placement against what this source already knows.
+    /// The anchor's geometry is looked up in local knowledge first (registers
+    /// carry the template's default size, placements fold as they go) — so a
+    /// whole `.below()` chain rooted at one positioned panel resolves
+    /// synchronously, browser or not — then the hub mirror (a peer's panel).
+    /// `None` when the anchor has no position anywhere yet.
+    fn resolve_relative(&self, kind: &str, anchor: &str, gap: f64,
+                        new_w: Option<f64>, new_h: Option<f64>)
+        -> Option<(f64, f64)>
+    {
+        let (ax, ay, aw, ah) = self.known_geom(anchor);
+        let (ax, ay) = (ax?, ay?);
+        Some(match kind {
+            "above" => (ax, ay - gap - new_h.unwrap_or(0.0)),
+            "right_of" => (ax + aw + gap, ay),
+            "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
+            _ => (ax, ay + ah + gap), // below
+        })
+    }
+
+    /// Deferred relative placement: one-shot on the anchor's first positioned
+    /// layout report (the panel joins the browser's masonry flow meanwhile,
+    /// exactly like the Python `below=` with an unpositioned anchor).
+    fn defer_relative(&self, id: String, kind: &'static str, anchor: String,
+                      gap: f64, new_w: Option<f64>, new_h: Option<f64>) {
         let client = self.clone();
         let done = std::sync::Arc::new(AtomicBool::new(false));
-        self.on_layout(&anchor, move |frame| {
+        self.on_layout(&anchor.clone(), move |frame| {
             if done.load(Ordering::SeqCst) { return; }
             let g = |k: &str| frame.get(k).and_then(Value::as_f64);
             let (ax, ay) = match (g("x"), g("y")) {
@@ -583,9 +705,28 @@ impl Client {
                 _ => return, // an h-only auto-height report: wait for x/y
             };
             done.store(true, Ordering::SeqCst);
-            let (x, y) = compute(ax, ay, g("w").unwrap_or(0.0), g("h").unwrap_or(0.0));
+            let (x, y) = match kind {
+                "above" => (ax, ay - gap - new_h.unwrap_or(0.0)),
+                "right_of" => (ax + g("w").unwrap_or(0.0) + gap, ay),
+                "left_of" => (ax - gap - new_w.unwrap_or(0.0), ay),
+                _ => (ax, ay + g("h").unwrap_or(0.0) + gap),
+            };
             client.set_layout(&id, x, y);
         });
+    }
+
+    /// Send one wire payload while folding a *different* payload into the
+    /// replay cache — for components whose wire form is a delta but whose
+    /// replayable state is a whole snapshot (LivePlot's `plot_extend` on the
+    /// wire vs the full `plot` figure a reconnecting client needs).
+    pub(crate) fn update_split(&self, id: &str, wire: Value,
+                               replay_key: &str, replay: Value) {
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            st.updates.entry(id.into()).or_default()
+                .insert(replay_key.into(), replay);
+        }
+        self.send(&json!({"type": "update", "id": id, "payload": wire}));
     }
 
     /// Withdraw a panel, shape, or arrow this source owns.
@@ -777,6 +918,71 @@ impl Client {
         self.send_media(4, id, data);
     }
 
+    // -- file transfer (downloads/uploads through the hub) ---------------------
+    /// Stash `data` under a fresh unguessable token and return the URL a
+    /// browser downloads it from (`/__download__/<token>`, saved as
+    /// `filename`). Valid ~5 minutes; when the hub asks (`file_pull`) this
+    /// client streams the bytes up — the twin of Python's
+    /// `canvas.serve_bytes`.
+    pub fn serve_bytes(&self, filename: &str, data: Vec<u8>) -> String {
+        let token = mint_token();
+        let mut st = self.inner.state.lock().unwrap();
+        let now = std::time::Instant::now();
+        st.downloads.retain(|_, (_, _, exp)| *exp > now);
+        st.downloads.insert(token.clone(),
+                            (filename.into(), data, now + DOWNLOAD_TTL));
+        format!("/__download__/{token}")
+    }
+
+    /// Answer a `download` panel's click: `f()` returns `(filename, bytes)`,
+    /// resolved fresh per click; the reply carries the minted one-off URL the
+    /// panel then fetches. The move that makes `panel(id, "download")` real:
+    ///
+    /// ```no_run
+    /// # use serde_json::json;
+    /// # let c = danvas_source::Client::connect("127.0.0.1:8000", "x").unwrap();
+    /// c.panel("dl", "download").set("text", json!("Export")).show();
+    /// c.on_download("dl", || ("data.csv".into(), b"a,b\n1,2\n".to_vec()));
+    /// ```
+    pub fn on_download<F>(&self, id: &str, f: F)
+    where F: Fn() -> (String, Vec<u8>) + Send + Sync + 'static {
+        let client = self.clone();
+        self.on_request(id, move |_req| {
+            let (filename, data) = f();
+            let url = client.serve_bytes(&filename, data);
+            json!({"url": url, "filename": filename})
+        });
+    }
+
+    /// Register a file-receiving endpoint: returns the URL a browser POSTs to
+    /// (`/__upload__/<token>`, stable for the client's lifetime); `f` fires
+    /// with each [`UploadedFile`]. The twin of Python's
+    /// `canvas.receive_files` — point an `upload` panel's `url` data field at
+    /// it, or use [`on_upload`](Self::on_upload) which wires both.
+    pub fn upload_endpoint<F>(&self, f: F) -> String
+    where F: Fn(&UploadedFile) + Send + Sync + 'static {
+        let token = mint_token();
+        self.inner.state.lock().unwrap()
+            .uploads.insert(token.clone(), std::sync::Arc::new(f));
+        format!("/__upload__/{token}")
+    }
+
+    /// Make an already-registered `upload` panel deliver its files to `f`:
+    /// mints an endpoint and patches it into the panel's `url` data field
+    /// (folded for replay). Call after the panel's `.show()`:
+    ///
+    /// ```no_run
+    /// # use serde_json::json;
+    /// # let c = danvas_source::Client::connect("127.0.0.1:8000", "x").unwrap();
+    /// c.panel("up", "upload").set("text", json!("Drop a file")).show();
+    /// c.on_upload("up", |file| println!("{} ({} bytes)", file.name, file.size));
+    /// ```
+    pub fn on_upload<F>(&self, id: &str, f: F)
+    where F: Fn(&UploadedFile) + Send + Sync + 'static {
+        let url = self.upload_endpoint(f);
+        self.update(id, "data_patch", json!({"url": url}));
+    }
+
     // -- managed shapes & arrows ---------------------------------------------
     /// A managed canvas shape: `shape(id,"geo").at(x,y).size(w,h).prop(..).show()`.
     /// Shape types: geo, text, note, draw, line, highlight, frame.
@@ -849,11 +1055,13 @@ impl Client {
     pub fn panels(&self) -> HashMap<String, PanelEntry> {
         self.inner.state.lock().unwrap().panels.clone()
     }
-    /// Build the row set an [`Inspector`](https://…) panel renders: one object per
-    /// panel this source has registered, in declaration order, with the columns
-    /// danvas's inspector expects (`name/label/type/value/visible/x/y/w/h`). Push
-    /// it with `update(ins_id, "data_patch", client.inspector_rows())` — the same
-    /// `data_patch` the Python Inspector sends on refresh.
+    /// Build the row set an Inspector panel renders: one object per panel this
+    /// source has registered, in declaration order, with the columns danvas's
+    /// inspector expects (`name/label/type/value/visible/x/y/w/h`). Push it
+    /// with `update(ins_id, "data_patch", client.inspector_rows())` — the same
+    /// `data_patch` the Python Inspector sends on refresh. Prefer
+    /// [`inspector`](Self::inspector), which wires the whole panel (views,
+    /// drill-down, trace) and refreshes itself.
     pub fn inspector_rows(&self) -> Value {
         let st = self.inner.state.lock().unwrap();
         let mut rows = Vec::new();
@@ -883,7 +1091,95 @@ impl Client {
                 "h": getp("h").unwrap_or(Value::Null), "locked": false,
             }));
         }
+        // Plain JSON: the inspector template parses rows tolerantly (string or
+        // array), so no double-encoding is needed.
         json!({ "rows": rows })
+    }
+
+    /// Seconds since this client connected (inspector uptime readouts).
+    pub(crate) fn uptime_secs(&self) -> f64 {
+        self.inner.started.elapsed().as_secs_f64()
+    }
+
+    /// The inspector's "canvas" view for a Rust source: this instance's weight
+    /// — what it contributes and what it can see — as name/type/value rows
+    /// (the Rust analogue of Python's RSS/panel-count view).
+    pub(crate) fn inspector_canvas_rows(&self) -> Vec<Value> {
+        let st = self.inner.state.lock().unwrap();
+        let replay_bytes: usize = st.registers.values()
+            .map(|v| v.to_string().len())
+            .chain(st.updates.values().map(|u| Value::Object(u.clone()).to_string().len()))
+            .sum();
+        let row = |name: &str, t: &str, value: String| {
+            json!({"key": name, "name": name, "type": t, "value": value})
+        };
+        vec![
+            row("source label", "str", self.inner.label.clone()),
+            row("connected", "bool", self.is_connected().to_string()),
+            row("uptime", "str", format!("{:.0} s", self.uptime_secs())),
+            row("panels (this source)", "int", st.registers.len().to_string()),
+            row("panels (canvas)", "int", st.panels.len().to_string()),
+            row("shapes", "int", st.shapes.len().to_string()),
+            row("arrows", "int", st.arrows.len().to_string()),
+            row("subscriptions", "int", st.subs.len().to_string()),
+            row("viewers", "int", st.viewers.len().to_string()),
+            row("replay cache", "str", format!("{:.1} KB", replay_bytes as f64 / 1024.0)),
+        ]
+    }
+
+    /// The inspector's "system" view for a Rust source: what the standard
+    /// library can tell about the host (Python's psutil-backed CPU/RAM/GPU
+    /// telemetry has no dependency-free Rust equivalent — say so in-table
+    /// rather than showing an empty view).
+    pub(crate) fn inspector_system_rows(&self) -> Vec<Value> {
+        let row = |name: &str, t: &str, value: String| {
+            json!({"key": name, "name": name, "type": t, "value": value})
+        };
+        vec![
+            row("os", "str", std::env::consts::OS.into()),
+            row("arch", "str", std::env::consts::ARCH.into()),
+            row("pid", "int", std::process::id().to_string()),
+            row("cpus", "int", std::thread::available_parallelism()
+                .map(|n| n.get().to_string()).unwrap_or_else(|_| "?".into())),
+            row("process uptime", "str", format!("{:.0} s", self.uptime_secs())),
+            row("host telemetry", "str",
+                "CPU/RAM/GPU readouts need a Python source (psutil)".into()),
+        ]
+    }
+
+    /// Drill-down detail for a panel this source registered: its register
+    /// frame as `repr`, its props + accumulated state as the field table.
+    pub(crate) fn inspector_detail(&self, key: &str) -> Option<Value> {
+        let st = self.inner.state.lock().unwrap();
+        let reg = st.registers.get(key)?;
+        let vtype = |v: &Value| match v {
+            Value::Null => "null", Value::Bool(_) => "bool",
+            Value::Number(_) => "number", Value::String(_) => "str",
+            Value::Array(_) => "list", Value::Object(_) => "dict",
+        };
+        let clip = |s: String| if s.len() > 120 {
+            format!("{}…", s.chars().take(119).collect::<String>())
+        } else { s };
+        let mut fields = Vec::new();
+        if let Some(props) = reg.get("props").and_then(Value::as_object) {
+            for (k, v) in props {
+                fields.push(json!({"field": format!("props.{k}"),
+                                   "type": vtype(v), "value": clip(v.to_string())}));
+            }
+        }
+        if let Some(upd) = st.updates.get(key) {
+            for (k, v) in upd {
+                fields.push(json!({"field": format!("state.{k}"),
+                                   "type": vtype(v), "value": clip(v.to_string())}));
+            }
+        }
+        let component = reg.get("component").and_then(Value::as_str).unwrap_or("React");
+        let mut repr = reg.to_string();
+        if repr.len() > 300 {
+            repr = format!("{}…", repr.chars().take(299).collect::<String>());
+        }
+        Some(json!({"key": key, "type": component, "repr": repr,
+                    "fields": fields}))
     }
     /// True while the socket is up.
     pub fn is_connected(&self) -> bool {
@@ -922,12 +1218,51 @@ impl Client {
         }
     }
 
-    /// A binary media envelope from the hub: opaque input a browser sent to one
-    /// of this source's panels (camera/mic/sendBinary) → its `on_binary`.
-    fn handle_binary(&self, _code: u8, id: &str, data: &[u8]) {
+    /// A binary media envelope from the hub: FILE (code 6) completes a pending
+    /// upload push (the envelope id is its reqId); everything else is opaque
+    /// input a browser sent to one of this source's panels
+    /// (camera/mic/sendBinary) → its `on_binary`.
+    fn handle_binary(&self, code: u8, id: &str, data: &[u8]) {
+        if code == 6 {
+            self.handle_file_bytes(id, data);
+            return;
+        }
         let hs: Vec<BinHandler> = self.inner.state.lock().unwrap()
             .on_binary.get(id).cloned().unwrap_or_default();
         for h in &hs { h(data); }
+    }
+
+    /// The FILE bytes of a `file_push` broadcast: deliver to the endpoint that
+    /// owns the token and ack, or decline (`ok: false`) — every source answers
+    /// every push, so the hub's HTTP reply never has to wait out its timeout.
+    fn handle_file_bytes(&self, req: &str, data: &[u8]) {
+        let push = self.inner.state.lock().unwrap().pending_pushes.remove(req);
+        let Some(push) = push else { return };
+        let token = push.get("token").and_then(Value::as_str).unwrap_or("");
+        let handler = self.inner.state.lock().unwrap().uploads.get(token).cloned();
+        let Some(handler) = handler else {
+            self.send(&json!({"type": "file_ack", "reqId": req, "ok": false}));
+            return;
+        };
+        // The hub basenames the filename already; strip separators again anyway.
+        let name = push.get("name").and_then(Value::as_str)
+            .and_then(|n| n.rsplit(['/', '\\']).next())
+            .filter(|n| !n.is_empty())
+            .unwrap_or("upload.bin")
+            .to_string();
+        let file = UploadedFile {
+            name: name.clone(),
+            size: data.len(),
+            content_type: push.get("content_type").and_then(Value::as_str)
+                .unwrap_or("application/octet-stream").into(),
+            data: data.to_vec(),
+        };
+        // A panicking receiver must not swallow the ack (the browser's POST
+        // would hang out its 15 s) — deliver, then ack regardless.
+        let _ = std::panic::catch_unwind(
+            std::panic::AssertUnwindSafe(|| handler(&file)));
+        self.send(&json!({"type": "file_ack", "reqId": req, "ok": true,
+                          "name": name, "size": data.len()}));
     }
 
     /// Route one inbound frame: taps see all; input/layout hit their handlers;
@@ -947,12 +1282,84 @@ impl Client {
                 for h in &hs { h(&payload); }
             }
             "layout" => {
+                // Fold a browser's move/resize of one of OUR panels into the
+                // accumulated updates, so hand-arranged layouts survive a
+                // reconnect (Python's _store_base_layout), and cascade a
+                // height settling (auto-height content fitting) through the
+                // below/right_of chain (Python's _cascade_height) — debounced,
+                // so a drag-resize shifts the chain once at the end, not per
+                // pointer-move frame.
+                let mut debounce_gen = None;
+                {
+                    let mut st = self.inner.state.lock().unwrap();
+                    if st.registers.contains_key(&id) {
+                        let old_h = st.updates.get(&id)
+                            .and_then(|u| u.get("h")).and_then(Value::as_f64)
+                            .or_else(|| st.registers.get(&id)
+                                .and_then(|r| r.get("props"))
+                                .and_then(|p| p.get("h"))
+                                .and_then(Value::as_f64));
+                        let new_h = msg.get("h").and_then(Value::as_f64);
+                        let e = st.updates.entry(id.clone()).or_default();
+                        for k in ["x", "y", "w", "h", "rotation"] {
+                            if let Some(v) = msg.get(k).filter(|v| v.is_number()) {
+                                e.insert(k.into(), v.clone());
+                            }
+                        }
+                        if let (Some(old), Some(new)) = (old_h, new_h) {
+                            let dh = new - old;
+                            if dh.abs() > 0.5 {
+                                let entry = st.casc_pending
+                                    .entry(id.clone()).or_insert((0.0, 0));
+                                entry.0 += dh;
+                                entry.1 += 1;
+                                debounce_gen = Some(entry.1);
+                            }
+                        }
+                    }
+                }
+                if let Some(gen) = debounce_gen {
+                    let client = self.clone();
+                    let anchor = id.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(
+                            std::time::Duration::from_millis(180));
+                        let mut shifts: Vec<(String, f64)> = Vec::new();
+                        {
+                            let mut st = client.inner.state.lock().unwrap();
+                            match st.casc_pending.get(&anchor) {
+                                // Still the latest report? Apply the whole
+                                // accumulated shift in one go.
+                                Some(&(dh, g)) if g == gen => {
+                                    st.casc_pending.remove(&anchor);
+                                    collect_y_shifts(&mut st, &anchor, dh,
+                                                     &mut shifts);
+                                }
+                                _ => return, // superseded by a newer report
+                            }
+                        }
+                        for (dep, new_y) in shifts {
+                            client.send(&json!({"type": "update", "id": dep,
+                                                "payload": {"y": new_y}}));
+                        }
+                    });
+                }
                 let hs: Vec<Handler> = self.inner.state.lock().unwrap()
                     .on_layout.get(&id).cloned().unwrap_or_default();
                 for h in &hs { h(msg); }
             }
             "register" => {
                 let mut st = self.inner.state.lock().unwrap();
+                // Fold the frame's top-level geometry into the entry's state so
+                // known_geom / find-and-place work on peers' panels (source.py
+                // keeps x/y/w/h the same way; a hub folds layout into the
+                // register it replays).
+                let mut state = Map::new();
+                for k in ["x", "y", "w", "h"] {
+                    if let Some(v) = msg.get(k) {
+                        state.insert(k.into(), v.clone());
+                    }
+                }
                 let entry = PanelEntry {
                     component: msg.get("component").and_then(Value::as_str)
                         .unwrap_or("").into(),
@@ -960,7 +1367,7 @@ impl Client {
                     owner: msg.get("owner").and_then(Value::as_str).map(String::from),
                     props: msg.get("props").and_then(Value::as_object).cloned()
                         .unwrap_or_default(),
-                    state: Map::new(),
+                    state,
                 };
                 st.panels.insert(id, entry);
             }
@@ -1010,6 +1417,39 @@ impl Client {
                     self.inner.state.lock().unwrap().on_draw.clone();
                 for h in &hs { h(msg); }
             }
+            "file_pull" => {
+                // The hub asks for a download token's bytes on a browser's
+                // behalf (broadcast — tokens are opaque): stream file_meta +
+                // a FILE envelope if the token is ours, else decline.
+                let req = msg.get("reqId").and_then(Value::as_str)
+                    .unwrap_or("").to_string();
+                let token = msg.get("token").and_then(Value::as_str).unwrap_or("");
+                let item = {
+                    let mut st = self.inner.state.lock().unwrap();
+                    let now = std::time::Instant::now();
+                    st.downloads.retain(|_, (_, _, exp)| *exp > now);
+                    st.downloads.get(token)
+                        .map(|(f, d, _)| (f.clone(), d.clone()))
+                };
+                match item {
+                    Some((filename, data)) => {
+                        self.send(&json!({"type": "file_meta", "reqId": req,
+                                          "ok": true, "filename": filename}));
+                        let _ = self.inner.tx.send(
+                            Out::Binary(bin_frame(6, &req, &data)));
+                    }
+                    None => self.send(&json!({"type": "file_meta",
+                                              "reqId": req, "ok": false})),
+                }
+            }
+            "file_push" => {
+                // An upload's meta: its FILE bytes follow on this socket —
+                // stash until they land (handle_file_bytes pairs by reqId).
+                if let Some(req) = msg.get("reqId").and_then(Value::as_str) {
+                    self.inner.state.lock().unwrap()
+                        .pending_pushes.insert(req.into(), msg.clone());
+                }
+            }
             "snapshot" | "image" => {
                 // A browser's reply to our get_snapshot/get_image: fire the
                 // callback registered under this reqId (once).
@@ -1049,6 +1489,26 @@ impl Client {
             out.push(json!({"type": "subscribe", "id": id}).to_string());
         }
         out
+    }
+}
+
+/// Shift `anchor`'s below/right_of dependents by `dh`, recursively, folding
+/// each dependent's new y into the replay state and collecting the frames to
+/// send (caller sends outside the lock). The Rust `_cascade_height`.
+fn collect_y_shifts(st: &mut State, anchor: &str, dh: f64,
+                    out: &mut Vec<(String, f64)>) {
+    let deps: Vec<String> = st.y_deps.get(anchor).cloned().unwrap_or_default();
+    for dep in deps {
+        if out.iter().any(|(d, _)| d == &dep) { continue; } // cycle guard
+        let y = st.updates.get(&dep)
+            .and_then(|u| u.get("y")).and_then(Value::as_f64)
+            .or_else(|| st.registers.get(&dep)
+                .and_then(|r| r.get("y")).and_then(Value::as_f64));
+        let Some(y) = y else { continue };
+        let new_y = y + dh;
+        st.updates.entry(dep.clone()).or_default().insert("y".into(), json!(new_y));
+        out.push((dep.clone(), new_y));
+        collect_y_shifts(st, &dep, dh, out);
     }
 }
 
