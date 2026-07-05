@@ -158,6 +158,7 @@ function enablePinch(el: HTMLElement): () => void {
 function enableRightDragPan(el: HTMLElement): () => void {
   let panning = false
   let moved = 0
+  let suppressMenuUntil = 0
   let lastX = 0
   let lastY = 0
   // A scroll-mode touch scroll is DEFERRED: we record the press but don't grab the
@@ -299,6 +300,23 @@ function enableRightDragPan(el: HTMLElement): () => void {
   el.addEventListener('pointercancel', onUp, true)
   el.addEventListener('contextmenu', onContextMenu, true)
   el.addEventListener('touchmove', onTouchMove, { passive: false })
+  // A right-drag pan can END over the UI overlays (toolbar, style panel, the
+  // bottom-left actions), which live outside this container — and the
+  // `contextmenu` MouseEvent does NOT follow pointer capture, so it fires on
+  // the overlay and the BROWSER menu appears. Swallow the single menu event
+  // that follows a right-drag, wherever it lands.
+  const onWindowUp = (e: PointerEvent) => {
+    if (e.button === 2 && moved > 4) suppressMenuUntil = Date.now() + 250
+  }
+  const onWindowContextMenu = (e: MouseEvent) => {
+    if (Date.now() < suppressMenuUntil) {
+      suppressMenuUntil = 0
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }
+  window.addEventListener('pointerup', onWindowUp, true)
+  window.addEventListener('contextmenu', onWindowContextMenu, true)
   return () => {
     el.removeEventListener('pointerdown', onDown, true)
     el.removeEventListener('pointerdown', onDownDismiss)
@@ -307,6 +325,8 @@ function enableRightDragPan(el: HTMLElement): () => void {
     el.removeEventListener('pointercancel', onUp, true)
     el.removeEventListener('contextmenu', onContextMenu, true)
     el.removeEventListener('touchmove', onTouchMove)
+    window.removeEventListener('pointerup', onWindowUp, true)
+    window.removeEventListener('contextmenu', onWindowContextMenu, true)
   }
 }
 
