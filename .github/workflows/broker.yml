@@ -56,6 +56,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"   # the zero-dep Node SDK target needs >=22
+
       - name: Build danvasd (release)
         working-directory: broker
         run: |
@@ -125,6 +129,49 @@ jobs:
             broker/target/release/${{ matrix.exe }}
             dist/*.whl
 
+  build-aarch64:
+    # Linux aarch64 (Raspberry Pi / Jetson — the hardware-control audience):
+    # cross-compile a static musl danvasd and package the manylinux2014_aarch64
+    # wheel. Build-only — the binary can't execute on this x86 runner, and the
+    # broker's behaviour is already conformance-tested natively on three OSes.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - name: aarch64 cross toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build danvasd (release, aarch64 musl static)
+        working-directory: broker
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-musl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the offline wheel (binary bundled)
+        run: |
+          python -m pip install --upgrade pip build wheel
+          mkdir -p danvas/_bin
+          cp broker/target/aarch64-unknown-linux-musl/release/danvasd danvas/_bin/
+          python -m build --wheel
+          # setup.py tags by the BUILD host (py3-none-linux_x86_64 here);
+          # relabel to the binary's real platform. musl static -> broad
+          # manylinux compatibility on Pis/Jetsons.
+          python -m wheel tags --remove             --platform-tag manylinux2014_aarch64 dist/*linux_x86_64.whl
+          ls dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: danvasd-linux-aarch64
+          path: |
+            broker/target/aarch64-unknown-linux-musl/release/danvasd
+            dist/*.whl
+
   python-compat:
     # The wheels claim >=3.9; prove the package actually imports and its suite
     # passes on the floor (3.9) and a fresh ceiling (3.13), not just 3.12.
@@ -148,7 +195,7 @@ jobs:
     # Tag v* -> the binaries become a GitHub release: what a user on any OS
     # points $DANVASD at (or drops on PATH) so serve()'s broker default works.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-and-conform
+    needs: [build-and-conform, build-aarch64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -168,6 +215,7 @@ jobs:
           cp dist/danvasd-windows-x86_64/broker/target/release/danvasd.exe out/danvasd-windows-x86_64.exe
           cp dist/danvasd-linux-x86_64/broker/target/release/danvasd out/danvasd-linux-x86_64
           cp dist/danvasd-macos-arm64/broker/target/release/danvasd out/danvasd-macos-arm64
+          cp dist/danvasd-linux-aarch64/broker/target/aarch64-unknown-linux-musl/release/danvasd out/danvasd-linux-aarch64
           find dist -name '*.whl' -exec cp {} out/ \;
           # a pure py3-none-any wheel (no binary) for every other platform
           pip install build

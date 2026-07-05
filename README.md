@@ -772,6 +772,12 @@ restores them without a restart (Python kept them alive). Override with
 
 ## Roles: one rule for everything per-viewer
 
+> **Trust model in one line:** everyone admitted to a canvas (password/LAN/
+> tunnel) can put live UI — including JSX that runs in every viewer's browser
+> — on it and edit any panel; admission is the security boundary, roles
+> attenuate visibility and operability within it. [SECURITY.md](SECURITY.md)
+> has the full model.
+
 Pass `serve(passwords={role: pw})` and each viewer logs in as a **role**. Everyone
 renders the same canvas, but you layer **per-viewer overrides** on top. One rule:
 

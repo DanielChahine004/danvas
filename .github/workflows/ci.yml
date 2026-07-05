@@ -20,7 +20,10 @@ jobs:
       - name: Install package + test deps
         run: |
           python -m pip install --upgrade pip
-          pip install . numpy plotly pytest httpx
+          # [hub] gives test_conformance.py its python-hub-under-test; the
+          # danvasd-dependent suites (sdk conformance, broker replay, browser
+          # smoke) skip themselves here and run in broker.yml instead.
+          pip install .[hub] numpy plotly pytest httpx
       - name: Run tests
         run: pytest -q
 

@@ -69,8 +69,18 @@ def _rust_target():
 
 
 def _node():
+    """A node >= 22 (the zero-dep SDK rides Node's own WebSocket), or None."""
     import shutil
-    return shutil.which("node")
+    node = shutil.which("node")
+    if not node:
+        return None
+    try:
+        out = subprocess.check_output([node, "--version"], text=True).strip()
+        if int(out.lstrip("v").split(".")[0]) < 22:
+            return None
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return None
+    return node
 
 
 def _sdk_cmds():
