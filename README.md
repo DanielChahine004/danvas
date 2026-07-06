@@ -31,6 +31,7 @@ extras:
 | `pip install "danvas[audio]"` | microphone capture for `AudioFeed` |
 | `pip install "danvas[tunnel]"` | public sharing (`serve(tunnel=True)`) |
 | `pip install "danvas[desktop]"` | native window + `bake()` to a standalone app |
+| `pip install "danvas[serial]"` | `python -m danvas.serial COM3` — wire a no-network device (Arduino/UART) onto a canvas |
 | `pip install "danvas[hub]"` | run the Python reference hub `python -m danvas.merge` (FastAPI/uvicorn) |
 
 `canvas.video(...)` needs `[video]` for default encoding — or stream
@@ -1068,7 +1069,10 @@ SDK in a new language means reading two documents —
 `DANVAS_SDK_CMD="./my_target|{port}" pytest tests/test_sdk_conformance.py`.
 The Node SDK was written exactly that way, from the docs alone, and passed on
 its first run; [docs/sdk-authoring.md](docs/sdk-authoring.md) is the
-step-by-step guide.)
+step-by-step guide. Devices with no network at all — an Arduino on USB — join
+through the shipped serial bridge: the board prints newline-delimited frames,
+`python -m danvas.serial COM3` carries the WebSocket/replay/heartbeat duties;
+see [examples/arduino_serial/](examples/arduino_serial/).)
 
 **Native panels from any language** — the built-in panels' register shapes
 (the React source + data defaults the frontend mounts) ship as a

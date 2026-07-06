@@ -80,6 +80,10 @@ video = ["opencv-python>=4.8"]
 # common sounddevice path does); sounddevice captures the microphone in the
 # examples. The browser plays the streamed PCM through the Web Audio API.
 audio = ["numpy>=1.24", "sounddevice>=0.4"]
+
+# `python -m danvas.serial COM3`: bridge a wired (UART/USB-serial) device
+# onto a canvas as a dial-in source.
+serial = ["pyserial>=3.5"]
 # Packaging a canvas into a standalone desktop app (Canvas.bake / python -m
 # danvas.bake). pywebview shows the canvas in a native window; PyInstaller
 # bundles everything into a self-contained executable.
