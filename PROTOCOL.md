@@ -261,6 +261,13 @@ its code and state live, but who listens is a live, shared fact.
 
 ## Writing a non-Python client (the polyglot subset)
 
+**The entry-point convention:** a danvas program's default move is to OWN its
+canvas — the SDK's primary entry (`serve(port)`) finds/spawns `danvasd` on the
+port, or attaches to a hub already serving it (so two programs pointed at the
+same port compose on one canvas), then dials in and opens the browser when it
+spawned. Dial-only (`connect(url)`) is the explicit opt-out for joining a
+canvas served elsewhere. All three SDKs follow this shape.
+
 A minimal *source* SDK needs only:
 
 1. Dial in as above (a plain WebSocket client — no server required): emit

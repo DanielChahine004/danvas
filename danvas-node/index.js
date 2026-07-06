@@ -14,9 +14,11 @@
 //   c.onInput('temp', (p) => console.log('browser set', p.value))
 //   setInterval(() => c.update('temp', 'post', readSensor()), 500)
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { spawn as spawnProcess, exec } from 'node:child_process'
+import { createConnection } from 'node:net'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HEARTBEAT_MS = 10_000  // hubs reap connections silent for ~30 s
@@ -433,7 +435,88 @@ export class Client {
   }
 }
 
-/** Dial into a canvas as a source; resolves once the first connection is up. */
+/** Dial into a canvas as a source; resolves once the first connection is up.
+ * This is the OPT-OUT of self-serving: use it when a hub is already being
+ * served elsewhere (another process, another machine). The default entry
+ * point for a danvas program is [serve]. */
 export function connect(url, label = 'source') {
   return new Client(url, label).connect()
+}
+
+// -- self-contained serving (the default entry point) ---------------------------
+// The danvas SDK convention: a program's default move is to OWN its canvas —
+// find/spawn danvasd on the port (or attach to one already serving it),
+// dial in, open the browser. Dial-only (`connect`) is the explicit opt-out.
+
+function findDanvasd() {
+  const exe = process.platform === 'win32' ? 'danvasd.exe' : 'danvasd'
+  const env = process.env.DANVASD
+  if (env && existsSync(env)) return env
+  for (const dir of (process.env.PATH || '').split(delimiter)) {
+    if (dir && existsSync(join(dir, exe))) return join(dir, exe)
+  }
+  const here = dirname(fileURLToPath(import.meta.url))
+  for (const rel of ['../broker/target/release', '../broker/target/debug']) {
+    const p = join(here, rel, exe)
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
+function portOpen(port) {
+  return new Promise((resolve) => {
+    const s = createConnection({ host: '127.0.0.1', port, timeout: 300 })
+    s.once('connect', () => { s.destroy(); resolve(true) })
+    s.once('error', () => resolve(false))
+    s.once('timeout', () => { s.destroy(); resolve(false) })
+  })
+}
+
+function openBrowser(url) {
+  const cmd = process.platform === 'win32' ? `start "" "${url}"`
+    : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`
+  exec(cmd, () => {})
+}
+
+/**
+ * Serve a canvas from this process alone (the default entry point): spawn
+ * `danvasd` on `port` — or attach to one already serving it — dial in as
+ * `label`, and open the browser (when we spawned). The broker child dies
+ * with this process. `opts`: `host` ('127.0.0.1'; '0.0.0.0' for LAN),
+ * `openBrowser` (default true when spawning).
+ *
+ * Resolves to the connected [Client]; `client.broker` is the danvasd child
+ * process (or null when attached to an existing hub).
+ */
+export async function serve(port = 8000, label = 'source', opts = {}) {
+  const host = opts.host || '127.0.0.1'
+  let broker = null
+  if (!(await portOpen(port))) {
+    const binary = findDanvasd()
+    if (!binary) {
+      throw new Error([
+        'danvasd (the serving binary) was not found. Fix by one of:',
+        '  - point $DANVASD at a danvasd binary',
+        '  - put danvasd on $PATH',
+        '  - build it from a checkout: cargo build --release --manifest-path broker/Cargo.toml',
+        '(or dial into an already-served canvas with connect())',
+      ].join('\n'))
+    }
+    broker = spawnProcess(binary, ['--port', String(port), '--host', host],
+                          { stdio: 'ignore' })
+    const kill = () => { try { broker.kill() } catch { /* gone */ } }
+    process.on('exit', kill)
+    const deadline = Date.now() + 15_000
+    while (!(await portOpen(port))) {
+      if (broker.exitCode !== null) throw new Error('danvasd exited on startup')
+      if (Date.now() > deadline) { kill(); throw new Error('danvasd never opened its port') }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  const client = await new Client(`127.0.0.1:${port}`, label).connect()
+  client.broker = broker
+  if (broker && opts.openBrowser !== false) {
+    openBrowser(`http://127.0.0.1:${port}`)
+  }
+  return client
 }

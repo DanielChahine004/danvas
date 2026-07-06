@@ -82,13 +82,24 @@ impl Drop for Broker {
     }
 }
 
-/// Serve a canvas from this process alone: spawn `danvasd` on `port`, dial in
-/// as `label`, and open the browser. Returns the broker handle (keep it alive
-/// — dropping it stops the server) and the connected [`Client`].
+/// Serve a canvas from this process alone — the DEFAULT entry point of a
+/// danvas program (dial-only [`Client::connect`] is the explicit opt-out):
+/// spawn `danvasd` on `port`, or ATTACH to one already serving it (so two
+/// danvas programs pointed at the same port compose on one canvas), dial in
+/// as `label`, and open the browser (only when we spawned). Returns the
+/// broker handle (keep it alive — dropping it stops a spawned server; an
+/// attached one is not ours to stop) and the connected [`Client`].
 pub fn serve(port: u16, label: &str) -> Result<(Broker, Client), String> {
-    let broker = Broker::spawn(port)?;
+    let attached = std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
+    let broker = if attached {
+        Broker { child: None, port, host: "127.0.0.1".into() }
+    } else {
+        Broker::spawn(port)?
+    };
     let client = Client::connect(&format!("127.0.0.1:{port}"), label)?;
-    broker.open_browser();
+    if !attached {
+        broker.open_browser();
+    }
     Ok((broker, client))
 }
 

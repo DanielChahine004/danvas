@@ -6,9 +6,12 @@ do, serve downloads and receive uploads. Zero dependencies: Node ≥ 22's own
 WebSocket is the transport, and the event loop is the ordered dispatcher.
 
 ```js
-import { connect } from 'danvas-node'
+import { serve } from 'danvas-node'
 
-const c = await connect('127.0.0.1:8000', 'telemetry')
+// The default move: own the canvas — spawn danvasd on the port (or attach to
+// one already serving it), dial in, open the browser. Use connect(url) when
+// the canvas is served elsewhere.
+const c = await serve(8000, 'telemetry')
 c.registerTemplate('temp', 'slider', {
   data: { min: 0, max: 100, value: 20 }, x: 40, y: 40,
 })

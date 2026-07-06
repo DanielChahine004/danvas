@@ -1,17 +1,19 @@
-// A danvas canvas from Node — the hello-world of danvas-node. Start a hub
-// (danvasd) and dial in:
+// A danvas canvas from Node — the hello-world of danvas-node. Self-contained
+// by default (spawns danvasd — or attaches to one already on the port — and
+// opens the browser):
 //
-//   danvasd --port 8000            # or: any Python canvas.serve()
-//   node danvas-node/example.js 8000
+//   node danvas-node/example.js            # serves itself on :8000
+//   node danvas-node/example.js 8123       # or dial an existing hub only
 //
 // A slider drives a label from a Node handler; a button asks Node for the
 // time; a live plot streams a sine wave. Panels chain below one another via
 // the register frame's `rel` (the hub's frontend places and re-settles them).
 
-import { connect } from './index.js'
+import { connect, serve } from './index.js'
 
-const port = process.argv[2] || '8000'
-const c = await connect(`127.0.0.1:${port}`, 'node-demo')
+const port = process.argv[2]
+const c = port ? await connect(`127.0.0.1:${port}`, 'node-demo')
+               : await serve(8000, 'node-demo')
 
 c.registerTemplate('title', 'label', {
   data: { text: 'Hello from Node.js' }, x: 80, y: 80,
@@ -46,4 +48,4 @@ setInterval(() => {
   c.update('wave', 'plot', fig)
 }, 100)
 
-console.log(`node demo live — open http://127.0.0.1:${port}`)
+console.log(`node demo live — http://127.0.0.1:${port || 8000}`)
