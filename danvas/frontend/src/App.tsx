@@ -9,7 +9,7 @@ import { Toolbar } from './react/Toolbar'
 import { StylePanel } from './react/StylePanel'
 import { TextEditor } from './react/TextEditor'
 import { ContextMenu } from './react/ContextMenu'
-import { connect, subscribePresence, subscribeViewConfig, _debug } from './bridge'
+import { connect, subscribeRoster, subscribeViewConfig, _debug } from './bridge'
 import { editor } from './engine/editor'
 import { store } from './engine/store'
 import * as camera from './engine/camera'
@@ -72,9 +72,13 @@ export function App() {
 // A small live-viewer badge floated over the canvas (port of App.jsx). Colours
 // are self-contained (it sits outside .tl-container, so --pc-* wouldn't resolve).
 function PresenceBadge() {
-  const [count, setCount] = useState(0)
-  useEffect(() => subscribePresence(setCount), [])
-  if (count < 1) return null
+  // Humans and programs are both roster peers, but the headline number is
+  // people: a solo user whose own script is peer #2 must read "1 viewer".
+  const [roster, setRosterState] = useState<any[]>([])
+  useEffect(() => subscribeRoster(setRosterState), [])
+  const processes = roster.filter((v) => v.device === 'process').length
+  const count = roster.length - processes
+  if (count + processes < 1) return null
   return (
     <div
       style={{
@@ -110,6 +114,11 @@ function PresenceBadge() {
         }}
       />
       {count} {count === 1 ? 'viewer' : 'viewers'}
+      {processes > 0 && (
+        <span style={{ color: 'var(--ui-fg-muted, #888)', fontWeight: 500 }}>
+          {' '}· {processes} {processes === 1 ? 'process' : 'processes'}
+        </span>
+      )}
     </div>
   )
 }

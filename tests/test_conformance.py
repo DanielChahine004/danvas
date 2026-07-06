@@ -381,6 +381,23 @@ def test_serves_the_frontend(hub):
     assert "<html" in body.lower()
 
 
+def test_sources_join_the_roster_as_processes(hub):
+    # Programs are roster-visible peers, but their presence entry MUST carry
+    # device == "process" so UIs can count humans separately (a solo user
+    # whose own script is peer #2 must not read "2 viewers").
+    async def go():
+        async with _source(hub, "rig") as s_ws, _browser(hub) as b_ws:
+            src, b = Peer(s_ws), Peer(b_ws)
+            await src.recv_until(lambda m: m.get("type") == "welcome")
+            m = await b.recv_until(
+                lambda m: m.get("type") == "presence"
+                and any(v.get("device") == "process"
+                        for v in m.get("viewers", [])))
+            humans = [v for v in m["viewers"] if v.get("device") != "process"]
+            assert len(humans) >= 1, m   # this browser counts as a human
+    _run(go())
+
+
 def test_roster_lists_dialin_sources_live_then_offline(hub):
     async def go():
         sws = await _source(hub, "c10")

@@ -1006,7 +1006,11 @@ class Bridge:
         # Classify the connecting device from the handshake User-Agent (no client
         # cooperation needed) so a handler can adapt the layout to mobile.
         headers = getattr(ws, "headers", {})
-        device = _device_from_ua(headers.get("user-agent"))
+        # A process peer is roster-visible by design, but marked so the UI
+        # counts humans separately (the badge must not say "2 viewers" to a
+        # solo user whose own program is peer #2).
+        device = ("process" if qp.get("source")
+                  else _device_from_ua(headers.get("user-agent")))
         viewer = self._make_viewer(role=role, requested=requested, device=device)
         self._viewers[ws] = viewer
         self._broadcast_roster()  # tell everyone a viewer joined

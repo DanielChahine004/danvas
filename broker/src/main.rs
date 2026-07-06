@@ -1160,7 +1160,12 @@ async fn handle(
         h.conns.insert(conn_id, tx.clone());
         h.viewers.insert(conn_id, json!({
             "id": format!("v{conn_id}"), "name": display_name,
-            "color": color, "device": "desktop", "role": role.clone(),
+            // Programs on the canvas are roster-visible (that is the
+            // feature) but marked so the UI can count HUMANS separately —
+            // a solo user must not read "2 viewers".
+            "color": color,
+            "device": if is_source { "process" } else { "desktop" },
+            "role": role.clone(),
         }));
         let p = h.presence_frame().to_string();
         h.fanout_all(&p);
