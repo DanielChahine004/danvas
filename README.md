@@ -1071,8 +1071,10 @@ The Node SDK was written exactly that way, from the docs alone, and passed on
 its first run; [docs/sdk-authoring.md](docs/sdk-authoring.md) is the
 step-by-step guide. Devices with no network at all — an Arduino on USB — join
 through the shipped serial bridge: the board prints newline-delimited frames,
-`python -m danvas.serial COM3` carries the WebSocket/replay/heartbeat duties;
-see [examples/arduino_serial/](examples/arduino_serial/).)
+`python -m danvas.serial COM3` carries the WebSocket/replay/heartbeat duties
+(`--baud 9600` for slower links — default 115200, must match the firmware's
+`Serial.begin`; `--url host:port` to dial an existing hub instead of serving
+one); see [examples/arduino_serial/](examples/arduino_serial/).)
 
 **Native panels from any language** — the built-in panels' register shapes
 (the React source + data defaults the frontend mounts) ship as a
