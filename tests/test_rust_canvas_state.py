@@ -1,6 +1,6 @@
 """Phase 4 of the Rust SDK: canvas state.
 
-Spawns danvasd + the danvas-source `canvas_state` example and verifies, from a
+Spawns danvasd + the danvas-rust `canvas_state` example and verifies, from a
 browser: shared React assets (define/style), the camera baked into welcome
 (set_view), z-order, free-form ink reaching on_draw, and a get_snapshot round
 trip — all driven from Rust.
@@ -31,7 +31,7 @@ def _danvasd():
 def _state_exe():
     exe = "canvas_state.exe" if os.name == "nt" else "canvas_state"
     for prof in ("release", "debug"):
-        p = os.path.join(_ROOT, "danvas-source", "target", prof, "examples", exe)
+        p = os.path.join(_ROOT, "danvas-rust", "target", prof, "examples", exe)
         if os.path.exists(p):
             return p
     return None

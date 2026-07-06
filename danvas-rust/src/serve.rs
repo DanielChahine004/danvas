@@ -5,7 +5,7 @@
 //! just removes the "start danvasd by hand" step:
 //!
 //! ```no_run
-//! let (_broker, c) = danvas_source::serve(8000, "rig").unwrap();
+//! let (_broker, c) = danvas::serve(8000, "rig").unwrap();
 //! c.slider("servo", 0.0, 180.0, 90.0).show();
 //! std::thread::park();   // _broker must stay alive — dropping it stops danvasd
 //! ```

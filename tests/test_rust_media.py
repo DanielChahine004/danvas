@@ -1,6 +1,6 @@
 """Phase 1 of the Rust SDK: binary media over the wire, both directions.
 
-Spawns danvasd + the danvas-source `media` example (a Rust source that streams a
+Spawns danvasd + the danvas-rust `media` example (a Rust source that streams a
 native video panel and echoes any binary a browser sends). Verifies the binary
 envelope crosses the hub from Rust to the browser AND back — the protocol's
 media layer, driven from Rust.
@@ -31,7 +31,7 @@ def _danvasd():
 def _media_exe():
     exe = "media.exe" if os.name == "nt" else "media"
     for prof in ("release", "debug"):
-        p = os.path.join(_ROOT, "danvas-source", "target", prof, "examples", exe)
+        p = os.path.join(_ROOT, "danvas-rust", "target", prof, "examples", exe)
         if os.path.exists(p):
             return p
     return None

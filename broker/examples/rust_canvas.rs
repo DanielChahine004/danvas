@@ -14,7 +14,7 @@
 //!     # an already-running hub — danvasd OR a Python canvas — it just dials
 //!     # in and never touches the hub's lifetime.
 //!
-//! This is the seed of the `danvas-source` crate: connect, replay-on-
+//! This is the seed of the `danvas-rust` crate: connect, replay-on-
 //! reconnect, heartbeat, register_template, on_input — the whole dial-in
 //! role in ~150 lines (PROTOCOL.md §dial-in sources).
 

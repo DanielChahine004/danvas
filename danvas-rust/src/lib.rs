@@ -1,4 +1,4 @@
-//! # danvas-source — the Rust SDK for danvas
+//! # danvas-rust — the Rust SDK for danvas
 //!
 //! Dial into a running danvas canvas (any hub — `danvasd` or a Python
 //! `canvas.serve()`) **as a source**: register native panels, react to what
@@ -8,7 +8,7 @@
 //! a first-class peer on a shared canvas alongside Python or a browser.
 //!
 //! ```no_run
-//! use danvas_source::Client;
+//! use danvas::Client;
 //!
 //! let c = Client::connect("127.0.0.1:8080", "rig").unwrap();
 //! // a NATIVE slider from the shared template asset:
@@ -872,7 +872,7 @@ impl Client {
     ///
     /// ```no_run
     /// # use serde_json::json;
-    /// # let c = danvas_source::Client::connect("127.0.0.1:8000", "x").unwrap();
+    /// # let c = danvas::Client::connect("127.0.0.1:8000", "x").unwrap();
     /// c.panel("dl", "download").set("text", json!("Export")).show();
     /// c.on_download("dl", || ("data.csv".into(), b"a,b\n1,2\n".to_vec()));
     /// ```
@@ -905,7 +905,7 @@ impl Client {
     ///
     /// ```no_run
     /// # use serde_json::json;
-    /// # let c = danvas_source::Client::connect("127.0.0.1:8000", "x").unwrap();
+    /// # let c = danvas::Client::connect("127.0.0.1:8000", "x").unwrap();
     /// c.panel("up", "upload").set("text", json!("Drop a file")).show();
     /// c.on_upload("up", |file| println!("{} ({} bytes)", file.name, file.size));
     /// ```

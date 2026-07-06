@@ -1,5 +1,5 @@
 //! A Rust remake of examples/catalogue.py — one column showcasing every native
-//! danvas panel, authored from the danvas-source SDK the same way the Python
+//! danvas panel, authored from the danvas-rust SDK the same way the Python
 //! one is: `below()` chaining instead of hardcoded coordinates, the SDK's
 //! component feeds (histogram binning, live-plot extend deltas, sandboxed
 //! file browsing) instead of baked figures, and real downloads/uploads.
@@ -13,7 +13,7 @@
 //!     danvasd --host 0.0.0.0 --port 8200
 //!     cargo run --example catalogue -- 8200
 
-use danvas_source::Client;
+use danvas::Client;
 use serde_json::json;
 
 const IMAGE_SRC: &str = include_str!("assets/image_src.txt");
@@ -74,7 +74,7 @@ fn main() {
             (None, c)
         }
         None => {
-            let (b, c) = danvas_source::serve(8200, "catalogue-rust")
+            let (b, c) = danvas::serve(8200, "catalogue-rust")
                 .expect("spawn danvasd (build it or set $DANVASD)");
             println!("[rust] catalogue serving itself at {}", b.url());
             (Some(b), c)
@@ -167,7 +167,7 @@ fn main() {
     });
 
     // 11. Image — the matplotlib figure (a data-URL PNG; encode your own
-    //     bytes with danvas_source::data_url).
+    //     bytes with danvas::data_url).
     c.panel("img", "image").set("src", json!(IMAGE_SRC.trim()))
         .titled("Image").below("live").color(SKY).show();
 

@@ -6,14 +6,14 @@ A raw-frame probe plays the browser role and the Rust conformance target the
 owner role, all over loopback. Build both first:
 
     cargo build --release --manifest-path broker/Cargo.toml
-    cargo build --example conformance_target --manifest-path danvas-source/Cargo.toml
+    cargo build --example conformance_target --manifest-path danvas-rust/Cargo.toml
     python scripts/bench_wire.py
 """
 import asyncio, json, os, socket, statistics, subprocess, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BROKER = os.path.join(ROOT, "broker/target/release/danvasd.exe")
-RUST_T = os.path.join(ROOT, "danvas-source/target/debug/examples/conformance_target.exe")
+RUST_T = os.path.join(ROOT, "danvas-rust/target/debug/examples/conformance_target.exe")
 
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p

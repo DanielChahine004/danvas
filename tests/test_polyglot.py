@@ -1,6 +1,6 @@
 """Two languages, one canvas — the polyglot proof.
 
-danvasd (Rust broker) + a Python peer that owns a panel + the danvas-source
+danvasd (Rust broker) + a Python peer that owns a panel + the danvas-rust
 Rust SDK example, all on one canvas. Verifies the Rust process does the three
 things that make it a first-class peer, across the language line:
 
@@ -37,7 +37,7 @@ def _danvasd():
 def _rust_example():
     exe = "two_languages.exe" if os.name == "nt" else "two_languages"
     for prof in ("release", "debug"):
-        p = os.path.join(_ROOT, "danvas-source", "target", prof, "examples", exe)
+        p = os.path.join(_ROOT, "danvas-rust", "target", prof, "examples", exe)
         if os.path.exists(p):
             return p
     return None

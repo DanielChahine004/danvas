@@ -6,7 +6,7 @@ Spawned by tests/test_sdk_conformance.py as::
 
 It dials into an already-running danvasd and stands up the fixed behavior
 script every conformance target implements (the Rust twin is
-danvas-source/examples/conformance_target.rs). This one is deliberately the
+danvas-rust/examples/conformance_target.rs). This one is deliberately the
 *production* Python owner path — a full Canvas transplanted onto the broker by
 serve_via_broker(existing_port=...) — so the suite measures what a real
 `canvas.serve()` app does on the wire, not a purpose-built shim.

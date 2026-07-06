@@ -10,12 +10,12 @@ on:
     tags: ["v*"]
     paths:
       - "broker/**"
-      - "danvas-source/**"
+      - "danvas-rust/**"
       - "danvas/**"
       - "tests/**"
       - ".github/workflows/broker.yml"
   pull_request:
-    paths: ["broker/**", "danvas-source/**", "danvas/**", "tests/**"]
+    paths: ["broker/**", "danvas-rust/**", "danvas/**", "tests/**"]
   workflow_dispatch:
 
 jobs:
@@ -74,8 +74,8 @@ jobs:
         working-directory: broker
         run: cargo test --release
 
-      - name: Build the danvas-source Rust SDK + polyglot example
-        working-directory: danvas-source
+      - name: Build the danvas-rust Rust SDK + polyglot example
+        working-directory: danvas-rust
         run: |
           cargo build --release --examples
           cargo test --release
@@ -94,7 +94,7 @@ jobs:
           DANVAS_HUB_CMD="$BIN|--port|{port}|--password|{password}" \
             python -m pytest tests/test_conformance.py -q
 
-      - name: Rust SDK proof (danvasd + the danvas-source examples, all OSes)
+      - name: Rust SDK proof (danvasd + the danvas-rust examples, all OSes)
         run: python -m pytest tests/test_polyglot.py tests/test_rust_media.py tests/test_rust_shapes.py tests/test_rust_interact.py tests/test_rust_canvas_state.py -q
 
       - name: Full Python suite (Windows + Linux)

@@ -5,7 +5,7 @@
 //!     cargo build --example conformance_target
 //!     # then the suite spawns: target/debug/examples/conformance_target <port>
 
-use danvas_source::Client;
+use danvas::Client;
 use serde_json::json;
 
 fn main() {

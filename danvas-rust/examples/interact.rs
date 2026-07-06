@@ -6,7 +6,7 @@
 //! A browser can `await canvas.request({n})` the compute panel and get an answer
 //! from Rust; as viewers join, the Rust peer posts the new headcount to chat.
 
-use danvas_source::Client;
+use danvas::Client;
 use serde_json::json;
 
 fn main() {

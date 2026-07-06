@@ -8,7 +8,7 @@
 //! panel comes back as the next "frame" — proving both directions of the
 //! binary media envelope cross the hub from a Rust peer.
 
-use danvas_source::Client;
+use danvas::Client;
 
 fn main() {
     let port = std::env::args().nth(1).unwrap_or_else(|| "8080".into());

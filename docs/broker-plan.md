@@ -30,7 +30,7 @@ baked props — the raw client's panels may not render without React-shaped
 registration. `danvas.connect()` is immune (real component classes build its
 frames); PROTOCOL.md must state what a non-Python SDK actually has to send.
 
-**2. The Rust source SDK (`danvas-source` crate) — weeks, not months.** A
+**2. The Rust source SDK (`danvas-rust` crate) — weeks, not months.** A
 transliteration of `danvas/source.py` (the executable spec) against protocol
 v1: dial in (`?source=1&label=`), register/update/remove + replay-on-
 reconnect, heartbeats, input/layout callbacks, `set_props`/`subscribe`, the
@@ -265,7 +265,7 @@ hello world on Win/mac/Linux CI.
 
 **Phase 4 — source SDK extraction.** *Pulled forward: this is step 2 of the
 roadmap above, buildable today against the Python hub with no broker.* A
-~1k-line `danvas-source` Rust crate that a C++/Rust process embeds to *be* a
+~1k-line `danvas-rust` Rust crate that a C++/Rust process embeds to *be* a
 source — "any language on the canvas" as a shipped artifact rather than a
 spec promise.
 

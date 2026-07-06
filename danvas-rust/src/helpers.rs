@@ -41,7 +41,7 @@ pub fn data_url(mime: &str, bytes: &[u8]) -> String {
 ///
 /// ```no_run
 /// # use serde_json::json;
-/// # let c = danvas_source::Client::connect("127.0.0.1:8000", "x").unwrap();
+/// # let c = danvas::Client::connect("127.0.0.1:8000", "x").unwrap();
 /// c.panel("live", "live_plot").titled("Live plot").show();
 /// let mut feed = c.live_plot_feed("live", 300);
 /// feed.push(&[("signal", 0.7)]);

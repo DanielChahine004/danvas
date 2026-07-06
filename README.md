@@ -1060,7 +1060,7 @@ def _():                                    # alongside the owner's handler
 
 (For other languages — or wire-level control — `danvas.SourceClient` is the
 minimal Python client underneath (`register`/`update`/`on_input` as raw frames),
-[`danvas-source/`](danvas-source/) is a full **Rust** SDK, and
+[`danvas-rust/`](danvas-rust/) is a full **Rust** SDK, and
 [`danvas-node/`](danvas-node/) is a zero-dependency **Node.js** one. Writing an
 SDK in a new language means reading two documents —
 [PROTOCOL.md](PROTOCOL.md) and the per-panel `contract` blocks in
@@ -1263,6 +1263,20 @@ component is used). Build without editing the script via
 import with `include=[...]`, skip a build-breaking dep with `exclude=[...]`.
 `serve(desktop=True)` opens the same native window in development.
 
+# Repository layout
+
+One protocol, several tiers — the directories map onto them:
+
+| dir | tier |
+|---|---|
+| [`PROTOCOL.md`](PROTOCOL.md) | **universal** — the frozen wire contract every peer speaks |
+| [`broker/`](broker/) | **universal** — `danvasd`, the standing hub daemon (the "d" is the Unix daemon convention) |
+| [`danvas/frontend/`](danvas/frontend/) + [`danvas/templates/`](danvas/templates/) | **universal** — the shared browser renderer and the panel templates + contracts every SDK consumes (parked inside the Python package so wheels ship them; hubs also serve the templates at `/__templates__`) |
+| [`danvas/`](danvas/) | **Python** — the batteries-included authoring tier (typed components, persist, bake, tunnels, hot reload) plus `SourceClient`, the minimal wire reference |
+| [`danvas-rust/`](danvas-rust/) | **Rust** — the full-coverage peer SDK (crate name: `danvas`) |
+| [`danvas-node/`](danvas-node/) | **Node.js** — the zero-dependency peer SDK |
+| [`tests/`](tests/) | **the nets** — hub + SDK conformance (both parametrized over every implementation), contract drift, protocol sync, renderer capability, browser smoke |
+
 # How it works
 
 danvas is three parts over **one WebSocket**: the `danvasd` **binary broker** (a
@@ -1297,7 +1311,7 @@ camera (~3 MB/s) uses ~1% of the relay's headroom.
 wire contract — JSON frames plus a binary media envelope, versioned in
 [PROTOCOL.md](PROTOCOL.md) / `danvas/_protocol.py`. Nothing about it is
 Python-specific, so any process that can open a WebSocket is a first-class peer:
-the Python binding here is one SDK, [`danvas-source/`](danvas-source/) is a Rust
+the Python binding here is one SDK, [`danvas-rust/`](danvas-rust/) is a Rust
 one, [`danvas-node/`](danvas-node/) is a zero-dependency Node.js one, and the
 built-in panels ship as a language-neutral asset with per-panel contracts
 (`danvas/templates/components.json`, also served by every hub at

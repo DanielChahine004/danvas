@@ -1,6 +1,6 @@
 """Phase 3 of the Rust SDK: interaction + multiuser.
 
-Spawns danvasd + the danvas-source `interact` example and verifies, from a
+Spawns danvasd + the danvas-rust `interact` example and verifies, from a
 browser: canvas.request() is answered by a Rust handler (request->response), and
 the roster reaching the Rust peer makes it chat the headcount (presence + chat).
 """
@@ -30,7 +30,7 @@ def _danvasd():
 def _interact_exe():
     exe = "interact.exe" if os.name == "nt" else "interact"
     for prof in ("release", "debug"):
-        p = os.path.join(_ROOT, "danvas-source", "target", prof, "examples", exe)
+        p = os.path.join(_ROOT, "danvas-rust", "target", prof, "examples", exe)
         if os.path.exists(p):
             return p
     return None

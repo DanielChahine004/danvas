@@ -1,6 +1,6 @@
 """Phase 2 of the Rust SDK: managed shapes + arrows.
 
-Spawns danvasd + the danvas-source `shapes` example (two boxes, an arrow, a live
+Spawns danvasd + the danvas-rust `shapes` example (two boxes, an arrow, a live
 edit) and verifies the shape/arrow/shape_update frames cross the hub to a browser
 with ids namespaced to the source — a Python-owned diagram authored from Rust.
 """
@@ -30,7 +30,7 @@ def _danvasd():
 def _shapes_exe():
     exe = "shapes.exe" if os.name == "nt" else "shapes"
     for prof in ("release", "debug"):
-        p = os.path.join(_ROOT, "danvas-source", "target", prof, "examples", exe)
+        p = os.path.join(_ROOT, "danvas-rust", "target", prof, "examples", exe)
         if os.path.exists(p):
             return p
     return None

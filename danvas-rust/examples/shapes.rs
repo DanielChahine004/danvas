@@ -4,7 +4,7 @@
 //!     danvasd --port 8080
 //!     cargo run --example shapes -- 8080
 
-use danvas_source::Client;
+use danvas::Client;
 use serde_json::json;
 
 fn main() {

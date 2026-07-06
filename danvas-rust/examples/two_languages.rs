@@ -11,7 +11,7 @@
 //! The canvas then has this Rust process's slider + label alongside whatever
 //! Python (or a browser) put there — and interactions cross the language line.
 
-use danvas_source::Client;
+use danvas::Client;
 
 fn main() {
     let port = std::env::args().nth(1).unwrap_or_else(|| "8080".into());

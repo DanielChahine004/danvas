@@ -275,7 +275,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "danvas-source"
+name = "danvas"
 version = "0.1.0"
 dependencies = [
  "futures-util",

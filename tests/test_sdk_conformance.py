@@ -5,7 +5,7 @@ The mirror of test_conformance.py (which validates hubs): this suite validates
 always the real danvasd; the SDK under test is a spawned target process
 implementing the fixed behavior script documented in
 tests/sdk_conformance_target.py (the Python reference, the production Canvas
-path) and danvas-source/examples/conformance_target.rs (the Rust SDK).
+path) and danvas-rust/examples/conformance_target.rs (the Rust SDK).
 
 Selection:
 
@@ -60,8 +60,8 @@ def _danvasd():
 def _rust_target():
     name = ("conformance_target.exe" if os.name == "nt"
             else "conformance_target")
-    for rel in ("danvas-source/target/debug/examples",
-                "danvas-source/target/release/examples"):
+    for rel in ("danvas-rust/target/debug/examples",
+                "danvas-rust/target/release/examples"):
         p = os.path.join(_ROOT, rel, name)
         if os.path.isfile(p):
             return p

@@ -1,5 +1,5 @@
 [package]
-name = "danvas-source"
+name = "danvas"
 version = "0.1.0"
 edition = "2021"
 description = "Rust SDK for danvas: dial into a canvas as a source and drive native panels (the transliteration of danvas/source.py; PROTOCOL.md is the contract)"

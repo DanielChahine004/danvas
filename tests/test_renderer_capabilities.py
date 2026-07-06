@@ -14,7 +14,7 @@ import re
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COMPONENTS = os.path.join(_ROOT, "danvas", "components")
-_RUST_HELPERS = os.path.join(_ROOT, "danvas-source", "src", "helpers.rs")
+_RUST_HELPERS = os.path.join(_ROOT, "danvas-rust", "src", "helpers.rs")
 _REACT_HOST = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
                            "ReactHost.tsx")
 _DIST_ASSETS = os.path.join(_ROOT, "danvas", "frontend", "dist", "assets")
