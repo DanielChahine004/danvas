@@ -134,6 +134,9 @@ jobs:
     # cross-compile a static musl danvasd and package the manylinux2014_aarch64
     # wheel. Build-only — the binary can't execute on this x86 runner, and the
     # broker's behaviour is already conformance-tested natively on three OSes.
+    # continue-on-error: a cross-toolchain wrinkle must degrade the release to
+    # three platforms, not block it (the release step copies tolerantly).
+    continue-on-error: true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -215,7 +218,7 @@ jobs:
           cp dist/danvasd-windows-x86_64/broker/target/release/danvasd.exe out/danvasd-windows-x86_64.exe
           cp dist/danvasd-linux-x86_64/broker/target/release/danvasd out/danvasd-linux-x86_64
           cp dist/danvasd-macos-arm64/broker/target/release/danvasd out/danvasd-macos-arm64
-          cp dist/danvasd-linux-aarch64/broker/target/aarch64-unknown-linux-musl/release/danvasd out/danvasd-linux-aarch64
+          cp dist/danvasd-linux-aarch64/broker/target/aarch64-unknown-linux-musl/release/danvasd out/danvasd-linux-aarch64             || echo "no aarch64 artifact (cross job failed) — releasing without it"
           find dist -name '*.whl' -exec cp {} out/ \;
           # a pure py3-none-any wheel (no binary) for every other platform
           pip install build

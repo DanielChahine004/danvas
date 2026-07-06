@@ -53,13 +53,26 @@ def test_custom_event_key_is_configurable():
     assert seen == [{"type": "ping", "n": 1}]
 
 
-def test_onpush_helper_is_injected_into_html():
-    panel = _panel()
-    html = panel.register_props()["html"]
+def _frontend_shim():
+    # The in-iframe `canvas` helper moved to the frontend (customShim.ts,
+    # injected by CustomView with the browser-local composed id); custom.py
+    # keeps only the auto-fit script. The shim-surface tests read the real
+    # injected source.
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "danvas", "frontend",
+                        "src", "react", "customShim.ts")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_onpush_helper_is_injected_by_the_frontend():
+    shim = _frontend_shim()
     # The symmetric helper exposes both directions in the iframe.
-    assert "canvas.send" not in html or "send:function" in html
-    assert "onPush:function" in html
-    assert "send:function" in html
+    assert "onPush:function" in shim
+    assert "send:function" in shim
+    # …and Python no longer bakes it (the frontend injects, marker-guarded).
+    html = _panel().register_props()["html"]
+    assert "window.canvas=" not in html
 
 
 def test_push_streams_without_reload():
@@ -95,9 +108,8 @@ def test_css_js_path_still_composes_unchanged():
 # -- Custom <-> React shim parity (request/viewport/setView) -----------------
 
 def test_custom_shim_exposes_react_parity_methods():
-    p = danvas.Custom(html="<div></div>", name="parity")
-    shim = p.register_props()["html"]
-    # The iframe `canvas` handle mirrors the React panel's: ask-Python +
+    shim = _frontend_shim()
+    # The iframe `canvas` handle mirrors the React panel's: ask-owner +
     # camera-awareness, not just send/onPush.
     for token in ("request:function", "setView:function", "viewport:function",
                   "send:function", "onPush:function", "sendBinary:function"):
@@ -138,8 +150,9 @@ def test_themed_panel_wires_prop_and_theme_listener():
     p = danvas.Custom(html="<div></div>", name="t", themed=True)
     props = p.register_props()
     assert props["themed"] is True
-    # The shim carries the listener that applies forwarded --pc-* vars to :root.
-    assert "__danvas_theme" in props["html"]
+    # The listener that applies forwarded --pc-* vars lives in the frontend
+    # shim now; Python's job is carrying the prop the frontend keys on.
+    assert "__danvas_theme" in _frontend_shim()
 
 
 def test_themed_defaults_off():
@@ -148,8 +161,7 @@ def test_themed_defaults_off():
 
 
 def test_custom_shim_exposes_chat_parity():
-    p = danvas.Custom(html="<div></div>", name="chatty")
-    shim = p.register_props()["html"]
+    shim = _frontend_shim()
     assert "chat:{" in shim
     for action in ("'send'", "'setName'", "'history'", "'sub'", "'idsub'"):
         assert f"action:{action}" in shim, f"chat shim missing action {action}"
