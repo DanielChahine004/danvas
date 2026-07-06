@@ -1067,7 +1067,8 @@ SDK in a new language means reading two documents —
 `danvas/templates/components.json` — and passing one command:
 `DANVAS_SDK_CMD="./my_target|{port}" pytest tests/test_sdk_conformance.py`.
 The Node SDK was written exactly that way, from the docs alone, and passed on
-its first run.)
+its first run; [docs/sdk-authoring.md](docs/sdk-authoring.md) is the
+step-by-step guide.)
 
 **Native panels from any language** — the built-in panels' register shapes
 (the React source + data defaults the frontend mounts) ship as a

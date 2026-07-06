@@ -261,6 +261,10 @@ its code and state live, but who listens is a live, shared fact.
 
 ## Writing a non-Python client (the polyglot subset)
 
+> The step-by-step version of this section — the eight-piece build list, the
+> optional tier, and the conformance workflow — lives in
+> [docs/sdk-authoring.md](docs/sdk-authoring.md).
+
 **The entry-point convention:** a danvas program's default move is to OWN its
 canvas — the SDK's primary entry (`serve(port)`) finds/spawns `danvasd` on the
 port, or attaches to a hub already serving it (so two programs pointed at the
