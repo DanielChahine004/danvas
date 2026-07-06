@@ -146,17 +146,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-musl
-      - name: aarch64 cross toolchain
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build danvasd (release, aarch64 musl static)
-        working-directory: broker
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_musl: aarch64-linux-gnu-gcc
-        run: cargo build --release --target aarch64-unknown-linux-musl
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: zig-backed cross toolchain (musl-aware linking)
+        # gcc-aarch64-linux-gnu links against glibc startup objects and fails
+        # on the musl target; zig carries its own multi-target libc.
+        run: python -m pip install cargo-zigbuild ziglang
+      - name: Build danvasd (release, aarch64 musl static)
+        working-directory: broker
+        run: cargo zigbuild --release --target aarch64-unknown-linux-musl
       - name: Build the offline wheel (binary bundled)
         run: |
           python -m pip install --upgrade pip build wheel
@@ -203,6 +202,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4   # the fallback-wheel build needs the source
       - uses: actions/download-artifact@v4
         with:
           path: dist
