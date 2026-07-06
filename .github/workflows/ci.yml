@@ -45,34 +45,34 @@ jobs:
         run: |
           python -m venv /tmp/clean
           /tmp/clean/bin/pip install dist/*.whl
-      - name: Assert the frontend bundle is present and served
+      - name: Assert the wheel ships the universal assets
+        # serve() is broker-only and this wheel carries no danvasd, so the
+        # check is packaging-shaped: the frontend dist, the template asset
+        # (with contracts), and the panels' .jsx sources must all install.
+        # That the frontend actually SERVES is broker.yml's conformance job.
         run: |
           /tmp/clean/bin/python - <<'PY'
-          import os, threading, time, urllib.request
+          import json, os
           import danvas
-          from danvas import server
+          pkg = os.path.dirname(danvas.__file__)
 
-          # 1. The built assets must be packaged, not just index.html.
-          assets = os.path.join(server.DIST_DIR, "assets")
+          dist = os.path.join(pkg, "frontend", "dist")
+          assets = os.path.join(dist, "assets")
           files = os.listdir(assets) if os.path.isdir(assets) else []
           assert any(f.endswith(".js") for f in files), f"no JS in {assets}: {files}"
-          print("packaged assets:", files)
+          html = open(os.path.join(dist, "index.html"), encoding="utf-8").read()
+          assert "<script" in html or "root" in html, "index.html looks empty"
 
-          # 2. The server must actually serve index.html and the referenced JS.
-          canvas = danvas.Canvas()
-          canvas.label("ci", "hello")
-          canvas.serve(port=8137, open_browser=False, block=False)
-          time.sleep(1.0)
-          base = "http://127.0.0.1:8137"
-          html = urllib.request.urlopen(base + "/").read().decode()
-          assert "<div id=\"root\"" in html or "<script" in html, "index.html looks empty"
-          # Pull the first hashed asset the page references and fetch it.
-          import re
-          m = re.search(r'/assets/[\w.\-]+\.js', html)
-          assert m, f"index.html references no /assets/*.js: {html[:300]}"
-          code = urllib.request.urlopen(base + m.group(0)).getcode()
-          assert code == 200, f"asset {m.group(0)} returned {code}"
-          print("served", m.group(0), "->", code)
-          canvas.stop()
-          print("PACKAGE SMOKE TEST OK")
+          tpl = json.load(open(os.path.join(pkg, "templates", "components.json"),
+                               encoding="utf-8"))["templates"]
+          assert len(tpl) == 20, f"expected 20 templates, got {len(tpl)}"
+          assert all("contract" in t for t in tpl.values()), "contract blocks missing"
+
+          jsx = os.listdir(os.path.join(pkg, "components", "jsx"))
+          assert len([f for f in jsx if f.endswith(".jsx")]) == 18, jsx
+
+          c = danvas.Canvas()
+          c.slider("s"); c.label("l", ""); c.inspector()
+          print("PACKAGE SMOKE TEST OK:", len(files), "assets,",
+                len(tpl), "templates,", len(jsx), "jsx sources")
           PY
