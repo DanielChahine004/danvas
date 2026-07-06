@@ -1,4 +1,4 @@
-﻿"""Image: show a static image on the canvas.
+"""Image: show a static image on the canvas.
 
 Accepts a file path, http(s)/data URL, raw image bytes, a Matplotlib figure or
 axes, a PIL image, or a NumPy array. (For a *stream* of frames use VideoFeed.)
@@ -23,18 +23,9 @@ _IMG_CSS = """
 .pc-img img{max-width:100%;max-height:100%;display:block}
 """
 
-_IMG_SOURCE = """
-function Component({ props }) {
-  return (
-    <div className="pc-img">
-      <style>{`__CSS__`}</style>
-      {props.src
-        ? <img src={props.src} alt="" style={{ objectFit: props.fit || "contain" }} />
-        : null}
-    </div>
-  );
-}
-""".replace("__CSS__", _IMG_CSS)
+from . import _jsx
+
+_IMG_SOURCE = _jsx.load("image").replace("__CSS__", _IMG_CSS)
 
 
 class Image(React):

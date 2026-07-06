@@ -22,18 +22,9 @@ _WEBVIEW_CSS = """
 
 # A single iframe filling the panel. ``props.url`` swaps live (and replays on
 # reconnect), so navigating just re-renders with a new src.
-_WEBVIEW_SOURCE = """
-function Component({ props }) {
-  return (
-    <>
-      <style>{`__CSS__`}</style>
-      <iframe className="pc-webview" src={props.url}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-        allowFullScreen />
-    </>
-  );
-}
-""".replace("__CSS__", _WEBVIEW_CSS)
+from . import _jsx
+
+_WEBVIEW_SOURCE = _jsx.load("webview").replace("__CSS__", _WEBVIEW_CSS)
 
 
 class WebView(React):

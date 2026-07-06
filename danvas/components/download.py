@@ -49,39 +49,9 @@ _DOWNLOAD_CSS = """
 # at click time), then trigger a native browser download via a transient <a>.
 # ``props.text`` is the face (replayed on reconnect). A short "busy" state keeps
 # double-clicks from racing while Python prepares the file.
-_DOWNLOAD_SOURCE = """
-function Component({ canvas, props }) {
-  const [busy, setBusy] = React.useState(false);
-  async function go() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const r = await canvas.request({});
-      if (r && r.url) {
-        const a = document.createElement("a");
-        a.href = r.url;
-        if (r.filename) a.download = r.filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-    } catch (e) {
-      console.error("danvas download failed:", e);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <>
-      <style>{`__CSS__`}</style>
-      <button className="pc-download" disabled={busy} onClick={go}>
-        <span className="pc-download-ico">{"\\u2913"}</span>
-        {busy ? "Preparing\\u2026" : props.text}
-      </button>
-    </>
-  );
-}
-""".replace("__CSS__", _DOWNLOAD_CSS)
+from . import _jsx
+
+_DOWNLOAD_SOURCE = _jsx.load("download").replace("__CSS__", _DOWNLOAD_CSS)
 
 
 class Download(React):

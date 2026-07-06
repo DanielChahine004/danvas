@@ -28,19 +28,9 @@ _BUTTON_CSS = """
 
 # Each click is a bare ``canvas.send({})`` — Python counts them and fires the
 # registered handlers. ``props.text`` is the face (replayed on reconnect).
-_BUTTON_SOURCE = """
-function Component({ canvas, props }) {
-  const _th = props._th || {};
-  return (
-    <>
-      <style>{`__CSS__`}</style>
-      <button className="pc-button" style={_th} onClick={() => canvas.send({})}>
-        {props.text}
-      </button>
-    </>
-  );
-}
-""".replace("__CSS__", _BUTTON_CSS)
+from . import _jsx
+
+_BUTTON_SOURCE = _jsx.load("button").replace("__CSS__", _BUTTON_CSS)
 
 
 class Button(React):

@@ -21,18 +21,9 @@ _LABEL_CSS = """
 # Renders the latest pushed value (``value``), falling back to the initial value
 # carried in ``props.text`` (also what a reconnecting client replays). Written as
 # a plain string so its JSX braces survive; only __CSS__ is substituted.
-_LABEL_SOURCE = """
-function Component({ value, props }) {
-  const text = value != null ? value : (props.text != null ? props.text : "");
-  const _th = props._th || {};
-  return (
-    <>
-      <style>{`__CSS__`}</style>
-      <div className="pc-label" style={_th}>{text}</div>
-    </>
-  );
-}
-""".replace("__CSS__", _LABEL_CSS)
+from . import _jsx
+
+_LABEL_SOURCE = _jsx.load("label").replace("__CSS__", _LABEL_CSS)
 
 
 def _str(v):

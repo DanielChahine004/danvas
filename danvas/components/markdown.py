@@ -48,18 +48,9 @@ _MD_CSS = """
 # The JSX component: drop the Python-rendered HTML into a native node. The CSS is
 # carried in a <style> tag (its braces are escaped to {{ }} so str.format leaves
 # them alone; only the {css} placeholder is filled).
-_MD_SOURCE = """
-function Component({{ props }}) {{
-  const _th = props._th || {{}};
-  return (
-    <>
-      <style>{{`{css}`}}</style>
-      <div className="pc-md" style={{_th}}
-           dangerouslySetInnerHTML={{{{ __html: props.html || "" }}}} />
-    </>
-  );
-}}
-""".format(css=_MD_CSS)
+from . import _jsx
+
+_MD_SOURCE = _jsx.load("markdown").format(css=_MD_CSS)
 
 
 class Markdown(React):
