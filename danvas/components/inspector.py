@@ -206,11 +206,15 @@ class Inspector(React):
         # detail, keeping the open field view live as the object changes.
         self._open_detail_key = None
 
-    def register_props(self):
+    def register_props_for(self, role=None, client_id=None):
         # Build the table fresh at register time so a (re)connecting client sees
-        # current state baked into the React ``data`` prop.
+        # current state baked into the React ``data`` prop. Overrides the *_for*
+        # variant — that's what register_message actually calls; a plain
+        # register_props override never runs.
         self._data["rows"] = self._build()
-        return super().register_props()
+        if self._open_detail_key:
+            self._data["detail"] = self._build_detail(self._open_detail_key)
+        return super().register_props_for(role, client_id)
 
     def refresh(self):
         """Rebuild the table from current state and push it, live.
@@ -242,9 +246,13 @@ class Inspector(React):
             if canvas is None:
                 continue
             # Skip work when nobody's watching: no server, or no open browser.
+            # Under the broker the browsers connect to danvasd, not to this
+            # bridge (its _connections is always empty) — with a hub pipe
+            # (_client) we can't see them, so tick unconditionally.
             if not getattr(canvas, "_serving", False):
                 continue
-            if not canvas._bridge._connections:
+            if (not canvas._bridge._connections
+                    and getattr(canvas._bridge, "_client", None) is None):
                 continue
             try:
                 self.refresh()

@@ -60,3 +60,16 @@ def test_show_field_handlers_dict_falls_back_to_repr():
     before = len(canvas.components)
     ins._handle_input({"action": "show_field", "key": "r", "field": "handlers"})
     assert len(canvas.components) == before + 1
+
+
+def test_register_props_bake_current_rows():
+    # register_message calls register_props_for (NOT register_props) — the
+    # bake must live on the *_for override or every inspector registers with
+    # the empty "[]" from __init__ and opens blank until a manual Refresh.
+    import json
+    canvas = danvas.Canvas()
+    canvas.slider("r")
+    ins = canvas.inspector()
+    props = ins.register_props_for(None, None)
+    rows = json.loads(json.loads(props["data"])["rows"])
+    assert any(r.get("name") == "r" for r in rows)
