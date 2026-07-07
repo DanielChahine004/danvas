@@ -1,4 +1,4 @@
-"""Per-function hot reload as a handler trigger: ``canvas.on_edit`` / ``canvas.live``.
+"""Per-function hot reload as a handler trigger: ``canvas.on_edit``.
 
 The middle rung of the reload ladder. Below it: nothing (restart to see an
 edit). Above it: ``serve(hot_reload=True)``, which restarts the whole process
@@ -7,7 +7,7 @@ top-level function** when its *source* changes on disk — the process, its
 state (open serial ports, warmed-up kernels, loaded models), and every panel
 stay put; only the function is re-compiled and rebound::
 
-    @canvas.live                    # rebind on save AND re-run
+    @canvas.on_edit                 # bare form: rebind on save AND re-run
     def update_geometry():
         ...
 

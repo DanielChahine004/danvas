@@ -170,58 +170,80 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._edit_watcher = None
 
     def on_edit(self, target, file=None):
-        """Fire a handler whenever a top-level function's SOURCE changes on disk.
+        """React to a top-level function's SOURCE changing on disk.
 
-        The middle rung of the reload ladder (see :mod:`danvas._onedit`):
-        edit the function in your editor, save, and the fresh definition is
-        re-compiled (original line numbers, so tracebacks point at the real
-        file), re-exec'd into its module — rebinding the global — and passed
-        to your handler, which decides the policy::
+        The editor as an input device (see :mod:`danvas._onedit`): the save
+        is the click, the fresh definition is the event payload. Two forms,
+        one name:
+
+        **Bare, on the function itself** — the common policy, re-run on
+        save. Edit the body, save, the canvas updates; no button, no
+        restart, process state intact::
+
+            @canvas.on_edit
+            def update_geometry():
+                ...
+
+        **With a name** — your policy. The fresh definition is compiled
+        (original line numbers), re-exec'd into its module (rebinding the
+        global), and handed to your handler to re-run / validate / diff::
 
             @canvas.on_edit("update_geometry")
             def _(fresh_fn):
-                fresh_fn()          # rebind already happened; re-run it
+                fresh_fn()
 
-        ``target`` is a function or its name; ``file`` defaults to the module
-        file the function was defined in (the running script for ``__main__``
-        code). Scope: top-level ``def``s only — decorated handlers, closures,
-        and new module-level imports need ``serve(hot_reload=True)`` (which,
-        when on, restarts the process on save and supersedes this). A syntax
-        error in the saved file keeps the old definition and says where.
-        For "rebind and re-run" — the common policy — use :meth:`live`.
+        ``file`` defaults to the running script for the name form (or pass
+        the module's path — its globals are found via ``sys.modules``).
+        Scope: top-level ``def``s only; decorated handlers, closures, and
+        new module-level imports need ``serve(hot_reload=True)`` (which,
+        when on, restarts on save and supersedes this). A syntax error in
+        the save keeps the old definition and says where.
         """
-        name = target if isinstance(target, str) else target.__name__
+        # Bare form: @canvas.on_edit above the def -> rebind AND re-run.
         if callable(target):
-            globals_ = target.__globals__
-        else:
+            self._watch_edit(target.__name__,
+                             file or target.__globals__.get("__file__"),
+                             target.__globals__,
+                             lambda fresh: fresh())
+            return target
+        # Name form: return the handler registrar.
+        name = target
+        path = file
+        if path is None:
             import sys
             globals_ = sys.modules["__main__"].__dict__
-        path = file or globals_.get("__file__")
+            path = globals_.get("__file__")
+        else:
+            globals_ = self._module_globals_for(path)
         if not path:
             raise ValueError("on_edit needs file= (the module has no __file__)")
 
         def register(handler):
-            if self._edit_watcher is None:
-                from ._onedit import EditWatcher
-                self._edit_watcher = EditWatcher(self)
-            self._edit_watcher.add(path, name, handler, globals_)
+            self._watch_edit(name, path, globals_, handler)
             return handler
         return register
 
-    def live(self, fn):
-        """Decorator: re-run ``fn`` every time its source is saved.
+    def _watch_edit(self, name, path, globals_, handler):
+        if not path:
+            raise ValueError("on_edit needs file= (the module has no __file__)")
+        if self._edit_watcher is None:
+            from ._onedit import EditWatcher
+            self._edit_watcher = EditWatcher(self)
+        self._edit_watcher.add(path, name, handler, globals_)
 
-        Sugar over :meth:`on_edit` with the common policy baked in — the
-        fresh definition is rebound (that part is on_edit's contract) and
-        immediately called, so "edit → save → the canvas updates" needs no
-        button. Put it above the plain ``def`` (not above another decorator)::
-
-            @canvas.live
-            def update_geometry():
-                ...
-        """
-        self.on_edit(fn)(lambda fresh: fresh())
-        return fn
+    @staticmethod
+    def _module_globals_for(path):
+        """The globals of the loaded module whose ``__file__`` is ``path`` —
+        so the name form of :meth:`on_edit` rebinds in the right module, not
+        ``__main__``. Falls back to ``__main__`` for a not-imported file."""
+        import os
+        import sys
+        want = os.path.abspath(path)
+        for mod in list(sys.modules.values()):
+            f = getattr(mod, "__file__", None)
+            if f and os.path.abspath(f) == want:
+                return mod.__dict__
+        return sys.modules["__main__"].__dict__
 
     def background(self, fn, *args, **kwargs):
         """Register ``fn`` to run as a daemon thread when the canvas serves.

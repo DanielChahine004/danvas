@@ -928,7 +928,7 @@ the worker, which re-reads files loaded via `path=` (e.g. a
 live-reloads its JSX/CSS *without* a restart; `watch=` is the whole-process
 version for arbitrary assets.
 
-**The editor as an input device** — `@canvas.live` treats saving your script
+**The editor as an input device** — `@canvas.on_edit` treats saving your script
 like clicking a button: the watched function is the panel, the save is the
 click, and the "event payload" is the fresh definition. danvas watches the
 file, and when *that function's own source* changes (an unrelated edit in the
@@ -938,13 +938,14 @@ it**, on the same dispatch thread as every other handler, with rapid saves
 coalescing latest-wins:
 
 ```python
-@canvas.live                       # edit the body, save → the canvas updates
+@canvas.on_edit                    # edit the body, save → the canvas updates
 def update_geometry():
     part = build_the_part(radius_slider.value)
     viewer.push_binary(tessellate(part))
 ```
 
-`canvas.on_edit("update_geometry")` is the general form: your handler receives
+`@canvas.on_edit("update_geometry")` — same name, given a name instead —
+is the general form: your handler receives
 the fresh function and chooses the policy (validate first, diff, re-run, or
 ask). A syntax error in the save keeps the old code running and prints where.
 This is the no-restart rung of the reload ladder: the process — its open

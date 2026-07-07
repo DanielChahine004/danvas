@@ -1,9 +1,9 @@
-"""canvas.on_edit / canvas.live: one-function hot reload as a handler trigger.
+"""canvas.on_edit: one-function hot reload as a handler trigger.
 
 A real module file on disk, really edited: the watcher must fire only when
 the WATCHED function's source changes, rebind the module global to the fresh
-definition, keep the old code through a syntax error, and coalesce policy
-into the `live` sugar (rebind + re-run).
+definition, keep the old code through a syntax error, and — in its bare
+form — re-run the function on save (the default policy).
 """
 
 import importlib.util
@@ -36,8 +36,12 @@ def answer(:
 
 
 def _load(path, name):
+    # Registered in sys.modules like any real import — the name form of
+    # on_edit resolves a file's module globals through sys.modules.
+    import sys
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -65,7 +69,7 @@ def test_on_edit_rebinds_and_fires_only_for_the_watched_function(tmp_path):
     mod = _load(path, "livemod_a")
     canvas = danvas.Canvas()
     fired = []
-    canvas.on_edit(mod.answer)(lambda fresh: fired.append(fresh()))
+    canvas.on_edit("answer", file=str(path))(lambda fresh: fired.append(fresh()))
 
     # An edit elsewhere in the file must NOT fire the watch.
     _write(path, _V1.replace('"unchanged"', '"tweaked"'))
@@ -84,7 +88,7 @@ def test_syntax_error_keeps_the_old_definition(tmp_path):
     mod = _load(path, "livemod_b")
     canvas = danvas.Canvas()
     fired = []
-    canvas.on_edit(mod.answer)(lambda fresh: fired.append(fresh()))
+    canvas.on_edit("answer", file=str(path))(lambda fresh: fired.append(fresh()))
 
     _write(path, _BROKEN)
     time.sleep(1.2)
@@ -95,7 +99,7 @@ def test_syntax_error_keeps_the_old_definition(tmp_path):
     assert _wait(lambda: fired == [2]), fired
 
 
-def test_live_reruns_on_save(tmp_path):
+def test_bare_on_edit_reruns_on_save(tmp_path):
     path = tmp_path / "livemod.py"
     runs = []
     _write(path, """
@@ -109,7 +113,7 @@ def tick():
     try:
         mod = _load(path, "livemod_c")
         canvas = danvas.Canvas()
-        canvas.live(mod.tick)
+        canvas.on_edit(mod.tick)
 
         _write(path, """
 import builtins
