@@ -179,7 +179,7 @@ canvas.insert(s, x=80, y=80)
 | `TextField` | bidirectional | single-line or `multiline=True`; `@on_change` on Enter/blur; `.value` (read/assign), `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
 | `Label` | output | escaped text/number; `.text` (read/assign), `.update(text)`; `h="auto"`; live: `.color` |
 | `Markdown` | output | rendered Markdown; `.text` (read/assign), `.update(text)`, `.html` (rendered) |
-| `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=`; live: `.color` |
+| `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.src` (read/assign — reads the wire-canonical data:/http URL), `.update(src)`, `.fit` (read/assign); live: `.color` |
 | `Table` | bidirectional | DataFrame/Series/records/dict/array → sortable, filterable, paginated; toolbar toggles index/column-visibility/row-selection (+ ✎ edit when `editable=True`); `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected` (read/assign, silent), `.update(data)` |
 | `Plot` | output | `.update(fig)` — a Plotly figure rendered natively, with the interactive toolbar (zoom/pan/box-zoom/save-PNG on hover) |
 | `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)`, `.clear()`, `smoothing=`; live: `.max_points`, `.mode`, `.color` |

@@ -49,6 +49,31 @@ class Image(React):
                                 "_th": _theme.derive(color) if color is not None else {}})
         self._init_color(color)
 
+    @property
+    def src(self):
+        """The image as it lives on the wire: a ``data:`` URI or http(s) URL —
+        the canonical form every viewer and SDK sees (a peer process reads the
+        same string from the shared property plane). Assign anything
+        ``update`` accepts (path, URL, bytes, PIL image, Matplotlib figure,
+        array); it's encoded to this form."""
+        return self._data.get("src", "")
+
+    @src.setter
+    def src(self, value):
+        self.update(value)
+
+    @property
+    def fit(self):
+        """The CSS object-fit (``"contain"``/``"cover"``); assignable live."""
+        return self._data.get("fit", self._fit)
+
+    @fit.setter
+    def fit(self, value):
+        if value not in ("contain", "cover"):
+            raise ValueError('fit must be "contain" or "cover"')
+        self._fit = value
+        super(Image, self).update(fit=value)
+
     def update(self, src):
         """Replace the image, live (the ``src`` prop swaps — no shape reload).
 

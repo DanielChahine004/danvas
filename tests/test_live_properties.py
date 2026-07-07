@@ -86,3 +86,18 @@ def test_table_selected_assignable_and_validated():
     assert t.selected == []
     with pytest.raises(IndexError):
         t.selected = [9]
+
+
+def test_image_src_is_the_wire_form():
+    # The getter returns the canonical encoded state (data: URI / URL) — the
+    # same string a peer SDK reads off the shared property plane; the setter
+    # takes anything update() accepts.
+    canvas = danvas.Canvas()
+    img = canvas.image(b"\x89PNG\r\n\x1a\nfake")
+    assert img.src.startswith("data:image/")
+    img.src = "https://example.com/x.png"
+    assert img.src == "https://example.com/x.png"
+    img.fit = "cover"
+    assert img.fit == "cover"
+    with pytest.raises(ValueError):
+        img.fit = "stretch"
