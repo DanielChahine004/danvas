@@ -189,6 +189,15 @@ class Upload(React):
         if self._dest is not None:
             os.makedirs(self._dest, exist_ok=True)
 
+    @property
+    def text(self):
+        """The drop-zone caption; assign to update it live."""
+        return self._data.get("text", "")
+
+    @text.setter
+    def text(self, value):
+        self.update(text=str(value))
+
     def _bind(self, component_id, bridge):
         super()._bind(component_id, bridge)
         bridge.register_upload(self._token, self)

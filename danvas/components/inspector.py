@@ -206,6 +206,18 @@ class Inspector(React):
         # detail, keeping the open field view live as the object changes.
         self._open_detail_key = None
 
+    @property
+    def source(self):
+        """The current view mode (``"components"``/``"canvas"``/``"globals"``/
+        ``"system"``); assign to switch it live, like the header dropdown."""
+        return self._view
+
+    @source.setter
+    def source(self, view):
+        if view not in _VIEWS:
+            raise ValueError("source must be one of: " + ", ".join(_VIEWS))
+        self._set_view(view)
+
     def register_props_for(self, role=None, client_id=None):
         # Build the table fresh at register time so a (re)connecting client sees
         # current state baked into the React ``data`` prop. Overrides the *_for*

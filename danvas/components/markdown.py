@@ -76,6 +76,15 @@ class Markdown(React):
         """The Markdown rendered to HTML (what the panel displays)."""
         return self._data.get("html", "")
 
+    @property
+    def text(self):
+        """The Markdown source; assign to update it live (same as ``update``)."""
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        self.update(value)
+
     def update(self, text):
         """Replace the rendered Markdown, live."""
         self._text = text

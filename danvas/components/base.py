@@ -300,6 +300,19 @@ class BaseComponent:
         """
         return self._visible
 
+    @visible.setter
+    def visible(self, shown):
+        # `panel.visible = False` is canvas.hide(panel); True is unhide —
+        # reversible (state/callbacks intact), same as calling the methods.
+        canvas = getattr(self._bridge, "_canvas", None) \
+            if self._bridge is not None else None
+        if canvas is None:
+            raise RuntimeError(
+                "panel isn't on a canvas yet — insert it before setting visible")
+        if bool(shown) == self._visible:
+            return
+        (canvas.unhide if shown else canvas.hide)(self)
+
     @property
     def owner(self):
         """Which process executes this panel's handlers, as its peers see it:

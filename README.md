@@ -107,7 +107,7 @@ canvas.servo_1            # same, as sugar — but canvas["..."] always wins if 
                           # collides with a Canvas method (e.g. "inspector"); "x" in canvas works
 canvas.components         # list of every panel (visible and hidden)
 canvas.arrows             # list of arrows
-panel.visible             # True if currently shown
+panel.visible             # True if currently shown; assign to hide/unhide
 canvas.emit("name", data) # fire @canvas.on_event("name") handlers — the backend's
                           # universal trigger (see "Backend events" under Serving)
 canvas.events             # {event_name: [handlers]} — the emit wiring, read-only
@@ -177,21 +177,21 @@ canvas.insert(s, x=80, y=80)
 | `Toggle` | bidirectional | `.value` (read/assign), `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
 | `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.text`, `.color` |
 | `TextField` | bidirectional | single-line or `multiline=True`; `@on_change` on Enter/blur; `.value` (read/assign), `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
-| `Label` | output | escaped text/number; `.update(text)`; `h="auto"`; live: `.color` |
-| `Markdown` | output | rendered Markdown; `.update(text)` |
+| `Label` | output | escaped text/number; `.text` (read/assign), `.update(text)`; `h="auto"`; live: `.color` |
+| `Markdown` | output | rendered Markdown; `.text` (read/assign), `.update(text)`, `.html` (rendered) |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=`; live: `.color` |
-| `Table` | bidirectional | DataFrame/Series/records/dict/array → sortable, filterable, paginated; toolbar toggles index/column-visibility/row-selection (+ ✎ edit when `editable=True`); `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected`, `.update(data)` |
+| `Table` | bidirectional | DataFrame/Series/records/dict/array → sortable, filterable, paginated; toolbar toggles index/column-visibility/row-selection (+ ✎ edit when `editable=True`); `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected` (read/assign, silent), `.update(data)` |
 | `Plot` | output | `.update(fig)` — a Plotly figure rendered natively, with the interactive toolbar (zoom/pan/box-zoom/save-PNG on hover) |
 | `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)`, `.clear()`, `smoothing=`; live: `.max_points`, `.mode`, `.color` |
 | `Histogram` | output | distribution over time; `.add(values, step)`; `color=` tints frame + chart |
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
-| `WebView` | output | external site in an iframe; `.navigate(url)` |
+| `WebView` | output | external site in an iframe; `.url` (read/assign), `.navigate(url)` |
 | `Model3D` | output | prebuilt CAD/3D part viewer (xeokit): `.update(glb)` takes GLB bytes / a `.glb` path / a trimesh-like — orbit, snap distance & angle measurements, section plane, X-ray/edges, NavCube |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
-| `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
-| `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `filename=` |
+| `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
+| `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
 | `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True` |
 | `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
@@ -518,7 +518,7 @@ web = canvas.webview("https://en.wikipedia.org/wiki/Robot"); web.navigate("https
 orbit/pan/zoom, snap-to-edge distance *and angle* measurements, a draggable
 section plane, X-ray and edges toggles, and a NavCube orientation gizmo, no
 HTML written. `update` takes GLB bytes, a `.glb` path, or a trimesh-like
-object; each update replaces the model while the camera holds your viewpoint.
+object (also assignable as `.model`); each update replaces the model while the camera holds your viewpoint.
 Pairs naturally with `@canvas.on_edit` for a live CAD loop:
 
 ```python

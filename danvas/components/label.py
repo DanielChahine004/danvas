@@ -53,6 +53,15 @@ class Label(React):
         if h is None:
             self._auto_h = True
 
+    @property
+    def text(self):
+        """The displayed text; assign to update it live (same as ``update``)."""
+        return self._data.get("text", "")
+
+    @text.setter
+    def text(self, value):
+        self.update(value)
+
     def update(self, value):
         """Push a new string/number to display (live, without re-rendering the
         shape). The value streams in over the push channel; the baked prop is kept

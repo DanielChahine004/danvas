@@ -71,6 +71,15 @@ class WebView(React):
             embed += f"?start={start.rstrip('s')}"
         return embed
 
+    @property
+    def url(self):
+        """The URL currently shown; assign to navigate (same as ``navigate``)."""
+        return self._data.get("url", "")
+
+    @url.setter
+    def url(self, value):
+        self.navigate(value)
+
     def navigate(self, url):
         """Point the panel at a new ``url``, live (reloads the iframe)."""
         self.update(url=self._normalize(url))

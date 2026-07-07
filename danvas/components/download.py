@@ -100,6 +100,15 @@ class Download(React):
         # One inbound action: a click asks Python to mint a download URL.
         self.on_request()(self._on_download)
 
+    @property
+    def text(self):
+        """The button face; assign to update it live."""
+        return self._data.get("text", "")
+
+    @text.setter
+    def text(self, value):
+        self.update(text=str(value))
+
     def provide(self, fn):
         """Decorator: register a callback that returns the content per click.
 

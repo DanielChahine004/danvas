@@ -278,6 +278,16 @@ class Model3D(Custom):
         if self._latest is not None:
             self.push_binary(self._latest)
 
+    @property
+    def model(self):
+        """The GLB bytes currently shown (``None`` before the first update);
+        assign to show a new model (same as ``update``)."""
+        return self._latest
+
+    @model.setter
+    def model(self, source):
+        self.update(source)
+
     def update(self, source):
         """Show a model: GLB ``bytes``, a ``.glb``/``.gltf`` path, or a
         trimesh object (anything with ``export(file_type="glb")``)."""

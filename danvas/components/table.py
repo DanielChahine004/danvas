@@ -125,7 +125,9 @@ class Table(React):
                  "numeric": "list[bool]", "pageSize": "number",
                  "dists": "list|null -- per-column distribution bars",
                  "profiles": "list|null -- per-column summary stats",
-                 "editable": "bool"},
+                 "editable": "bool",
+                 "selected": "list[int]|absent -- programmatic row selection; "
+                             "applied silently (no selected event echoed)"},
         "updates": {"data_patch": "merge changed data fields"},
         "events": [{"selected": "list[number] -- selected row indexes"},
                    {"edited": "object {row: number, col: number, value}"}],
@@ -155,9 +157,25 @@ class Table(React):
 
     @property
     def selected(self):
-        """The 0-based indices of currently selected rows in the original data."""
+        """The 0-based indices of currently selected rows in the original data.
+
+        Assignable: ``table.selected = [0, 3]`` selects those rows in every
+        browser (and ``[]`` clears). Programmatic selection is silent — it
+        never fires ``on_select``, matching how a Python push of a control's
+        value never fires ``on_change``."""
         with self._lock:
             return list(self._selected)
+
+    @selected.setter
+    def selected(self, indices):
+        idx = sorted({int(i) for i in indices})
+        n = len(self._data.get("rows") or [])
+        bad = [i for i in idx if i < 0 or i >= n]
+        if bad:
+            raise IndexError(f"row index {bad[0]} out of range (table has {n} rows)")
+        with self._lock:
+            self._selected = idx
+        React.update(self, selected=idx)
 
     def on_edit(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: called with ``(row, col, value)`` when the user edits a cell.

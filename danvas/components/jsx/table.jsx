@@ -22,6 +22,14 @@ function Component({ canvas, props }) {
   const [colMenuOpen, setColMenuOpen] = React.useState(false);
   const [showSel, setShowSel] = React.useState(false);
   const [selectedRows, setSelectedRows] = React.useState(new Set());
+  // Programmatic selection: Python pushed `selected` (table.selected = [...]).
+  // Applied silently — no echo back — mirroring how a Python push of a value
+  // never re-fires on_change.
+  React.useEffect(() => {
+    if (props.selected == null) return;
+    setSelectedRows(new Set(props.selected));
+    if (props.selected.length) setShowSel(true);
+  }, [props.selected]);
   const selAllRef = React.useRef(null);
   const editable = !!props.editable;
   const [editMode, setEditMode] = React.useState(false);
