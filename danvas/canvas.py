@@ -254,6 +254,19 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 channel._callbacks, f, threaded, dedicated, queue)
         return register(fn) if fn is not None else register
 
+    @property
+    def events(self):
+        """The backend event wiring: ``{event_name: [HandlerInfo]}``.
+
+        The :meth:`emit` counterpart of a panel's ``.handlers`` property —
+        every name with at least one :meth:`on_event` handler, each entry
+        carrying the original function (``.fn``), its ``file:line``-qualified
+        name, and its dispatch mode. Read-only introspection.
+        """
+        from .components.base import _describe_handlers
+        return {name: _describe_handlers(ch._callbacks)
+                for name, ch in self._events.items() if ch._callbacks}
+
     def emit(self, name, data=None):
         """Fire every :meth:`on_event` handler registered for ``name``.
 

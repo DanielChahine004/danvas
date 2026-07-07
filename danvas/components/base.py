@@ -142,6 +142,44 @@ def _handler_label(cb):
     return f"{name} ({os.path.basename(code.co_filename)}:{code.co_firstlineno})"
 
 
+class HandlerInfo:
+    """One registered handler, as :attr:`BaseComponent.handlers` reports it.
+
+    ``fn`` is the original function (unwrapped from any dispatch-mode
+    wrapper), so it can be called or inspected; the repr is the readable
+    summary the Inspector's detail view shows.
+    """
+
+    __slots__ = ("fn", "name", "mode", "queue")
+
+    def __init__(self, fn, name, mode, queue):
+        self.fn = fn
+        self.name = name
+        self.mode = mode          # "inline" | "threaded" | "dedicated"
+        self.queue = queue        # backpressure policy; dedicated mode only
+
+    def __repr__(self):
+        q = f"/{self.queue}" if self.queue else ""
+        return f"<handler {self.name} [{self.mode}{q}]>"
+
+
+def _describe_handlers(callbacks):
+    """The :class:`HandlerInfo` list for one handler store."""
+    out = []
+    for cb in callbacks:
+        dedicated = getattr(cb, "_danvas_dedicated", False)
+        out.append(HandlerInfo(
+            fn=_unwrap(cb),
+            name=_handler_label(cb),
+            mode=("dedicated" if dedicated
+                  else "threaded" if getattr(cb, "_danvas_threaded", False)
+                  else "inline"),
+            queue=getattr(cb, "_danvas_handler_queue", "fifo")
+                  if dedicated else None,
+        ))
+    return out
+
+
 class BaseComponent:
     """A bidirectional canvas component.
 
@@ -920,6 +958,34 @@ class BaseComponent:
         else:
             store.append(fn)
         return fn
+
+    # What the `_callbacks` store means in `handlers` — Button says "click".
+    _change_trigger = "change"
+
+    def _handler_sources(self):
+        """(trigger, callbacks) pairs feeding :attr:`handlers`; subclasses
+        with extra stores extend this via ``yield from super()...``."""
+        yield (self._change_trigger, self._callbacks)
+        yield ("layout", self._layout_callbacks)
+
+    @property
+    def handlers(self):
+        """What this panel is wired to trigger: ``{trigger: [HandlerInfo]}``.
+
+        Every registered handler, keyed by what fires it (``"change"`` /
+        ``"click"`` / ``"on:<event>"`` / ``"message"`` / ``"binary"`` /
+        ``"request:<event>"`` / ``"select"`` / …), each entry carrying the
+        original function (``.fn``), a ``file:line``-qualified name, and its
+        dispatch mode. Read-only introspection — registration still goes
+        through the ``on_*`` decorators. Triggers with no handlers are
+        omitted, so an unwired panel reads ``{}``. Also how the Inspector's
+        detail view shows a panel's wiring.
+        """
+        out = {}
+        for trigger, fns in self._handler_sources():
+            if fns:
+                out.setdefault(trigger, []).extend(_describe_handlers(fns))
+        return out
 
     def on_change(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: register a callback fired on input from the browser.

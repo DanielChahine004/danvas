@@ -112,6 +112,11 @@ class Download(React):
         self._provider = fn
         return fn
 
+    def _handler_sources(self):
+        yield from super()._handler_sources()
+        if self._provider is not None:
+            yield ("provide", [self._provider])
+
     def set_source(self, source, filename=None):
         """Replace the static content served on click (path or ``bytes``), live.
 

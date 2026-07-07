@@ -148,6 +148,11 @@ class Table(React):
         self._select_callbacks = []
         self._edit_callbacks = []
 
+    def _handler_sources(self):
+        yield from super()._handler_sources()
+        yield ("select", self._select_callbacks)
+        yield ("edit", self._edit_callbacks)
+
     @property
     def selected(self):
         """The 0-based indices of currently selected rows in the original data."""

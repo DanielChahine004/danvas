@@ -52,6 +52,10 @@ class Chat(React):
         # they're handed to the bridge as sinks at bind time.
         self._chat_callbacks = []
 
+    def _handler_sources(self):
+        yield from super()._handler_sources()
+        yield ("message", self._chat_callbacks)
+
     def _bind(self, component_id, bridge):
         super()._bind(component_id, bridge)
         for cb in self._chat_callbacks:

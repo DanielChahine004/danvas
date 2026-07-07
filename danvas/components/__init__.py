@@ -1,4 +1,4 @@
-from .base import BaseComponent
+from .base import BaseComponent, HandlerInfo
 from .slider import Slider
 from .button import Button
 from .label import Label
@@ -24,6 +24,7 @@ from .textfield import TextField
 
 __all__ = [
     "BaseComponent",
+    "HandlerInfo",
     "Slider",
     "Button",
     "Label",

@@ -51,6 +51,15 @@ class _EventRouter:
         # exactly one answers each call, keyed by event (None = catch-all).
         self._request_routes = {}
 
+    def _handler_sources(self):
+        """Extend ``handlers`` with the routed stores (see BaseComponent)."""
+        yield from super()._handler_sources()
+        for event, fns in self._routes.items():
+            yield ("message" if event is None else f"on:{event}", fns)
+        yield ("binary", self._binary_handlers)
+        for event, fn in self._request_routes.items():
+            yield ("request" if event is None else f"request:{event}", [fn])
+
     def on(self, event=None, *, fields=None, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handle inbound ``canvas.send`` messages.
 

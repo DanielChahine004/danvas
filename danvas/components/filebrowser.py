@@ -133,6 +133,11 @@ class FileBrowser(React):
         self._show_hidden = bool(value)
         self._push_listing()
 
+    def _handler_sources(self):
+        yield from super()._handler_sources()
+        yield ("select", self._select_cbs)
+        yield ("navigate", self._nav_cbs)
+
     # -- public decorators ---------------------------------------------------
     def on_select(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handler fired with the absolute path of a clicked file."""

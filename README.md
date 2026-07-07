@@ -1003,6 +1003,19 @@ The division of labour: your code owns *detection* (a `watchdog` observer, a
 backpressure, tracing. `@canvas.on_edit` is this same pattern with the
 detector built in.
 
+**Seeing the wiring** — every panel exposes `panel.handlers`, a read-only
+`{trigger: [handler]}` map of everything it's configured to fire — the original
+function, its `file:line`, and its dispatch mode — and `canvas.events` is the
+same view over the emit channels. The Inspector's detail view shows it when you
+drill into a panel:
+
+```python
+>>> slider.handlers
+{'change': [<handler update_geometry (cad.py:17) [dedicated/latest]>]}
+>>> canvas.events
+{'part-dropped': [<handler _ (watcher.py:12) [inline]>]}
+```
+
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving
 process only*. Prefer this over a hand-started thread when using `hot_reload`, so

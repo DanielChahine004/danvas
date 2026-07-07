@@ -48,6 +48,7 @@ class Button(React):
     }
     default_w = 200
     default_h = 84
+    _change_trigger = "click"       # `_callbacks` hold on_click handlers
 
     def __init__(self, name="button", text=None, color=None, label=None):
         # ``text`` is the button face; it defaults to the label/name so naming the

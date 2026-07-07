@@ -193,6 +193,10 @@ class Upload(React):
         super()._bind(component_id, bridge)
         bridge.register_upload(self._token, self)
 
+    def _handler_sources(self):
+        yield from super()._handler_sources()
+        yield ("upload", self._upload_cbs)
+
     def on_upload(self, fn=None, *, threaded=False, dedicated=False, queue="fifo"):
         """Decorator: handler fired with an :class:`UploadedFile` per upload.
 
