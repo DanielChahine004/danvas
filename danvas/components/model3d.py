@@ -116,7 +116,7 @@ _VIEWER_HTML = """
             const worldPerPx = 2 * dist * Math.tan(
                 (camera.perspective.fov / 2) * Math.PI / 180)
                 / (cvs.clientHeight || 1);
-            camera.pan([-dx * worldPerPx, dy * worldPerPx, 0]);
+            camera.pan([dx * worldPerPx, dy * worldPerPx, 0]);
         });
         document.addEventListener('mouseup', (e) => {
             if (e.button === 1) panning = false;
