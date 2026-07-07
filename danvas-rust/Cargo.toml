@@ -25,3 +25,6 @@ camera = ["dep:nokhwa", "dep:image"]
 [[example]]
 name = "two_languages"
 path = "examples/two_languages.rs"
+
+[build-dependencies]
+serde_json = "1"
