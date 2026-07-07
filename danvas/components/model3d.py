@@ -179,6 +179,7 @@ _VIEWER_HTML = """
             camera.look = [P[0] + (camera.look[0] - P[0]) * s,
                            P[1] + (camera.look[1] - P[1]) * s,
                            P[2] + (camera.look[2] - P[2]) * s];
+            refreshClip();   // ortho mode brackets the (changed) distance
         }, { passive: false });
     }
 
@@ -225,6 +226,25 @@ _VIEWER_HTML = """
         }
     }
 
+    function refreshClip() {
+        // Clip planes sized to the situation. Perspective: model-scaled (a mm
+        // part in meters sits inside any fixed near). Telephoto ortho: tight
+        // around the pulled-back camera distance and re-bracketed on every
+        // zoom — a model-scaled near plane 32x away compresses the model into
+        // a coarse depth slice and the edge overlay z-fights the faces.
+        if (!model) return;
+        const diag = Math.max(math.getAABB3Diag(model.aabb), 1e-6);
+        const camera = viewer.camera;
+        if (orthoMode) {
+            const D = math.lenVec3(math.subVec3(camera.look, camera.eye, []));
+            camera.perspective.near = Math.max(D - diag * 2, D * 0.2);
+            camera.perspective.far  = D + diag * 4;
+        } else {
+            camera.perspective.near = diag / 1000;
+            camera.perspective.far  = diag * 1000;
+        }
+    }
+
     canvas.onPush((data) => {
         // GLB bytes arrive as an ArrayBuffer; the dataSource serves them.
         const mySeq = ++seq;
@@ -238,11 +258,7 @@ _VIEWER_HTML = """
         m.on("loaded", () => {
             if (mySeq !== seq) { m.destroy(); return; }   // a newer push won
             model = m;
-            const diag = Math.max(math.getAABB3Diag(m.aabb), 1e-6);
-            viewer.camera.perspective.near = diag / 1000;
-            viewer.camera.perspective.far  = diag * 1000;
-            viewer.camera.ortho.near = diag / 1000;
-            viewer.camera.ortho.far  = diag * 1000;
+            refreshClip();
             applyLook();
             status.innerText = "RENDER COMPLETE";
             if (firstLoad) { viewer.cameraFlight.jumpTo(model); firstLoad = false; }
@@ -309,20 +325,8 @@ _VIEWER_HTML = """
                       camera.look[1] - dir[1] * dist * t,
                       camera.look[2] - dir[2] * dist * t];
         camera.perspective.fov = fovTo;
-        if (model) {
-            const diag = Math.max(math.getAABB3Diag(model.aabb), 1e-6);
-            if (orthoMode) {   // returning to perspective: model-scaled planes
-                viewer.camera.perspective.near = diag / 1000;
-                viewer.camera.perspective.far  = diag * 1000;
-            } else {
-                // Telephoto: clip planes tight around the pulled-back
-                // distance, or the depth buffer z-fights across the model.
-                const D = dist * t;
-                viewer.camera.perspective.near = D / 100;
-                viewer.camera.perspective.far  = D * 4;
-            }
-        }
         orthoMode = !orthoMode;
+        refreshClip();
         sync();
     };
     document.getElementById('btnReset').onclick = () => {
