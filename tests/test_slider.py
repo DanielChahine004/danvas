@@ -58,3 +58,16 @@ def test_slider_update_broadcasts():
     assert bridge.sent == [
         {"type": "update", "id": "abc", "payload": {"post": 55}}
     ]
+
+
+def test_value_setter_is_update():
+    # `slider.value = 7` is the symmetric twin of the .min/.max/.step live
+    # setters: routed through update() — pushed/replayed, and silent (a
+    # programmatic set never fires on_change; that path is browser input).
+    import danvas
+    canvas = danvas.Canvas()
+    s = canvas.slider("r", min=1, max=9, default=5)
+    fired = []
+    s.on_change(fired.append)
+    s.value = 7
+    assert s.value == 7 and fired == []

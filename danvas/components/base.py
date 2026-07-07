@@ -1276,6 +1276,19 @@ class _ValuePersist:
     value lands silently, with no spurious startup callbacks.
     """
 
+    @property
+    def value(self):
+        with self._lock:
+            return self._value
+
+    @value.setter
+    def value(self, v):
+        # Write = the component's own update(): pushed to browsers, replayed
+        # on reconnect, and silent (a programmatic set never fires on_change —
+        # that path belongs to browser input). `slider.value = 3` is the
+        # symmetric twin of the .min/.max/.step live setters.
+        self.update(v)
+
     def _persist_state(self):
         v = self.value
         return {"value": v} if v is not None else {}

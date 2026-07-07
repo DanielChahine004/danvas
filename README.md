@@ -173,10 +173,10 @@ canvas.insert(s, x=80, y=80)
 
 | Component | Direction | API |
 |---|---|---|
-| `Slider` | bidirectional | `.value`, `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True`; live: `.min`, `.max`, `.step`, `.color` |
-| `Toggle` | bidirectional | `.value`, `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
+| `Slider` | bidirectional | `.value` (read/assign), `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True`; live: `.min`, `.max`, `.step`, `.color` |
+| `Toggle` | bidirectional | `.value` (read/assign), `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
 | `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.text`, `.color` |
-| `TextField` | bidirectional | single-line or `multiline=True`; `@on_change` on Enter/blur; `.value`, `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
+| `TextField` | bidirectional | single-line or `multiline=True`; `@on_change` on Enter/blur; `.value` (read/assign), `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
 | `Label` | output | escaped text/number; `.update(text)`; `h="auto"`; live: `.color` |
 | `Markdown` | output | rendered Markdown; `.update(text)` |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.update(src)`, `fit=`; live: `.color` |
