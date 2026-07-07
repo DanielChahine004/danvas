@@ -1655,6 +1655,9 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         if let Some(v) = frame.get("uiHosting").and_then(Value::as_bool) {
             h.ui_hosting = v;
         }
+        // Browsers already connected got a welcome without these flags (a
+        // hot-reload browser outlives the worker) — push the change live.
+        h.fanout_browsers(&frame.to_string());
         return;
     }
     if kind == "view" {

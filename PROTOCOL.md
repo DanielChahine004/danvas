@@ -169,9 +169,10 @@ did not spawn (e.g. the hot-reload monitor started danvasd before the script
 ran) may deliver its resolved UI-affordance gating:
 `{"type": "serve_config", "uiInspector": bool, "uiGraveyard": bool,
 "cursors": bool, "uiHosting": bool}` (all fields optional; absent fields keep
-the hub's current value). The hub folds the flags, and every *subsequent*
-browser welcome advertises them — send it right after connecting, before
-viewers arrive. A hub MAY ignore it from untrusted sources.
+the hub's current value). The hub folds the flags into every subsequent
+browser welcome **and relays the frame to already-connected browsers**, which
+apply it live (a hot-reload browser outlives the worker, so its welcome
+predates the flags). A hub MAY ignore it from untrusted sources.
 
 **Authoring native panels:** register-frame props are opaque to the protocol,
 but the built-in panels only render when the frame carries the React-shaped

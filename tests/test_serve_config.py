@@ -69,6 +69,36 @@ async def _welcome(port):
                 return msg
 
 
+def test_serve_config_reaches_an_already_connected_browser(hub):
+    """A hot-reload browser outlives the worker, so its welcome predates the
+    flags — the hub must relay serve_config to it live (no F5)."""
+    async def go():
+        async with ws_connect(f"ws://127.0.0.1:{hub}/ws", max_size=None) as browser:
+            # Drain until the welcome so the session is fully established.
+            while True:
+                raw = await asyncio.wait_for(browser.recv(), timeout=8)
+                if not isinstance(raw, bytes) and \
+                        json.loads(raw).get("type") == "welcome":
+                    break
+            async with ws_connect(
+                    f"ws://127.0.0.1:{hub}/ws?source=1&label=host",
+                    max_size=None) as src:
+                await src.send(json.dumps(
+                    {"type": "serve_config", "uiInspector": True}))
+                deadline = asyncio.get_event_loop().time() + 8
+                while True:
+                    raw = await asyncio.wait_for(browser.recv(), timeout=8)
+                    if isinstance(raw, bytes):
+                        continue
+                    msg = json.loads(raw)
+                    if msg.get("type") == "serve_config":
+                        assert msg.get("uiInspector") is True
+                        return
+                    assert asyncio.get_event_loop().time() < deadline
+
+    asyncio.run(go())
+
+
 def test_serve_config_updates_the_welcome_gating(hub):
     async def go():
         # A bare broker defaults every affordance off.

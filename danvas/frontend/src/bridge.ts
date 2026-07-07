@@ -712,6 +712,14 @@ function handle(msg: any): void {
     case 'merge_auth_failed':
       markMergeAuthFailed(msg.uri, msg.label || msg.uri)
       break
+    case 'serve_config':
+      // The owner delivered its UI gating after we connected (a hot-reload
+      // browser outlives the worker, so its welcome predates the flags) —
+      // apply live, only the fields present.
+      if (typeof msg.uiInspector === 'boolean') setUiInspectorEnabled(msg.uiInspector)
+      if (typeof msg.uiGraveyard === 'boolean') setGraveyardEnabled(msg.uiGraveyard)
+      if (typeof msg.cursors === 'boolean') setCursorsEnabled(msg.cursors)
+      break
     default:
       break
   }
