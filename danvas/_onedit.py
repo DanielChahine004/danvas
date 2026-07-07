@@ -137,6 +137,13 @@ class EditWatcher:
                 continue                  # an edit elsewhere in the file
             watch.src = segment
             try:
+                # Compile the def WITHOUT its decorators: re-exec'ing them
+                # would re-run their registrations against live objects — an
+                # @canvas.on_edit on the def itself would append a duplicate
+                # re-run handler on every save (one extra run per save), and an
+                # @slider.on_change would double-register. Handlers get the
+                # plain function either way.
+                node.decorator_list = []
                 code = compile(ast.Module(body=[node], type_ignores=[]),
                                path, "exec")
                 exec(code, watch.globals_)          # rebinds the module global

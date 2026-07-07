@@ -124,3 +124,38 @@ def tick():
         assert _wait(lambda: runs == ["ran-v2"]), runs
     finally:
         del builtins._on_edit_test_runs
+
+
+def test_decorated_def_runs_once_per_save(tmp_path):
+    # Regression: the recompiled def must not re-exec its decorators. When the
+    # watched function is decorated with @canvas.on_edit (the usual bare-form
+    # layout), re-applying the decorator on save appended a duplicate re-run
+    # handler each time — save N ran the function N+1 times.
+    path = tmp_path / "livemod.py"
+    runs = []
+    import builtins
+    builtins._on_edit_test_runs = runs
+    builtins._on_edit_test_canvas = danvas.Canvas()
+    src = """
+import builtins
+
+@builtins._on_edit_test_canvas.on_edit
+def tick():
+    builtins._on_edit_test_runs.append({version!r})
+"""
+    _write(path, src.format(version="v1"))
+    try:
+        _load(path, "livemod_d")
+
+        _write(path, src.format(version="v2"))
+        assert _wait(lambda: len(runs) >= 1)
+        time.sleep(1.2)  # would catch the duplicate handler firing late
+        assert runs == ["v2"], runs
+
+        _write(path, src.format(version="v3"))
+        assert _wait(lambda: len(runs) >= 2)
+        time.sleep(1.2)
+        assert runs == ["v2", "v3"], runs
+    finally:
+        del builtins._on_edit_test_runs
+        del builtins._on_edit_test_canvas
