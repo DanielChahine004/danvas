@@ -928,6 +928,30 @@ the worker, which re-reads files loaded via `path=` (e.g. a
 live-reloads its JSX/CSS *without* a restart; `watch=` is the whole-process
 version for arbitrary assets.
 
+**The editor as an input device** — `@canvas.live` treats saving your script
+like clicking a button: the watched function is the panel, the save is the
+click, and the "event payload" is the fresh definition. danvas watches the
+file, and when *that function's own source* changes (an unrelated edit in the
+same file doesn't fire), it re-compiles just that `def` — original line
+numbers, so tracebacks point at your real file — rebinds it, and **re-runs
+it**, on the same dispatch thread as every other handler, with rapid saves
+coalescing latest-wins:
+
+```python
+@canvas.live                       # edit the body, save → the canvas updates
+def update_geometry():
+    part = build_the_part(radius_slider.value)
+    viewer.push_binary(tessellate(part))
+```
+
+`canvas.on_edit("update_geometry")` is the general form: your handler receives
+the fresh function and chooses the policy (validate first, diff, re-run, or
+ask). A syntax error in the save keeps the old code running and prints where.
+This is the no-restart rung of the reload ladder: the process — its open
+serial ports, warmed kernels, half-trained models — never blinks. Scope:
+top-level `def`s only; decorated handlers, closures, and new module-level
+imports are `hot_reload=True` territory (which, when on, supersedes this).
+
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving
 process only*. Prefer this over a hand-started thread when using `hot_reload`, so
