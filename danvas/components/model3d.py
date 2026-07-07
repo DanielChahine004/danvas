@@ -84,7 +84,10 @@ _VIEWER_HTML = """
     // hand the loader its bytes directly instead of a src it would fetch.
     let pendingBuf = null;
     const loader        = new GLTFLoaderPlugin(viewer, {
-        dataSource: { getGLTF: (src, ok, err) => ok(pendingBuf) }
+        dataSource: {   // the loader picks the getter by src extension
+            getGLB:  (src, ok, err) => ok(pendingBuf),
+            getGLTF: (src, ok, err) => ok(pendingBuf),
+        }
     });
     const sectionPlanes = new SectionPlanesPlugin(viewer, { overviewVisible: false });
     const distance      = new DistanceMeasurementsPlugin(viewer);
