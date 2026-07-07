@@ -504,10 +504,10 @@ def handle(msg):
 web = canvas.webview("https://en.wikipedia.org/wiki/Robot"); web.navigate("https://example.com")
 ```
 
-**3D models / CAD** — `Model3D` is a prebuilt part viewer (xeokit): hand it a
-**GLB** — the standard 3D binary every CAD/mesh stack exports — and you get
-orbit/pan/zoom, snap-to-edge distance measurements, a draggable section plane,
-and reset/clear, no HTML written. `update` takes GLB bytes, a `.glb` path, or a
+**3D models / CAD** — `Model3D` is a prebuilt part viewer (Google's
+`<model-viewer>`): hand it a **GLB** — the standard 3D binary every CAD/mesh
+stack exports — and you get smooth orbit/pan/zoom, PBR rendering, spin and
+reset, no HTML written. `update` takes GLB bytes, a `.glb` path, or a
 trimesh-like object; each update replaces the model while the camera holds your
 viewpoint. Pairs naturally with `@canvas.on_edit` for a live CAD loop:
 

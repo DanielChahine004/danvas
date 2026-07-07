@@ -1,10 +1,10 @@
-"""Model3D: a prebuilt CAD/3D viewer panel — hand it GLB bytes, done.
+"""Model3D: a prebuilt 3D model viewer panel — hand it GLB bytes, done.
 
-The viewer inside is `xeokit <https://xeokit.io>`_ (the established
-BIM/engineering web viewer, loaded from its CDN), pre-wired with the tools a
-part viewer needs: orbit/pan with fine-grained proportional zoom, snap-to-edge
-distance **measurements**, a draggable **section plane**, reset/clear — the
-distilled version of the panel every CAD script used to hand-write.
+The viewer inside is Google's `\\<model-viewer>
+<https://modelviewer.dev>`_ (the established web-component 3D viewer, loaded
+from its CDN): smooth orbit/pan/zoom with inertia and proper PBR rendering,
+zero HTML written. A presentation viewer, not an engineering one — no
+measurements or section planes.
 
 The input is **glTF-Binary (GLB)** — the industry-standard 3D binary, which
 every CAD/mesh stack exports::
@@ -25,10 +25,6 @@ afterwards.
 Polyglot: the panel ships as the ``model3d`` template, and the bytes ride the
 CUSTOM binary envelope — any SDK renders a part by sending one register frame
 and pushing GLB bytes (Rust: ``send_media(3, id, glb)``).
-
-Section-cap note: a filled cut face needs a closed solid mesh. GLB exported
-from CAD kernels is usually one open surface per face, so the section slices
-without a cap — the standard trade for taking the standard format.
 """
 
 import os
@@ -39,8 +35,7 @@ _VIEWER_HTML = """
 <style>
     html, body { margin: 0; height: 100%; background: #1a1a1b; overflow: hidden;
                  font-family: monospace; }
-    #xk { width: 100vw; height: 100vh; cursor: grab; }
-    #xk:active { cursor: grabbing; }
+    model-viewer { width: 100vw; height: 100vh; --poster-color: transparent; }
     #status { position: absolute; top: 10px; left: 10px; color: #888;
               font-size: 11px; pointer-events: none;
               background: rgba(0,0,0,0.8); padding: 4px 8px; border-radius: 4px; }
@@ -50,108 +45,66 @@ _VIEWER_HTML = """
                       border-radius: 4px; padding: 6px 10px; cursor: pointer; }
     #toolbar button.on { background: #3b6ea5; border-color: #5a8fc7; color: #fff; }
     #toolbar button:hover { border-color: #777; }
-    .viewer-ruler-label { font-family: monospace !important; }
 </style>
 
-<canvas id="xk"></canvas>
+<script type="module"
+    src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3/dist/model-viewer.min.js"></script>
+
+<model-viewer id="mv" camera-controls interaction-prompt="none"
+              exposure="0.9" shadow-intensity="0.6"></model-viewer>
 <div id="status">WAITING FOR MODEL…</div>
 <div id="toolbar">
-    <button id="btnMeasure">Measure</button>
-    <button id="btnSection">Section</button>
+    <button id="btnSpin">Spin</button>
     <button id="btnReset">Reset view</button>
-    <button id="btnClear">Clear</button>
 </div>
 
-<script type="module">
-    import {
-        Viewer, GLTFLoaderPlugin, SectionPlanesPlugin,
-        DistanceMeasurementsPlugin, DistanceMeasurementsMouseControl,
-        PointerLens, math
-    } from "https://cdn.jsdelivr.net/npm/@xeokit/xeokit-sdk@2/dist/xeokit-sdk.es.min.js";
-
+<script>
+    const mv = document.getElementById('mv');
     const status = document.getElementById('status');
-    const viewer = new Viewer({ canvasId: "xk", transparent: true,
-                                readableGeometryEnabled: true });
-    viewer.camera.eye = [60, 60, 60];
-    viewer.camera.look = [0, 0, 0];
-    viewer.camera.up = [0, 1, 0];
-    viewer.camera.perspective.near = 0.1;
-    viewer.camera.perspective.far = 100000;
-    viewer.cameraControl.mouseWheelDollyRate = 10;
-    viewer.cameraControl.dollyProportionalToCameraDistance = true;
-
-    // The sandboxed iframe (opaque origin) can't XHR-fetch blob: URLs, so
-    // hand the loader its bytes directly instead of a src it would fetch.
-    let pendingBuf = null;
-    const loader        = new GLTFLoaderPlugin(viewer, {
-        dataSource: {   // the loader picks the getter by src extension
-            getGLB:  (src, ok, err) => ok(pendingBuf),
-            getGLTF: (src, ok, err) => ok(pendingBuf),
-        }
-    });
-    const sectionPlanes = new SectionPlanesPlugin(viewer, { overviewVisible: false });
-    const distance      = new DistanceMeasurementsPlugin(viewer);
-    const measureCtrl   = new DistanceMeasurementsMouseControl(distance, {
-        pointerLens: new PointerLens(viewer)
-    });
-    measureCtrl.snapping = true;
-
-    let model = null;
     let firstLoad = true;
-    let measuring = false;
-    let sectioning = false;
-    let seq = 0;
+    let savedOrbit = null, savedTarget = null, savedFov = null;
 
     canvas.onPush((data) => {
-        // GLB bytes arrive as an ArrayBuffer; the dataSource serves them.
-        const mySeq = ++seq;
-        distance.clear();
-        if (sectioning) { sectionPlanes.clear(); sectioning = false; sync(); }
-        if (model) { model.destroy(); model = null; }
-        pendingBuf = data;
+        // The sandboxed iframe (opaque origin) can't fetch blob: URLs, so
+        // the GLB rides a data: URL, which fetch() accepts from anywhere.
+        if (!firstLoad) {
+            savedOrbit  = mv.getCameraOrbit().toString();
+            savedTarget = mv.getCameraTarget().toString();
+            savedFov    = mv.getFieldOfView() + "deg";
+        }
+        const bytes = new Uint8Array(data);
+        let bin = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK)
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
         status.innerText = "LOADING…";
-        const m = loader.load({ id: "cad" + mySeq, src: "model.glb", edges: true });
-        m.on("loaded", () => {
-            if (mySeq !== seq) { m.destroy(); return; }   // a newer push won
-            model = m;
-            status.innerText = "RENDER COMPLETE";
-            if (firstLoad) { viewer.cameraFlight.jumpTo(model); firstLoad = false; }
-        });
-        m.on("error", (e) => { status.innerText = "LOAD ERROR: " + e; });
+        mv.src = "data:model/gltf-binary;base64," + btoa(bin);
     });
 
-    const bM = document.getElementById('btnMeasure');
-    const bS = document.getElementById('btnSection');
-    function sync() {
-        bM.classList.toggle('on', measuring);
-        bS.classList.toggle('on', sectioning);
-    }
-    bM.onclick = () => {
-        measuring = !measuring;
-        measuring ? measureCtrl.activate() : measureCtrl.deactivate();
-        sync();
-    };
-    bS.onclick = () => {
-        if (!model) return;
-        sectioning = !sectioning;
-        if (sectioning) {
-            const c = math.getAABB3Center(viewer.scene.aabb);
-            const sp = sectionPlanes.createSectionPlane({ id: "sp1", pos: c, dir: [-1, 0, 0] });
-            sectionPlanes.showControl(sp.id);
-        } else {
-            sectionPlanes.clear();
+    mv.addEventListener('load', () => {
+        status.innerText = "RENDER COMPLETE";
+        if (!firstLoad && savedOrbit) {
+            // Each src swap re-frames; put the user's viewpoint back.
+            mv.cameraOrbit  = savedOrbit;
+            mv.cameraTarget = savedTarget;
+            mv.fieldOfView  = savedFov;
+            mv.jumpCameraToGoal();
         }
-        sync();
+        firstLoad = false;
+    });
+    mv.addEventListener('error', (e) => {
+        status.innerText = "LOAD ERROR: " + (e.detail ? e.detail.type : e.type);
+    });
+
+    document.getElementById('btnSpin').onclick = function () {
+        mv.autoRotate = !mv.autoRotate;
+        this.classList.toggle('on', mv.autoRotate);
     };
     document.getElementById('btnReset').onclick = () => {
-        if (model) viewer.cameraFlight.flyTo(model);
-    };
-    document.getElementById('btnClear').onclick = () => {
-        distance.clear();
-        sectionPlanes.clear();
-        measuring = false; sectioning = false;
-        measureCtrl.deactivate();
-        sync();
+        mv.cameraOrbit = "auto auto auto";
+        mv.cameraTarget = "auto auto auto";
+        mv.fieldOfView = "auto";
+        mv.jumpCameraToGoal();
     };
 
     canvas.send({event: 'ready'});
@@ -160,7 +113,7 @@ _VIEWER_HTML = """
 
 
 class Model3D(Custom):
-    """A prebuilt 3D/CAD viewer: GLB in, orbit/measure/section out."""
+    """A prebuilt 3D model viewer: GLB in, orbit/pan/zoom out."""
 
     # Language-neutral contract (see PROTOCOL.md section: component contracts).
     CONTRACT = {
@@ -169,8 +122,9 @@ class Model3D(Custom):
         "events": [{"event": "ready"}],
         "binary": "receives CUSTOM (code 3): a complete glTF-Binary (GLB) "
                   "model; each push replaces the current one",
-        "note": "the viewer (xeokit) loads from its CDN; the browser needs "
-                "network access to cdn.jsdelivr.net on first render",
+        "note": "the viewer (Google <model-viewer>) loads from its CDN; the "
+                "browser needs network access to cdn.jsdelivr.net on first "
+                "render",
     }
 
     default_w = 800
