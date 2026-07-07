@@ -20,9 +20,10 @@ function ViewReadout({ canvas }) {
 }
 
 // Drill-down: an object's type/repr header plus a field/type/value table.
-function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
+function DetailView({ selected, detail, onBack, onRefresh, onShow, controlStyle }) {
   const [query, setQuery] = React.useState("");
   const [typeFilter, setTypeFilter] = React.useState("all");
+  const [hovered, setHovered] = React.useState(null);
   // Reset filters when drilling into a different object.
   React.useEffect(() => { setQuery(""); setTypeFilter("all"); }, [selected]);
 
@@ -89,8 +90,22 @@ function DetailView({ selected, detail, onBack, onRefresh, controlStyle }) {
                   </tr>
                 ) : (
                   fields.map((f, i) => (
-                    <tr key={i}>
-                      <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)", ...selectable }}>{f.field}</td>
+                    <tr key={i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+                      <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={selectable}>{f.field}</span>
+                          <button
+                            title="show this field as its own panel"
+                            onClick={() => onShow(f.field)}
+                            style={{
+                              visibility: hovered === i ? "visible" : "hidden",
+                              fontSize: 11, lineHeight: 1, padding: "1px 5px",
+                              border: "1px solid var(--pc-border-mid)", borderRadius: 4,
+                              background: "var(--pc-input-bg)", color: "var(--pc-muted)",
+                              cursor: "pointer", flex: "none",
+                            }}>⧉</button>
+                        </span>
+                      </td>
                       <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)", color: "var(--pc-faint)" }}>{f.type}</td>
                       <td style={{ padding: "2px 6px", borderBottom: "1px solid var(--pc-border-soft)",
                         fontFamily: "ui-monospace, monospace", ...selectable }}>{f.value}</td>
@@ -139,6 +154,7 @@ function Component({ canvas, props }) {
         detail={ready ? detail : null}
         onBack={() => { setSelected(null); canvas.send({ action: "detail", key: null }); }}
         onRefresh={() => canvas.send({ action: "detail", key: selected })}
+        onShow={(field) => canvas.send({ action: "show_field", key: selected, field })}
         controlStyle={controlStyle} />
     );
   }

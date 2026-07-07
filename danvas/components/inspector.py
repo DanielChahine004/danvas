@@ -156,7 +156,8 @@ class Inspector(React):
         "updates": {"data_patch": "merge changed data fields"},
         "events": [{"action": "refresh|trace"},
                    {"action": "source", "source": "str"},
-                   {"action": "detail", "key": "str|null"}],
+                   {"action": "detail", "key": "str|null"},
+                   {"action": "show_field", "key": "str", "field": "str"}],
     }
     default_w = 520
     default_h = 320
@@ -265,6 +266,67 @@ class Inspector(React):
                 self.update(detail=self._build_detail(key))
         elif action == "trace":
             self._open_trace()
+        elif action == "show_field":
+            self._show_field(payload.get("key"), payload.get("field"))
+
+    def _show_field(self, key, field):
+        """Pop one field of the drilled-into object out as its own panel.
+
+        The ⧉ button on a detail row: the field's live value goes through
+        ``canvas.show`` (DataFrame → table, dict → JSON, figure → image, …)
+        and lands beside the inspector. The panel is named after
+        ``<row>.<field>``, so showing the same field again refreshes that
+        panel in place rather than stacking duplicates; it's ephemeral like
+        the inspector itself (deleting it closes it, no graveyard).
+        """
+        canvas = self._canvas
+        if canvas is None or not key or not field:
+            return
+        target = self._row_targets.get(key)
+        if target is None:
+            return
+        value = self._field_value(target, field)
+        label = f"{key}.{field}"
+        try:
+            panel = canvas.show(value, name=f"__inspect__{label}", label=label,
+                                right_of=self, gap=20)
+        except Exception:
+            # A value the renderer can't serialise still gets shown — as its repr.
+            try:
+                panel = canvas.show(repr(value), name=f"__inspect__{label}",
+                                    label=label, right_of=self, gap=20)
+            except Exception:
+                traceback.print_exc()
+                return
+        panel._ephemeral = True
+
+    @staticmethod
+    def _field_value(target, field):
+        """Resolve a detail-row field back to its live value — the same
+        sources, in the same priority order, as :func:`_object_fields`."""
+        if isinstance(target, dict):
+            for k, v in target.items():
+                if k == field or _short(k, 40) == field:
+                    return v
+            return None
+        if isinstance(target, (list, tuple, set)):
+            try:
+                return list(target)[int(field)]
+            except (ValueError, IndexError):
+                return None
+        try:
+            v = getattr(target, field)
+            if not callable(v):
+                return v
+        except Exception:
+            pass
+        props = getattr(target, "_props", None)
+        if isinstance(props, dict) and field in props:
+            return props[field]
+        inst = getattr(target, "__dict__", None)
+        if isinstance(inst, dict) and field in inst:
+            return inst[field]
+        return None
 
     def _open_trace(self):
         """Toggle the live dispatch-trace panel beside this inspector.
