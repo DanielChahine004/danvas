@@ -79,6 +79,12 @@ _VIEWER_HTML = """
     } from "https://cdn.jsdelivr.net/npm/@xeokit/xeokit-sdk@2/dist/xeokit-sdk.es.min.js";
 
     const status = document.getElementById('status');
+    // Middle-drag pans (xeokit binds MOUSE_MIDDLE_BUTTON to pan); stop the
+    // browser's middle-click autoscroll from stealing the gesture first.
+    document.getElementById('xk').addEventListener(
+        'mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+    document.getElementById('xk').addEventListener(
+        'auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
     const viewer = new Viewer({ canvasId: "xk", transparent: true,
                                 readableGeometryEnabled: true });
     viewer.camera.eye = [60, 60, 60];
