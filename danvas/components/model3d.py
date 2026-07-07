@@ -153,7 +153,7 @@ _VIEWER_HTML = """
             const dx = e.clientX - ox, dy = e.clientY - oy;
             ox = e.clientX; oy = e.clientY;
             viewer.camera.orbitYaw(-dx * 0.4);
-            viewer.camera.orbitPitch(-dy * 0.4);
+            viewer.camera.orbitPitch(dy * 0.4);
         });
         document.addEventListener('mouseup', (e) => {
             if (e.button === 0) orbiting = false;
