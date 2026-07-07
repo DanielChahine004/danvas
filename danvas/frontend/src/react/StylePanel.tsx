@@ -49,12 +49,13 @@ const wrap: any = {
   top: 10,
   right: 10,
   zIndex: 320,
-  width: 'min(194px, calc(100vw - 16px))',
+  width: 'min(172px, calc(100vw - 16px))',
   maxHeight: 'calc(100dvh - 20px)',
   overflowY: 'auto',
+  overflowX: 'hidden',   // content fits the width; never show a horizontal bar
   boxSizing: 'border-box',
-  padding: 12,
-  borderRadius: 16,
+  padding: 9,
+  borderRadius: 13,
   background: 'var(--ui-bg)',
   border: '1px solid var(--ui-border)',
   boxShadow: 'var(--ui-shadow)',
@@ -66,15 +67,15 @@ const wrap: any = {
 }
 // Section headers are collapsed to a thin spacer — the icons + tooltips say what
 // each control does, so the descriptive text just made the panel taller.
-const rowLabel: any = { fontSize: 0, lineHeight: 0, height: 0, margin: '12px 0 0' }
+const rowLabel: any = { fontSize: 0, lineHeight: 0, height: 0, margin: '8px 0 0' }
 const rowLabelFirst: any = { ...rowLabel, marginTop: 0 }
 // Hairline divider between control groups (colour · opacity · fill/dash · size).
-const divider: any = { height: 1, background: 'var(--ui-divider)', margin: '11px 0' }
+const divider: any = { height: 1, background: 'var(--ui-divider)', margin: '7px 0' }
 
 const OPACITY_CSS = `
 .pc-opacity{-webkit-appearance:none;appearance:none;height:6px;border-radius:4px;background:var(--ui-track);outline:none;cursor:pointer}
-.pc-opacity::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--ui-accent);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
-.pc-opacity::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--ui-accent);cursor:pointer}
+.pc-opacity::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--ui-accent);cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+.pc-opacity::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--ui-accent);cursor:pointer}
 `
 
 export function StylePanel() {
@@ -338,8 +339,8 @@ export function StylePanel() {
     position: 'relative',
   })
   const dot = (bg: string, greyed?: boolean): any => ({
-    width: 22,
-    height: 22,
+    width: 18,
+    height: 18,
     borderRadius: '50%',
     boxSizing: 'border-box',
     background: greyed ? 'transparent' : bg,
@@ -382,14 +383,14 @@ export function StylePanel() {
       style={{
         flex: 1,
         minWidth: 0,
-        height: 30,
-        borderRadius: 8,
+        height: 25,
+        borderRadius: 7,
         cursor: 'pointer',
         border: 'none',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: 700,
         color: active ? 'var(--ui-accent-fg)' : 'var(--ui-fg-dim)',
         background: active ? 'var(--ui-accent)' : 'var(--ui-btn)',
@@ -403,17 +404,17 @@ export function StylePanel() {
     <div style={wrap} data-pc-stylepanel="">
       <style>{OPACITY_CSS}</style>
       {sel.length > 0 && (
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ui-fg)', marginBottom: showOpacity || showStyle ? 10 : 2 }}>{describe()}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ui-fg)', marginBottom: showOpacity || showStyle || sel.length > 0 ? 6 : 2 }}>{describe()}</div>
       )}
 
       {showStyle && (
         <>
           <div style={sel.length > 0 ? rowLabel : rowLabelFirst}>Colour</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 3 }}>
             {PALETTE.map(swatch)}
             {/* spectral picker — opens the OS wheel to add a NEW custom colour */}
             <label title="Pick a custom colour" style={{ ...cell(false), cursor: 'pointer' }}>
-              <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.25)' }} />
+              <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.25)' }} />
               <input
                 type="color"
                 // open at the CURRENT colour (not #000000 → the picker showed black
@@ -444,8 +445,8 @@ export function StylePanel() {
           {/* custom-colour menu (double-click a custom): live edit via the picker
               + a Delete button (so removing isn't an accidental right-click). */}
           {menuColor && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, padding: 5, borderRadius: 9, background: 'var(--ui-btn)' }}>
-              <label title="Edit colour (drag updates everything live)" style={{ position: 'relative', width: 30, height: 30, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, cursor: 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5, padding: 4, borderRadius: 8, background: 'var(--ui-btn)' }}>
+              <label title="Edit colour (drag updates everything live)" style={{ position: 'relative', width: 26, height: 26, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, cursor: 'pointer' }}>
                 <div style={dot(menuColor)} />
                 <input
                   type="color"
@@ -464,14 +465,14 @@ export function StylePanel() {
               <button
                 onClick={() => { removeCustomColor(origColor.current || menuColor); setMenuColor(null) }}
                 title="Delete this custom colour"
-                style={{ width: 30, height: 30, flex: 'none', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'var(--ui-danger-bg)', color: 'var(--ui-danger-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ width: 26, height: 26, flex: 'none', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'var(--ui-danger-bg)', color: 'var(--ui-danger-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                <Icon name="trash" size={15} />
+                <Icon name="trash" size={13} />
               </button>
               <button
                 onClick={() => setMenuColor(null)}
                 title="Done"
-                style={{ width: 30, height: 30, flex: 'none', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'var(--ui-btn)', color: 'var(--ui-fg-dim)', fontSize: 15, fontWeight: 700 }}
+                style={{ width: 26, height: 26, flex: 'none', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'var(--ui-btn)', color: 'var(--ui-fg-dim)', fontSize: 13, fontWeight: 700 }}
               >
                 ✓
               </button>
@@ -483,7 +484,7 @@ export function StylePanel() {
       {showOpacity && (
         <>
           {showStyle ? <div style={divider} /> : <div style={sel.length > 0 ? rowLabel : rowLabelFirst} />}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingRight: 4 }}>
             {/* 5-step (discrete) opacity slider — snaps to OPACITY_STEPS. */}
             <input
               class="pc-opacity"
@@ -493,9 +494,9 @@ export function StylePanel() {
               step={1}
               value={OPACITY_STEPS.reduce((best, v, i) => (Math.abs(v - dispOpacity) < Math.abs(OPACITY_STEPS[best] - dispOpacity) ? i : best), OPACITY_STEPS.length - 1)}
               onInput={(e: any) => applyOpacity(OPACITY_STEPS[+e.target.value])}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0, maxWidth: 108 }}
             />
-            <span style={{ width: 34, textAlign: 'right', fontSize: 11.5, fontWeight: 600, color: 'var(--ui-fg-dim)' }}>{Math.round(dispOpacity * 100)}%</span>
+            <span style={{ width: 30, flex: 'none', textAlign: 'right', fontSize: 11, fontWeight: 600, color: 'var(--ui-fg-dim)' }}>{Math.round(dispOpacity * 100)}%</span>
           </div>
         </>
       )}
@@ -503,20 +504,20 @@ export function StylePanel() {
       {showStyle && (
         <>
           <div style={divider} />
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>{FILLS.map(([f, icon]) => seg(disp.fill === f, () => apply({ fill: f }), <Icon name={icon} size={18} />, f, f))}</div>
-          <div style={{ display: 'flex', gap: 6 }}>{DASHES.map(([d, icon]) => seg(disp.dash === d, () => apply({ dash: d }), <Icon name={icon} size={18} />, d, d))}</div>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>{FILLS.map(([f, icon]) => seg(disp.fill === f, () => apply({ fill: f }), <Icon name={icon} size={15} />, f, f))}</div>
+          <div style={{ display: 'flex', gap: 4 }}>{DASHES.map(([d, icon]) => seg(disp.dash === d, () => apply({ dash: d }), <Icon name={icon} size={15} />, d, d))}</div>
           <div style={divider} />
-          <div style={{ display: 'flex', gap: 6 }}>{SIZES.map(([s, l]) => seg(disp.size === s, () => applySize(s), l, s))}</div>
+          <div style={{ display: 'flex', gap: 4 }}>{SIZES.map(([s, l]) => seg(disp.size === s, () => applySize(s), l, s))}</div>
         </>
       )}
 
       {(selText.length > 0 || tool === 'text') && (
         <>
           {showStyle && <div style={divider} />}
-          <div style={{ display: 'flex', gap: 6 }}>
-            {seg(dispAlign === 'left', () => applyAlign('left'), <Icon name="textAlignLeft" size={18} />, 'tal', 'Align text left')}
-            {seg(dispAlign === 'center', () => applyAlign('center'), <Icon name="textAlignCenter" size={18} />, 'tac', 'Align text centre')}
-            {seg(dispAlign === 'right', () => applyAlign('right'), <Icon name="textAlignRight" size={18} />, 'tar', 'Align text right')}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {seg(dispAlign === 'left', () => applyAlign('left'), <Icon name="textAlignLeft" size={15} />, 'tal', 'Align text left')}
+            {seg(dispAlign === 'center', () => applyAlign('center'), <Icon name="textAlignCenter" size={15} />, 'tac', 'Align text centre')}
+            {seg(dispAlign === 'right', () => applyAlign('right'), <Icon name="textAlignRight" size={15} />, 'tar', 'Align text right')}
           </div>
           {/* divider so the align row isn't crammed against the rows below it */}
           {(selLines.length > 0 || sel.length > 0) && <div style={divider} />}
@@ -532,35 +533,35 @@ export function StylePanel() {
           </div>
           <div style={rowLabel}>Arrow style</div>
           <div style={{ display: 'flex', gap: 5 }}>
-            {seg(arrowKind === 'straight', () => applyKind('straight'), <Icon name="arrowStraight" size={18} />, 'akS', 'Straight')}
-            {seg(arrowKind === 'elbow', () => applyKind('elbow'), <Icon name="arrowElbow" size={18} />, 'akE', 'Right-angle (elbow)')}
-            {seg(arrowKind === 'curved', () => applyKind('curved'), <Icon name="arrowCurved" size={18} />, 'akC', 'Curved')}
+            {seg(arrowKind === 'straight', () => applyKind('straight'), <Icon name="arrowStraight" size={15} />, 'akS', 'Straight')}
+            {seg(arrowKind === 'elbow', () => applyKind('elbow'), <Icon name="arrowElbow" size={15} />, 'akE', 'Right-angle (elbow)')}
+            {seg(arrowKind === 'curved', () => applyKind('curved'), <Icon name="arrowCurved" size={15} />, 'akC', 'Curved')}
           </div>
         </>
       )}
 
       {sel.length > 1 && (
         <>
-          <div style={showStyle ? rowLabel : rowLabelFirst}>Align</div>
+          <div style={rowLabel}>Align</div>
           <div style={{ display: 'flex', gap: 5 }}>
-            {seg(false, () => alignSelection('x', 'start'), <Icon name="alignLeft" size={18} />, 'al', 'Align left')}
-            {seg(false, () => alignSelection('x', 'center'), <Icon name="alignCenterX" size={18} />, 'acx', 'Align horizontal centres')}
-            {seg(false, () => alignSelection('x', 'end'), <Icon name="alignRight" size={18} />, 'ar', 'Align right')}
-            {seg(false, () => alignSelection('y', 'start'), <Icon name="alignTop" size={18} />, 'at', 'Align top')}
-            {seg(false, () => alignSelection('y', 'center'), <Icon name="alignMiddleY" size={18} />, 'amy', 'Align vertical centres')}
-            {seg(false, () => alignSelection('y', 'end'), <Icon name="alignBottom" size={18} />, 'ab', 'Align bottom')}
+            {seg(false, () => alignSelection('x', 'start'), <Icon name="alignLeft" size={14} />, 'al', 'Align left')}
+            {seg(false, () => alignSelection('x', 'center'), <Icon name="alignCenterX" size={14} />, 'acx', 'Align horizontal centres')}
+            {seg(false, () => alignSelection('x', 'end'), <Icon name="alignRight" size={14} />, 'ar', 'Align right')}
+            {seg(false, () => alignSelection('y', 'start'), <Icon name="alignTop" size={14} />, 'at', 'Align top')}
+            {seg(false, () => alignSelection('y', 'center'), <Icon name="alignMiddleY" size={14} />, 'amy', 'Align vertical centres')}
+            {seg(false, () => alignSelection('y', 'end'), <Icon name="alignBottom" size={14} />, 'ab', 'Align bottom')}
           </div>
         </>
       )}
 
       {sel.length > 0 && (
         <>
-          <div style={sel.length > 1 || showStyle ? rowLabel : rowLabelFirst}>Arrange</div>
+          <div style={rowLabel}>Arrange</div>
           <div style={{ display: 'flex', gap: 5 }}>
-            {seg(false, () => arrangeSelection('back'), <Icon name="toBack" size={18} />, 'zback', 'Send to back')}
-            {seg(false, () => arrangeSelection('backward'), <Icon name="backward" size={18} />, 'zbwd', 'Send backward')}
-            {seg(false, () => arrangeSelection('forward'), <Icon name="forward" size={18} />, 'zfwd', 'Bring forward')}
-            {seg(false, () => arrangeSelection('front'), <Icon name="toFront" size={18} />, 'zfront', 'Bring to front')}
+            {seg(false, () => arrangeSelection('back'), <Icon name="toBack" size={15} />, 'zback', 'Send to back')}
+            {seg(false, () => arrangeSelection('backward'), <Icon name="backward" size={15} />, 'zbwd', 'Send backward')}
+            {seg(false, () => arrangeSelection('forward'), <Icon name="forward" size={15} />, 'zfwd', 'Bring forward')}
+            {seg(false, () => arrangeSelection('front'), <Icon name="toFront" size={15} />, 'zfront', 'Bring to front')}
           </div>
         </>
       )}
