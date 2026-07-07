@@ -94,6 +94,34 @@ _VIEWER_HTML = """
     // arrives in meters — a 20mm box is 0.02 units, inside any fixed near).
     viewer.cameraControl.mouseWheelDollyRate = 10;
     viewer.cameraControl.dollyProportionalToCameraDistance = true;
+    {   // Middle-drag pans. Not via xeokit's keymap — its mousemove handler
+        // doesn't recognise a held middle button (real mousemove events carry
+        // button=0), so drive the camera directly: screen-space drag → a
+        // camera-space pan sized so the content follows the cursor.
+        const cvs = document.getElementById('xk');
+        let panning = false, lx = 0, ly = 0;
+        cvs.addEventListener('mousedown', (e) => {
+            if (e.button === 1) {
+                panning = true; lx = e.clientX; ly = e.clientY;
+                e.preventDefault();
+            }
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!panning) return;
+            const dx = e.clientX - lx, dy = e.clientY - ly;
+            lx = e.clientX; ly = e.clientY;
+            const camera = viewer.camera;
+            const dist = math.lenVec3(
+                math.subVec3(camera.look, camera.eye, []));
+            const worldPerPx = 2 * dist * Math.tan(
+                (camera.perspective.fov / 2) * Math.PI / 180)
+                / (cvs.clientHeight || 1);
+            camera.pan([-dx * worldPerPx, dy * worldPerPx, 0]);
+        });
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 1) panning = false;
+        });
+    }
 
     // The sandboxed iframe (opaque origin) can't XHR-fetch blob: URLs, so
     // hand the loader its bytes directly instead of a src it would fetch.
