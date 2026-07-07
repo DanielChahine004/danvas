@@ -84,8 +84,8 @@ _VIEWER_HTML = """
     viewer.camera.eye = [60, 60, 60];
     viewer.camera.look = [0, 0, 0];
     viewer.camera.up = [0, 1, 0];
-    viewer.camera.perspective.near = 0.1;
-    viewer.camera.perspective.far = 100000;
+    // near/far are set per-load, scaled to the model (a mm-modeled part
+    // arrives in meters — a 20mm box is 0.02 units, inside any fixed near).
     viewer.cameraControl.mouseWheelDollyRate = 10;
     viewer.cameraControl.dollyProportionalToCameraDistance = true;
 
@@ -144,6 +144,11 @@ _VIEWER_HTML = """
         m.on("loaded", () => {
             if (mySeq !== seq) { m.destroy(); return; }   // a newer push won
             model = m;
+            const diag = Math.max(math.getAABB3Diag(m.aabb), 1e-6);
+            viewer.camera.perspective.near = diag / 1000;
+            viewer.camera.perspective.far  = diag * 1000;
+            viewer.camera.ortho.near = diag / 1000;
+            viewer.camera.ortho.far  = diag * 1000;
             applyLook();
             status.innerText = "RENDER COMPLETE";
             if (firstLoad) { viewer.cameraFlight.jumpTo(model); firstLoad = false; }
