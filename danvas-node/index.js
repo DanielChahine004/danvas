@@ -83,6 +83,8 @@ export class Client {
     this._httpBase = normalizeWs(url).replace(/^ws/, 'http').replace(/\/ws$/, '')
     this.label = label
     this._templates = loadLocalTemplates()
+    this._kinds = new Map()
+    this._warnedKeys = new Set()
     this._ws = null
     this._closing = false
     this._connected = null // resolver for the first connection
@@ -190,6 +192,7 @@ export class Client {
   registerTemplate(cid, kind, opts = {}) {
     const tpl = this._templates[kind]
     if (!tpl) throw new Error(`unknown template kind ${kind}`)
+    this._kinds.set(cid, kind)
     const props = { ...tpl.props, ...(opts.props || {}) }
     props.data = JSON.stringify({ ...tpl.data, ...(opts.data || {}) })
     props.label = opts.label || cid
@@ -204,11 +207,53 @@ export class Client {
 
   /** Stream new state: `update(id, 'post', value)` — keys per the contract. */
   update(cid, key, value) {
+    this._checkUpdateKey(cid, key)
     const acc = this._updates.get(cid) || {}
     acc[key] = value
     this._updates.set(cid, acc)
     this._sendRaw({ type: 'update', id: cid, payload: { [key]: value } })
     return this
+  }
+
+  /**
+   * Set a value-control's current value — the wire form of Python's
+   * `panel.value = v` on a slider/toggle/text_field: streamed live (`post`)
+   * plus a `data_patch` so a late-joining browser replays the latest value.
+   */
+  setValue(cid, value) {
+    const acc = this._updates.get(cid) || {}
+    acc.post = value
+    acc.data_patch = { ...(acc.data_patch || {}), value }
+    this._updates.set(cid, acc)
+    this._sendRaw({ type: 'update', id: cid,
+                    payload: { post: value, data_patch: { value } } })
+    return this
+  }
+
+  // The contract guard: a template panel's CONTRACT declares which update
+  // keys it consumes — an off-vocabulary key lands as an unused prop and the
+  // panel silently doesn't react (e.g. update(id, 'value', ..) on a slider,
+  // whose vocabulary is data_patch/post). Warn once per (panel, key);
+  // advisory only.
+  _checkUpdateKey(cid, key) {
+    const UNIVERSAL = new Set(['data_patch', 'x', 'y', 'w', 'h', 'rotation',
+      'opacity', 'label', 'locked', 'movable', 'resizable', 'interactive',
+      'selectable', 'frame', 'frameColor', 'autoH'])
+    if (UNIVERSAL.has(key)) return
+    const kind = this._kinds.get(cid)
+    if (!kind || !this._templates) return
+    const contract = (this._templates[kind] || {}).contract
+    const updates = contract && contract.updates
+    if (!updates || key in updates) return
+    const mark = `${cid}${key}`
+    if (this._warnedKeys.has(mark)) return
+    this._warnedKeys.add(mark)
+    const hint = contract.data && key in contract.data
+      ? ` — '${key}' is a data field; send it as data_patch (or setValue for a control's value)`
+      : ''
+    console.error(`[danvas] update(${JSON.stringify(cid)}, ${JSON.stringify(key)}): ` +
+      `not in ${kind}'s update vocabulary (${Object.keys(updates).join(', ')}); ` +
+      `the panel won't react${hint}`)
   }
 
   remove(cid) {

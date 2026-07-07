@@ -118,6 +118,10 @@ struct State {
     reg_order: Vec<String>,
     registers: HashMap<String, Value>,
     updates: HashMap<String, Map<String, Value>>,
+    // Template kind per panel (only for template registers) + the off-contract
+    // update keys already warned about, so the guard nags once per (id, key).
+    kinds: HashMap<String, String>,
+    warned_keys: std::collections::HashSet<(String, String)>,
     // Managed shapes + arrows this source owns, kept current for replay.
     shape_order: Vec<String>,
     shapes: HashMap<String, Value>,
@@ -571,6 +575,7 @@ impl Client {
                 json!({"kind": kind_r, "anchor": anchor, "gap": gap}));
         }
         self.record_register(id, &msg);
+        self.inner.state.lock().unwrap().kinds.insert(id.into(), kind.into());
         self.send(&msg);
     }
 
@@ -585,11 +590,64 @@ impl Client {
 
     /// Stream new state for a panel this source owns (e.g. `update("s","post",v)`).
     pub fn update(&self, id: &str, key: &str, value: Value) {
+        self.check_update_key(id, key);
         {
             let mut st = self.inner.state.lock().unwrap();
             st.updates.entry(id.into()).or_default().insert(key.into(), value.clone());
         }
         self.send(&json!({"type": "update", "id": id, "payload": {key: value}}));
+    }
+
+    /// Set a value-control's current value — the wire form of Python's
+    /// `panel.value = v` on a slider/toggle/text_field: streamed live over the
+    /// `post` channel, plus a `data_patch` so the hub's replay hands a late
+    /// browser the latest value rather than the register-time default.
+    pub fn set_value(&self, id: &str, value: Value) {
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            let e = st.updates.entry(id.into()).or_default();
+            e.insert("post".into(), value.clone());
+            e.insert("data_patch".into(), json!({"value": value.clone()}));
+        }
+        self.send(&json!({"type": "update", "id": id, "payload": {
+            "post": value.clone(), "data_patch": {"value": value}}}));
+    }
+
+    /// The contract guard: a template panel's CONTRACT (in the shared
+    /// components.json this crate embeds) declares which update keys it
+    /// consumes — an off-vocabulary key is applied as an unused prop and the
+    /// panel silently doesn't react (e.g. `update(id, "value", ..)` on a
+    /// slider, whose vocabulary is `data_patch`/`post`). Warn once per
+    /// (panel, key); never blocks — the vocabulary is advisory, additive
+    /// contract fields are legal.
+    fn check_update_key(&self, id: &str, key: &str) {
+        const UNIVERSAL: [&str; 16] = [
+            "data_patch", "x", "y", "w", "h", "rotation", "opacity", "label",
+            "locked", "movable", "resizable", "interactive", "selectable",
+            "frame", "frameColor", "autoH"];
+        if UNIVERSAL.contains(&key) { return; }
+        let kind = match self.inner.state.lock().unwrap().kinds.get(id).cloned() {
+            Some(k) => k,
+            None => return,               // raw register: vocabulary unknown
+        };
+        let contract = &self.inner.templates["templates"][&kind]["contract"];
+        let Some(updates) = contract["updates"].as_object() else { return };
+        if updates.contains_key(key) { return; }
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            if !st.warned_keys.insert((id.into(), key.into())) { return; }
+        }
+        let vocab: Vec<&str> = updates.keys().map(|s| s.as_str()).collect();
+        let hint = if contract["data"].as_object()
+                       .map_or(false, |d| d.contains_key(key)) {
+            format!(" — '{key}' is a data field; send it as data_patch \
+                     (or set_value for a control's value)")
+        } else {
+            String::new()
+        };
+        eprintln!("[danvas] update({id:?}, {key:?}): not in {kind}'s update \
+                   vocabulary ({}); the panel won't react{hint}",
+                  vocab.join(", "));
     }
 
     /// Reposition a panel this source owns (x/y in canvas coords) — the wire

@@ -6,7 +6,14 @@ The whole process, in three steps:
    per-panel `contract` blocks in `danvas/templates/components.json` (also
    served by every hub at `GET /__templates__`) as reference while wiring
    panels; they are the normative statement of each panel's data fields,
-   update keys, and events.
+   update keys, and events. An update key outside a panel's declared
+   `contract.updates` lands as an unused prop and the panel silently doesn't
+   react — since the contract is machine-readable, **validate update keys at
+   runtime and warn** (the Rust and Node SDKs both do: once per panel+key,
+   advisory, with a data-field hint). The classic trap this catches: sending
+   `{value: v}` to a slider — its value streams as `post` (or folds as
+   `data_patch: {value}`); the SDKs wrap that pairing as
+   `set_value`/`setValue`, the wire form of Python's `panel.value = v`.
 2. **Implement the fixed behavior script** in
    [`tests/sdk_conformance_target.py`](../tests/sdk_conformance_target.py)'s
    table — it is the executable spec. The Rust
