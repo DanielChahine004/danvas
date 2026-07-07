@@ -1636,6 +1636,27 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         }
         return;
     }
+    if kind == "serve_config" {
+        // The owner's resolved serve() gating, delivered on dial-in. When the
+        // broker was spawned by something that doesn't know the serve()
+        // kwargs (the hot-reload monitor starts it before the script runs),
+        // the host source sends the flags it resolved; folded into the hub so
+        // every subsequent browser welcome advertises the right affordances.
+        let mut h = hub.lock().unwrap();
+        if let Some(v) = frame.get("uiInspector").and_then(Value::as_bool) {
+            h.ui_inspector = v;
+        }
+        if let Some(v) = frame.get("uiGraveyard").and_then(Value::as_bool) {
+            h.ui_graveyard = v;
+        }
+        if let Some(v) = frame.get("cursors").and_then(Value::as_bool) {
+            h.cursors = v;
+        }
+        if let Some(v) = frame.get("uiHosting").and_then(Value::as_bool) {
+            h.ui_hosting = v;
+        }
+        return;
+    }
     if kind == "view" {
         // The source (e.g. the transplanted host) sets camera/chrome: fold
         // for late joiners' welcome, relay live.

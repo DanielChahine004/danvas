@@ -705,6 +705,15 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     view = getattr(canvas._bridge, "_view", None)
     if view:
         client._send({"type": "view", "view": view})
+    if existing_port is not None:
+        # An already-running broker (the hot-reload monitor's) was spawned
+        # without knowing this serve()'s kwargs — deliver the resolved
+        # UI-affordance gating now, before browsers typically connect.
+        config = {"type": "serve_config", "uiInspector": bool(ui_inspector),
+                  "uiGraveyard": bool(ui_graveyard), "cursors": bool(cursors)}
+        if ui_hosting is not None:
+            config["uiHosting"] = bool(ui_hosting)
+        client._send(config)
     # Pre-serve canvas.merge(url) calls: the broker owns merging, so replay them
     # as merge frames instead of standing up the Python merge host. A known
     # password uses merge_auth (dials with the session cookie); otherwise

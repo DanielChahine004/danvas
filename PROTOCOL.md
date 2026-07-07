@@ -164,6 +164,15 @@ Every served canvas is a hub by default, so this works against a plain
 `danvas/source.py` (`danvas.SourceClient`) is the reference implementation —
 ~200 lines, and the executable spec for an SDK in any language.
 
+**`serve_config` (optional, source → hub):** an owner dialing into a broker it
+did not spawn (e.g. the hot-reload monitor started danvasd before the script
+ran) may deliver its resolved UI-affordance gating:
+`{"type": "serve_config", "uiInspector": bool, "uiGraveyard": bool,
+"cursors": bool, "uiHosting": bool}` (all fields optional; absent fields keep
+the hub's current value). The hub folds the flags, and every *subsequent*
+browser welcome advertises them — send it right after connecting, before
+viewers arrive. A hub MAY ignore it from untrusted sources.
+
 **Authoring native panels:** register-frame props are opaque to the protocol,
 but the built-in panels only render when the frame carries the React-shaped
 props the frontend mounts. Those shapes ship as a language-neutral asset —
