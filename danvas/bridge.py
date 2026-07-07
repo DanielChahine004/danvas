@@ -1843,6 +1843,19 @@ class Bridge:
         else:
             self.broadcast(msg)
 
+    def _relay_layout(self, comp, geom, ws):
+        """Relay a user move/resize to the OTHER clients (mover excluded).
+
+        Overridden by the hub-backed bridge to a no-op: the hub folds a
+        browser's layout into its replay cache and keeps the other browsers
+        in step itself, so an owner echo would reach the mover — with the
+        owner busy (a tight user loop), that echo arrives stale mid-drag and
+        snaps the panel backwards (the jitter this method's split fixed).
+        """
+        self.broadcast({"type": "update", "id": comp.id, "payload": geom},
+                       exclude=ws,
+                       roles=getattr(comp, "_roles", None) or None)
+
     def _dispatch_layout(self, comp, msg, ws=None):
         """Apply a user move/resize (off the loop) and relay the new geometry.
 
@@ -1871,9 +1884,7 @@ class Bridge:
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation", "autoH", "autoW")
                 if msg.get(k) is not None}
         if geom:
-            self.broadcast({"type": "update", "id": comp.id, "payload": geom},
-                           exclude=ws,
-                           roles=getattr(comp, "_roles", None) or None)
+            self._relay_layout(comp, geom, ws)
         if "h" in msg and old_h is not None and comp.h != old_h:
             dh = comp.h - old_h
             # Auto-height measurement arrives with h only (no x/y from a drag).

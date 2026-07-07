@@ -18,16 +18,16 @@ def test_grid_flows_left_to_right_then_wraps():
 
 def test_column_stacks_by_natural_height():
     canvas = danvas.Canvas()
-    # A label is 84 tall by default, a button 84, a slider 96 — the column keeps
+    # A label is 84 tall by default, a button 84, a slider 72 — the column keeps
     # each panel's own height and advances the cursor by it (not a uniform slot).
     with canvas.column(x=40, y=40, w=320, gap=10):
         a = canvas.label("a")              # default_h 84
         b = canvas.button("b")             # default_h 84
-        c = canvas.slider("c")             # default_h 96
+        c = canvas.slider("c")             # default_h 72
     assert (a.x, a.y, a.w) == (40, 40, 320)
     assert (b.x, b.y) == (40, 40 + 84 + 10)
     assert (c.x, c.y) == (40, 40 + 84 + 10 + 84 + 10)
-    assert c.h == 96                       # natural height preserved
+    assert c.h == 72                       # natural height preserved
 
 
 def test_column_width_none_keeps_each_panels_own_width():

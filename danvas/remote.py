@@ -91,6 +91,14 @@ class _RemoteBridge(Bridge):
         # and relays to browsers (video/audio through a hub works).
         self._client._send_binary(data)
 
+    def _relay_layout(self, comp, geom, ws):
+        # The hub folds a browser's move/resize into its replay cache and
+        # relays it to the other browsers itself ("the owner doesn't echo
+        # layout back" — broker/src/main.rs). Echoing from here would reach
+        # the MOVER too (this pipe can't exclude a viewer), and a stale echo
+        # mid-drag snaps the panel backwards.
+        pass
+
     def register_live(self, component, only_roles=None):
         self._client._send(self.register_message(component))
         state = component.state_payload()
