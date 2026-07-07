@@ -80,7 +80,12 @@ _VIEWER_HTML = """
     viewer.cameraControl.mouseWheelDollyRate = 10;
     viewer.cameraControl.dollyProportionalToCameraDistance = true;
 
-    const loader        = new GLTFLoaderPlugin(viewer);
+    // The sandboxed iframe (opaque origin) can't XHR-fetch blob: URLs, so
+    // hand the loader its bytes directly instead of a src it would fetch.
+    let pendingBuf = null;
+    const loader        = new GLTFLoaderPlugin(viewer, {
+        dataSource: { getGLTF: (src, ok, err) => ok(pendingBuf) }
+    });
     const sectionPlanes = new SectionPlanesPlugin(viewer, { overviewVisible: false });
     const distance      = new DistanceMeasurementsPlugin(viewer);
     const measureCtrl   = new DistanceMeasurementsMouseControl(distance, {
@@ -89,23 +94,20 @@ _VIEWER_HTML = """
     measureCtrl.snapping = true;
 
     let model = null;
-    let blobUrl = null;
     let firstLoad = true;
     let measuring = false;
     let sectioning = false;
     let seq = 0;
 
     canvas.onPush((data) => {
-        // GLB bytes -> a blob URL the GLTF loader streams from.
+        // GLB bytes arrive as an ArrayBuffer; the dataSource serves them.
         const mySeq = ++seq;
         distance.clear();
         if (sectioning) { sectionPlanes.clear(); sectioning = false; sync(); }
         if (model) { model.destroy(); model = null; }
-        if (blobUrl) { URL.revokeObjectURL(blobUrl); }
-        blobUrl = URL.createObjectURL(
-            new Blob([data], { type: "model/gltf-binary" }));
+        pendingBuf = data;
         status.innerText = "LOADING…";
-        const m = loader.load({ id: "cad" + mySeq, src: blobUrl, edges: true });
+        const m = loader.load({ id: "cad" + mySeq, src: "model.glb", edges: true });
         m.on("loaded", () => {
             if (mySeq !== seq) { m.destroy(); return; }   // a newer push won
             model = m;
