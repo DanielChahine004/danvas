@@ -168,6 +168,8 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         self._pending_merges = []   # [(url, password, (ox, oy))]
         # Lazy per-canvas file watcher behind on_edit()/live() (danvas/_onedit.py).
         self._edit_watcher = None
+        # Named backend event channels behind emit()/on_event() (danvas/_events.py).
+        self._events = {}
 
     def on_edit(self, target, file=None):
         """React to a top-level function's SOURCE changing on disk.
@@ -222,6 +224,51 @@ class Canvas(_FactoryMixin, _LayoutMixin):
             self._watch_edit(name, path, globals_, handler)
             return handler
         return register
+
+    def on_event(self, name, fn=None, *, threaded=False, dedicated=False,
+                 queue="fifo"):
+        """Decorator: register a handler for a named backend event.
+
+        The universal trigger (see :mod:`danvas._events`): anything that can
+        call Python — a file watcher, a timer, a serial reader, another
+        handler — becomes an input by calling :meth:`emit` with the same
+        name. The handler receives the emitted data (``None`` when emitted
+        without any)::
+
+            @canvas.on_event("part-dropped")
+            def _(path):
+                viewer.update(path)
+
+        Handlers here are peers of ``on_change``/``on_click`` handlers:
+        the same ``threaded=``/``dedicated=``/``queue=`` dispatch modes,
+        ``async def`` support, and dispatch-trace visibility. Several
+        handlers may share one name; they fire in registration order.
+        """
+        channel = self._events.get(name)
+        if channel is None:
+            from ._events import EventChannel
+            channel = self._events[name] = EventChannel(self, name)
+
+        def register(f):
+            return channel._register_callback(
+                channel._callbacks, f, threaded, dedicated, queue)
+        return register(fn) if fn is not None else register
+
+    def emit(self, name, data=None):
+        """Fire every :meth:`on_event` handler registered for ``name``.
+
+        Callable from any thread (and before :meth:`serve`). The dispatch
+        rides the same shared input thread as browser events, so an inline
+        handler never races an ``on_change`` — an emit is an event like any
+        other. An emit with no handlers registered is a silent no-op, so
+        producers can emit unconditionally.
+        """
+        channel = self._events.get(name)
+        if channel is None or not channel._callbacks:
+            return
+        self._bridge._dispatch.submit(
+            lambda: channel._dispatch_callbacks(
+                channel._callbacks, (data,), None, event=name))
 
     def _watch_edit(self, name, path, globals_, handler):
         if not path:

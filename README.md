@@ -972,6 +972,37 @@ serial ports, warmed kernels, half-trained models — never blinks. Scope:
 top-level `def`s only; decorated handlers, closures, and new module-level
 imports are `hot_reload=True` territory (which, when on, supersedes this).
 
+**Backend events: the universal trigger** — panels aren't the only things that
+fire handlers. `canvas.emit(name, data)` is the backend twin of a panel's
+`canvas.send(...)`: anything that can call Python — a file watcher, a timer, a
+serial reader, an MQTT callback, another handler — becomes an input, and every
+`@canvas.on_event(name)` handler fires with the data. Emits ride the same
+dispatch thread as browser input (an inline handler never races an
+`on_change`), and event handlers are full peers of `on_change`/`on_click`:
+`threaded=`/`dedicated=`/`queue="latest"` modes, `async def`, the optional
+`viewer` arg, and dispatch-trace visibility. An emit nobody listens to is a
+silent no-op, so producers can emit unconditionally.
+
+```python
+@canvas.on_event("part-dropped", dedicated=True, queue="latest")
+def _(path):
+    viewer.update(path)                      # heavy work off the shared thread
+
+@canvas.background                           # any detector works — e.g. a poll
+def watch_drop_folder():
+    seen = set()
+    while True:
+        for f in glob.glob("drop/*.glb"):
+            if f not in seen:
+                seen.add(f); canvas.emit("part-dropped", f)
+        time.sleep(1)
+```
+
+The division of labour: your code owns *detection* (a `watchdog` observer, a
+`schedule` job, `serial.read()`), `emit` owns *execution* — serialization,
+backpressure, tracing. `@canvas.on_edit` is this same pattern with the
+detector built in.
+
 **Background workers** — register producer loops (camera, sensor, telemetry) with
 `@canvas.background`; `serve()` runs each on a daemon thread *in the serving
 process only*. Prefer this over a hand-started thread when using `hot_reload`, so
