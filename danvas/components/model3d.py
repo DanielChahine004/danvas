@@ -93,8 +93,12 @@ _VIEWER_HTML = """
     viewer.camera.up = [0, 1, 0];
     // near/far are set per-load, scaled to the model (a mm-modeled part
     // arrives in meters — a 20mm box is 0.02 units, inside any fixed near).
-    viewer.cameraControl.mouseWheelDollyRate = 10;
-    viewer.cameraControl.dollyProportionalToCameraDistance = true;
+    // followPointer is OFF: its pivot machinery drifts camera.look during a
+    // left-drag even with the rotate keymap unbound — that drift is an
+    // off-centre orbit. The two things it provided are reimplemented below:
+    // orbit (about the model centre, deliberately) and wheel zoom-to-cursor.
+    viewer.cameraControl.followPointer = false;
+    viewer.cameraControl.mouseWheelDollyRate = 0;   // replaced below
     {   // Middle-drag pans. Not via xeokit's keymap — its mousemove handler
         // doesn't recognise a held middle button (real mousemove events carry
         // button=0), so drive the camera directly: screen-space drag → a
@@ -124,6 +128,58 @@ _VIEWER_HTML = """
         document.addEventListener('mouseup', (e) => {
             if (e.button === 1) panning = false;
         });
+    }
+    {   // Left-drag orbits about the model CENTRE (camera.look — placed there
+        // by the first-load jump and Fit, and carried along by the pan), not
+        // the surface point under the cursor: xeokit's own rotate is unbound
+        // and the camera is driven directly. Wheel dolly keeps followPointer
+        // (zoom toward the cursor) — that pairing is why this isn't done by
+        // just flipping followPointer off.
+        const cc = viewer.cameraControl;
+        const km = cc.keyMap;
+        km[cc.MOUSE_ROTATE] = [];
+        cc.keyMap = km;
+        const cvs = document.getElementById('xk');
+        let orbiting = false, ox = 0, oy = 0;
+        cvs.addEventListener('mousedown', (e) => {
+            // pointerEnabled goes false while a gizmo (the section plane's
+            // arrows) owns the pointer — don't orbit under its drags.
+            if (e.button === 0 && viewer.cameraControl.pointerEnabled) {
+                orbiting = true; ox = e.clientX; oy = e.clientY;
+            }
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!orbiting) return;
+            const dx = e.clientX - ox, dy = e.clientY - oy;
+            ox = e.clientX; oy = e.clientY;
+            viewer.camera.orbitYaw(-dx * 0.4);
+            viewer.camera.orbitPitch(-dy * 0.4);
+        });
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 0) orbiting = false;
+        });
+    }
+    {   // Wheel dollies toward the cursor: scale eye AND look toward the 3D
+        // point under the pointer (model surface if hit, else the current
+        // look), so the spot you point at stays put while the view closes in
+        // — and the orbit pivot converges on what you're inspecting.
+        const cvs = document.getElementById('xk');
+        cvs.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const notches = Math.max(1, Math.abs(e.deltaY) / 100);
+            const s = Math.pow(0.9, -Math.sign(e.deltaY) * notches);
+            const camera = viewer.camera;
+            let P = camera.look;
+            const hit = viewer.scene.pick({
+                canvasPos: [e.offsetX, e.offsetY], pickSurface: true });
+            if (hit && hit.worldPos) P = hit.worldPos;
+            camera.eye = [P[0] + (camera.eye[0] - P[0]) * s,
+                          P[1] + (camera.eye[1] - P[1]) * s,
+                          P[2] + (camera.eye[2] - P[2]) * s];
+            camera.look = [P[0] + (camera.look[0] - P[0]) * s,
+                           P[1] + (camera.look[1] - P[1]) * s,
+                           P[2] + (camera.look[2] - P[2]) * s];
+        }, { passive: false });
     }
 
     // The sandboxed iframe (opaque origin) can't XHR-fetch blob: URLs, so
