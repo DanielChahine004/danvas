@@ -376,6 +376,20 @@ def _dispatch_hub_frame(bridge, msg):
                 v = {**v, "cursor": cur}
             merged[vid] = v
         bridge._viewers = merged
+        # Roster diff -> the on_connect/on_disconnect taps. The broker owns
+        # the joins (there is no per-viewer socket on this side), so the
+        # roster refresh is where a join/leave becomes visible; same off-loop
+        # dispatch contract as the embedded server's connect path. Browsers
+        # already on the canvas when this source dials in appear in the first
+        # roster and fire on_connect too — they ARE new to this process.
+        for vid in merged.keys() - prev.keys():
+            if bridge._connect_taps:
+                bridge._dispatch.submit(
+                    lambda v=dict(merged[vid]): bridge._tap_connect(v))
+        for vid in prev.keys() - merged.keys():
+            if bridge._disconnect_taps:
+                bridge._dispatch.submit(
+                    lambda v=dict(prev[vid]): bridge._tap_disconnect(v))
         return
     if kind == "cursor":
         # High-rate pointer report for one viewer: fold it onto that viewer's
