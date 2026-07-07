@@ -18,7 +18,7 @@ def test_slider_register_props():
     # Slider is now a native React panel: its config rides in the JSON `data`
     # prop (replayed on reconnect), not as top-level shape props.
     assert props["label"] == "servo"
-    assert props["w"] == 240 and props["h"] == 96
+    assert props["w"] == 240 and props["h"] == 72
     data = json.loads(props["data"])
     assert data == {
         "min": 0, "max": 180, "step": 1, "default": 90,

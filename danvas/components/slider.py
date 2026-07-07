@@ -11,7 +11,7 @@ from .base import _ValuePersist
 from .react import React
 
 _SLIDER_CSS = """
-.pc-slider{box-sizing:border-box;width:100%;height:100%;padding:10px 12px;
+.pc-slider{box-sizing:border-box;width:100%;height:100%;padding:4px 12px 8px;
  display:flex;gap:10px;align-items:center;
  font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3)}
 .pc-slider input[type=range]{flex:1;min-width:0;accent-color:var(--pc-accent,#3b82f6)}
@@ -46,7 +46,7 @@ class Slider(_ValuePersist, React):
         "events": [{"value": "number"}],
     }
     default_w = 240
-    default_h = 96
+    default_h = 72
 
     def __init__(self, name="slider", min=0, max=100, default=None, step=1,
                  on_release=False, color=None, label=None):
