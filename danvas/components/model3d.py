@@ -94,11 +94,6 @@ _VIEWER_HTML = """
     // arrives in meters — a 20mm box is 0.02 units, inside any fixed near).
     viewer.cameraControl.mouseWheelDollyRate = 10;
     viewer.cameraControl.dollyProportionalToCameraDistance = true;
-    // Orbit about the model's centre, not whatever surface point the cursor
-    // touches: with followPointer off, rotation pivots on camera.look — which
-    // the first-load jump and the Fit button place at the model's centre, and
-    // the middle-drag pan carries along (eye and look move together).
-    viewer.cameraControl.followPointer = false;
     {   // Middle-drag pans. Not via xeokit's keymap — its mousemove handler
         // doesn't recognise a held middle button (real mousemove events carry
         // button=0), so drive the camera directly: screen-space drag → a
