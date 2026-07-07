@@ -18,6 +18,7 @@ from .liveplot import LivePlot
 from .histogram import Histogram
 from .inspector import Inspector
 from .upload import Upload, UploadedFile
+from .model3d import Model3D
 from .webview import WebView
 from .textfield import TextField
 
@@ -43,6 +44,7 @@ __all__ = [
     "Inspector",
     "Upload",
     "UploadedFile",
+    "Model3D",
     "WebView",
     "TextField",
 ]

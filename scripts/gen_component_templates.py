@@ -66,6 +66,7 @@ _BUILDERS = {
     "upload": lambda: danvas.Upload(text="Choose a file"),
     "file_browser": lambda: danvas.FileBrowser(root="."),
     "inspector": lambda: danvas.Inspector(),
+    "model3d": lambda: danvas.Model3D(),
     "chat": lambda: danvas.Chat(),
 }
 

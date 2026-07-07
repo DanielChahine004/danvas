@@ -25,6 +25,7 @@ from .components import (
     Upload,
     UploadedFile,
     VideoFeed,
+    Model3D,
     WebView,
 )
 from .dispatch import panel_for
@@ -70,6 +71,7 @@ __all__ = [
     "Inspector",
     "Upload",
     "UploadedFile",
+    "Model3D",
     "WebView",
     "BaseComponent",
     "BaseShape",

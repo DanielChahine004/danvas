@@ -33,6 +33,7 @@ from .components import (
     Toggle,
     Upload,
     VideoFeed,
+    Model3D,
     WebView,
 )
 
@@ -233,6 +234,14 @@ class _FactoryMixin:
     def webview(self, url, name="webview", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.WebView`. See :meth:`insert` for ``place``."""
         return self._make(WebView, url, name=name, label=label, **place)
+
+    def model3d(self, name="model3d", label=None, color=None,
+                **place: Unpack[Place]):
+        """Insert a :class:`~danvas.Model3D` — the prebuilt CAD/3D viewer:
+        ``viewer.update(glb_bytes_or_path_or_trimesh)`` shows the model with
+        orbit, snap measurements, and a section plane. See :meth:`insert`."""
+        return self._make(Model3D, name=name, label=label, color=color,
+                          **place)
 
     def plot(self, name="plot", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Plot`. See :meth:`insert` for ``place``."""

@@ -65,7 +65,7 @@ jobs:
 
           tpl = json.load(open(os.path.join(pkg, "templates", "components.json"),
                                encoding="utf-8"))["templates"]
-          assert len(tpl) == 20, f"expected 20 templates, got {len(tpl)}"
+          assert len(tpl) == 21, f"expected 21 templates, got {len(tpl)}"
           assert all("contract" in t for t in tpl.values()), "contract blocks missing"
 
           jsx = os.listdir(os.path.join(pkg, "components", "jsx"))
