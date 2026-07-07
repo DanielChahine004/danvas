@@ -179,7 +179,6 @@ _VIEWER_HTML = """
             camera.look = [P[0] + (camera.look[0] - P[0]) * s,
                            P[1] + (camera.look[1] - P[1]) * s,
                            P[2] + (camera.look[2] - P[2]) * s];
-            refreshClip();   // ortho mode brackets the (changed) distance
         }, { passive: false });
     }
 
@@ -203,8 +202,8 @@ _VIEWER_HTML = """
         pointerLens: new PointerLens(viewer)
     });
     angleCtrl.snapping = true;
-    new NavCubePlugin(viewer, { canvasId: "nav", visible: true,
-                                color: "#2a2a2c", textColor: "#ddd" });
+    const navCube = new NavCubePlugin(viewer, { canvasId: "nav", visible: true,
+                                                color: "#2a2a2c", textColor: "#ddd" });
 
     let model = null;
     let firstLoad = true;
@@ -226,24 +225,37 @@ _VIEWER_HTML = """
         }
     }
 
+    let clipped = null;   // {D, diag} the current ortho bracket was built for
     function refreshClip() {
         // Clip planes sized to the situation. Perspective: model-scaled (a mm
         // part in meters sits inside any fixed near). Telephoto ortho: tight
-        // around the pulled-back camera distance and re-bracketed on every
-        // zoom — a model-scaled near plane 32x away compresses the model into
-        // a coarse depth slice and the edge overlay z-fights the faces.
+        // around the pulled-back camera distance — a model-scaled near plane
+        // 32x away compresses the model into a coarse depth slice and the
+        // edge overlay z-fights the faces (edges drop out).
         if (!model) return;
         const diag = Math.max(math.getAABB3Diag(model.aabb), 1e-6);
         const camera = viewer.camera;
         if (orthoMode) {
             const D = math.lenVec3(math.subVec3(camera.look, camera.eye, []));
+            if (clipped && clipped.diag === diag
+                    && Math.abs(D - clipped.D) < diag * 1e-4) return;
+            clipped = { D, diag };
             camera.perspective.near = Math.max(D - diag * 2, D * 0.2);
             camera.perspective.far  = D + diag * 4;
         } else {
+            clipped = null;
             camera.perspective.near = diag / 1000;
             camera.perspective.far  = diag * 1000;
         }
     }
+
+    // The bracket rides the camera CONTINUOUSLY (any dolly, flight, or
+    // NavCube snap changes the distance it was built around). Widening the
+    // clips for a flight instead is not an option: the wide range at
+    // telephoto distance is exactly the coarse depth that drops the edges,
+    // so the whole ride would flicker. The change-guard above keeps the
+    // per-frame cost at a subtraction while the distance holds (orbit, pan).
+    viewer.camera.on("matrix", () => { if (orthoMode) refreshClip(); });
 
     canvas.onPush((data) => {
         // GLB bytes arrive as an ArrayBuffer; the dataSource serves them.
@@ -326,6 +338,12 @@ _VIEWER_HTML = """
                       camera.look[2] - dir[2] * dist * t];
         camera.perspective.fov = fovTo;
         orthoMode = !orthoMode;
+        // Flights frame the model to a fit-FOV, not the live fov — track the
+        // telephoto or they park the camera ~30x too close. Two knobs: Fit
+        // reads viewer.cameraFlight.fitFOV; a NavCube face-click computes its
+        // own eye from the plugin's cameraFitFOV (dist = diag/tan(fitFOV)).
+        viewer.cameraFlight.fitFOV = orthoMode ? 1.5 : 45;
+        navCube.setCameraFitFOV(orthoMode ? 1.5 : 45);
         refreshClip();
         sync();
     };
