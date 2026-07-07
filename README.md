@@ -108,6 +108,10 @@ canvas.servo_1            # same, as sugar — but canvas["..."] always wins if 
 canvas.components         # list of every panel (visible and hidden)
 canvas.arrows             # list of arrows
 panel.visible             # True if currently shown
+canvas.emit("name", data) # fire @canvas.on_event("name") handlers — the backend's
+                          # universal trigger (see "Backend events" under Serving)
+canvas.events             # {event_name: [handlers]} — the emit wiring, read-only
+panel.handlers            # {trigger: [handlers]} — what this panel is wired to fire
 ```
 
 **`hide` vs `remove`** — `hide` is reversible: the panel disappears from the
@@ -184,6 +188,7 @@ canvas.insert(s, x=80, y=80)
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `WebView` | output | external site in an iframe; `.navigate(url)` |
+| `Model3D` | output | prebuilt CAD/3D part viewer (xeokit): `.update(glb)` takes GLB bytes / a `.glb` path / a trimesh-like — orbit, snap distance & angle measurements, section plane, X-ray/edges, NavCube |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `filename=` |
@@ -304,10 +309,14 @@ plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" la
 | `@panel.on_binary` | Custom, React | `(data: bytes)` | `canvas.sendBinary(buf)` from the panel |
 | `@panel.on_request("event")` | Custom, React | `(req)` | `await canvas.request(...)` — return resolves the Promise |
 | `@panel.on_error` | Custom, React | `(msg)` | JS error in the panel |
+| `@canvas.on_event("name")` | canvas | `(data)` | `canvas.emit("name", data)` from any Python code — the backend trigger |
+| `@canvas.on_edit` | canvas | `()` / `(fresh_fn)` | a watched function's source is saved — the editor as input |
 
 These are plain registration methods, so `@panel.on_change` and
 `panel.on_change(fn)` are the same — decorate for the common case, or call it
-directly to reuse one handler across panels.
+directly to reuse one handler across panels. To read the wiring back,
+`panel.handlers` (and `canvas.events` for the emit side) returns
+`{trigger: [handler]}` with each function, its `file:line`, and dispatch mode.
 
 **Who did it.** *Any* handler may declare a trailing `viewer` parameter; one-arg
 handlers are unchanged:
