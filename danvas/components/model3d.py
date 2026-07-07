@@ -66,6 +66,7 @@ _VIEWER_HTML = """
     <button id="btnSection">Section</button>
     <button id="btnXray">X-ray</button>
     <button id="btnEdges" class="on">Edges</button>
+    <button id="btnOrtho">Ortho</button>
     <button id="btnReset">Fit</button>
     <button id="btnClear">Clear</button>
 </div>
@@ -113,8 +114,10 @@ _VIEWER_HTML = """
             const camera = viewer.camera;
             const dist = math.lenVec3(
                 math.subVec3(camera.look, camera.eye, []));
-            const worldPerPx = 2 * dist * Math.tan(
-                (camera.perspective.fov / 2) * Math.PI / 180)
+            const worldPerPx = (camera.projection === "ortho"
+                ? camera.ortho.scale
+                : 2 * dist * Math.tan(
+                      (camera.perspective.fov / 2) * Math.PI / 180))
                 / (cvs.clientHeight || 1);
             camera.pan([dx * worldPerPx, dy * worldPerPx, 0]);
         });
@@ -153,6 +156,7 @@ _VIEWER_HTML = """
     let sectioning = false;
     let xrayed = false;
     let edgesOn = true;
+    let orthoMode = false;
     let seq = 0;
 
     function applyLook() {
@@ -195,12 +199,14 @@ _VIEWER_HTML = """
     const bS = document.getElementById('btnSection');
     const bX = document.getElementById('btnXray');
     const bE = document.getElementById('btnEdges');
+    const bO = document.getElementById('btnOrtho');
     function sync() {
         bM.classList.toggle('on', measuring);
         bA.classList.toggle('on', angling);
         bS.classList.toggle('on', sectioning);
         bX.classList.toggle('on', xrayed);
         bE.classList.toggle('on', edgesOn);
+        bO.classList.toggle('on', orthoMode);
     }
     bM.onclick = () => {
         measuring = !measuring;
@@ -228,6 +234,41 @@ _VIEWER_HTML = """
     };
     bX.onclick = () => { xrayed = !xrayed; applyLook(); sync(); };
     bE.onclick = () => { edgesOn = !edgesOn; applyLook(); sync(); };
+    bO.onclick = () => {
+        // "Ortho" is a telephoto perspective (2° fov, camera pulled back to
+        // hold the apparent size): real ortho is off the table — this xeokit
+        // build stops rendering once ortho.near/far are touched, and a
+        // mm-scale part sits inside the default ortho near plane. At 2° the
+        // foreshortening across a part is ~2%: visually orthographic, and
+        // measurements/sections/clip planes all keep working.
+        const camera = viewer.camera;
+        const fovNow = camera.perspective.fov;
+        const fovTo = orthoMode ? 60 : 2;
+        const t = Math.tan((fovNow / 2) * Math.PI / 180)
+                / Math.tan((fovTo / 2) * Math.PI / 180);
+        const dir = math.normalizeVec3(
+            math.subVec3(camera.look, camera.eye, []));
+        const dist = math.lenVec3(math.subVec3(camera.look, camera.eye, []));
+        camera.eye = [camera.look[0] - dir[0] * dist * t,
+                      camera.look[1] - dir[1] * dist * t,
+                      camera.look[2] - dir[2] * dist * t];
+        camera.perspective.fov = fovTo;
+        if (model) {
+            const diag = Math.max(math.getAABB3Diag(model.aabb), 1e-6);
+            if (orthoMode) {   // returning to perspective: model-scaled planes
+                viewer.camera.perspective.near = diag / 1000;
+                viewer.camera.perspective.far  = diag * 1000;
+            } else {
+                // Telephoto: clip planes tight around the pulled-back
+                // distance, or the depth buffer z-fights across the model.
+                const D = dist * t;
+                viewer.camera.perspective.near = D / 100;
+                viewer.camera.perspective.far  = D * 4;
+            }
+        }
+        orthoMode = !orthoMode;
+        sync();
+    };
     document.getElementById('btnReset').onclick = () => {
         if (model) viewer.cameraFlight.flyTo(model);
     };
