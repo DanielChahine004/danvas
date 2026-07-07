@@ -802,7 +802,14 @@ async fn main() {
     }
     let addr = SocketAddr::from((host, port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
-    println!("[danvasd] serving ws://{addr}/ws");
+    // The human-facing line: the page URL, browser-clickable. (The wire
+    // endpoint is ws://<addr>/ws; SDKs derive it, people never open it.)
+    let shown = if host.is_unspecified() {
+        SocketAddr::from(([127, 0, 0, 1], port))
+    } else {
+        addr
+    };
+    println!("[danvasd] canvas at http://{shown}");
     axum::serve(listener, build_app(hub.clone())).await.expect("serve");
 }
 

@@ -291,8 +291,8 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
                     time.sleep(0.1)
             if up:
                 base_env["_danvas_BROKER_PORT"] = str(port)
-                print(f"danvas hot reload: broker (danvasd) on :{port} — "
-                      "UI survives every restart (retention)")
+                print(f"danvas hot reload: canvas at http://127.0.0.1:{port} "
+                      "(broker danvasd — the UI survives every restart)")
             else:
                 danvasd_proc = None
                 print("danvas hot reload: danvasd wouldn't start; "
