@@ -94,6 +94,15 @@ def _contract(comp):
             f"{type(comp).__name__} has no CONTRACT declaration — every "
             "templated component must declare one (see PROTOCOL.md)")
     contract = dict(declared)
+    # `live`: which data fields are safe to WRITE after registration — derived
+    # from the Python class's real property surface (a data key with a Python
+    # property setter is live; register-time-only fields like upload's minted
+    # `url` or slider's `default` have no setter and stay out). Introspected,
+    # not declared, so it can never drift from what Python actually allows.
+    contract["live"] = sorted(
+        k for k in contract.get("data", {})
+        if isinstance(getattr(type(comp), k, None), property)
+        and getattr(type(comp), k).fset is not None)
     data = dict(contract.get("data", {}))
     # Universal: every panel accepts the derived accent-theme CSS variables
     # (what a `color=`/`.color()` sets); no class declares it individually.

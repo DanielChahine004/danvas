@@ -280,6 +280,76 @@ export class Client {
 
   // -- the shared plane ------------------------------------------------------------
   setProps(cid, props) { this._sendRaw({ type: 'set_props', id: cid, props }); return this }
+
+  // Merge a partial data write into the replay cache and stream it — the
+  // mechanical form behind handle()'s setters (setValue is its `value` twin).
+  _patchData(cid, patch) {
+    const acc = this._updates.get(cid) || {}
+    acc.data_patch = { ...(acc.data_patch || {}), ...patch }
+    this._updates.set(cid, acc)
+    this._sendRaw({ type: 'update', id: cid, payload: { data_patch: patch } })
+  }
+
+  /**
+   * A live property handle: `h = c.handle('speed'); h.max = 90; h.value = 5`.
+   *
+   * Getters/setters synthesized from the panel's contract (nothing is
+   * hand-written per panel): reads merge the panel's registered data with
+   * everything streamed since; writes are gated by the contract's `live`
+   * list — the data fields Python exposes a property setter for — so a
+   * register-time-only field (`slider.default`, upload's minted `url`)
+   * throws instead of silently confusing the panel. `value` rides the
+   * post+data_patch pairing (`setValue`); other fields ride `data_patch`.
+   *
+   * Works on a PEER's panel too: writes go through `set_props`, so the
+   * owning process applies them with its real setters (validation and side
+   * effects included) — the shared property plane.
+   */
+  handle(cid) {
+    const client = this
+    const readData = () => {
+      const own = client._registers.get(cid)
+      const src = own || client.panels.get(cid)
+      let base = {}
+      try { base = JSON.parse(((src && src.props) || {}).data || '{}') } catch {}
+      const acc = own ? client._updates.get(cid)
+                      : (client.panels.get(cid) || {}).state
+      if (acc && acc.data_patch) Object.assign(base, acc.data_patch)
+      if (acc && 'post' in acc) base.value = acc.post
+      return base
+    }
+    return new Proxy({}, {
+      get(_, key) {
+        if (typeof key !== 'string' || key === 'then') return undefined
+        return readData()[key]
+      },
+      set(_, key, value) {
+        if (typeof key !== 'string') return false
+        if (!client._registers.has(cid)) {
+          // A peer's panel: route the write to its owner (real setters run).
+          client.setProps(cid, { [key]: value })
+          return true
+        }
+        const kind = client._kinds.get(cid)
+        const contract = kind && client._templates
+          ? (client._templates[kind] || {}).contract : null
+        if (contract && !(contract.live || []).includes(key)) {
+          throw new Error(`[danvas] ${kind}.${key} is not live-settable ` +
+            `(live: ${(contract.live || []).join(', ') || 'none'})`)
+        }
+        if (key === 'value') client.setValue(cid, value)
+        else client._patchData(cid, { [key]: value })
+        return true
+      },
+      has(_, key) { return typeof key === 'string' && key in readData() },
+      ownKeys() { return Object.keys(readData()) },
+      getOwnPropertyDescriptor(_, key) {
+        const d = readData()
+        return typeof key === 'string' && key in d
+          ? { value: d[key], enumerable: true, configurable: true } : undefined
+      },
+    })
+  }
   subscribe(cid, fn) {
     this._subs.add(cid)
     this._sendRaw({ type: 'subscribe', id: cid })

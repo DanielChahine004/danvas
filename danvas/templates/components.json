@@ -18,6 +18,7 @@
      "h": 120,
      "w": 260
     },
+    "live": [],
     "updates": {}
    },
    "data": {
@@ -51,6 +52,9 @@
      "h": 84,
      "w": 200
     },
+    "live": [
+     "text"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -83,6 +87,7 @@
      "h": 400,
      "w": 320
     },
+    "live": [],
     "note": "hub-native: the shared room rides chat/set_name frames, not per-panel updates",
     "updates": {}
    },
@@ -114,6 +119,7 @@
      "h": 320,
      "w": 380
     },
+    "live": [],
     "props": {
      "forwardWheel": "bool -- forward wheel to canvas zoom (default true)",
      "html": "str -- the iframe document; a bare fragment is fine (the frontend wraps it with the base reset and injects the canvas API + interaction shim unless the document already carries a window.canvas= marker)",
@@ -149,6 +155,9 @@
      "h": 84,
      "w": 200
     },
+    "live": [
+     "text"
+    ],
     "requests": {
      "click": {
       "returns": "{url: str, filename: str} -- a minted /__download__/<token> URL",
@@ -194,6 +203,7 @@
      "h": 420,
      "w": 320
     },
+    "live": [],
     "updates": {
      "post": "the listing {cwd: str, atRoot: bool, selected: str|null, entries: [{name: str, dir: bool, size: number}]} -- owner-built, sandboxed"
     }
@@ -226,6 +236,7 @@
      "h": 360,
      "w": 560
     },
+    "live": [],
     "updates": {
      "data_patch": "typically {_fig: <figure>}"
     }
@@ -257,6 +268,10 @@
      "h": 320,
      "w": 420
     },
+    "live": [
+     "fit",
+     "src"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -311,6 +326,9 @@
      "h": 320,
      "w": 520
     },
+    "live": [
+     "source"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -346,6 +364,9 @@
      "h": 84,
      "w": 240
     },
+    "live": [
+     "text"
+    ],
     "updates": {
      "data_patch": "merge changed data fields",
      "post": "the new text (str)"
@@ -379,6 +400,7 @@
      "h": 380,
      "w": 560
     },
+    "live": [],
     "updates": {
      "plot": "a full Plotly figure {data, layout} (replaces)",
      "plot_extend": "{indices: list[number], x: list[list], y: list[list], max: number|null} appended via Plotly.extendTraces"
@@ -410,6 +432,7 @@
      "h": 240,
      "w": 380
     },
+    "live": [],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -447,6 +470,7 @@
      "h": 600,
      "w": 800
     },
+    "live": [],
     "note": "the viewer (xeokit) loads from its CDN; the browser needs network access to cdn.jsdelivr.net on first render",
     "updates": {}
    },
@@ -474,6 +498,7 @@
      "h": 420,
      "w": 560
     },
+    "live": [],
     "updates": {
      "data_patch": "typically {_fig: <figure>}"
     }
@@ -513,6 +538,12 @@
      "h": 72,
      "w": 240
     },
+    "live": [
+     "max",
+     "min",
+     "step",
+     "value"
+    ],
     "updates": {
      "data_patch": "merge changed data fields",
      "post": "the current value (number)"
@@ -566,6 +597,9 @@
      "h": 360,
      "w": 520
     },
+    "live": [
+     "selected"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -735,6 +769,11 @@
      "h": 80,
      "w": 240
     },
+    "live": [
+     "multiline",
+     "placeholder",
+     "value"
+    ],
     "updates": {
      "data_patch": "merge changed data fields",
      "post": "the new value (str)"
@@ -776,6 +815,10 @@
      "h": 84,
      "w": 260
     },
+    "live": [
+     "options",
+     "value"
+    ],
     "updates": {
      "data_patch": "merge changed data fields",
      "post": "the new value (str)"
@@ -817,6 +860,9 @@
      "h": 120,
      "w": 240
     },
+    "live": [
+     "text"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }
@@ -852,6 +898,7 @@
      "h": 280,
      "w": 340
     },
+    "live": [],
     "updates": {}
    },
    "data": {},
@@ -880,6 +927,9 @@
      "h": 600,
      "w": 800
     },
+    "live": [
+     "url"
+    ],
     "updates": {
      "data_patch": "merge changed data fields"
     }

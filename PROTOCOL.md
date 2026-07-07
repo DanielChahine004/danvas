@@ -226,6 +226,7 @@ Each contract carries:
 | `data` | authorable data-blob fields → informal type strings (`"number"`, `"list[str]"`, `"str -- note"`). `_th` (the accent theme) is universal and auto-declared. |
 | `props` | register-prop-level fields outside the data blob (e.g. Custom's `html`) |
 | `updates` | the `update` payload keys the panel consumes → what each carries |
+| `live` | the `data` fields safe to WRITE after registration (send as `data_patch`; `value` also streams as `post`). Derived from the Python class's real property-setter surface, so it cannot drift; fields absent here (a minted upload `url`, a slider's `default`) are register-time-only. SDKs can synthesize getters/setters from this list (danvas-node's `handle()` does). |
 | `events` | the `input` payload shapes the panel emits (browser → owner + subscribers) |
 | `requests` | `request`→`response` round-trips the panel makes and their reply shapes |
 | `binary` | how the panel uses the binary envelope, if at all |
