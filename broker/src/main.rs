@@ -1075,7 +1075,16 @@ async fn ws_handler(
             return (StatusCode::UNAUTHORIZED, "login required").into_response()
         }
     };
-    ws.on_upgrade(move |socket| handle(socket, q, role, hub)).into_response()
+    // Default tungstenite limits are 64MiB/message but 16MiB/FRAME — and the
+    // Python SDK sends each media push as one unfragmented frame, so a big
+    // model (a 32MB GLB) would kill the connection on every push and the
+    // source would flap: reconnect, replay, re-push, die again. Media scale
+    // is the point of the binary envelope; take frames as big as messages.
+    const WS_MAX: usize = 256 * 1024 * 1024;
+    ws.max_message_size(WS_MAX)
+        .max_frame_size(WS_MAX)
+        .on_upgrade(move |socket| handle(socket, q, role, hub))
+        .into_response()
 }
 
 async fn handle(
