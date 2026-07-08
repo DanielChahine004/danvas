@@ -474,8 +474,10 @@ _VIEWER_HTML = """
     #vol { position: absolute; inset: 0; width: 100vw; height: 100vh;
            pointer-events: none; }
     #wl { position: absolute; bottom: 8px; left: 10px; display: none;
-          color: #888; font-size: 11px; pointer-events: none;
-          background: rgba(0,0,0,0.8); padding: 4px 8px; border-radius: 4px; }
+          color: #888; font-size: 11px;
+          background: rgba(0,0,0,0.8); padding: 6px 8px; border-radius: 4px; }
+    #wl label { display: flex; align-items: center; gap: 6px; }
+    #wl input { width: 110px; }
     #axes { position: absolute; left: 10px; bottom: 34px;
             pointer-events: none; }
     #nav { position: absolute; right: 8px; bottom: 8px; width: 110px;
@@ -507,7 +509,12 @@ _VIEWER_HTML = """
 <canvas id="nav"></canvas>
 <canvas id="axes" width="88" height="88"></canvas>
 <div id="status">WAITING FOR MODEL…</div>
-<div id="wl">W 1.00 / L 0.50 — right-drag to window</div>
+<div id="wl">
+    <label>W <input type="range" id="wlW" min="1" max="200" value="100">
+        <span id="wlWv">1.00</span></label>
+    <label>L <input type="range" id="wlL" min="-50" max="150" value="50">
+        <span id="wlLv">0.50</span></label>
+</div>
 <div id="tip"></div>
 <div id="toolbar">
     <button id="btnMeasure">Measure</button>
@@ -1585,32 +1592,19 @@ _VIEWER_HTML = """
             volMode ? "Fog" : "MIP";
         volDirty();
     };
-    {   // right-drag = window/level, live only while a volume is shown
-        const cvs = document.getElementById('xk');
-        const wl = document.getElementById('wl');
-        let wling = false, wx = 0, wy = 0;
-        cvs.addEventListener('contextmenu', (e) => {
-            if (volumes.size) e.preventDefault();
-        });
-        cvs.addEventListener('mousedown', (e) => {
-            if (e.button === 2 && volumes.size) {
-                wling = true; wx = e.clientX; wy = e.clientY;
-            }
-        });
-        document.addEventListener('mouseup', (e) => {
-            if (e.button === 2) wling = false;
-        });
-        document.addEventListener('mousemove', (e) => {
-            if (!wling) return;
-            volWin = Math.min(2, Math.max(0.01,
-                volWin + (e.clientX - wx) * 0.003));
-            volLevel = Math.min(1.5, Math.max(-0.5,
-                volLevel + (e.clientY - wy) * 0.003));
-            wx = e.clientX; wy = e.clientY;
-            wl.innerText = `W ${volWin.toFixed(2)} / L ${volLevel.toFixed(2)}`
-                + " — right-drag to window";
+    {   // window/level sliders, shown only while a volume is in the scene
+        const wW = document.getElementById('wlW');
+        const wL = document.getElementById('wlL');
+        wW.oninput = () => {
+            volWin = Math.max(0.01, wW.value / 100);
+            document.getElementById('wlWv').innerText = volWin.toFixed(2);
             volDirty();
-        });
+        };
+        wL.oninput = () => {
+            volLevel = wL.value / 100;
+            document.getElementById('wlLv').innerText = volLevel.toFixed(2);
+            volDirty();
+        };
     }
     document.getElementById('btnClear').onclick = () => {
         distance.clear();
@@ -1672,6 +1666,11 @@ class Model3D(Custom):
         self._layers = {}
         self._handles = {}
         self.on("ready")(lambda _msg: self._repush())
+        # The panel emits a pick on every click whether or not the script
+        # cares — consume unhandled ones so the router's "matched no
+        # handler" diagnostic doesn't fire on normal clicking. A user's
+        # on_pick registers alongside (handlers are additive).
+        self.on("pick")(lambda _msg: None)
 
     def _repush(self):
         for lname, st in self._layers.items():
@@ -1882,9 +1881,9 @@ class Model3DLayer:
         voxels is ``spacing=(0.002, 0.002, 0.0028)``.
 
         In the panel: MIP by default (a "MIP"/"Fog" toolbar button appears
-        with a volume in the scene, Fog = shaded alpha compositing);
-        right-drag adjusts window/level. ``cmap`` is ``"gray"``, ``"hot"``
-        or ``"viridis"``. The volume composites OVER the geometry — dim
+        with a volume in the scene, Fog = shaded alpha compositing), and
+        window/level sliders appear bottom-left. ``cmap`` is ``"gray"``,
+        ``"hot"`` or ``"viridis"``. The volume composites OVER the geometry — dim
         regions are transparent, so models show through; there is no depth
         interleaving between fog and meshes.
         """
