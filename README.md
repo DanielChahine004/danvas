@@ -188,7 +188,7 @@ canvas.insert(s, x=80, y=80)
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `WebView` | output | external site in an iframe; `.url` (read/assign), `.navigate(url)` |
-| `Model3D` | output | prebuilt CAD/3D part viewer (xeokit): `.update(glb)` takes GLB bytes / a `.glb` path / a trimesh-like — orbit, snap distance & angle measurements, section plane, X-ray/edges, NavCube |
+| `Model3D` | output | prebuilt CAD/3D viewer (xeokit): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points()/.lines()/.curve()/.visible/.clear()`) — orbit, snap distance & angle measurements, section plane, X-ray/edges, NavCube, per-layer Items panel, hover/`@on_pick` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
@@ -516,9 +516,16 @@ web = canvas.webview("https://en.wikipedia.org/wiki/Robot"); web.navigate("https
 **3D models / CAD** — `Model3D` is a prebuilt part viewer (xeokit): hand it a
 **GLB** — the standard 3D binary every CAD/mesh stack exports — and you get
 orbit/pan/zoom, snap-to-edge distance *and angle* measurements, a draggable
-section plane, X-ray and edges toggles, and a NavCube orientation gizmo, no
-HTML written. `update` takes GLB bytes, a `.glb` path, or a trimesh-like
-object (also assignable as `.model`); each update replaces the model while the camera holds your viewpoint.
+section plane, X-ray and edges toggles, a NavCube orientation gizmo, and a
+per-layer **Items** show/hide panel, no HTML written. `update` takes GLB
+bytes, a `.glb` path, or a trimesh-like object (also assignable as
+`.model`), plus overlay keywords — `points=` (N,3), `lines=` (M,2,3
+endpoint pairs), `curve=` (K,3 function samples, joined into a polyline),
+each with a color, and `mesh_color=` for the faces. The scene is **layers**:
+named, independently replaceable slices, so a rebuild ships only what
+changed and one layer can animate while the rest stand still. Hovering
+reads the entity and vertex-snapped coordinate under the cursor (plus the
+point index on a cloud); a click reaches Python via `@viewer.on_pick`.
 Pairs naturally with `@canvas.on_edit` for a live CAD loop:
 
 ```python
@@ -528,7 +535,9 @@ viewer = canvas.model3d("part")
 def rebuild():
     part = make_part()                            # build123d / cadquery / trimesh…
     export_gltf(part, "part.glb", binary=True)
-    viewer.update("part.glb")
+    viewer.layer("part").update("part.glb", mesh_color=(110, 150, 220, 255))
+    viewer.layer("cloud").points(sample_points, color=(255, 40, 40, 255))
+    viewer.layer("path").curve(helix)             # animate: re-push just this
 rebuild()
 ```
 

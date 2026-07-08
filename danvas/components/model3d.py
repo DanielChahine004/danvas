@@ -8,6 +8,24 @@ part viewer needs: orbit/pan with fine-grained proportional zoom, snap-to-edge
 fit/clear — the distilled version of the panel every CAD script used to
 hand-write.
 
+Hovering the model shows what's under the cursor — the entity (glTF node)
+name and the vertex-snapped coordinate; on a point cloud, the point's index
+too (``cloud #4172``). A click sends the same info to Python::
+
+    @viewer.on_pick
+    def picked(msg):
+        print(msg["id"], msg["point"], msg["pos"])
+
+Not just solids: glTF carries POINTS and LINES primitives as well as
+triangles, so point clouds, polylines, and sampled curves render in the
+same space — a ``trimesh.Scene`` holding meshes, ``PointCloud``\\ s, and
+``Path3D``\\ s exports to one GLB. Per-part materials come through; a
+``COLOR_0`` vertex attribute (xeokit's loader ignores it) is applied as an
+entity tint — the node's *average* vertex color, flat, not a gradient.
+The **Items** toolbar button lists the model's top-level glTF
+nodes with show/hide checkboxes — group geometries under parent nodes to
+shape that list.
+
 The input is **glTF-Binary (GLB)** — the industry-standard 3D binary, which
 every CAD/mesh stack exports::
 
@@ -20,9 +38,24 @@ every CAD/mesh stack exports::
 
 ``update`` accepts GLB ``bytes``, a filesystem path to a ``.glb``/``.gltf``,
 or any object exposing a glTF exporter danvas recognises (a trimesh
-``Trimesh``/``Scene`` via ``export(file_type="glb")``). Each update replaces
-the model in place; the camera frames the first load and holds your viewpoint
-afterwards.
+``Trimesh``/``Scene`` via ``export(file_type="glb")``), plus overlay
+keywords composed into the same frame::
+
+    viewer.update(part_glb, points=pts, curve=helix,
+                  mesh_color=(110, 150, 220, 255))
+
+The scene is made of **layers** — named, independently replaceable slices,
+each with its own Items row. ``update`` addresses the default ``"model"``
+layer; ``viewer.layer(name)`` returns a handle for the rest::
+
+    viewer.layer("part").update("part.glb", mesh_color=STEEL)
+    viewer.layer("cloud").points(pts)        # part stays put
+    viewer.layer("path").curve(helix)        # animate just this, cheaply
+    viewer.layer("cloud").visible = False
+    viewer.layer("path").clear()
+
+Pushing a layer replaces only that layer; the camera frames the first load
+and holds your viewpoint afterwards.
 
 Polyglot: the panel ships as the ``model3d`` template, and the bytes ride the
 CUSTOM binary envelope — any SDK renders a part by sending one register frame
@@ -33,9 +66,158 @@ from CAD kernels is usually one open surface per face, so the section slices
 without a cap — the standard trade for taking the standard format.
 """
 
+import json
 import os
+import struct
 
 from .custom import Custom
+
+# Default overlay colors (RGBA 0-255).
+POINT_COLOR = (255, 40, 40, 255)    # red
+LINE_COLOR = (0, 200, 80, 255)      # green
+CURVE_COLOR = (255, 170, 0, 255)    # orange
+
+# Layer frame: b"DVL1" + u16le(name length) + UTF-8 layer name + GLB bytes.
+# A payload that starts with the GLB magic instead is the legacy form and
+# addresses the "model" layer.
+_LAYER_MAGIC = b"DVL1"
+
+
+def _layer_frame(name, glb):
+    nb = name.encode("utf-8")
+    return _LAYER_MAGIC + struct.pack("<H", len(nb)) + nb + glb
+
+
+def compose_glb(source=None, *, points=None, lines=None, curve=None,
+                point_color=None, line_color=None, curve_color=None,
+                mesh_color=None):
+    """Build one GLB from a base model and/or overlays.
+
+    ``source`` is GLB ``bytes``, a ``.glb``/``.gltf`` path, or a trimesh-like
+    object with ``export(file_type='glb')`` — or ``None`` for an overlay-only
+    GLB. Overlays (all optional, numpy-shaped, coordinates in the model's
+    world frame):
+
+    - ``points``: (N, 3) → a point cloud (node ``points``).
+    - ``lines``: (M, 2, 3) → M independent segments (node ``lines``).
+    - ``curve``: (K, 3) samples along a function; consecutive samples are
+      joined into a connected polyline (node ``curve``).
+
+    Colors are RGBA 0-255 tuples; ``mesh_color`` becomes a glTF material on
+    every source face that has none. Everything is appended straight into
+    the GLB's binary chunk with numpy — millions of points are fine.
+
+    Unnamed source nodes are named (``model``/``model_N``) so the viewer's
+    Items panel and hover labels can identify them.
+    """
+    import numpy as np
+
+    pts = (np.zeros((0, 3)) if points is None
+           else np.asarray(points, float).reshape(-1, 3))
+    seg_pts = (np.zeros((0, 3)) if lines is None
+               else np.asarray(lines, float).reshape(-1, 3))
+    cur = (np.zeros((0, 3)) if curve is None
+           else np.asarray(curve, float).reshape(-1, 3))
+    cur_pts = (np.zeros((0, 3)) if len(cur) < 2
+               else np.stack([cur[:-1], cur[1:]], axis=1).reshape(-1, 3))
+    if source is None and not (len(pts) or len(seg_pts) or len(cur_pts)):
+        raise ValueError("compose_glb needs a source model and/or overlays")
+
+    if source is not None:
+        glb = _coerce_glb(source)
+        if glb[:4] != b"glTF":
+            raise ValueError("source is not glTF-Binary (GLB)")
+        jlen, = struct.unpack_from("<I", glb, 12)
+        doc = json.loads(glb[20:20 + jlen])
+        boff = 20 + jlen
+        blen = (struct.unpack_from("<I", glb, boff)[0]
+                if boff + 8 <= len(glb) else 0)
+        bin0 = glb[boff + 8: boff + 8 + blen]
+    else:
+        doc = {"asset": {"version": "2.0"}}
+        bin0 = b""
+    doc.setdefault("scenes", [{"nodes": []}])
+    doc.setdefault("scene", 0)
+    for key in ("nodes", "meshes", "accessors", "bufferViews"):
+        doc.setdefault(key, [])
+    doc.setdefault("buffers", [{"byteLength": 0}])
+    scene_nodes = doc["scenes"][doc["scene"]].setdefault("nodes", [])
+
+    chunks = [bin0, b"\0" * ((-len(bin0)) % 4)]
+    off = sum(len(c) for c in chunks)
+
+    if doc["nodes"]:
+        root = scene_nodes[0] if scene_nodes else 0
+        for i, nd in enumerate(doc["nodes"]):
+            nd.setdefault("name", "model" if i == root else f"model_{i}")
+
+    if mesh_color is not None and doc["meshes"]:
+        # A real glTF material — the standard way to color a mesh, honored
+        # by any glTF viewer, not just this panel.
+        doc.setdefault("materials", []).append({"pbrMetallicRoughness": {
+            "baseColorFactor": [c / 255 for c in mesh_color],
+            "metallicFactor": 0.1, "roughnessFactor": 0.6}})
+        for mesh in doc["meshes"]:
+            for prim in mesh.get("primitives", []):
+                prim.setdefault("material", len(doc["materials"]) - 1)
+
+    def add_accessor(arr, ctype, atype, normalized=False, minmax=False):
+        nonlocal off
+        b = arr.tobytes()
+        doc["bufferViews"].append(
+            {"buffer": 0, "byteOffset": off, "byteLength": len(b)})
+        acc = {"bufferView": len(doc["bufferViews"]) - 1,
+               "componentType": ctype, "count": len(arr), "type": atype}
+        if normalized:
+            acc["normalized"] = True
+        if minmax:
+            acc["min"] = arr.min(axis=0).tolist()
+            acc["max"] = arr.max(axis=0).tolist()
+        doc["accessors"].append(acc)
+        chunks.extend([b, b"\0" * ((-len(b)) % 4)])
+        off += len(b) + ((-len(b)) % 4)
+        return len(doc["accessors"]) - 1
+
+    overlays = (("points", pts, point_color or POINT_COLOR, 0),
+                ("lines", seg_pts, line_color or LINE_COLOR, 1),
+                ("curve", cur_pts, curve_color or CURVE_COLOR, 1))
+    for name, verts, rgba, mode in overlays:
+        if len(verts) == 0:
+            continue
+        v = np.ascontiguousarray(verts, dtype=np.float32)
+        c = np.ascontiguousarray(np.broadcast_to(
+            np.asarray(rgba, np.uint8), (len(v), 4)))
+        prim = {"attributes": {
+                    "POSITION": add_accessor(v, 5126, "VEC3", minmax=True),
+                    "COLOR_0": add_accessor(c, 5121, "VEC4", normalized=True)},
+                "mode": mode}
+        doc["meshes"].append({"primitives": [prim]})
+        doc["nodes"].append({"name": name, "mesh": len(doc["meshes"]) - 1})
+        scene_nodes.append(len(doc["nodes"]) - 1)
+
+    doc["buffers"][0]["byteLength"] = off
+    jb = json.dumps(doc, separators=(",", ":")).encode()
+    jb += b" " * ((-len(jb)) % 4)
+    body = b"".join(chunks)
+    return b"".join([
+        struct.pack("<III", 0x46546C67, 2, 28 + len(jb) + len(body)),
+        struct.pack("<II", len(jb), 0x4E4F534A), jb,          # "JSON"
+        struct.pack("<II", len(body), 0x004E4942), body])     # "BIN"
+
+
+def _coerce_glb(source):
+    """GLB bytes from bytes, a .glb/.gltf path, or a trimesh-like object."""
+    if isinstance(source, (bytes, bytearray, memoryview)):
+        return bytes(source)
+    if isinstance(source, (str, os.PathLike)) and os.path.isfile(source):
+        with open(source, "rb") as f:
+            return f.read()
+    if hasattr(source, "export"):
+        return source.export(file_type="glb")
+    raise TypeError(
+        "expected GLB bytes, a .glb/.gltf path, or a trimesh-like object "
+        "with export(file_type='glb') — for build123d, "
+        "export_gltf(part, path, binary=True) first")
 
 _VIEWER_HTML = """
 <style>
@@ -55,11 +237,22 @@ _VIEWER_HTML = """
     #toolbar button.on { background: #3b6ea5; border-color: #5a8fc7; color: #fff; }
     #toolbar button:hover { border-color: #777; }
     .viewer-ruler-label { font-family: monospace !important; }
+    #tip { position: absolute; display: none; z-index: 3; color: #ddd;
+           font-size: 11px; pointer-events: none; white-space: pre;
+           background: rgba(0,0,0,0.85); padding: 4px 8px; border-radius: 4px; }
+    #items { position: absolute; display: none; z-index: 2; top: 44px;
+             right: 10px; max-height: 60vh; overflow-y: auto; color: #ddd;
+             font-size: 11px; background: rgba(20,20,22,0.95);
+             border: 1px solid #444; border-radius: 4px; padding: 6px 10px; }
+    #items label { display: block; padding: 3px 2px; cursor: pointer;
+                   white-space: nowrap; }
+    #items input { vertical-align: middle; margin-right: 6px; }
 </style>
 
 <canvas id="xk"></canvas>
 <canvas id="nav"></canvas>
 <div id="status">WAITING FOR MODEL…</div>
+<div id="tip"></div>
 <div id="toolbar">
     <button id="btnMeasure">Measure</button>
     <button id="btnAngle">Angle</button>
@@ -67,9 +260,11 @@ _VIEWER_HTML = """
     <button id="btnXray">X-ray</button>
     <button id="btnEdges" class="on">Edges</button>
     <button id="btnOrtho">Ortho</button>
+    <button id="btnItems">Items</button>
     <button id="btnReset">Fit</button>
     <button id="btnClear">Clear</button>
 </div>
+<div id="items"></div>
 
 <script type="module">
     import {
@@ -88,6 +283,8 @@ _VIEWER_HTML = """
         'auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
     const viewer = new Viewer({ canvasId: "xk", transparent: true,
                                 readableGeometryEnabled: true });
+    viewer.scene.pointsMaterial.pointSize = 5;   // clouds read as dots, not dust
+    viewer.scene.pointsMaterial.roundPoints = true;
     viewer.camera.eye = [60, 60, 60];
     viewer.camera.look = [0, 0, 0];
     viewer.camera.up = [0, 1, 0];
@@ -184,11 +381,16 @@ _VIEWER_HTML = """
 
     // The sandboxed iframe (opaque origin) can't XHR-fetch blob: URLs, so
     // hand the loader its bytes directly instead of a src it would fetch.
-    let pendingBuf = null;
+    // Keyed by src: two layers loading at once must not cross wires.
+    const pendingBufs = new Map();
+    const serveBuf = (src, ok) => {
+        ok(pendingBufs.get(src));
+        pendingBufs.delete(src);
+    };
     const loader        = new GLTFLoaderPlugin(viewer, {
         dataSource: {   // the loader picks the getter by src extension
-            getGLB:  (src, ok, err) => ok(pendingBuf),
-            getGLTF: (src, ok, err) => ok(pendingBuf),
+            getGLB:  (src, ok, err) => serveBuf(src, ok),
+            getGLTF: (src, ok, err) => serveBuf(src, ok),
         }
     });
     const sectionPlanes = new SectionPlanesPlugin(viewer, { overviewVisible: false });
@@ -205,15 +407,26 @@ _VIEWER_HTML = """
     const navCube = new NavCubePlugin(viewer, { canvasId: "nav", visible: true,
                                                 color: "#2a2a2c", textColor: "#ddd" });
 
-    let model = null;
-    let firstLoad = true;
+    // The scene is LAYERS: named, independently replaceable models. A push
+    // addresses one layer and leaves the rest standing — that's what makes
+    // per-frame animation of one overlay (or a part rebuild that leaves a
+    // million-point cloud alone) cheap.
+    const layers = new Map();   // name -> {model, groups, colors, counts, seq}
+    const layerHidden = {};     // layer name -> hidden via a Python control
+    let loadedAny = false;      // the first successful load frames the camera
+    let frameSeq = 0;           // unique model ids / dataSource keys
     let measuring = false;
     let angling = false;
     let sectioning = false;
     let xrayed = false;
     let edgesOn = true;
     let orthoMode = false;
-    let seq = 0;
+    const vtxCache = {};   // entity id -> Float64Array xyz, point clouds only
+
+    function anyLoaded() {
+        for (const L of layers.values()) if (L.model) return true;
+        return false;
+    }
 
     function applyLook() {
         // Per-entity display state resets with each load — reapply the toggles.
@@ -232,8 +445,8 @@ _VIEWER_HTML = """
         // around the pulled-back camera distance — a model-scaled near plane
         // 32x away compresses the model into a coarse depth slice and the
         // edge overlay z-fights the faces (edges drop out).
-        if (!model) return;
-        const diag = Math.max(math.getAABB3Diag(model.aabb), 1e-6);
+        if (!anyLoaded()) return;
+        const diag = Math.max(math.getAABB3Diag(viewer.scene.aabb), 1e-6);
         const camera = viewer.camera;
         if (orthoMode) {
             const D = math.lenVec3(math.subVec3(camera.look, camera.eye, []));
@@ -257,26 +470,406 @@ _VIEWER_HTML = """
     // per-frame cost at a subtraction while the distance holds (orbit, pan).
     viewer.camera.on("matrix", () => { if (orthoMode) refreshClip(); });
 
-    canvas.onPush((data) => {
-        // GLB bytes arrive as an ArrayBuffer; the dataSource serves them.
-        const mySeq = ++seq;
+    {   // Hover inspect + click pick. Hovering reads what's under the cursor
+        // — the entity (glTF node) name and the vertex-snapped coordinate,
+        // plus the point's index on a point cloud ("#4172"). A click (a
+        // press that doesn't turn into an orbit drag) sends the same info
+        // to Python as an {event:'pick'} message.
+        const cvs = document.getElementById('xk');
+        const tip = document.getElementById('tip');
+        const fmt = (v) => Number(v.toPrecision(6));
+
+        function isPointCloud(ent) {
+            const m = ent.meshes && ent.meshes[0];
+            return !!(m && m.layer && m.layer.primitive === "points");
+        }
+        function pointIndex(ent, p) {
+            // Nearest cached vertex to the snapped position — exact on a
+            // snap hit. readableGeometryEnabled keeps positions CPU-side;
+            // cache them per entity (cleared on each model load).
+            let c = vtxCache[ent.id];
+            if (!c) {
+                if (typeof ent.getEachVertex !== "function") return null;
+                const arr = [];
+                ent.getEachVertex((v) => arr.push(v[0], v[1], v[2]));
+                c = vtxCache[ent.id] = new Float64Array(arr);
+            }
+            let best = null, bd = Infinity;
+            for (let i = 0; i < c.length; i += 3) {
+                const dx = c[i] - p[0], dy = c[i+1] - p[1], dz = c[i+2] - p[2];
+                const d = dx*dx + dy*dy + dz*dz;
+                if (d < bd) { bd = d; best = i / 3; }
+            }
+            return best;
+        }
+        function inspect(canvasPos) {
+            const r = viewer.scene.pick({ canvasPos, snapToVertex: true,
+                                          snapRadius: 30 });
+            const p = r && (r.snappedWorldPos || r.worldPos);
+            if (!p) return null;
+            const ent = r.entity || null;
+            // Globalized entity ids are "<modelId>#<node>", model ids are
+            // "m<seq>:<layer>" — split back into (layer, node) for display
+            // and for the pick payload.
+            let node = null, lname = null;
+            if (ent) {
+                const hash = ent.id.indexOf("#");
+                node = hash >= 0 ? ent.id.slice(hash + 1) : ent.id;
+                const mid = hash >= 0 ? ent.id.slice(0, hash) : "";
+                lname = mid.slice(mid.indexOf(":") + 1) || null;
+            }
+            const info = { id: node, layer: lname, point: null,
+                           pos: [fmt(p[0]), fmt(p[1]), fmt(p[2])] };
+            if (ent && isPointCloud(ent)) info.point = pointIndex(ent, p);
+            return info;
+        }
+        function label(info) {
+            const name = info.id !== null
+                ? (layers.size > 1 && info.layer && info.layer !== info.id
+                       ? info.layer + ":" + info.id : info.id)
+                : "";
+            const head = name + (info.point !== null ? " #" + info.point : "");
+            const xyz = "(" + info.pos.join(", ") + ")";
+            return head ? head + "\\n" + xyz : xyz;
+        }
+
+        let lastHover = 0;
+        cvs.addEventListener('mousemove', (e) => {
+            // Quiet during drags and while a tool owns the pointer (the
+            // measure/angle controls run their own lens; the section gizmo
+            // disables cameraControl.pointerEnabled).
+            if (e.buttons || measuring || angling
+                    || !viewer.cameraControl.pointerEnabled || !anyLoaded()) {
+                tip.style.display = 'none';
+                return;
+            }
+            const now = performance.now();
+            if (now - lastHover < 40) return;   // ~25Hz is plenty
+            lastHover = now;
+            const info = inspect([e.offsetX, e.offsetY]);
+            if (!info) { tip.style.display = 'none'; return; }
+            tip.innerText = label(info);
+            tip.style.left = (e.offsetX + 14) + 'px';
+            tip.style.top = (e.offsetY + 14) + 'px';
+            tip.style.display = 'block';
+        });
+        cvs.addEventListener('mouseleave', () => {
+            tip.style.display = 'none';
+        });
+
+        let downX = 0, downY = 0, armed = false;
+        cvs.addEventListener('mousedown', (e) => {
+            armed = e.button === 0 && !measuring && !angling
+                    && viewer.cameraControl.pointerEnabled;
+            downX = e.clientX; downY = e.clientY;
+        });
+        cvs.addEventListener('mouseup', (e) => {
+            if (!armed || e.button !== 0 || !anyLoaded()) return;
+            armed = false;
+            if (Math.abs(e.clientX - downX) > 4
+                    || Math.abs(e.clientY - downY) > 4) return;   // a drag
+            const info = inspect([e.offsetX, e.offsetY]);
+            if (info) canvas.send({ event: 'pick', ...info });
+        });
+    }
+
+    function prepGLB(buf) {
+        // Per-layer GLB analysis + fixes between the wire and xeokit's
+        // loader; returns {buf, groups, colors, counts}:
+        //  * colors: the glTF parser never reads the COLOR_0 vertex
+        //    attribute (what trimesh & friends write for point clouds and
+        //    line sets), and its points layer ignores material color too —
+        //    so record each named node's average vertex color and tint the
+        //    loaded entity (colorize) instead. Flat per-node, no gradient.
+        //  * indexless LINES get sequential indices appended to the BIN
+        //    chunk: the loader requires indices for "lines" and drops the
+        //    whole primitive otherwise (trimesh exports lines indexless).
+        //  * groups: where the node tree first branches — the Items
+        //    panel's show/hide rows. counts: points/segments per node.
+        try {
+            const dv = new DataView(buf);
+            if (dv.getUint32(0, true) !== 0x46546C67) {   // ≠"glTF"
+                return { buf, groups: [], colors: {}, counts: {} };
+            }
+            const jlen = dv.getUint32(12, true);
+            const json = JSON.parse(new TextDecoder().decode(
+                new Uint8Array(buf, 20, jlen)));
+            const binOff = 20 + jlen;   // chunk-1 header, if present
+            const binLen = binOff + 8 <= buf.byteLength
+                ? dv.getUint32(binOff, true) : 0;
+            const bin = binLen ? new Uint8Array(buf, binOff + 8, binLen) : null;
+
+            const nodes = json.nodes || [];
+            const scn = (json.scenes || [])[json.scene || 0] || { nodes: [] };
+            let tops = scn.nodes || [];
+            while (tops.length === 1
+                   && (nodes[tops[0]].children || []).length)
+                tops = nodes[tops[0]].children;
+            const groups = tops.map((i) => {
+                const names = [];
+                (function walk(k) {
+                    if (nodes[k].name) names.push(nodes[k].name);
+                    (nodes[k].children || []).forEach(walk);
+                })(i);
+                return { name: nodes[i].name || "node " + i, nodes: names };
+            });
+
+            function avgColor(accIdx) {
+                const acc = json.accessors[accIdx];
+                const bv = json.bufferViews[acc.bufferView];
+                if (!bin || bv.buffer !== 0 || acc.count === 0) return null;
+                const ncomp = acc.type === "VEC4" ? 4 : 3;
+                const readers = {
+                    5121: [1, (d, o) => d.getUint8(o) / 255],
+                    5123: [2, (d, o) => d.getUint16(o, true) / 65535],
+                    5126: [4, (d, o) => d.getFloat32(o, true)],
+                };
+                const r = readers[acc.componentType];
+                if (!r) return null;
+                const [size, get] = r;
+                const d = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
+                const stride = bv.byteStride || ncomp * size;
+                const base = (bv.byteOffset || 0) + (acc.byteOffset || 0);
+                const sum = [0, 0, 0, 0];
+                for (let i = 0; i < acc.count; i++) {
+                    const o = base + i * stride;
+                    for (let c = 0; c < ncomp; c++)
+                        sum[c] += get(d, o + c * size);
+                }
+                return [sum[0] / acc.count, sum[1] / acc.count,
+                        sum[2] / acc.count,
+                        ncomp === 4 ? sum[3] / acc.count : 1];
+            }
+
+            const colors = {};
+            const counts = {};
+            for (const nd of nodes) {
+                if (!nd.name || nd.mesh === undefined) continue;
+                let count = 0;
+                for (const prim of (json.meshes[nd.mesh] || {}).primitives
+                                   || []) {
+                    if (!prim.attributes) continue;
+                    const pc = prim.attributes.POSITION !== undefined
+                        ? json.accessors[prim.attributes.POSITION].count : 0;
+                    if (prim.mode === 0) count += pc;                // points
+                    else if (prim.mode === 1)                       // lines
+                        count += Math.floor((prim.indices !== undefined
+                            ? json.accessors[prim.indices].count : pc) / 2);
+                    if (bin && colors[nd.name] === undefined
+                            && prim.attributes.COLOR_0 !== undefined) {
+                        const rgba = avgColor(prim.attributes.COLOR_0);
+                        if (rgba) colors[nd.name] = rgba;
+                    }
+                }
+                if (count) counts[nd.name] = count;
+            }
+
+            let changed = false;
+            const binPad = (4 - (binLen % 4)) % 4;
+            const appendix = [];        // extra BIN bytes (line indices)
+            let apLen = 0;
+            for (const mesh of json.meshes || []) {
+                for (const prim of mesh.primitives || []) {
+                    if (!prim.attributes || !bin) continue;
+                    if (prim.mode === 1 && prim.indices === undefined
+                            && prim.attributes.POSITION !== undefined) {
+                        const count =
+                            json.accessors[prim.attributes.POSITION].count;
+                        const wide = count > 65535;
+                        const idx = wide ? new Uint32Array(count)
+                                         : new Uint16Array(count);
+                        for (let i = 0; i < count; i++) idx[i] = i;
+                        let bytes = new Uint8Array(
+                            idx.buffer, 0, idx.byteLength);
+                        const pad = (4 - (bytes.length % 4)) % 4;
+                        json.bufferViews = json.bufferViews || [];
+                        json.bufferViews.push({
+                            buffer: 0, byteOffset: binLen + binPad + apLen,
+                            byteLength: bytes.length });
+                        json.accessors.push({
+                            bufferView: json.bufferViews.length - 1,
+                            componentType: wide ? 5125 : 5123,
+                            count, type: "SCALAR" });
+                        prim.indices = json.accessors.length - 1;
+                        appendix.push(bytes);
+                        if (pad) appendix.push(new Uint8Array(pad));
+                        apLen += bytes.length + pad;
+                        changed = true;
+                    }
+                }
+            }
+            if (!changed) return { buf, groups, colors, counts };
+            if (json.buffers && json.buffers[0])
+                json.buffers[0].byteLength = binLen + binPad + apLen;
+
+            let jbytes = new TextEncoder().encode(JSON.stringify(json));
+            const jpad = (4 - (jbytes.length % 4)) % 4;
+            if (jpad) {  // JSON chunks pad with spaces
+                const p = new Uint8Array(jbytes.length + jpad).fill(0x20);
+                p.set(jbytes);
+                jbytes = p;
+            }
+            const newBinLen = binLen + binPad + apLen;
+            const out = new Uint8Array(20 + jbytes.length + 8 + newBinLen);
+            const odv = new DataView(out.buffer);
+            odv.setUint32(0, 0x46546C67, true);
+            odv.setUint32(4, 2, true);
+            odv.setUint32(8, out.length, true);
+            odv.setUint32(12, jbytes.length, true);
+            odv.setUint32(16, 0x4E4F534A, true);        // "JSON"
+            out.set(jbytes, 20);
+            let off = 20 + jbytes.length;
+            odv.setUint32(off, newBinLen, true);
+            odv.setUint32(off + 4, 0x004E4942, true);   // "BIN\\0"
+            off += 8;
+            if (bin) { out.set(bin, off); off += binLen + binPad; }
+            for (const a of appendix) { out.set(a, off); off += a.length; }
+            return { buf: out.buffer, groups, colors, counts };
+        } catch (e) {
+            console.warn("model3d: GLB prep skipped:", e);
+            return { buf, groups: [], colors: {}, counts: {} };
+        }
+    }
+
+    function dropVtxCache(model) {
+        const pre = model.id + "#";
+        for (const k in vtxCache) if (k.startsWith(pre)) delete vtxCache[k];
+    }
+
+    function loadLayer(lname, glbBuf) {
+        let L = layers.get(lname);
+        if (!L) {
+            L = { model: null, groups: [], colors: {}, counts: {}, seq: 0 };
+            layers.set(lname, L);
+        }
+        const mySeq = ++L.seq;
+        // Measurements/section anchor to entities the reload may destroy.
         distance.clear();
         angle.clear();
         if (sectioning) { sectionPlanes.clear(); sectioning = false; sync(); }
-        if (model) { model.destroy(); model = null; }
-        pendingBuf = data;
+        if (L.model) { dropVtxCache(L.model); L.model.destroy(); L.model = null; }
+        document.getElementById('tip').style.display = 'none';
+        const prep = prepGLB(glbBuf);
+        L.groups = prep.groups;
+        L.colors = prep.colors;
+        L.counts = prep.counts;
+        const src = "m" + (++frameSeq) + ".glb";
+        pendingBufs.set(src, prep.buf);
         status.innerText = "LOADING…";
-        const m = loader.load({ id: "cad" + mySeq, src: "model.glb", edges: true });
+        // globalizeObjectIds: entity ids become "<modelId>#<node>" so the
+        // same node name ("points") can live on two layers at once.
+        const m = loader.load({ id: "m" + frameSeq + ":" + lname, src,
+                                edges: true, globalizeObjectIds: true });
         m.on("loaded", () => {
-            if (mySeq !== seq) { m.destroy(); return; }   // a newer push won
-            model = m;
+            if (mySeq !== L.seq) { m.destroy(); return; }  // a newer push won
+            L.model = m;
             refreshClip();
             applyLook();
+            for (const [n, c] of Object.entries(L.colors)) {
+                const o = viewer.scene.objects[m.id + "#" + n];
+                if (!o) continue;
+                o.colorize = [c[0], c[1], c[2]];
+                if (c[3] < 0.999) o.opacity = c[3];
+            }
+            buildItems();
             status.innerText = "RENDER COMPLETE";
-            if (firstLoad) { viewer.cameraFlight.jumpTo(model); firstLoad = false; }
+            if (!loadedAny) { loadedAny = true; viewer.cameraFlight.jumpTo(m); }
         });
         m.on("error", (e) => { status.innerText = "LOAD ERROR: " + e; });
+    }
+
+    canvas.onPush((data) => {
+        // Binary: a layer frame ("DVL1" + u16le name length + name + GLB)
+        // or a bare GLB, which addresses the "model" layer. JSON: controls.
+        if (data instanceof ArrayBuffer) {
+            const u8 = new Uint8Array(data);
+            if (u8.length >= 6 && u8[0] === 0x44 && u8[1] === 0x56
+                    && u8[2] === 0x4C && u8[3] === 0x31) {      // "DVL1"
+                const nlen = u8[4] | (u8[5] << 8);
+                const lname = new TextDecoder().decode(
+                    u8.subarray(6, 6 + nlen));
+                loadLayer(lname, data.slice(6 + nlen));
+            } else {
+                loadLayer("model", data);
+            }
+            return;
+        }
+        if (!data || typeof data !== "object") return;
+        if (data.cmd === "visible") {
+            layerHidden[data.layer] = !data.on;
+            buildItems();
+        } else if (data.cmd === "clear") {
+            for (const [lname, L] of [...layers]) {
+                if (data.layer != null && lname !== data.layer) continue;
+                if (L.model) { dropVtxCache(L.model); L.model.destroy(); }
+                layers.delete(lname);
+            }
+            buildItems();
+        }
     });
+
+    const hiddenGroups = {};   // "layer/branch" -> true; survives reloads
+
+    function buildItems() {
+        // The Items panel: one show/hide row per layer — or per top-level
+        // branch of a layer's node tree when it splits (a single-layer
+        // composed GLB reads as before: part / points / lines rows).
+        // Checkbox state lives in hiddenGroups (keyed "layer/branch") and
+        // Python-set layer visibility in layerHidden; both are re-applied
+        // here after every load, so hidden things STAY hidden across
+        // pushes. Entities under unnamed nodes land in "(other)".
+        const panel = document.getElementById('items');
+        panel.innerHTML = '';
+        const scene = viewer.scene;
+        const rows = [];
+        for (const [lname, L] of layers) {
+            if (!L.model) continue;
+            const mid = L.model.id;
+            const claimed = new Set();
+            const lrows = [];
+            for (const g of L.groups) {
+                const ids = g.nodes.map((n) => mid + "#" + n)
+                    .filter((i) => scene.objects[i]);
+                ids.forEach((i) => claimed.add(i));
+                if (ids.length)
+                    lrows.push({ branch: g.name, nodes: g.nodes, ids });
+            }
+            const rest = scene.objectIds.filter(
+                (i) => i.startsWith(mid + "#") && !claimed.has(i));
+            if (rest.length)
+                lrows.push({ branch: lrows.length ? "(other)" : lname,
+                             nodes: [], ids: rest });
+            for (const r of lrows) {
+                const label = lrows.length === 1 ? lname
+                    : (layers.size === 1 ? r.branch
+                                         : lname + ":" + r.branch);
+                rows.push({ key: lname + "/" + r.branch, label, lname,
+                            nodes: r.nodes, ids: r.ids, counts: L.counts });
+            }
+        }
+        for (const g of rows) {
+            const lab = document.createElement('label');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            const hidden = !!(hiddenGroups[g.key] || layerHidden[g.lname]);
+            cb.checked = !hidden;
+            scene.setObjectsVisible(g.ids, !hidden);
+            cb.onchange = () => {
+                hiddenGroups[g.key] = !cb.checked;
+                scene.setObjectsVisible(g.ids,
+                    cb.checked && !layerHidden[g.lname]);
+            };
+            lab.appendChild(cb);
+            // The count: points/segments where the row carries any, else
+            // how many entities the checkbox toggles.
+            let prims = 0;
+            for (const n of g.nodes) prims += g.counts[n] || 0;
+            const suffix = prims ? " (" + prims + ")"
+                : g.ids.length > 1 ? " (" + g.ids.length + ")" : "";
+            lab.appendChild(document.createTextNode(g.label + suffix));
+            panel.appendChild(lab);
+        }
+    }
 
     const bM = document.getElementById('btnMeasure');
     const bA = document.getElementById('btnAngle');
@@ -305,7 +898,7 @@ _VIEWER_HTML = """
         sync();
     };
     bS.onclick = () => {
-        if (!model) return;
+        if (!anyLoaded()) return;
         sectioning = !sectioning;
         if (sectioning) {
             const c = math.getAABB3Center(viewer.scene.aabb);
@@ -317,6 +910,12 @@ _VIEWER_HTML = """
         sync();
     };
     bX.onclick = () => { xrayed = !xrayed; applyLook(); sync(); };
+    document.getElementById('btnItems').onclick = () => {
+        const panel = document.getElementById('items');
+        const show = panel.style.display !== 'block';
+        panel.style.display = show ? 'block' : 'none';
+        document.getElementById('btnItems').classList.toggle('on', show);
+    };
     bE.onclick = () => { edgesOn = !edgesOn; applyLook(); sync(); };
     bO.onclick = () => {
         // "Ortho" is a telephoto perspective (2° fov, camera pulled back to
@@ -348,7 +947,8 @@ _VIEWER_HTML = """
         sync();
     };
     document.getElementById('btnReset').onclick = () => {
-        if (model) viewer.cameraFlight.flyTo(model);
+        if (anyLoaded())
+            viewer.cameraFlight.flyTo({ aabb: viewer.scene.aabb });
     };
     document.getElementById('btnClear').onclick = () => {
         distance.clear();
@@ -372,9 +972,21 @@ class Model3D(Custom):
     CONTRACT = {
         "data": {},
         "updates": {},
-        "events": [{"event": "ready"}],
-        "binary": "receives CUSTOM (code 3): a complete glTF-Binary (GLB) "
-                  "model; each push replaces the current one",
+        "events": [{"event": "ready"},
+                   {"event": "pick",
+                    "id": "str|null -- picked entity (glTF node name)",
+                    "layer": "str -- the layer the entity lives on",
+                    "point": "int|null -- point index within a picked "
+                             "point-cloud entity",
+                    "pos": "[x,y,z] -- picked world coordinate, snapped to "
+                           "the nearest vertex when one is in range"}],
+        "binary": "receives CUSTOM (code 3): either a raw glTF-Binary (GLB)"
+                  " — replaces the 'model' layer — or a layer frame: "
+                  "b'DVL1' + u16le(name length) + UTF-8 layer name + GLB, "
+                  "replacing that named layer only",
+        "controls": "JSON via the update channel's `post` (Custom.push): "
+                    "{cmd:'visible', layer, on} shows/hides a layer; "
+                    "{cmd:'clear', layer|null} removes one layer or all",
         "note": "the viewer (xeokit) loads from its CDN; the browser needs "
                 "network access to cdn.jsdelivr.net on first render",
     }
@@ -387,40 +999,144 @@ class Model3D(Custom):
                          # the wheel zooms the model, not the canvas
                          forward_wheel=False)
         self._init_color(color)
-        # A model pushed before any browser was ready would be dropped
-        # (binary streams aren't replayed) — hold the latest GLB and
-        # re-push whenever a viewer mounts and says so.
-        self._latest = None
+        # Layer state: name -> {"glb": bytes|None, "visible": bool}. Binary
+        # streams aren't replayed by the hub, so every layer's latest GLB
+        # (and its visibility) is held here and re-pushed whenever a viewer
+        # mounts and says so.
+        self._layers = {}
+        self._handles = {}
         self.on("ready")(lambda _msg: self._repush())
 
     def _repush(self):
-        if self._latest is not None:
-            self.push_binary(self._latest)
+        for lname, st in self._layers.items():
+            if st.get("glb") is not None:
+                self.push_binary(_layer_frame(lname, st["glb"]))
+            if not st.get("visible", True):
+                self.push({"cmd": "visible", "layer": lname, "on": False})
+
+    def _layer_state(self, lname):
+        return self._layers.setdefault(lname, {"glb": None, "visible": True})
+
+    def layer(self, lname):
+        """The named layer's handle — an independently updatable slice of
+        the scene (its own Items row, its own lifecycle)::
+
+            viewer.layer("part").update(glb, mesh_color=(110, 150, 220, 255))
+            viewer.layer("cloud").points(pts)          # part stays put
+            viewer.layer("path").curve(samples)
+            viewer.layer("cloud").visible = False
+            viewer.layer("path").clear()
+        """
+        if lname not in self._handles:
+            self._handles[lname] = Model3DLayer(self, lname)
+        return self._handles[lname]
+
+    def clear(self, lname=None):
+        """Remove one layer (``clear("cloud")``) or the whole scene."""
+        if lname is None:
+            self._layers.clear()
+        else:
+            self._layers.pop(lname, None)
+        self.push({"cmd": "clear", "layer": lname})
 
     @property
     def model(self):
-        """The GLB bytes currently shown (``None`` before the first update);
-        assign to show a new model (same as ``update``)."""
-        return self._latest
+        """The default ("model") layer's GLB bytes (``None`` before the
+        first update); assign to show a new model (same as ``update``)."""
+        return self._layers.get("model", {}).get("glb")
 
     @model.setter
     def model(self, source):
         self.update(source)
 
-    def update(self, source):
-        """Show a model: GLB ``bytes``, a ``.glb``/``.gltf`` path, or a
-        trimesh object (anything with ``export(file_type="glb")``)."""
-        if isinstance(source, (bytes, bytearray, memoryview)):
-            glb = bytes(source)
-        elif isinstance(source, (str, os.PathLike)) and os.path.isfile(source):
-            with open(source, "rb") as f:
-                glb = f.read()
-        elif hasattr(source, "export"):
-            glb = source.export(file_type="glb")
+    def update(self, source=None, *, layer="model", points=None, lines=None,
+               curve=None, point_color=None, line_color=None,
+               curve_color=None, mesh_color=None):
+        """Show a model and/or overlays (composed into one GLB, pushed to
+        ``layer`` — the default layer unless named).
+
+        ``source``: GLB ``bytes``, a ``.glb``/``.gltf`` path, or a trimesh
+        object (anything with ``export(file_type="glb")``). Overlays and
+        colors as in :func:`compose_glb`::
+
+            viewer.update(part_glb, points=pts, curve=helix,
+                          mesh_color=(110, 150, 220, 255))
+        """
+        if (source is not None and points is None and lines is None
+                and curve is None and mesh_color is None):
+            # Nothing to compose — ship the bytes opaquely (no reparse).
+            glb = _coerce_glb(source)
         else:
-            raise TypeError(
-                "model3d.update takes GLB bytes, a .glb/.gltf path, or a "
-                "trimesh-like object with export(file_type='glb') — for "
-                "build123d, export_gltf(part, path, binary=True) first")
-        self._latest = glb
-        self.push_binary(glb)
+            glb = compose_glb(source, points=points, lines=lines,
+                              curve=curve, point_color=point_color,
+                              line_color=line_color,
+                              curve_color=curve_color,
+                              mesh_color=mesh_color)
+        self._layer_state(layer)["glb"] = glb
+        self.push_binary(_layer_frame(layer, glb))
+
+    def on_pick(self, fn):
+        """Register a handler for clicks on the model (``@viewer.on_pick``).
+
+        The handler receives ``{"event": "pick", "id", "layer", "point",
+        "pos"}``: ``id`` is the glTF node name of what was hit (name your
+        geometries — e.g. ``scene.add_geometry(mesh, node_name="housing")``
+        in trimesh — and that name comes back here), ``layer`` the layer it
+        lives on, ``pos`` the world coordinate snapped to the nearest
+        vertex, and on a point cloud ``point`` is the index of that point in
+        the order the positions were supplied (``None`` elsewhere). Hovering
+        shows the same readout as a tooltip in the viewer without involving
+        Python. Sugar for ``on("pick")``.
+        """
+        return self.on("pick")(fn)
+
+
+class Model3DLayer:
+    """A named, independently updatable slice of a Model3D scene.
+
+    Obtained via ``viewer.layer(name)``. Each layer holds one GLB; pushing
+    to a layer replaces only that layer — the others stay put, which is
+    what makes per-frame animation of one overlay (or a slider-driven part
+    rebuild that leaves a million-point cloud alone) cheap.
+    """
+
+    def __init__(self, parent, name):
+        self._parent = parent
+        self._name = name
+
+    def update(self, source=None, **kwargs):
+        """Replace this layer's content — same signature as
+        :meth:`Model3D.update` (minus ``layer``)."""
+        self._parent.update(source, layer=self._name, **kwargs)
+
+    def points(self, pts, color=None):
+        """Show an (N, 3) point cloud as this layer's content."""
+        self.update(points=pts, point_color=color)
+
+    def lines(self, segments, color=None):
+        """Show (M, 2, 3) segments — endpoint pairs — as this layer."""
+        self.update(lines=segments, line_color=color)
+
+    def curve(self, samples, color=None):
+        """Show a (K, 3)-sampled function as a connected polyline."""
+        self.update(curve=samples, curve_color=color)
+
+    def clear(self):
+        """Remove this layer from the scene."""
+        self._parent.clear(self._name)
+
+    @property
+    def glb(self):
+        """This layer's current GLB bytes (``None`` if never pushed)."""
+        return self._parent._layers.get(self._name, {}).get("glb")
+
+    @property
+    def visible(self):
+        return self._parent._layer_state(self._name).get("visible", True)
+
+    @visible.setter
+    def visible(self, on):
+        self._parent._layer_state(self._name)["visible"] = bool(on)
+        self._parent.push({"cmd": "visible", "layer": self._name,
+                           "on": bool(on)})
+
