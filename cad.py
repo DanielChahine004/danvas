@@ -93,6 +93,24 @@ def update_geometry():
             field, level=0.0, color="#88bbff55",   # translucent via #rgba
             spacing=(ax[1] - ax[0], ay[1] - ay[0], az[1] - az[0]),
             origin=(ax[0], ay[0], az[0]))
+
+        # A napari-style VOLUME rendering (GPU ray marching, truly
+        # transparent — MIP by default, "Fog" on the toolbar). Three
+        # gaussian rods cross at the volume's center, so the transparency
+        # is unmistakable: from any angle you see each rod THROUGH the
+        # others. (For blocky occupancy voxels use layer.voxels() instead.)
+        nv = 128
+        i, j, k = np.indices((nv, nv, nv)).astype(float)
+        c = (nv - 1) / 2
+        # gaussian width scales with the grid so the rods stay proportional
+        w = (nv / 16) ** 2
+        rod_i = np.exp(-((j - c) ** 2 + (k - c) ** 2) / w)   # along x
+        rod_j = np.exp(-((i - c) ** 2 + (k - c) ** 2) / w)   # along y
+        rod_k = np.exp(-((i - c) ** 2 + (j - c) ** 2) / w)   # along z
+        dens = np.maximum.reduce([rod_i, rod_j, rod_k])
+        viewer.layer("rods").volume(dens, spacing=(0.02 / nv,) * 3,
+                                    origin=(0.032, 0.0, -0.010),
+                                    cmap="gray")
         print(f"part updated (sides={sides}, hole r={radius}, "
               f"{n} points, {n // 2} lines)")
     except Exception as e:

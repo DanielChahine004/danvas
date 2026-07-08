@@ -34,6 +34,7 @@ from .components import (
     Upload,
     VideoFeed,
     Model3D,
+    Volume3D,
     WebView,
 )
 
@@ -241,6 +242,15 @@ class _FactoryMixin:
         ``viewer.update(glb_bytes_or_path_or_trimesh)`` shows the model with
         orbit, snap measurements, and a section plane. See :meth:`insert`."""
         return self._make(Model3D, name=name, label=label, color=color,
+                          **place)
+
+    def volume3d(self, name="volume3d", label=None, color=None,
+                 **place: Unpack[Place]):
+        """Insert a :class:`~danvas.Volume3D` — true volume rendering for 3D
+        arrays (PET/CT recons, density fields): ``vol.update(array,
+        spacing=)`` ray-marches it with MIP / composite / slice views and
+        window-level. See :meth:`insert`."""
+        return self._make(Volume3D, name=name, label=label, color=color,
                           **place)
 
     def plot(self, name="plot", label=None, **place: Unpack[Place]):

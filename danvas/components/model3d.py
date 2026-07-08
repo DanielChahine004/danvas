@@ -297,6 +297,27 @@ def _coerce_glb(source):
         "export_gltf(part, path, binary=True) first")
 
 
+def _face_quads(cells, axis, sign, P, O, base):
+    """Quads for one face direction of the given cells: verts, per-face
+    normals, and triangle indices starting at vertex ``base``."""
+    import numpy as np
+    u, w = [x for x in range(3) if x != axis]
+    corners = np.zeros((4, 3))
+    corners[:, axis] = (sign + 1) // 2
+    # wind so the face's normal points along `sign` on `axis`
+    order = ((0, 0), (0, 1), (1, 1), (1, 0))
+    for ci, (du, dw) in enumerate(order if sign > 0 else order[::-1]):
+        corners[ci, u] += du
+        corners[ci, w] += dw
+    v = ((cells[:, None, :] + corners[None, :, :]) * P + O).reshape(-1, 3)
+    nrm = np.zeros(3)
+    nrm[axis] = sign
+    n = np.tile(nrm, (len(cells) * 4, 1))
+    quad = np.arange(len(cells))[:, None] * 4 + base
+    idx = (quad + np.array([0, 1, 2, 0, 2, 3])).ravel()
+    return v, n, idx
+
+
 def _box_surface(grid, pitch, origin):
     """Exposed-face box mesh of an occupancy grid (pure numpy).
 
@@ -313,35 +334,55 @@ def _box_surface(grid, pitch, origin):
     core = (slice(1, -1),) * 3
     all_v, all_n, all_i, base = [], [], [], 0
     for axis in range(3):
-        u, w = [x for x in range(3) if x != axis]
         for sign in (1, -1):
             sl = list(core)
             sl[axis] = (slice(2, None) if sign > 0 else slice(0, -2))
-            exposed = g & ~gp[tuple(sl)]
-            cells = np.argwhere(exposed)
+            cells = np.argwhere(g & ~gp[tuple(sl)])
             if not len(cells):
                 continue
-            n = len(cells)
-            corners = np.zeros((4, 3))
-            corners[:, axis] = (sign + 1) // 2
-            # wind so the face's normal points along `sign` on `axis`
-            order = ((0, 0), (0, 1), (1, 1), (1, 0))
-            for ci, (du, dw) in enumerate(order if sign > 0
-                                          else order[::-1]):
-                corners[ci, u] += du
-                corners[ci, w] += dw
-            v = (cells[:, None, :] + corners[None, :, :]) * P + O
-            all_v.append(v.reshape(-1, 3))
-            nrm = np.zeros(3)
-            nrm[axis] = sign
-            all_n.append(np.tile(nrm, (n * 4, 1)))
-            quad = np.arange(n)[:, None] * 4 + base
-            all_i.append((quad + np.array([0, 1, 2, 0, 2, 3])).ravel())
-            base += n * 4
+            v, n, i = _face_quads(cells, axis, sign, P, O, base)
+            all_v.append(v)
+            all_n.append(n)
+            all_i.append(i)
+            base += len(v)
     if not all_v:
         return (np.zeros((0, 3)),) * 2 + (np.zeros(0, np.uint32),)
     return (np.concatenate(all_v), np.concatenate(all_n),
             np.concatenate(all_i))
+
+
+def _rank_surfaces(rank, pitch, origin):
+    """Per-rank walls of a ranked voxel grid: ``{rank: (verts, normals,
+    indices)}``, with each boundary face owned by the HIGHER rank only
+    (``rank`` -1 = empty). One wall per boundary — two adjacent opacity
+    bands never emit coincident quads, which would z-fight and
+    double-blend into a murky wall."""
+    import numpy as np
+    r = np.asarray(rank)
+    P = np.asarray(pitch, float) * np.ones(3)
+    O = np.asarray(origin, float)
+    rp = np.pad(r, 1, constant_values=-1)
+    core = (slice(1, -1),) * 3
+    acc = {}   # band -> [verts...], [normals...], [indices...], base
+    for axis in range(3):
+        for sign in (1, -1):
+            sl = list(core)
+            sl[axis] = (slice(2, None) if sign > 0 else slice(0, -2))
+            nbr = rp[tuple(sl)]
+            cells = np.argwhere((r >= 0) & (nbr < r))
+            if not len(cells):
+                continue
+            bands = r[tuple(cells.T)]
+            for b in np.unique(bands):
+                a = acc.setdefault(int(b), ([], [], [], [0]))
+                v, n, i = _face_quads(cells[bands == b], axis, sign,
+                                      P, O, a[3][0])
+                a[0].append(v)
+                a[1].append(n)
+                a[2].append(i)
+                a[3][0] += len(v)
+    return {b: (np.concatenate(v), np.concatenate(n), np.concatenate(i))
+            for b, (v, n, i, _) in acc.items()}
 
 
 def _surface_net(field, level, spacing, origin):
@@ -430,6 +471,13 @@ _VIEWER_HTML = """
                  font-family: monospace; }
     #xk { width: 100vw; height: 100vh; cursor: grab; }
     #xk:active { cursor: grabbing; }
+    #vol { position: absolute; inset: 0; width: 100vw; height: 100vh;
+           pointer-events: none; }
+    #wl { position: absolute; bottom: 8px; left: 10px; display: none;
+          color: #888; font-size: 11px; pointer-events: none;
+          background: rgba(0,0,0,0.8); padding: 4px 8px; border-radius: 4px; }
+    #axes { position: absolute; left: 10px; bottom: 34px;
+            pointer-events: none; }
     #nav { position: absolute; right: 8px; bottom: 8px; width: 110px;
            height: 110px; z-index: 2; }
     #status { position: absolute; top: 10px; left: 10px; color: #888;
@@ -455,8 +503,11 @@ _VIEWER_HTML = """
 </style>
 
 <canvas id="xk"></canvas>
+<canvas id="vol"></canvas>
 <canvas id="nav"></canvas>
+<canvas id="axes" width="88" height="88"></canvas>
 <div id="status">WAITING FOR MODEL…</div>
+<div id="wl">W 1.00 / L 0.50 — right-drag to window</div>
 <div id="tip"></div>
 <div id="toolbar">
     <button id="btnMeasure">Measure</button>
@@ -465,6 +516,7 @@ _VIEWER_HTML = """
     <button id="btnXray">X-ray</button>
     <button id="btnEdges" class="on">Edges</button>
     <button id="btnOrtho">Ortho</button>
+    <button id="btnVolMode" style="display:none">MIP</button>
     <button id="btnItems">Items</button>
     <button id="btnReset">Fit</button>
     <button id="btnClear">Clear</button>
@@ -490,6 +542,11 @@ _VIEWER_HTML = """
                                 readableGeometryEnabled: true });
     viewer.scene.pointsMaterial.pointSize = 5;   // clouds read as dots, not dust
     viewer.scene.pointsMaterial.roundPoints = true;
+    // glTF world units are meters by spec (a mm-modeled CAD part arrives
+    // as 0.02-unit geometry) — read measurements out in mm. The label
+    // format is (length * scale).toFixed(2) + unit, so "20.00mm".
+    viewer.scene.metrics.units = "millimeters";
+    viewer.scene.metrics.scale = 1000;
     viewer.camera.eye = [60, 60, 60];
     viewer.camera.look = [0, 0, 0];
     viewer.camera.up = [0, 1, 0];
@@ -612,6 +669,52 @@ _VIEWER_HTML = """
     const navCube = new NavCubePlugin(viewer, { canvasId: "nav", visible: true,
                                                 color: "#2a2a2c", textColor: "#ddd" });
 
+    {   // XYZ axes gizmo (bottom-left): the world axes projected with the
+        // live camera — X red / Y green / Z blue (glTF world: Y up,
+        // meters); an axis pointing into the screen draws dimmed.
+        const axc = document.getElementById('axes');
+        const ctx = axc.getContext('2d');
+        function drawAxes() {
+            const cam = viewer.camera;
+            const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+            const crs = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                                   a[2] * b[0] - a[0] * b[2],
+                                   a[0] * b[1] - a[1] * b[0]];
+            const nv = (a) => {
+                const l = Math.hypot(a[0], a[1], a[2]) || 1;
+                return [a[0] / l, a[1] / l, a[2] / l];
+            };
+            const fwd = nv(sub(cam.look, cam.eye));
+            const right = nv(crs(fwd, cam.up));
+            const up = crs(right, fwd);
+            ctx.clearRect(0, 0, 88, 88);
+            const cx = 44, cy = 44, L = 32;
+            const proj = [[[1, 0, 0], "#e74c3c", "X"],
+                          [[0, 1, 0], "#2ecc71", "Y"],
+                          [[0, 0, 1], "#3b82f6", "Z"]].map(([a, col, lab]) => ({
+                x: right[0] * a[0] + right[1] * a[1] + right[2] * a[2],
+                y: up[0] * a[0] + up[1] * a[1] + up[2] * a[2],
+                z: fwd[0] * a[0] + fwd[1] * a[1] + fwd[2] * a[2],
+                col, lab }));
+            proj.sort((p, q) => q.z - p.z);   // into-screen axes drawn first
+            ctx.font = "bold 11px monospace";
+            for (const p of proj) {
+                const ex = cx + p.x * L, ey = cy - p.y * L;
+                ctx.globalAlpha = p.z > 0 ? 0.4 : 1.0;
+                ctx.strokeStyle = ctx.fillStyle = p.col;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(ex, ey);
+                ctx.stroke();
+                ctx.fillText(p.lab, ex + (p.x >= 0 ? 3 : -11), ey + 4);
+            }
+            ctx.globalAlpha = 1;
+        }
+        viewer.camera.on("matrix", drawAxes);
+        drawAxes();
+    }
+
     // The scene is LAYERS: named, independently replaceable models. A push
     // addresses one layer and leaves the rest standing — that's what makes
     // per-frame animation of one overlay (or a part rebuild that leaves a
@@ -633,6 +736,285 @@ _VIEWER_HTML = """
         return false;
     }
 
+    // ---- fused volume overlay -------------------------------------------
+    // Volume layers (DVV2 frames: PET/CT recons, density fields) render on
+    // a transparent WebGL2 canvas ray-marched with the SAME camera as the
+    // geometry, every frame. Compositing is overlay-onto-geometry: where
+    // the volume is dim it's transparent and models show through; there is
+    // no depth interleaving between fog and meshes (xeokit's depth buffer
+    // isn't shareable across contexts).
+    const volumes = new Map();   // layer name -> {tex, dims, aabb, steps}
+    let volMode = 0;             // 0 = MIP, 1 = fog (shaded compositing)
+    let volWin = 1.0, volLevel = 0.5;
+    let volNeedsDraw = false;
+    const volDirty = () => { volNeedsDraw = true; };
+
+    const volGL = (() => {
+        const c = document.getElementById('vol');
+        const gl = c.getContext('webgl2', { alpha: true, antialias: false,
+                                            premultipliedAlpha: false });
+        if (!gl) return null;
+        const VS = `#version 300 es
+        out vec2 vUV;
+        void main() {
+            vUV = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+            gl_Position = vec4(vUV * 2.0 - 1.0, 0.0, 1.0);
+        }`;
+        const FS = `#version 300 es
+        precision highp float; precision highp sampler3D;
+        uniform sampler3D uVol;
+        uniform vec3 uCamPos, uRight, uUp, uFwd, uBoxMin, uBoxMax;
+        uniform float uTanFov, uAspect, uWindow, uLevel;
+        uniform int uMode, uSteps, uCmapId, uClipOn;
+        uniform vec3 uClipPos, uClipDir;
+        in vec2 vUV;
+        out vec4 outColor;
+        float vol(vec3 p) {
+            return texture(uVol, (p - uBoxMin) / (uBoxMax - uBoxMin)).r;
+        }
+        bool clipped(vec3 p) {   // same side convention as xeokit's planes:
+            // geometry survives on the side the plane's arrow points at
+            return uClipOn == 1 && dot(p - uClipPos, uClipDir) < 0.0;
+        }
+        float wl(float v) {
+            return clamp((v - (uLevel - uWindow * 0.5)) / uWindow, 0.0, 1.0);
+        }
+        vec3 cmap(float v) {
+            if (uCmapId == 0) return vec3(v);          // gray (napari-like)
+            if (uCmapId == 2) {                        // viridis approx
+                vec3 a = mix(vec3(0.267, 0.005, 0.329),
+                             vec3(0.128, 0.567, 0.551), clamp(v * 2.0, 0.0, 1.0));
+                return mix(a, vec3(0.993, 0.906, 0.144),
+                           clamp(v * 2.0 - 1.0, 0.0, 1.0));
+            }
+            // hot: black -> red -> yellow -> white
+            return clamp(vec3(v * 3.0, v * 3.0 - 1.0, v * 3.0 - 2.0),
+                         0.0, 1.0);
+        }
+        void main() {
+            vec2 ndc = vUV * 2.0 - 1.0;
+            vec3 dir = normalize(uFwd + uRight * ndc.x * uTanFov * uAspect
+                                      + uUp * ndc.y * uTanFov);
+            vec3 inv = 1.0 / dir;
+            vec3 ta = (uBoxMin - uCamPos) * inv;
+            vec3 tb = (uBoxMax - uCamPos) * inv;
+            vec3 tmin = min(ta, tb), tmax = max(ta, tb);
+            float t0 = max(max(tmin.x, tmin.y), max(tmin.z, 0.0));
+            float t1 = min(min(tmax.x, tmax.y), tmax.z);
+            if (t1 <= t0) { outColor = vec4(0.0); return; }
+            float dt = (t1 - t0) / float(uSteps);
+            if (uMode == 0) {                     // MIP
+                float m = 0.0;
+                for (int i = 0; i < 2048; i++) {
+                    if (i >= uSteps) break;
+                    vec3 p = uCamPos + dir * (t0 + (float(i) + 0.5) * dt);
+                    if (clipped(p)) continue;
+                    m = max(m, vol(p));
+                }
+                float v = wl(m);
+                outColor = vec4(cmap(v), v * 0.92);
+                return;
+            }
+            // fog: exponential extinction + gradient-lit diffuse
+            vec3 vox = (uBoxMax - uBoxMin)
+                     / vec3(textureSize(uVol, 0));
+            vec3 acc = vec3(0.0);
+            float T = 1.0;
+            vec3 L = normalize(vec3(0.5, 0.8, 0.6));
+            float density = 400.0 / length(uBoxMax - uBoxMin);
+            for (int i = 0; i < 2048; i++) {
+                if (i >= uSteps) break;
+                vec3 p = uCamPos + dir * (t0 + (float(i) + 0.5) * dt);
+                if (clipped(p)) continue;
+                float v = wl(vol(p));
+                if (v < 0.004) continue;
+                float a = 1.0 - exp(-v * v * density * dt);
+                vec3 g = vec3(
+                    wl(vol(p + vec3(vox.x, 0, 0))) - wl(vol(p - vec3(vox.x, 0, 0))),
+                    wl(vol(p + vec3(0, vox.y, 0))) - wl(vol(p - vec3(0, vox.y, 0))),
+                    wl(vol(p + vec3(0, 0, vox.z))) - wl(vol(p - vec3(0, 0, vox.z))));
+                float gm = length(g);
+                float diff = gm > 1e-4
+                    ? 0.35 + 0.65 * max(dot(-g / gm, L), 0.0) : 1.0;
+                acc += T * a * cmap(v) * diff;
+                T *= 1.0 - a;
+                if (T < 0.01) break;
+            }
+            outColor = vec4(acc, 1.0 - T);
+        }`;
+        function sh(type, src) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+                throw new Error(gl.getShaderInfoLog(s));
+            return s;
+        }
+        const prog = gl.createProgram();
+        gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+        gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+            throw new Error(gl.getProgramInfoLog(prog));
+        const U = {};
+        for (const n of ["uVol", "uCamPos", "uRight", "uUp", "uFwd",
+                         "uBoxMin", "uBoxMax", "uTanFov", "uAspect",
+                         "uWindow", "uLevel", "uMode", "uSteps", "uCmapId",
+                         "uClipOn", "uClipPos", "uClipDir"])
+            U[n] = gl.getUniformLocation(prog, n);
+        return { gl, c, prog, U };
+    })();
+
+    function drawVolumes() {
+        const { gl, c, prog, U } = volGL;
+        const w = c.clientWidth, h = c.clientHeight;
+        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+        gl.viewport(0, 0, c.width, c.height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        const vis = [...volumes.entries()].filter(
+            ([n]) => !(hiddenGroups[n + "/volume"] || layerHidden[n]));
+        if (!vis.length) return;
+        const cam = viewer.camera;
+        const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        const crs = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                               a[2] * b[0] - a[0] * b[2],
+                               a[0] * b[1] - a[1] * b[0]];
+        const nrm = (a) => {
+            const l = Math.hypot(a[0], a[1], a[2]) || 1;
+            return [a[0] / l, a[1] / l, a[2] / l];
+        };
+        const fwd = nrm(sub(cam.look, cam.eye));
+        const right = nrm(crs(fwd, cam.up));
+        const up2 = crs(right, fwd);
+        gl.useProgram(prog);
+        gl.enable(gl.BLEND);
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA,
+                             gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.uniform3fv(U.uCamPos, cam.eye);
+        gl.uniform3fv(U.uRight, right);
+        gl.uniform3fv(U.uUp, up2);
+        gl.uniform3fv(U.uFwd, fwd);
+        gl.uniform1f(U.uTanFov,
+            Math.tan(cam.perspective.fov / 2 * Math.PI / 180));
+        gl.uniform1f(U.uAspect, c.width / Math.max(c.height, 1));
+        gl.uniform1f(U.uWindow, volWin);
+        gl.uniform1f(U.uLevel, volLevel);
+        gl.uniform1i(U.uMode, volMode);
+        gl.uniform1i(U.uVol, 0);
+        // the panel's Section plane cuts the volume too (first active one)
+        let clip = null;
+        for (const id in viewer.scene.sectionPlanes) {
+            const sp = viewer.scene.sectionPlanes[id];
+            if (sp.active !== false) { clip = sp; break; }
+        }
+        gl.uniform1i(U.uClipOn, clip ? 1 : 0);
+        if (clip) {
+            gl.uniform3fv(U.uClipPos, clip.pos);
+            gl.uniform3fv(U.uClipDir, clip.dir);
+        }
+        gl.activeTexture(gl.TEXTURE0);
+        for (const [, V] of vis) {
+            gl.bindTexture(gl.TEXTURE_3D, V.tex);
+            gl.uniform3fv(U.uBoxMin, V.aabb.slice(0, 3));
+            gl.uniform3fv(U.uBoxMax, V.aabb.slice(3, 6));
+            gl.uniform1i(U.uSteps, V.steps);
+            gl.uniform1i(U.uCmapId, V.cmap || 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+        gl.disable(gl.BLEND);
+    }
+    (function volLoop() {
+        if (volGL && volNeedsDraw) { volNeedsDraw = false; drawVolumes(); }
+        requestAnimationFrame(volLoop);
+    })();
+    if (volGL) {
+        viewer.camera.on("matrix", volDirty);
+        new ResizeObserver(volDirty).observe(volGL.c);
+        // re-march when a section plane appears, moves, or goes away
+        viewer.scene.on("sectionPlaneCreated", (sp) => {
+            volDirty();
+            sp.on("pos", volDirty);
+            sp.on("dir", volDirty);
+            sp.on("active", volDirty);
+        });
+        viewer.scene.on("sectionPlaneDestroyed", volDirty);
+    }
+
+    function loadVolume(lname, buf) {
+        // "DVV2" + u32le nx,ny,nz + f32le spacing xyz + f32le origin xyz
+        // + uint8 voxels (x-fastest), world units = the model's (meters).
+        if (!volGL) { status.innerText = "VOLUME NEEDS WEBGL2"; return; }
+        const dv = new DataView(buf);
+        const nx = dv.getUint32(4, true), ny = dv.getUint32(8, true),
+              nz = dv.getUint32(12, true);
+        const s = [dv.getFloat32(16, true), dv.getFloat32(20, true),
+                   dv.getFloat32(24, true)];
+        const o = [dv.getFloat32(28, true), dv.getFloat32(32, true),
+                   dv.getFloat32(36, true)];
+        const cmapId = dv.getUint8(40);   // 0 gray, 1 hot, 2 viridis
+        const vox = new Uint8Array(buf, 44, nx * ny * nz);
+        const gl = volGL.gl;
+        let V = volumes.get(lname);
+        if (!V) {
+            V = { tex: gl.createTexture() };
+            volumes.set(lname, V);
+        }
+        const L = layers.get(lname);   // a layer is one thing at a time
+        if (L && L.model) {
+            dropVtxCache(L.model);
+            L.model.destroy();
+            layers.delete(lname);
+        }
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_3D, V.tex);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, nx, ny, nz, 0, gl.RED,
+                      gl.UNSIGNED_BYTE, vox);
+        for (const [p, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR],
+                              [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+                              [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
+                              [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE],
+                              [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
+            gl.texParameteri(gl.TEXTURE_3D, p, v);
+        V.dims = [nx, ny, nz];
+        V.aabb = [o[0], o[1], o[2],
+                  o[0] + nx * s[0], o[1] + ny * s[1], o[2] + nz * s[2]];
+        V.steps = Math.min(2 * Math.max(nx, ny, nz), 512);
+        V.cmap = cmapId;
+        document.getElementById('btnVolMode').style.display = '';
+        document.getElementById('wl').style.display = 'block';
+        status.innerText = "RENDER COMPLETE";
+        if (!loadedAny) {
+            loadedAny = true;
+            viewer.cameraFlight.jumpTo({ aabb: V.aabb });
+        }
+        refreshClip();
+        buildItems();
+        volDirty();
+    }
+
+    function volChrome() {
+        // hide the volume toolbar bits again when the last volume goes
+        if (!volumes.size) {
+            document.getElementById('btnVolMode').style.display = 'none';
+            document.getElementById('wl').style.display = 'none';
+        }
+    }
+
+    function unionAabb() {
+        let a = viewer.scene.objectIds.length
+            ? Array.from(viewer.scene.aabb) : null;
+        for (const V of volumes.values()) {
+            if (!a) a = V.aabb.slice();
+            else for (let i = 0; i < 3; i++) {
+                a[i] = Math.min(a[i], V.aabb[i]);
+                a[i + 3] = Math.max(a[i + 3], V.aabb[i + 3]);
+            }
+        }
+        return a;
+    }
+
     function applyLook() {
         // Per-entity display state resets with each load — reapply the toggles.
         const scene = viewer.scene;
@@ -650,8 +1032,9 @@ _VIEWER_HTML = """
         // around the pulled-back camera distance — a model-scaled near plane
         // 32x away compresses the model into a coarse depth slice and the
         // edge overlay z-fights the faces (edges drop out).
-        if (!anyLoaded()) return;
-        const diag = Math.max(math.getAABB3Diag(viewer.scene.aabb), 1e-6);
+        const uab = unionAabb();
+        if (!uab) return;
+        const diag = Math.max(math.getAABB3Diag(uab), 1e-6);
         const camera = viewer.camera;
         if (orthoMode) {
             const D = math.lenVec3(math.subVec3(camera.look, camera.eye, []));
@@ -956,6 +1339,17 @@ _VIEWER_HTML = """
     }
 
     function loadLayer(lname, glbBuf) {
+        const u8h = new Uint8Array(glbBuf, 0, 4);
+        if (u8h[0] === 0x44 && u8h[1] === 0x56 && u8h[2] === 0x56
+                && u8h[3] === 0x32) {              // "DVV2": a volume layer
+            loadVolume(lname, glbBuf);
+            return;
+        }
+        if (volumes.has(lname)) {                  // GLB replaces a volume
+            volumes.delete(lname);
+            volChrome();
+            volDirty();
+        }
         let L = layers.get(lname);
         if (!L) {
             L = { model: null, groups: [], colors: {}, counts: {}, seq: 0 };
@@ -1017,12 +1411,19 @@ _VIEWER_HTML = """
         if (data.cmd === "visible") {
             layerHidden[data.layer] = !data.on;
             buildItems();
+            volDirty();
         } else if (data.cmd === "clear") {
             for (const [lname, L] of [...layers]) {
                 if (data.layer != null && lname !== data.layer) continue;
                 if (L.model) { dropVtxCache(L.model); L.model.destroy(); }
                 layers.delete(lname);
             }
+            for (const lname of [...volumes.keys()]) {
+                if (data.layer != null && lname !== data.layer) continue;
+                volumes.delete(lname);
+            }
+            volChrome();
+            volDirty();
             buildItems();
         }
     });
@@ -1066,17 +1467,24 @@ _VIEWER_HTML = """
                             nodes: r.nodes, ids: r.ids, counts: L.counts });
             }
         }
+        for (const [lname, V] of volumes) {   // volume layers get rows too
+            rows.push({ key: lname + "/volume",
+                        label: lname + " (" + V.dims.join("×") + ")",
+                        lname, nodes: [], ids: null, counts: {} });
+        }
         for (const g of rows) {
             const lab = document.createElement('label');
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             const hidden = !!(hiddenGroups[g.key] || layerHidden[g.lname]);
             cb.checked = !hidden;
-            scene.setObjectsVisible(g.ids, !hidden);
+            if (g.ids) scene.setObjectsVisible(g.ids, !hidden);
             cb.onchange = () => {
                 hiddenGroups[g.key] = !cb.checked;
-                scene.setObjectsVisible(g.ids,
-                    cb.checked && !layerHidden[g.lname]);
+                if (g.ids)
+                    scene.setObjectsVisible(g.ids,
+                        cb.checked && !layerHidden[g.lname]);
+                else volDirty();
             };
             lab.appendChild(cb);
             // The count: points/segments where the row carries any, else
@@ -1084,7 +1492,8 @@ _VIEWER_HTML = """
             let prims = 0;
             for (const n of g.nodes) prims += g.counts[n] || 0;
             const suffix = prims ? " (" + prims + ")"
-                : g.ids.length > 1 ? " (" + g.ids.length + ")" : "";
+                : (g.ids && g.ids.length > 1)
+                    ? " (" + g.ids.length + ")" : "";
             lab.appendChild(document.createTextNode(g.label + suffix));
             panel.appendChild(lab);
         }
@@ -1117,10 +1526,11 @@ _VIEWER_HTML = """
         sync();
     };
     bS.onclick = () => {
-        if (!anyLoaded()) return;
+        const uab = unionAabb();   // volumes count: slice a PET cloud too
+        if (!uab) return;
         sectioning = !sectioning;
         if (sectioning) {
-            const c = math.getAABB3Center(viewer.scene.aabb);
+            const c = math.getAABB3Center(uab);
             const sp = sectionPlanes.createSectionPlane({ id: "sp1", pos: c, dir: [-1, 0, 0] });
             sectionPlanes.showControl(sp.id);
         } else {
@@ -1166,9 +1576,42 @@ _VIEWER_HTML = """
         sync();
     };
     document.getElementById('btnReset').onclick = () => {
-        if (anyLoaded())
-            viewer.cameraFlight.flyTo({ aabb: viewer.scene.aabb });
+        const uab = unionAabb();
+        if (uab) viewer.cameraFlight.flyTo({ aabb: uab });
     };
+    document.getElementById('btnVolMode').onclick = () => {
+        volMode = 1 - volMode;
+        document.getElementById('btnVolMode').innerText =
+            volMode ? "Fog" : "MIP";
+        volDirty();
+    };
+    {   // right-drag = window/level, live only while a volume is shown
+        const cvs = document.getElementById('xk');
+        const wl = document.getElementById('wl');
+        let wling = false, wx = 0, wy = 0;
+        cvs.addEventListener('contextmenu', (e) => {
+            if (volumes.size) e.preventDefault();
+        });
+        cvs.addEventListener('mousedown', (e) => {
+            if (e.button === 2 && volumes.size) {
+                wling = true; wx = e.clientX; wy = e.clientY;
+            }
+        });
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 2) wling = false;
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!wling) return;
+            volWin = Math.min(2, Math.max(0.01,
+                volWin + (e.clientX - wx) * 0.003));
+            volLevel = Math.min(1.5, Math.max(-0.5,
+                volLevel + (e.clientY - wy) * 0.003));
+            wx = e.clientX; wy = e.clientY;
+            wl.innerText = `W ${volWin.toFixed(2)} / L ${volLevel.toFixed(2)}`
+                + " — right-drag to window";
+            volDirty();
+        });
+    }
     document.getElementById('btnClear').onclick = () => {
         distance.clear();
         angle.clear();
@@ -1201,8 +1644,12 @@ class Model3D(Custom):
                            "the nearest vertex when one is in range"}],
         "binary": "receives CUSTOM (code 3): either a raw glTF-Binary (GLB)"
                   " — replaces the 'model' layer — or a layer frame: "
-                  "b'DVL1' + u16le(name length) + UTF-8 layer name + GLB, "
-                  "replacing that named layer only",
+                  "b'DVL1' + u16le(name length) + UTF-8 layer name + "
+                  "payload, replacing that named layer only. Payload is a "
+                  "GLB (geometry) or b'DVV2' + u32le nx,ny,nz + f32le "
+                  "spacing xyz + f32le origin xyz + u8 cmap (0 gray/1 hot/"
+                  "2 viridis) + 3 pad + uint8 voxels x-fastest (a "
+                  "ray-marched volume fused into the scene)",
         "controls": "JSON via the update channel's `post` (Custom.push): "
                     "{cmd:'visible', layer, on} shows/hides a layer; "
                     "{cmd:'clear', layer|null} removes one layer or all",
@@ -1420,19 +1867,83 @@ class Model3DLayer:
                           "rgba": _cmap_rgba(centers[b], cmap)})
         self._parent._push_composed(self._name, compose_glb(_nodes=nodes))
 
-    def voxels(self, grid, pitch=1.0, origin=(0, 0, 0), color=None):
-        """Show an occupancy grid as a voxel body (exposed-face box mesh).
+    def volume(self, volume, spacing=(1.0, 1.0, 1.0), origin=(0, 0, 0),
+               vmin=None, vmax=None, cmap="hot"):
+        """Show a 3D array as a TRUE volume rendering fused into the scene
+        (GPU ray marching on an overlay locked to the panel camera) — for
+        PET/CT recons and density fields living in the same space as the
+        model.
 
-        ``grid`` is a 3D boolean/array-like; cell (i,j,k) spans
-        ``origin + [i, i+1] * pitch`` per axis (``pitch`` may be a scalar
-        or per-axis triple). Interior faces are culled, so a filled
-        100-cube costs ~60k faces, not a million.
+        ``volume`` is any 3D array indexed ``[x, y, z]``; values are
+        windowed to ``vmin``..``vmax`` (data min/max by default) and
+        quantized to uint8. ``spacing`` is the per-axis voxel size and
+        ``origin`` the position of voxel (0,0,0)'s corner — both in the
+        model's world units (glTF = meters), so a PET recon with 2mm
+        voxels is ``spacing=(0.002, 0.002, 0.0028)``.
+
+        In the panel: MIP by default (a "MIP"/"Fog" toolbar button appears
+        with a volume in the scene, Fog = shaded alpha compositing);
+        right-drag adjusts window/level. ``cmap`` is ``"gray"``, ``"hot"``
+        or ``"viridis"``. The volume composites OVER the geometry — dim
+        regions are transparent, so models show through; there is no depth
+        interleaving between fog and meshes.
         """
-        verts, normals, indices = _box_surface(grid, pitch, origin)
-        self._parent._push_composed(self._name, compose_glb(_nodes=[{
-            "name": "voxels", "mode": 4, "verts": verts,
-            "normals": normals, "indices": indices,
-            "rgba": _rgba(color, MESH_COLOR)}]))
+        import numpy as np
+        vol = np.asarray(volume)
+        if vol.ndim != 3:
+            raise ValueError(f"expected a 3D array, got shape {vol.shape}")
+        lo = float(vol.min()) if vmin is None else float(vmin)
+        hi = float(vol.max()) if vmax is None else float(vmax)
+        u8 = np.clip((vol.astype(float) - lo) / max(hi - lo, 1e-12) * 255,
+                     0, 255).astype(np.uint8)
+        cmaps = {"gray": 0, "hot": 1, "viridis": 2}
+        if cmap not in cmaps:
+            raise ValueError(f"cmap must be one of {sorted(cmaps)}")
+        frame = (b"DVV2"
+                 + struct.pack("<IIIffffff", *vol.shape,
+                               *(float(s) for s in spacing),
+                               *(float(o) for o in origin))
+                 + bytes([cmaps[cmap], 0, 0, 0])
+                 + np.ascontiguousarray(u8.transpose(2, 1, 0)).tobytes())
+        self._parent._push_composed(self._name, frame)
+
+    def voxels(self, grid, pitch=1.0, origin=(0, 0, 0), color=None,
+               bands=8):
+        """Show a voxel body (exposed-face box mesh).
+
+        ``grid`` is 3D: **boolean/int** = occupancy (solid voxels in
+        ``color``); **float** = per-voxel OPACITY — values are clipped to
+        [0, 1] and a cell's value scales its alpha (0 = absent), banded
+        into ``bands`` opacity groups. ``color`` supplies the hue either
+        way (its own alpha scales the whole body).
+
+        Cell (i,j,k) spans ``origin + [i, i+1] * pitch`` per axis
+        (``pitch`` may be a scalar or per-axis triple). Interior faces
+        between same-band neighbors are culled, so a solid 100-cube costs
+        ~60k faces, not a million — but a smooth float gradient exposes
+        every band boundary, so keep float grids modest.
+        """
+        import numpy as np
+        g = np.asarray(grid)
+        rgba = _rgba(color, MESH_COLOR)
+        if not np.issubdtype(g.dtype, np.floating):
+            verts, normals, indices = _box_surface(g, pitch, origin)
+            self._parent._push_composed(self._name, compose_glb(_nodes=[{
+                "name": "voxels", "mode": 4, "verts": verts,
+                "normals": normals, "indices": indices, "rgba": rgba}]))
+            return
+        v = np.clip(g, 0.0, 1.0)
+        rank = np.where(v > 0,
+                        np.minimum((v * bands).astype(int), bands - 1), -1)
+        surf = _rank_surfaces(rank, pitch, origin)
+        if not surf:
+            raise ValueError("float voxel grid has no cells with value > 0")
+        nodes = [{"name": f"voxels/{b:02d}", "mode": 4, "verts": vs,
+                  "normals": ns, "indices": ix,
+                  "rgba": (*rgba[:3],
+                           int(round((b + 0.5) / bands * rgba[3])))}
+                 for b, (vs, ns, ix) in sorted(surf.items())]
+        self._parent._push_composed(self._name, compose_glb(_nodes=nodes))
 
     def isosurface(self, field, level=None, levels=None, spacing=1.0,
                    origin=(0, 0, 0), color=None, cmap=None):

@@ -188,7 +188,8 @@ canvas.insert(s, x=80, y=80)
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `WebView` | output | external site in an iframe; `.url` (read/assign), `.navigate(url)` |
-| `Model3D` | output | prebuilt CAD/3D viewer (xeokit): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points()/.lines()/.curve()/.visible/.clear()`) — orbit, snap distance & angle measurements, section plane, X-ray/edges, NavCube, per-layer Items panel, hover/`@on_pick` |
+| `Model3D` | output | prebuilt CAD/3D viewer (xeokit): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points(color_by=)/.lines()/.curve()/.vectors()/.voxels()/.isosurface()/.volume()/.visible/.clear()`) — orbit, mm snap measurements, section plane (cuts volumes too), X-ray/edges, NavCube + XYZ axes, per-layer Items panel, hover/`@on_pick` |
+| `Volume3D` | output | standalone volume renderer (zero-dep WebGL2 ray marching): `.update(array_3d, spacing=, vmin=, vmax=)` — MIP / composite / slice views, window-level drag, colormaps; built for PET/CT recons |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
@@ -525,8 +526,21 @@ each with a color, and `mesh_color=` for the faces. The scene is **layers**:
 named, independently replaceable slices, so a rebuild ships only what
 changed and one layer can animate while the rest stand still. Hovering
 reads the entity and vertex-snapped coordinate under the cursor (plus the
-point index on a cloud); a click reaches Python via `@viewer.on_pick`.
-Pairs naturally with `@canvas.on_edit` for a live CAD loop:
+point index on a cloud); a click reaches Python via `@viewer.on_pick`;
+measurements read in **mm** and an XYZ axes gizmo tracks the camera
+(world = glTF: right-handed, Y up, meters). Colors are hex or RGBA
+tuples anywhere a `color=`/`cmap=` appears.
+
+Fields and volumes are layers too: `.voxels(grid)` (occupancy → box
+mesh), `.isosurface(field, levels=)` (pure-numpy surface nets),
+`.vectors(origins, vecs, color_by="magnitude")`, `.points(color_by=values,
+cmap=)` for value-colored clouds (picks still return your index + value) —
+and `.volume(array_3d, spacing=, origin=, cmap=)` for **true volume
+rendering** (napari-style GPU ray marching: MIP/Fog toolbar modes,
+right-drag window/level) fused into the same camera as the geometry, with
+the section plane cutting volume and meshes alike. Built for things like
+PET recons overlaid on scanner geometry. Pairs naturally with
+`@canvas.on_edit` for a live CAD loop:
 
 ```python
 viewer = canvas.model3d("part")
@@ -535,9 +549,10 @@ viewer = canvas.model3d("part")
 def rebuild():
     part = make_part()                            # build123d / cadquery / trimesh…
     export_gltf(part, "part.glb", binary=True)
-    viewer.layer("part").update("part.glb", mesh_color=(110, 150, 220, 255))
-    viewer.layer("cloud").points(sample_points, color=(255, 40, 40, 255))
+    viewer.layer("part").update("part.glb", mesh_color="#6e96dc")
+    viewer.layer("cloud").points(pts, color_by=pts[:, 1])   # value-colored
     viewer.layer("path").curve(helix)             # animate: re-push just this
+    viewer.layer("pet").volume(recon, spacing=(0.002,) * 3, cmap="hot")
 rebuild()
 ```
 
