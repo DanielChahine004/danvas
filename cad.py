@@ -74,12 +74,25 @@ def update_geometry():
                                  0.020 * t / t[-1],      # y(t): 0 -> top
                                  0.023 * np.sin(t)])     # z(t)
 
+        # A scalar field around the part: distance to the bore axis, shown
+        # as its r=24mm isosurface (a clearance shell, level 0 of the field).
+        ax = np.linspace(-0.030, 0.030, 48)
+        ay = np.linspace(-0.004, 0.024, 24)
+        az = np.linspace(-0.030, 0.030, 48)
+        X, _, Z = np.meshgrid(ax, ay, az, indexing="ij")
+        field = 0.024 - np.sqrt(X ** 2 + Z ** 2)
+
         # >>> the viewer is LAYERS: each call replaces only its own layer.
         viewer.layer("part").update("part.glb", mesh_color=STEEL)
-        viewer.layer("cloud").points(pts, color=RED)
+        viewer.layer("cloud").points(          # value-colored: radius from
+            pts, color_by=np.hypot(pts[:, 0], pts[:, 2]))   # the bore axis
         viewer.layer("net").lines(pts[rng.permutation(n)].reshape(-1, 2, 3),
                                   color=GREEN)
         viewer.layer("path").curve(helix, color=ORANGE)
+        viewer.layer("shell").isosurface(
+            field, level=0.0, color="#88bbff55",   # translucent via #rgba
+            spacing=(ax[1] - ax[0], ay[1] - ay[0], az[1] - az[0]),
+            origin=(ax[0], ay[0], az[0]))
         print(f"part updated (sides={sides}, hole r={radius}, "
               f"{n} points, {n // 2} lines)")
     except Exception as e:

@@ -76,6 +76,53 @@ from .custom import Custom
 POINT_COLOR = (255, 40, 40, 255)    # red
 LINE_COLOR = (0, 200, 80, 255)      # green
 CURVE_COLOR = (255, 170, 0, 255)    # orange
+MESH_COLOR = (150, 160, 175, 255)   # neutral grey-blue (voxels/isosurfaces)
+
+# Built-in colormap (viridis stops) for `color_by=` / isosurface levels; a
+# `cmap` argument accepts a list of RGB(A) 0-255 stops to lerp, or a
+# callable t∈[0,1] -> RGBA 0-255.
+_VIRIDIS = ((68, 1, 84), (71, 44, 122), (59, 81, 139), (44, 113, 142),
+            (33, 144, 141), (39, 173, 129), (92, 200, 99), (170, 220, 50),
+            (253, 231, 37))
+
+
+def _rgba(color, default=None):
+    """RGBA 0-255 from an (r,g,b[,a]) tuple or hex string — the same forms
+    ``color=`` accepts across the package: ``'#38f'``, ``'#3b82f6'``, plus
+    ``'#rgba'``/``'#rrggbbaa'`` for translucency — or ``default``."""
+    if color is None:
+        return default
+    if isinstance(color, (tuple, list)):
+        c = tuple(int(x) for x in color)
+        return c if len(c) == 4 else (*c[:3], 255)
+    s = str(color).strip().lstrip("#")
+    if len(s) in (3, 4):
+        s = "".join(ch * 2 for ch in s)
+    v = [int(s[i:i + 2], 16) for i in range(0, len(s), 2)]
+    return (*v, 255)[:4] if len(v) == 3 else tuple(v[:4])
+
+
+def _cmap_rgba(t, cmap=None):
+    if callable(cmap):
+        return _rgba(cmap(float(t)))
+    stops = ([_rgba(s) for s in cmap] if cmap is not None
+             else [_rgba(s) for s in _VIRIDIS])
+    t = min(max(float(t), 0.0), 1.0) * (len(stops) - 1)
+    i = min(int(t), len(stops) - 2)
+    f = t - i
+    a, b = stops[i], stops[i + 1]
+    return tuple(round(a[k] + (b[k] - a[k]) * f) for k in range(4))
+
+
+def _bucketize(values, n):
+    """Bucket indices (per value) + normalized bucket centers, for
+    `color_by=`: values -> n color bands."""
+    import numpy as np
+    v = np.asarray(values, float).ravel()
+    lo, hi = float(np.nanmin(v)), float(np.nanmax(v))
+    t = np.zeros_like(v) if hi <= lo else (v - lo) / (hi - lo)
+    idx = np.minimum((t * n).astype(int), n - 1)
+    return idx, [(b + 0.5) / n for b in range(n)]
 
 # Layer frame: b"DVL1" + u16le(name length) + UTF-8 layer name + GLB bytes.
 # A payload that starts with the GLB magic instead is the legacy form and
@@ -90,7 +137,7 @@ def _layer_frame(name, glb):
 
 def compose_glb(source=None, *, points=None, lines=None, curve=None,
                 point_color=None, line_color=None, curve_color=None,
-                mesh_color=None):
+                mesh_color=None, _nodes=None):
     """Build one GLB from a base model and/or overlays.
 
     ``source`` is GLB ``bytes``, a ``.glb``/``.gltf`` path, or a trimesh-like
@@ -103,9 +150,11 @@ def compose_glb(source=None, *, points=None, lines=None, curve=None,
     - ``curve``: (K, 3) samples along a function; consecutive samples are
       joined into a connected polyline (node ``curve``).
 
-    Colors are RGBA 0-255 tuples; ``mesh_color`` becomes a glTF material on
-    every source face that has none. Everything is appended straight into
-    the GLB's binary chunk with numpy — millions of points are fine.
+    Colors take the package's usual forms — an (r,g,b[,a]) 0-255 tuple or a
+    hex string (``'#38f'``, ``'#3b82f6'``, ``'#3b82f680'`` for alpha);
+    ``mesh_color`` becomes a glTF material on every source face that has
+    none. Everything is appended straight into the GLB's binary chunk with
+    numpy — millions of points are fine.
 
     Unnamed source nodes are named (``model``/``model_N``) so the viewer's
     Items panel and hover labels can identify them.
@@ -120,7 +169,8 @@ def compose_glb(source=None, *, points=None, lines=None, curve=None,
            else np.asarray(curve, float).reshape(-1, 3))
     cur_pts = (np.zeros((0, 3)) if len(cur) < 2
                else np.stack([cur[:-1], cur[1:]], axis=1).reshape(-1, 3))
-    if source is None and not (len(pts) or len(seg_pts) or len(cur_pts)):
+    if (source is None and _nodes is None
+            and not (len(pts) or len(seg_pts) or len(cur_pts))):
         raise ValueError("compose_glb needs a source model and/or overlays")
 
     if source is not None:
@@ -155,7 +205,7 @@ def compose_glb(source=None, *, points=None, lines=None, curve=None,
         # A real glTF material — the standard way to color a mesh, honored
         # by any glTF viewer, not just this panel.
         doc.setdefault("materials", []).append({"pbrMetallicRoughness": {
-            "baseColorFactor": [c / 255 for c in mesh_color],
+            "baseColorFactor": [c / 255 for c in _rgba(mesh_color)],
             "metallicFactor": 0.1, "roughnessFactor": 0.6}})
         for mesh in doc["meshes"]:
             for prim in mesh.get("primitives", []):
@@ -178,9 +228,9 @@ def compose_glb(source=None, *, points=None, lines=None, curve=None,
         off += len(b) + ((-len(b)) % 4)
         return len(doc["accessors"]) - 1
 
-    overlays = (("points", pts, point_color or POINT_COLOR, 0),
-                ("lines", seg_pts, line_color or LINE_COLOR, 1),
-                ("curve", cur_pts, curve_color or CURVE_COLOR, 1))
+    overlays = (("points", pts, _rgba(point_color, POINT_COLOR), 0),
+                ("lines", seg_pts, _rgba(line_color, LINE_COLOR), 1),
+                ("curve", cur_pts, _rgba(curve_color, CURVE_COLOR), 1))
     for name, verts, rgba, mode in overlays:
         if len(verts) == 0:
             continue
@@ -193,6 +243,33 @@ def compose_glb(source=None, *, points=None, lines=None, curve=None,
                 "mode": mode}
         doc["meshes"].append({"primitives": [prim]})
         doc["nodes"].append({"name": name, "mesh": len(doc["meshes"]) - 1})
+        scene_nodes.append(len(doc["nodes"]) - 1)
+
+    # Generic node specs (the voxel/isosurface/color_by machinery): each is
+    # {name, mode, verts, rgba, indices?, normals?}. Node names may carry a
+    # "base/sub" suffix — the viewer folds those into one Items row.
+    for spec in (_nodes or []):
+        v = np.ascontiguousarray(
+            np.asarray(spec["verts"], np.float32).reshape(-1, 3))
+        if len(v) == 0:
+            continue
+        rgba = _rgba(spec.get("rgba"), MESH_COLOR)
+        c = np.ascontiguousarray(np.broadcast_to(
+            np.asarray(rgba, np.uint8), (len(v), 4)))
+        attrs = {"POSITION": add_accessor(v, 5126, "VEC3", minmax=True),
+                 "COLOR_0": add_accessor(c, 5121, "VEC4", normalized=True)}
+        if spec.get("normals") is not None:
+            attrs["NORMAL"] = add_accessor(np.ascontiguousarray(
+                np.asarray(spec["normals"], np.float32).reshape(-1, 3)),
+                5126, "VEC3")
+        prim = {"attributes": attrs, "mode": spec.get("mode", 4)}
+        if spec.get("indices") is not None:
+            prim["indices"] = add_accessor(np.ascontiguousarray(
+                np.asarray(spec["indices"], np.uint32).ravel()),
+                5125, "SCALAR")
+        doc["meshes"].append({"primitives": [prim]})
+        doc["nodes"].append({"name": spec["name"],
+                             "mesh": len(doc["meshes"]) - 1})
         scene_nodes.append(len(doc["nodes"]) - 1)
 
     doc["buffers"][0]["byteLength"] = off
@@ -218,6 +295,134 @@ def _coerce_glb(source):
         "expected GLB bytes, a .glb/.gltf path, or a trimesh-like object "
         "with export(file_type='glb') — for build123d, "
         "export_gltf(part, path, binary=True) first")
+
+
+def _box_surface(grid, pitch, origin):
+    """Exposed-face box mesh of an occupancy grid (pure numpy).
+
+    One quad per face where a filled cell meets empty space (or the grid
+    border) — the classic voxel mesher: interior faces never exist, per-face
+    normals keep the cubes crisp. Cell (i,j,k) spans
+    ``origin + [i,i+1]*pitch`` per axis. Returns (verts, normals, indices).
+    """
+    import numpy as np
+    g = np.asarray(grid).astype(bool)
+    P = np.asarray(pitch, float) * np.ones(3)
+    O = np.asarray(origin, float)
+    gp = np.pad(g, 1, constant_values=False)
+    core = (slice(1, -1),) * 3
+    all_v, all_n, all_i, base = [], [], [], 0
+    for axis in range(3):
+        u, w = [x for x in range(3) if x != axis]
+        for sign in (1, -1):
+            sl = list(core)
+            sl[axis] = (slice(2, None) if sign > 0 else slice(0, -2))
+            exposed = g & ~gp[tuple(sl)]
+            cells = np.argwhere(exposed)
+            if not len(cells):
+                continue
+            n = len(cells)
+            corners = np.zeros((4, 3))
+            corners[:, axis] = (sign + 1) // 2
+            # wind so the face's normal points along `sign` on `axis`
+            order = ((0, 0), (0, 1), (1, 1), (1, 0))
+            for ci, (du, dw) in enumerate(order if sign > 0
+                                          else order[::-1]):
+                corners[ci, u] += du
+                corners[ci, w] += dw
+            v = (cells[:, None, :] + corners[None, :, :]) * P + O
+            all_v.append(v.reshape(-1, 3))
+            nrm = np.zeros(3)
+            nrm[axis] = sign
+            all_n.append(np.tile(nrm, (n * 4, 1)))
+            quad = np.arange(n)[:, None] * 4 + base
+            all_i.append((quad + np.array([0, 1, 2, 0, 2, 3])).ravel())
+            base += n * 4
+    if not all_v:
+        return (np.zeros((0, 3)),) * 2 + (np.zeros(0, np.uint32),)
+    return (np.concatenate(all_v), np.concatenate(all_n),
+            np.concatenate(all_i))
+
+
+def _surface_net(field, level, spacing, origin):
+    """Isosurface of a 3D scalar field at ``level`` (pure numpy).
+
+    Surface nets: one vertex per grid cell the surface crosses (placed at
+    the mean of its edge crossings), one quad per crossing grid edge —
+    no marching-cubes table, no scikit-image dependency. Normals come from
+    the field gradient, so shading is smooth. Sample (i,j,k) sits at
+    ``origin + (i,j,k)*spacing``. Returns (verts, normals, indices).
+    """
+    import numpy as np
+    F = np.asarray(field, float)
+    S = np.asarray(spacing, float) * np.ones(3)
+    O = np.asarray(origin, float)
+    inside = F > level
+    cshape = tuple(s - 1 for s in F.shape)
+    agg_all = np.ones(cshape, bool)
+    agg_any = np.zeros(cshape, bool)
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                blk = inside[dx:cshape[0] + dx, dy:cshape[1] + dy,
+                             dz:cshape[2] + dz]
+                agg_all &= blk
+                agg_any |= blk
+    mixed = agg_any & ~agg_all
+    cells = np.argwhere(mixed)
+    if not len(cells):
+        return (np.zeros((0, 3)),) * 2 + (np.zeros(0, np.uint32),)
+    cell_id = np.full(cshape, -1, np.int64)
+    cell_id[tuple(cells.T)] = np.arange(len(cells))
+    acc = np.zeros((len(cells), 3))
+    cnt = np.zeros(len(cells))
+    quads = []
+    for axis in range(3):
+        sl0 = [slice(None)] * 3
+        sl1 = [slice(None)] * 3
+        sl0[axis] = slice(0, -1)
+        sl1[axis] = slice(1, None)
+        f0 = F[tuple(sl0)]
+        f1 = F[tuple(sl1)]
+        cross = (f0 > level) != (f1 > level)
+        e = np.argwhere(cross)
+        if not len(e):
+            continue
+        t = (level - f0[cross]) / (f1[cross] - f0[cross])
+        pos = e.astype(float)
+        pos[:, axis] += t
+        u, w = [x for x in range(3) if x != axis]
+        quad_ids = []
+        for du, dw in ((0, 0), (0, 1), (1, 1), (1, 0)):
+            cc = e.copy()
+            cc[:, u] -= du
+            cc[:, w] -= dw
+            valid = ((cc >= 0).all(1)
+                     & (cc[:, 0] < cshape[0]) & (cc[:, 1] < cshape[1])
+                     & (cc[:, 2] < cshape[2]))
+            ids = np.full(len(e), -1, np.int64)
+            ids[valid] = cell_id[tuple(cc[valid].T)]
+            ok = ids >= 0   # a cell touching a crossing edge is mixed
+            np.add.at(acc, ids[ok], pos[ok])
+            np.add.at(cnt, ids[ok], 1)
+            quad_ids.append(ids)
+        q = np.stack(quad_ids, 1)
+        q = q[(q >= 0).all(1)]
+        flip = (f0[cross] > level)[(np.stack(quad_ids, 1) >= 0).all(1)]
+        q[flip] = q[flip, ::-1]
+        quads.append(q)
+    quads = (np.concatenate(quads) if quads
+             else np.zeros((0, 4), np.int64))
+    vpos = acc / np.maximum(cnt, 1)[:, None]
+    verts = vpos * S + O
+    idx = quads[:, [0, 1, 2, 0, 2, 3]].ravel().astype(np.uint32)
+    gx, gy, gz = np.gradient(F)
+    vi = np.clip(np.round(vpos).astype(int), 0,
+                 np.asarray(F.shape) - 1)
+    nrm = -np.stack([gx[tuple(vi.T)], gy[tuple(vi.T)],
+                     gz[tuple(vi.T)]], 1)
+    nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+    return verts, nrm, idx
 
 _VIEWER_HTML = """
 <style>
@@ -524,11 +729,17 @@ _VIEWER_HTML = """
             return info;
         }
         function label(info) {
-            const name = info.id !== null
-                ? (layers.size > 1 && info.layer && info.layer !== info.id
-                       ? info.layer + ":" + info.id : info.id)
+            // A "base/xx" node is a color_by bucket: show the base name and
+            // hide the bucket-local index (Python's pick event translates
+            // it to the caller's index; the raw one would just mislead).
+            const bucketed = info.id !== null && info.id.includes("/");
+            const base = bucketed ? info.id.split("/")[0] : info.id;
+            const name = base !== null
+                ? (layers.size > 1 && info.layer && info.layer !== base
+                       ? info.layer + ":" + base : base)
                 : "";
-            const head = name + (info.point !== null ? " #" + info.point : "");
+            const head = name + (info.point !== null && !bucketed
+                                     ? " #" + info.point : "");
             const xyz = "(" + info.pos.join(", ") + ")";
             return head ? head + "\\n" + xyz : xyz;
         }
@@ -605,14 +816,22 @@ _VIEWER_HTML = """
             while (tops.length === 1
                    && (nodes[tops[0]].children || []).length)
                 tops = nodes[tops[0]].children;
-            const groups = tops.map((i) => {
+            // Sibling nodes named "base/xx" (color_by buckets, isosurface
+            // levels) fold into one group "base" — one Items row.
+            const folded = new Map();
+            for (const i of tops) {
                 const names = [];
                 (function walk(k) {
                     if (nodes[k].name) names.push(nodes[k].name);
                     (nodes[k].children || []).forEach(walk);
                 })(i);
-                return { name: nodes[i].name || "node " + i, nodes: names };
-            });
+                const raw = nodes[i].name || "node " + i;
+                const base = raw.split("/")[0];
+                if (!folded.has(base))
+                    folded.set(base, { name: base, nodes: [] });
+                folded.get(base).nodes.push(...names);
+            }
+            const groups = [...folded.values()];
 
             function avgColor(accIdx) {
                 const acc = json.accessors[accIdx];
@@ -1072,8 +1291,35 @@ class Model3D(Custom):
                               line_color=line_color,
                               curve_color=curve_color,
                               mesh_color=mesh_color)
-        self._layer_state(layer)["glb"] = glb
+        self._push_composed(layer, glb)
+
+    def _push_composed(self, layer, glb, buckets=None, values=None):
+        st = self._layer_state(layer)
+        st["glb"] = glb
+        # color_by bookkeeping: bucket node -> original point indices, so
+        # picks report indices into the caller's arrays (see _handle_input).
+        st["buckets"] = buckets
+        st["values"] = values
         self.push_binary(_layer_frame(layer, glb))
+
+    def _handle_input(self, payload, viewer=None):
+        # A pick on a color_by-bucketed node carries the node's local point
+        # index — translate it back to the caller's index (and value), and
+        # collapse the "base/bucket" node name to its base.
+        try:
+            if isinstance(payload, dict) and payload.get("event") == "pick":
+                st = self._layers.get(payload.get("layer") or "", {})
+                maps = st.get("buckets") or {}
+                node = payload.get("id")
+                if node in maps and payload.get("point") is not None:
+                    orig = int(maps[node][payload["point"]])
+                    payload["point"] = orig
+                    payload["id"] = node.split("/")[0]
+                    if st.get("values") is not None:
+                        payload["value"] = float(st["values"][orig])
+        except Exception:
+            pass
+        super()._handle_input(payload, viewer)
 
     def on_pick(self, fn):
         """Register a handler for clicks on the model (``@viewer.on_pick``).
@@ -1109,9 +1355,33 @@ class Model3DLayer:
         :meth:`Model3D.update` (minus ``layer``)."""
         self._parent.update(source, layer=self._name, **kwargs)
 
-    def points(self, pts, color=None):
-        """Show an (N, 3) point cloud as this layer's content."""
-        self.update(points=pts, point_color=color)
+    def points(self, pts, color=None, color_by=None, cmap=None, buckets=16):
+        """Show an (N, 3) point cloud as this layer's content.
+
+        ``color_by=`` value-colors the cloud: an array of N values is
+        banded into ``buckets`` color bands over ``cmap`` (built-in viridis
+        by default; pass RGB(A) stops or a callable t→RGBA). Picks on a
+        value-colored cloud still report the index into YOUR array (plus
+        the point's ``value``).
+        """
+        if color_by is None:
+            self.update(points=pts, point_color=color)
+            return
+        import numpy as np
+        pts = np.asarray(pts, float).reshape(-1, 3)
+        v = np.asarray(color_by, float).ravel()
+        idx, centers = _bucketize(v, buckets)
+        nodes, maps = [], {}
+        for b in range(buckets):
+            m = idx == b
+            if not m.any():
+                continue
+            name = f"points/{b:02d}"
+            nodes.append({"name": name, "mode": 0, "verts": pts[m],
+                          "rgba": _cmap_rgba(centers[b], cmap)})
+            maps[name] = np.where(m)[0]
+        self._parent._push_composed(self._name, compose_glb(_nodes=nodes),
+                                    buckets=maps, values=v)
 
     def lines(self, segments, color=None):
         """Show (M, 2, 3) segments — endpoint pairs — as this layer."""
@@ -1120,6 +1390,74 @@ class Model3DLayer:
     def curve(self, samples, color=None):
         """Show a (K, 3)-sampled function as a connected polyline."""
         self.update(curve=samples, curve_color=color)
+
+    def vectors(self, origins, vecs, scale=1.0, color=None, color_by=None,
+                cmap=None, buckets=16):
+        """Show a vector field: a segment from each of the (N, 3)
+        ``origins`` along ``vecs * scale``.
+
+        ``color_by="magnitude"`` (or an array of N values) colors the
+        arrows by value over ``cmap``, banded into ``buckets``.
+        """
+        import numpy as np
+        o = np.asarray(origins, float).reshape(-1, 3)
+        d = np.asarray(vecs, float).reshape(-1, 3) * scale
+        segs = np.stack([o, o + d], axis=1)          # (N, 2, 3)
+        if color_by is None:
+            self.update(lines=segs, line_color=color)
+            return
+        v = (np.linalg.norm(d, axis=1)
+             if isinstance(color_by, str) and color_by == "magnitude"
+             else np.asarray(color_by, float).ravel())
+        idx, centers = _bucketize(v, buckets)
+        nodes = []
+        for b in range(buckets):
+            m = idx == b
+            if not m.any():
+                continue
+            nodes.append({"name": f"lines/{b:02d}", "mode": 1,
+                          "verts": segs[m].reshape(-1, 3),
+                          "rgba": _cmap_rgba(centers[b], cmap)})
+        self._parent._push_composed(self._name, compose_glb(_nodes=nodes))
+
+    def voxels(self, grid, pitch=1.0, origin=(0, 0, 0), color=None):
+        """Show an occupancy grid as a voxel body (exposed-face box mesh).
+
+        ``grid`` is a 3D boolean/array-like; cell (i,j,k) spans
+        ``origin + [i, i+1] * pitch`` per axis (``pitch`` may be a scalar
+        or per-axis triple). Interior faces are culled, so a filled
+        100-cube costs ~60k faces, not a million.
+        """
+        verts, normals, indices = _box_surface(grid, pitch, origin)
+        self._parent._push_composed(self._name, compose_glb(_nodes=[{
+            "name": "voxels", "mode": 4, "verts": verts,
+            "normals": normals, "indices": indices,
+            "rgba": _rgba(color, MESH_COLOR)}]))
+
+    def isosurface(self, field, level=None, levels=None, spacing=1.0,
+                   origin=(0, 0, 0), color=None, cmap=None):
+        """Show isosurface(s) of a 3D scalar field (pure-numpy surface
+        nets, gradient-shaded).
+
+        One ``level`` or a list of ``levels`` — multiple levels render as
+        one Items row, colored along ``cmap`` (or all ``color``). Sample
+        (i,j,k) sits at ``origin + (i,j,k) * spacing``. For per-level
+        show/hide, push each level as its own layer instead.
+        """
+        lvls = [level] if level is not None else list(levels or [])
+        if not lvls:
+            raise ValueError("isosurface needs level= or levels=[...]")
+        lo, hi = min(lvls), max(lvls)
+        nodes = []
+        for lv in lvls:
+            verts, normals, indices = _surface_net(field, lv, spacing,
+                                                   origin)
+            t = 0.5 if hi <= lo else (lv - lo) / (hi - lo)
+            nodes.append({"name": f"iso/{lv:g}", "mode": 4, "verts": verts,
+                          "normals": normals, "indices": indices,
+                          "rgba": (_rgba(color) if color is not None
+                                   else _cmap_rgba(t, cmap))})
+        self._parent._push_composed(self._name, compose_glb(_nodes=nodes))
 
     def clear(self):
         """Remove this layer from the scene."""
