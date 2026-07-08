@@ -87,6 +87,7 @@ MESSAGE_TYPES_OUT = (
     "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot",
     "draw", "presence", "cursor", "cursor_gone", "view", "welcome",
     "graveyard_update", "shared", "chat", "response", "hosting",
+    "serve_config",
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout",
