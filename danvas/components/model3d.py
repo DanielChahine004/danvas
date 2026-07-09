@@ -478,6 +478,9 @@ _VIEWER_HTML = """
           background: rgba(0,0,0,0.8); padding: 6px 8px; border-radius: 4px; }
     #wl label { display: flex; align-items: center; gap: 6px; }
     #wl input { width: 110px; }
+    #wl button { font-family: monospace; font-size: 10px; color: #ddd;
+                 background: #2a2a2c; border: 1px solid #444;
+                 border-radius: 3px; padding: 1px 6px; cursor: pointer; }
     #axes { position: absolute; left: 10px; bottom: 34px;
             pointer-events: none; }
     #nav { position: absolute; right: 8px; bottom: 8px; width: 110px;
@@ -514,6 +517,11 @@ _VIEWER_HTML = """
         <span id="wlWv">1.00</span></label>
     <label>L <input type="range" id="wlL" min="-50" max="150" value="50">
         <span id="wlLv">0.50</span></label>
+    <label id="wlDrow" style="display:none">D
+        <input type="range" id="wlD" min="0" max="1000" value="500"></label>
+    <label id="wlSrow" style="display:none">
+        <button id="vAxis">Z</button>
+        <input type="range" id="wlS" min="0" max="1000" value="500"></label>
 </div>
 <div id="tip"></div>
 <div id="toolbar">
@@ -751,8 +759,10 @@ _VIEWER_HTML = """
     // no depth interleaving between fog and meshes (xeokit's depth buffer
     // isn't shareable across contexts).
     const volumes = new Map();   // layer name -> {tex, dims, aabb, steps}
-    let volMode = 0;             // 0 = MIP, 1 = fog (shaded compositing)
+    let volMode = 0;             // 0 = MIP, 1 = fog, 2 = slice
     let volWin = 1.0, volLevel = 0.5;
+    let volDensity = 400;        // fog extinction (slider, exponential)
+    let volSliceAxis = 2, volSliceFrac = 0.5;
     let volNeedsDraw = false;
     const volDirty = () => { volNeedsDraw = true; };
 
@@ -771,8 +781,8 @@ _VIEWER_HTML = """
         precision highp float; precision highp sampler3D;
         uniform sampler3D uVol;
         uniform vec3 uCamPos, uRight, uUp, uFwd, uBoxMin, uBoxMax;
-        uniform float uTanFov, uAspect, uWindow, uLevel;
-        uniform int uMode, uSteps, uCmapId, uClipOn;
+        uniform float uTanFov, uAspect, uWindow, uLevel, uSliceFrac, uDensity;
+        uniform int uMode, uSteps, uCmapId, uClipOn, uSliceAxis;
         uniform vec3 uClipPos, uClipDir;
         in vec2 vUV;
         out vec4 outColor;
@@ -809,6 +819,25 @@ _VIEWER_HTML = """
             float t0 = max(max(tmin.x, tmin.y), max(tmin.z, 0.0));
             float t1 = min(min(tmax.x, tmax.y), tmax.z);
             if (t1 <= t0) { outColor = vec4(0.0); return; }
+            if (uMode == 2) {                     // slice plane
+                float lo = uSliceAxis == 0 ? uBoxMin.x
+                         : uSliceAxis == 1 ? uBoxMin.y : uBoxMin.z;
+                float hi = uSliceAxis == 0 ? uBoxMax.x
+                         : uSliceAxis == 1 ? uBoxMax.y : uBoxMax.z;
+                float plane = mix(lo, hi, uSliceFrac);
+                float d = uSliceAxis == 0 ? dir.x
+                        : uSliceAxis == 1 ? dir.y : dir.z;
+                float o = uSliceAxis == 0 ? uCamPos.x
+                        : uSliceAxis == 1 ? uCamPos.y : uCamPos.z;
+                if (abs(d) < 1e-6) { outColor = vec4(0.0); return; }
+                float t = (plane - o) / d;
+                if (t < t0 || t > t1) { outColor = vec4(0.0); return; }
+                vec3 p = uCamPos + dir * t;
+                if (clipped(p)) { outColor = vec4(0.0); return; }
+                float v = wl(vol(p));
+                outColor = vec4(cmap(v), 1.0);
+                return;
+            }
             float dt = (t1 - t0) / float(uSteps);
             if (uMode == 0) {                     // MIP
                 float m = 0.0;
@@ -828,7 +857,7 @@ _VIEWER_HTML = """
             vec3 acc = vec3(0.0);
             float T = 1.0;
             vec3 L = normalize(vec3(0.5, 0.8, 0.6));
-            float density = 400.0 / length(uBoxMax - uBoxMin);
+            float density = uDensity / length(uBoxMax - uBoxMin);
             for (int i = 0; i < 2048; i++) {
                 if (i >= uSteps) break;
                 vec3 p = uCamPos + dir * (t0 + (float(i) + 0.5) * dt);
@@ -867,7 +896,8 @@ _VIEWER_HTML = """
         for (const n of ["uVol", "uCamPos", "uRight", "uUp", "uFwd",
                          "uBoxMin", "uBoxMax", "uTanFov", "uAspect",
                          "uWindow", "uLevel", "uMode", "uSteps", "uCmapId",
-                         "uClipOn", "uClipPos", "uClipDir"])
+                         "uClipOn", "uClipPos", "uClipDir", "uSliceAxis",
+                         "uSliceFrac", "uDensity"])
             U[n] = gl.getUniformLocation(prog, n);
         return { gl, c, prog, U };
     })();
@@ -908,6 +938,9 @@ _VIEWER_HTML = """
         gl.uniform1f(U.uWindow, volWin);
         gl.uniform1f(U.uLevel, volLevel);
         gl.uniform1i(U.uMode, volMode);
+        gl.uniform1i(U.uSliceAxis, volSliceAxis);
+        gl.uniform1f(U.uSliceFrac, volSliceFrac);
+        gl.uniform1f(U.uDensity, volDensity);
         gl.uniform1i(U.uVol, 0);
         // the panel's Section plane cuts the volume too (first active one)
         let clip = null;
@@ -1587,14 +1620,21 @@ _VIEWER_HTML = """
         if (uab) viewer.cameraFlight.flyTo({ aabb: uab });
     };
     document.getElementById('btnVolMode').onclick = () => {
-        volMode = 1 - volMode;
+        volMode = (volMode + 1) % 3;
         document.getElementById('btnVolMode').innerText =
-            volMode ? "Fog" : "MIP";
+            ["MIP", "Fog", "Slice"][volMode];
+        // per-mode extras: density in Fog, axis + position in Slice
+        document.getElementById('wlDrow').style.display =
+            volMode === 1 ? 'flex' : 'none';
+        document.getElementById('wlSrow').style.display =
+            volMode === 2 ? 'flex' : 'none';
         volDirty();
     };
-    {   // window/level sliders, shown only while a volume is in the scene
+    {   // volume controls, shown only while a volume is in the scene
         const wW = document.getElementById('wlW');
         const wL = document.getElementById('wlL');
+        const wD = document.getElementById('wlD');
+        const wS = document.getElementById('wlS');
         wW.oninput = () => {
             volWin = Math.max(0.01, wW.value / 100);
             document.getElementById('wlWv').innerText = volWin.toFixed(2);
@@ -1603,6 +1643,17 @@ _VIEWER_HTML = """
         wL.oninput = () => {
             volLevel = wL.value / 100;
             document.getElementById('wlLv').innerText = volLevel.toFixed(2);
+            volDirty();
+        };
+        // exponential: 0..1000 -> ~20..8000 extinction (500 ≈ the default)
+        wD.oninput = () => {
+            volDensity = 20 * Math.pow(10, wD.value / 1000 * 2.6);
+            volDirty();
+        };
+        wS.oninput = () => { volSliceFrac = wS.value / 1000; volDirty(); };
+        document.getElementById('vAxis').onclick = () => {
+            volSliceAxis = (volSliceAxis + 1) % 3;
+            document.getElementById('vAxis').innerText = "XYZ"[volSliceAxis];
             volDirty();
         };
     }
@@ -1880,10 +1931,12 @@ class Model3DLayer:
         model's world units (glTF = meters), so a PET recon with 2mm
         voxels is ``spacing=(0.002, 0.002, 0.0028)``.
 
-        In the panel: MIP by default (a "MIP"/"Fog" toolbar button appears
-        with a volume in the scene, Fog = shaded alpha compositing), and
-        window/level sliders appear bottom-left. ``cmap`` is ``"gray"``,
-        ``"hot"`` or ``"viridis"``. The volume composites OVER the geometry — dim
+        In the panel: a mode button appears with a volume in the scene and
+        cycles **MIP** (max intensity projection, the PET reading view) →
+        **Fog** (shaded alpha compositing, density slider) → **Slice** (an
+        axis-aligned plane scrubbed through the volume: axis button +
+        position slider); window/level sliders sit bottom-left. ``cmap``
+        is ``"gray"``, ``"hot"`` or ``"viridis"``. The volume composites OVER the geometry — dim
         regions are transparent, so models show through; there is no depth
         interleaving between fog and meshes.
         """

@@ -188,8 +188,7 @@ canvas.insert(s, x=80, y=80)
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `WebView` | output | external site in an iframe; `.url` (read/assign), `.navigate(url)` |
-| `Model3D` | output | prebuilt CAD/3D viewer (xeokit): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points(color_by=)/.lines()/.curve()/.vectors()/.voxels()/.isosurface()/.volume()/.visible/.clear()`) — orbit, mm snap measurements, section plane (cuts volumes too), X-ray/edges, NavCube + XYZ axes, per-layer Items panel, hover/`@on_pick` |
-| `Volume3D` | output | standalone volume renderer (zero-dep WebGL2 ray marching): `.update(array_3d, spacing=, vmin=, vmax=)` — MIP / composite / slice views, window-level drag, colormaps; built for PET/CT recons |
+| `Model3D` | output | the 3D panel (xeokit + a WebGL2 ray marcher): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points(color_by=)/.lines()/.curve()/.vectors()/.voxels()/.isosurface()/.volume()/.visible/.clear()`) — orbit, mm snap measurements, section plane (cuts volumes too), X-ray/edges, NavCube + XYZ axes, MIP/Fog/Slice volume modes with window-level, per-layer Items panel, hover/`@on_pick` |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
@@ -536,10 +535,10 @@ mesh), `.isosurface(field, levels=)` (pure-numpy surface nets),
 `.vectors(origins, vecs, color_by="magnitude")`, `.points(color_by=values,
 cmap=)` for value-colored clouds (picks still return your index + value) —
 and `.volume(array_3d, spacing=, origin=, cmap=)` for **true volume
-rendering** (napari-style GPU ray marching: MIP/Fog toolbar modes,
-right-drag window/level) fused into the same camera as the geometry, with
-the section plane cutting volume and meshes alike. Built for things like
-PET recons overlaid on scanner geometry. Pairs naturally with
+rendering** (napari-style GPU ray marching: MIP / shaded Fog / scrubbable
+Slice modes with window-level and density sliders) fused into the same
+camera as the geometry, with the section plane cutting volume and meshes
+alike. Built for things like PET recons overlaid on scanner geometry. Pairs naturally with
 `@canvas.on_edit` for a live CAD loop:
 
 ```python

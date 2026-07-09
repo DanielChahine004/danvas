@@ -19,7 +19,6 @@ from .histogram import Histogram
 from .inspector import Inspector
 from .upload import Upload, UploadedFile
 from .model3d import Model3D
-from .volume3d import Volume3D
 from .webview import WebView
 from .textfield import TextField
 
@@ -47,7 +46,6 @@ __all__ = [
     "Upload",
     "UploadedFile",
     "Model3D",
-    "Volume3D",
     "WebView",
     "TextField",
 ]
