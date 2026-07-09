@@ -69,6 +69,8 @@ mod serve;
 
 pub use helpers::{data_url, Histogram, LivePlot};
 pub use serve::{serve, Broker};
+#[cfg(feature = "broker")]
+pub use serve::serve_embedded;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

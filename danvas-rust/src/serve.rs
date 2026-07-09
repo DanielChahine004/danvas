@@ -103,6 +103,47 @@ pub fn serve(port: u16, label: &str) -> Result<(Broker, Client), String> {
     Ok((broker, client))
 }
 
+/// Serve the canvas from THIS process with the broker linked in — the same
+/// `danvasd` hub as [`serve`], run on a background thread instead of spawned
+/// as a child (`cargo add danvas --features broker`; no binary to find,
+/// nothing to leak). Attaches instead when something already serves `port`,
+/// like [`serve`]. The trade: the canvas dies with this process — [`serve`]'s
+/// out-of-process broker is what lets the UI survive a host crash/restart.
+#[cfg(feature = "broker")]
+pub fn serve_embedded(port: u16, label: &str) -> Result<(Broker, Client), String> {
+    let attached = std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
+    if !attached {
+        std::thread::Builder::new()
+            .name("danvasd-embedded".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime for the embedded broker");
+                let cfg = danvasd::Config { port, ..Default::default() };
+                if let Err(e) = rt.block_on(danvasd::run(cfg)) {
+                    eprintln!("[danvas] embedded danvasd: {e}");
+                }
+            })
+            .map_err(|e| format!("could not start the embedded broker: {e}"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                return Err("embedded danvasd never opened its port".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    let client = Client::connect(&format!("127.0.0.1:{port}"), label)?;
+    let broker = Broker { child: None, port, host: "127.0.0.1".into() };
+    // Unlike serve(), no automatic browser: embedding leans programmatic
+    // (tests, headless rigs). Call broker.open_browser() when wanted.
+    Ok((broker, client))
+}
+
 /// Locate the danvasd binary: `$DANVASD` (explicit override), beside the
 /// current executable (a shipped app), `$PATH`, then the repo-checkout build
 /// dirs relative to the working directory (developer convenience).

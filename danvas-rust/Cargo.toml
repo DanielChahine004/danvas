@@ -17,14 +17,28 @@ getrandom = "0.2"
 # baked animation instead. Enable with `--features camera`.
 nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
+# The broker linked in as a library (the danvasd crate exposes the whole hub
+# behind `danvasd::run`) — see the `broker` feature.
+danvasd = { path = "../broker", version = "0.1.0", optional = true }
 
 [features]
 # Capture the physical webcam in examples/catalogue.rs instead of the animation.
 camera = ["dep:nokhwa", "dep:image"]
+# serve_embedded(): run the danvasd hub IN-PROCESS — no external binary to
+# find, spawn, or leak; `cargo add danvas --features broker` is the whole
+# install. The trade against serve(): the canvas dies with this process
+# (no crash-survival / hot-restart story), and your binary carries the
+# hub's dependencies (axum, bundled sqlite).
+broker = ["dep:danvasd"]
 
 [[example]]
 name = "two_languages"
 path = "examples/two_languages.rs"
+
+[[example]]
+name = "embedded"
+path = "examples/embedded.rs"
+required-features = ["broker"]
 
 [build-dependencies]
 serde_json = "1"
