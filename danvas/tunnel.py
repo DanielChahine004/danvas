@@ -128,6 +128,148 @@ class Tunnel:
             proc.kill()
 
 
+# === the tunnel keeper ========================================================
+# Quick tunnels mint a NEW URL every time the tunnel process restarts — so a
+# tunnel owned by the serving script invalidates the link you shared on every
+# code iteration. The keeper is a small DETACHED process that owns the tunnel
+# for a port and outlives the scripts that use it: serve(tunnel=True) finds a
+# live keeper and reuses its URL, or spawns one. Deliberately not an "owned"
+# child (contrast _procown): surviving the script is its entire job. Stop it
+# with `python -m danvas.tunnel --stop --port N`.
+
+def _state_path(port):
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), f"danvas-tunnel-{port}.json")
+
+
+def _read_state(port):
+    import json
+    try:
+        with open(_state_path(port), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_alive(pid):
+    if os.name == "nt":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            k32.GetExitCodeProcess(h, ctypes.byref(code))
+            return code.value == STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
+def ensure_tunnel(port, provider="cloudflared", timeout=45):
+    """A tunnel for ``port`` whose URL is STABLE across script restarts.
+
+    Reuses a live keeper's URL if one already holds this port; otherwise
+    spawns a detached keeper (`python -m danvas.tunnel --port N`) and waits
+    for it to announce. The returned :class:`Tunnel`'s ``stop()`` is a no-op
+    — the keeper owns the process; stop it explicitly with
+    ``python -m danvas.tunnel --stop --port N``.
+    """
+    import json
+    import sys
+    import time
+
+    st = _read_state(port)
+    if st and st.get("provider") == provider and _pid_alive(st.get("pid", -1)):
+        return Tunnel(None, st["url"], provider)
+    path = _state_path(port)
+    try:
+        os.remove(path)   # stale state from a dead keeper
+    except OSError:
+        pass
+    log = open(path + ".log", "ab")
+    kwargs = {}
+    if os.name == "nt":
+        DETACHED = 0x00000008 | 0x00000200 | 0x08000000  # no console, own group
+        kwargs["creationflags"] = DETACHED
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen(
+        [sys.executable, "-m", "danvas.tunnel",
+         "--port", str(port), "--provider", provider],
+        stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+        **kwargs)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        st = _read_state(port)
+        if st and st.get("provider") == provider \
+                and _pid_alive(st.get("pid", -1)):
+            return Tunnel(None, st["url"], provider)
+        time.sleep(0.3)
+    raise RuntimeError(
+        f"the tunnel keeper never announced a URL for port {port} — see "
+        f"{path}.log")
+
+
+def _run_keeper(port, provider):
+    """The keeper body: own the tunnel, publish state, reopen if it dies."""
+    import json
+    import time
+
+    path = _state_path(port)
+
+    def publish(t):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"url": t.url, "pid": os.getpid(), "port": port,
+                       "provider": provider}, f)
+        print(f"[danvas.tunnel] {t.url} -> localhost:{port} "
+              f"(keeper pid {os.getpid()})", flush=True)
+
+    t = open_tunnel(port, provider=provider)
+    publish(t)
+    try:
+        while True:
+            time.sleep(2)
+            if t._proc is not None and t._proc.poll() is not None:
+                # The tunnel process died (network blip, provider restart):
+                # reopen. Quick tunnels mint a new URL here — unavoidable —
+                # but scripts restarting no longer do.
+                t = open_tunnel(port, provider=provider)
+                publish(t)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        t.stop()
+
+
+def _stop_keeper(port):
+    st = _read_state(port)
+    if not st or not _pid_alive(st.get("pid", -1)):
+        print(f"no live tunnel keeper for port {port}")
+        return
+    pid = int(st["pid"])
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       capture_output=True)
+    else:
+        import signal
+        os.kill(pid, signal.SIGTERM)
+    try:
+        os.remove(_state_path(port))
+    except OSError:
+        pass
+    print(f"stopped tunnel keeper for port {port} (pid {pid})")
+
+
 def open_tunnel(port, provider="cloudflared", timeout=30):
     """Start a tunnel to ``localhost:port`` and return a :class:`Tunnel`.
 
@@ -184,3 +326,28 @@ def open_tunnel(port, provider="cloudflared", timeout=30):
             f"and working ({spec['install']})"
         )
     return Tunnel(proc, found["url"], provider)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description="danvas tunnel keeper: hold a public tunnel for a port "
+                    "so its URL survives script restarts")
+    ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--provider", default="cloudflared")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the keeper for --port")
+    ap.add_argument("--status", action="store_true",
+                    help="print the keeper's URL for --port, if alive")
+    a = ap.parse_args()
+    if a.stop:
+        _stop_keeper(a.port)
+    elif a.status:
+        _st = _read_state(a.port)
+        if _st and _pid_alive(_st.get("pid", -1)):
+            print(_st["url"])
+        else:
+            print(f"no live tunnel keeper for port {a.port}")
+    else:
+        _run_keeper(a.port, a.provider)

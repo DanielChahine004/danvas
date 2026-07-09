@@ -29,6 +29,26 @@ from . import _jsx
 _TOGGLE_SOURCE = _jsx.load("toggle").replace("__CSS__", _TOGGLE_CSS)
 
 
+def _split_toggle_args(args, options, name):
+    """Resolve Toggle's flexible positionals: a positional string is the
+    name, a positional list/tuple is the options — either order."""
+    if len(args) > 2:
+        raise TypeError(
+            f"Toggle takes at most two positional arguments ({len(args)} given)")
+    for a in args:
+        if isinstance(a, str):
+            name = a
+        elif a is not None:
+            if options is not None:
+                raise TypeError("Toggle got multiple values for its options")
+            options = a
+    if options is None:
+        raise ValueError(
+            'Toggle requires its options, e.g. Toggle(["a", "b"]) or '
+            'Toggle("mode", ["a", "b"])')
+    return options, name
+
+
 class Toggle(_ValuePersist, React):
     # Language-neutral contract (see PROTOCOL.md section: component contracts).
     CONTRACT = {
@@ -40,7 +60,15 @@ class Toggle(_ValuePersist, React):
     default_w = 260
     default_h = 84
 
-    def __init__(self, options, name="toggle", default=None, color=None, label=None):
+    def __init__(self, *args, options=None, name="toggle", default=None,
+                 color=None, label=None):
+        # Every call order works: ``Toggle(["a", "b"])`` (the documented
+        # content-first form), ``Toggle("mode", ["a", "b"])`` /
+        # ``Toggle("mode", options=[...])`` (name-first — the shape fingers
+        # trained on Slider keep producing), and the old
+        # ``Toggle(["a", "b"], "mode")``. A positional string is the name;
+        # a positional list/tuple is the options.
+        options, name = _split_toggle_args(args, options, name)
         options = list(options)
         if not options:
             raise ValueError("Toggle requires at least one option")

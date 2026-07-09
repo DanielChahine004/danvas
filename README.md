@@ -184,6 +184,7 @@ canvas.insert(s, x=80, y=80)
 | `Plot` | output | `.update(fig)` — a Plotly figure rendered natively, with the interactive toolbar (zoom/pan/box-zoom/save-PNG on hover) |
 | `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)`, `.clear()`, `smoothing=`; live: `.max_points`, `.mode`, `.color` |
 | `Histogram` | output | distribution over time; `.add(values, step)`; `color=` tints frame + chart |
+| `Heatmap` | output | 2D array as a colormapped image: `.update(array2d, vmin=, vmax=, cmap=, extent=, smooth=)` — colorbar, cursor value readout in extent units, `@on_pick` clicks |
 | `VideoFeed` | output | `.update(bgr_frame)` → binary JPEG; `encode=False` for pre-encoded |
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |

@@ -528,6 +528,9 @@ def test_serve_tunnel_opens_python_owned_tunnel_to_broker_port(monkeypatch):
     fake_tunnel_mod = types.ModuleType("danvas.tunnel")
     fake_tunnel_mod.open_tunnel = lambda port, provider="cloudflared": (
         opened.update(port=port), FakeTunnel())[1]
+    # tunnel=True now defaults to the detached keeper (URL stable across
+    # restarts); tunnel="ephemeral" is the in-process open_tunnel path.
+    fake_tunnel_mod.ensure_tunnel = fake_tunnel_mod.open_tunnel
     monkeypatch.setitem(_sys.modules, "danvas.tunnel", fake_tunnel_mod)
     monkeypatch.setattr(remote_mod, "_find_danvasd", lambda: "/fake/danvasd")
 

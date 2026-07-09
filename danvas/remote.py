@@ -765,15 +765,24 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     tunnel_handle = None
     if tunnel:
         # A tunnel is a Python-side concern (pycloudflared) — point it at the
-        # broker's port, exactly as the hot-reload monitor tunnels the worker's
-        # port. The broker serves; Python owns the public URL.
-        from .tunnel import open_tunnel
+        # broker's port. By default the tunnel lives in a detached KEEPER
+        # process, so the public URL is stable across script restarts (a
+        # quick tunnel mints a new URL per process — owning it here meant
+        # every code iteration invalidated the link you'd shared). Pass
+        # tunnel="ephemeral" for the old die-with-this-script behavior.
+        from .tunnel import ensure_tunnel, open_tunnel
         try:
-            tunnel_handle = open_tunnel(port, provider=tunnel_provider)
+            if tunnel == "ephemeral":
+                tunnel_handle = open_tunnel(port, provider=tunnel_provider)
+                extra = ""
+            else:
+                tunnel_handle = ensure_tunnel(port, provider=tunnel_provider)
+                extra = ("   (stable across restarts; stop with: python -m "
+                         f"danvas.tunnel --stop --port {port})")
             # flush: THE line people tail in detached logs/CI — it must not
             # sit in Python's block-buffered stdout while the app runs.
             print(f"[danvas] public URL: {tunnel_handle.url}"
-                  "   <- share this; served by danvasd behind it",
+                  "   <- share this; served by danvasd behind it" + extra,
                   flush=True)
         except Exception as exc:  # noqa: BLE001
             warnings.warn(f"tunnel failed to start ({exc}); serving locally")

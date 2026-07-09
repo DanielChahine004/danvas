@@ -222,6 +222,44 @@
     "wasm": ""
    }
   },
+  "heatmap": {
+   "component": "Custom",
+   "contract": {
+    "binary": "receives CUSTOM (code 3): b'DVH1' + u32le nx,ny + f32le vmin,vmax + f32le extent x0,x1,y0,y1 + u8 cmap (0 gray/1 hot/2 viridis) + u8 smooth + 2 pad + ny*nx uint8 cells row-major (row 0 top); each push replaces the array",
+    "data": {
+     "_th": "object -- accent theme CSS variables, derived from an accent color; frameColor is its top-level register-frame twin"
+    },
+    "encoded": [],
+    "events": [
+     {
+      "event": "ready"
+     },
+     {
+      "cell": "[col, row] -- the array cell",
+      "event": "pick",
+      "value": "number -- value under the cursor (dequantized)",
+      "x": "number -- cursor x in extent units",
+      "y": "number -- cursor y in extent units"
+     }
+    ],
+    "geometry": {
+     "auto_h": false,
+     "h": 380,
+     "w": 460
+    },
+    "live": [],
+    "updates": {}
+   },
+   "data": {},
+   "props": {
+    "forwardWheel": true,
+    "h": 380,
+    "html": "<style>* { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }body { background: transparent; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }</style>\n<style>\n    html, body { margin: 0; height: 100%; background: #1a1a1b;\n                 overflow: hidden; font-family: monospace; }\n    #wrap { display: flex; width: 100vw; height: 100vh; }\n    #main { flex: 1; position: relative; min-width: 0; }\n    #hm { position: absolute; inset: 8px 8px 26px 8px;\n          width: calc(100% - 16px); height: calc(100% - 34px);\n          image-rendering: pixelated; cursor: crosshair; }\n    #hm.smooth { image-rendering: auto; }\n    #bar { width: 52px; position: relative; }\n    #cb { position: absolute; top: 8px; bottom: 26px; left: 6px; width: 14px; }\n    #bmax, #bmin { position: absolute; left: 24px; color: #aaa;\n                   font-size: 10px; }\n    #bmax { top: 6px; }\n    #bmin { bottom: 24px; }\n    #ro { position: absolute; left: 8px; bottom: 6px; color: #888;\n          font-size: 11px; pointer-events: none; }\n    #status { position: absolute; top: 10px; left: 10px; color: #888;\n              font-size: 11px; pointer-events: none;\n              background: rgba(0,0,0,0.8); padding: 3px 7px;\n              border-radius: 4px; }\n</style>\n\n<div id=\"wrap\">\n  <div id=\"main\">\n    <canvas id=\"hm\"></canvas>\n    <div id=\"ro\"></div>\n    <div id=\"status\">WAITING FOR DATA\u2026</div>\n  </div>\n  <div id=\"bar\"><canvas id=\"cb\" width=\"14\" height=\"256\"></canvas>\n    <span id=\"bmax\"></span><span id=\"bmin\"></span></div>\n</div>\n\n<script>\n(function () {\n    const hm = document.getElementById('hm');\n    const cb = document.getElementById('cb');\n    const ro = document.getElementById('ro');\n    const status = document.getElementById('status');\n    const ctx = hm.getContext('2d');\n\n    // colormap LUTs (mirrors the model3d volume shader's named maps)\n    function ramp(stops) {\n        const lut = new Uint8Array(256 * 3);\n        for (let i = 0; i < 256; i++) {\n            const t = i / 255 * (stops.length - 1);\n            const k = Math.min(Math.floor(t), stops.length - 2), f = t - k;\n            for (let c = 0; c < 3; c++)\n                lut[i * 3 + c] = Math.round(\n                    stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f);\n        }\n        return lut;\n    }\n    const LUTS = [\n        ramp([[0, 0, 0], [255, 255, 255]]),\n        ramp([[0, 0, 0], [180, 0, 0], [255, 160, 0], [255, 255, 255]]),\n        ramp([[68, 1, 84], [59, 81, 139], [33, 144, 141], [92, 200, 99],\n              [253, 231, 37]]),\n    ];\n\n    let D = null;   // {nx, ny, vmin, vmax, extent, cells}\n\n    function drawColorbar(lut) {\n        const g = cb.getContext('2d');\n        const img = g.createImageData(14, 256);\n        for (let y = 0; y < 256; y++) {\n            const v = 255 - y;   // max at the top\n            for (let x = 0; x < 14; x++) {\n                const o = (y * 14 + x) * 4;\n                img.data[o] = lut[v * 3];\n                img.data[o + 1] = lut[v * 3 + 1];\n                img.data[o + 2] = lut[v * 3 + 2];\n                img.data[o + 3] = 255;\n            }\n        }\n        g.putImageData(img, 0, 0);\n    }\n\n    const fmt = (v) => Number(v.toPrecision(4));\n\n    canvas.onPush((data) => {\n        const dv = new DataView(data);\n        if (dv.getUint32(0, false) !== 0x44564831) {   // \"DVH1\"\n            status.innerText = \"BAD FRAME\";\n            return;\n        }\n        const nx = dv.getUint32(4, true), ny = dv.getUint32(8, true);\n        const vmin = dv.getFloat32(12, true), vmax = dv.getFloat32(16, true);\n        const extent = [dv.getFloat32(20, true), dv.getFloat32(24, true),\n                        dv.getFloat32(28, true), dv.getFloat32(32, true)];\n        const lut = LUTS[dv.getUint8(36)] || LUTS[2];\n        hm.classList.toggle('smooth', !!dv.getUint8(37));\n        const cells = new Uint8Array(data, 40, nx * ny);\n        D = { nx, ny, vmin, vmax, extent, cells };\n        hm.width = nx;\n        hm.height = ny;\n        const img = ctx.createImageData(nx, ny);\n        for (let i = 0; i < nx * ny; i++) {\n            const v = cells[i], o = i * 4;\n            img.data[o] = lut[v * 3];\n            img.data[o + 1] = lut[v * 3 + 1];\n            img.data[o + 2] = lut[v * 3 + 2];\n            img.data[o + 3] = 255;\n        }\n        ctx.putImageData(img, 0, 0);\n        drawColorbar(lut);\n        document.getElementById('bmax').innerText = fmt(vmax);\n        document.getElementById('bmin').innerText = fmt(vmin);\n        status.innerText = `${nx}\u00d7${ny}`;\n    });\n\n    function probe(e) {\n        // cursor -> cell -> extent coords + value (row 0 = top,\n        // matplotlib origin=\"upper\": y runs extent[2] at top to [3])\n        if (!D) return null;\n        const r = hm.getBoundingClientRect();\n        const fx = (e.clientX - r.left) / r.width;\n        const fy = (e.clientY - r.top) / r.height;\n        if (fx < 0 || fx >= 1 || fy < 0 || fy >= 1) return null;\n        const cx = Math.floor(fx * D.nx), cy = Math.floor(fy * D.ny);\n        const raw = D.cells[cy * D.nx + cx];\n        return {\n            x: fmt(D.extent[0] + fx * (D.extent[1] - D.extent[0])),\n            y: fmt(D.extent[2] + fy * (D.extent[3] - D.extent[2])),\n            value: fmt(D.vmin + raw / 255 * (D.vmax - D.vmin)),\n            cell: [cx, cy],\n        };\n    }\n    hm.addEventListener('mousemove', (e) => {\n        const p = probe(e);\n        ro.innerText = p ? `x=${p.x}  y=${p.y}  value=${p.value}` : '';\n    });\n    hm.addEventListener('mouseleave', () => { ro.innerText = ''; });\n    hm.addEventListener('click', (e) => {\n        const p = probe(e);\n        if (p) canvas.send({ event: 'pick', ...p });\n    });\n\n    canvas.send({event: 'ready'});\n})();\n</script>\n<script></script>",
+    "permissions": "",
+    "themed": false,
+    "w": 460
+   }
+  },
   "histogram": {
    "component": "React",
    "contract": {

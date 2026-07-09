@@ -9,6 +9,7 @@ from .custom import Custom
 from .download import Download
 from .filebrowser import FileBrowser
 from .react import React
+from .heatmap import Heatmap
 from .markdown import Markdown
 from .image import Image
 from .table import Table
@@ -35,6 +36,7 @@ __all__ = [
     "Download",
     "FileBrowser",
     "React",
+    "Heatmap",
     "Markdown",
     "Image",
     "Table",

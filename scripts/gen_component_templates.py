@@ -67,6 +67,7 @@ _BUILDERS = {
     "file_browser": lambda: danvas.FileBrowser(root="."),
     "inspector": lambda: danvas.Inspector(),
     "model3d": lambda: danvas.Model3D(),
+    "heatmap": lambda: danvas.Heatmap(),
     "chat": lambda: danvas.Chat(),
 }
 

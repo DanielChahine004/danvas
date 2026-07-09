@@ -19,6 +19,7 @@ from .components import (
     Custom,
     Download,
     FileBrowser,
+    Heatmap,
     Histogram,
     Image,
     Inspector,
@@ -71,10 +72,14 @@ class _FactoryMixin:
         return self._make(Slider, name=name, min=min, max=max, default=default,
                           step=step, on_release=on_release, label=label, **place)
 
-    def toggle(self, options, name="toggle", default=None, label=None, **place: Unpack[Place]):
-        """Insert a :class:`~danvas.Toggle`. See :meth:`insert` for ``place``."""
-        return self._make(Toggle, options, name=name, default=default, label=label,
-                          **place)
+    def toggle(self, *args, options=None, name="toggle", default=None,
+               label=None, **place: Unpack[Place]):
+        """Insert a :class:`~danvas.Toggle`. Positionals are flexible — a
+        string is the name, a list/tuple the options, in either order:
+        ``canvas.toggle(["a", "b"])`` or ``canvas.toggle("mode", ["a", "b"])``.
+        See :meth:`insert` for ``place``."""
+        return self._make(Toggle, *args, options=options, name=name,
+                          default=default, label=label, **place)
 
     def button(self, name="button", text=None, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Button`. See :meth:`insert` for ``place``."""
@@ -83,6 +88,26 @@ class _FactoryMixin:
     def label(self, name="label", value="", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Label`. See :meth:`insert` for ``place``."""
         return self._make(Label, name=name, value=value, label=label, **place)
+
+    def heatmap(self, *args, array=None, name="heatmap", vmin=None, vmax=None,
+                cmap="viridis", extent=None, smooth=False, label=None,
+                **place: Unpack[Place]):
+        """Insert a :class:`~danvas.Heatmap` — a 2D array as a colormapped
+        image with a colorbar and cursor value readout. Positionals are
+        flexible: a string is the name, an array-like is the initial data —
+        ``canvas.heatmap("dose", slice2d, extent=(0, 350, 0, 350))`` or just
+        ``canvas.heatmap("dose")`` + ``hm.update(...)`` later. See
+        :meth:`insert` for ``place``."""
+        for a in args:
+            if isinstance(a, str):
+                name = a
+            elif a is not None:
+                array = a
+        hm = self._make(Heatmap, name=name, label=label, **place)
+        if array is not None:
+            hm.update(array, vmin=vmin, vmax=vmax, cmap=cmap, extent=extent,
+                      smooth=smooth)
+        return hm
 
     def video(self, name="video", quality=70, label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.VideoFeed`. See :meth:`insert` for ``place``."""
