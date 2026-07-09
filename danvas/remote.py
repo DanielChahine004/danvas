@@ -584,9 +584,18 @@ class BrokerHandle:
         self.tunnel = tunnel
 
     def stop(self):
+        def _end_proc():
+            if not self.proc:
+                return
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:
+                self.proc.kill()
+
         for closer in (lambda: self.client.close(),
                        lambda: self.tunnel and self.tunnel.stop(),
-                       lambda: self.proc and self.proc.terminate()):
+                       _end_proc):
             try:
                 closer()
             except Exception:
@@ -666,7 +675,12 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             # Role logins ride the env contract both hubs share.
             env["DANVAS_ROLE_PASSWORDS"] = ",".join(
                 f"{r}={pw}" for r, pw in passwords.items())
-        proc = subprocess.Popen(cmd, env=env)
+        # Owned spawn: the broker dies with this process no matter HOW this
+        # process dies (atexit + a Windows kill-on-close job / Linux
+        # PDEATHSIG) — an IDE stop button or a Ctrl+C landing in user code
+        # must not leave a stray danvasd holding the port.
+        from ._procown import spawn_owned
+        proc = spawn_owned(cmd, env=env)
         deadline = _time.time() + 15
         while _time.time() < deadline:
             try:

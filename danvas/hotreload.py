@@ -235,8 +235,9 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
         env = dict(base_env)
         if restart:
             env["_danvas_RELOAD_RESTART"] = "1"
-        return subprocess.Popen([sys.executable, main_file, *sys.argv[1:]],
-                                env=env)
+        from ._procown import spawn_owned
+        return spawn_owned([sys.executable, main_file, *sys.argv[1:]],
+                           env=env)
 
     def script_ok():
         """True if the edited script imports/runs cleanly (pre-flight).
@@ -276,7 +277,8 @@ def run_monitor(main_file, tunnel=False, port=8000, tunnel_provider="cloudflared
         import socket as _socket
         binary = _find_danvasd()
         if binary:
-            danvasd_proc = subprocess.Popen(
+            from ._procown import spawn_owned
+            danvasd_proc = spawn_owned(
                 [binary, "--port", str(port), "--host", "127.0.0.1"])
             _end = time.time() + 15
             up = False
