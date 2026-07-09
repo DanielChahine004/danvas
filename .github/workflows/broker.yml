@@ -101,6 +101,31 @@ jobs:
         if: matrix.os != 'macos-latest'
         run: python -m pytest tests/ -q
 
+      - name: Cull/remount regression (real Chrome against the live app)
+        # The invariant: a control's state lives in three places (Python
+        # _data, broker replay, browser-local props) and they must agree
+        # across a viewport-cull remount. Set a value by simulated input,
+        # pan the panel out of view (unmounts), pan back (remounts), and
+        # assert the visible value is the SET one — this is the exact
+        # shape of the v0.5.2 stale-props bug.
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          DANVASD: ${{ github.workspace }}/broker/target/release/danvasd
+        run: |
+          python - <<'PY' > cull_server.log 2>&1 &
+          import danvas
+          c = danvas.Canvas()
+          c.slider("CULLTEST", min=0, max=10000, default=1234)
+          c.serve(port=8933, open_browser=False)
+          PY
+          SERVER=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8933/ >/dev/null && break; sleep 1
+          done
+          npm --prefix danvas/frontend install --no-save --no-audit puppeteer-core
+          node danvas/frontend/scripts/_cullcheck.mjs || { cat cull_server.log; exit 1; }
+          kill $SERVER || true
+
       - name: Build the offline wheel (binary bundled)
         run: |
           python -m pip install build wheel

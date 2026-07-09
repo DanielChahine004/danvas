@@ -4,7 +4,12 @@
 // Run: serve a slider on :8933, then `node scripts/_cullcheck.mjs`.
 import puppeteer from 'puppeteer-core'
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+const CHROME = process.env.CHROME
+  || (process.platform === 'win32'
+      ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+      : process.platform === 'darwin'
+        ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        : '/usr/bin/google-chrome')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const b = await puppeteer.launch({

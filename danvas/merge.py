@@ -1498,7 +1498,7 @@ class Merge:
         from .tunnel import open_tunnel
         self._tunnel = open_tunnel(port, provider=provider)
         print(f"[merge] public URL: {self._tunnel.url}"
-              "   <- share this with anyone, anywhere")
+              "   <- share this with anyone, anywhere", flush=True)
 
     def _stop_tunnel(self):
         if self._tunnel is not None:

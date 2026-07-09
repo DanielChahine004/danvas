@@ -78,12 +78,17 @@ LINE_COLOR = (0, 200, 80, 255)      # green
 CURVE_COLOR = (255, 170, 0, 255)    # orange
 MESH_COLOR = (150, 160, 175, 255)   # neutral grey-blue (voxels/isosurfaces)
 
-# Built-in colormap (viridis stops) for `color_by=` / isosurface levels; a
-# `cmap` argument accepts a list of RGB(A) 0-255 stops to lerp, or a
-# callable t∈[0,1] -> RGBA 0-255.
+# Built-in colormaps for `color_by=` / isosurface levels. A `cmap` argument
+# accepts a NAME below, a list of RGB(A)/hex stops to lerp, or a callable
+# t∈[0,1] -> RGBA 0-255 — the same names volume() bakes into its shader.
 _VIRIDIS = ((68, 1, 84), (71, 44, 122), (59, 81, 139), (44, 113, 142),
             (33, 144, 141), (39, 173, 129), (92, 200, 99), (170, 220, 50),
             (253, 231, 37))
+_NAMED_CMAPS = {
+    "viridis": _VIRIDIS,
+    "gray": ((0, 0, 0), (255, 255, 255)),
+    "hot": ((0, 0, 0), (180, 0, 0), (255, 160, 0), (255, 255, 255)),
+}
 
 
 def _rgba(color, default=None):
@@ -105,8 +110,23 @@ def _rgba(color, default=None):
 def _cmap_rgba(t, cmap=None):
     if callable(cmap):
         return _rgba(cmap(float(t)))
-    stops = ([_rgba(s) for s in cmap] if cmap is not None
-             else [_rgba(s) for s in _VIRIDIS])
+    if isinstance(cmap, str):
+        try:
+            cmap = _NAMED_CMAPS[cmap]
+        except KeyError:
+            raise ValueError(
+                f"unknown cmap {cmap!r}: use one of "
+                f"{sorted(_NAMED_CMAPS)}, a list of RGB(A)/hex color "
+                "stops, or a callable t -> RGBA") from None
+    try:
+        stops = ([_rgba(s) for s in cmap] if cmap is not None
+                 else [_rgba(s) for s in _VIRIDIS])
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "cmap must be a name "
+            f"({sorted(_NAMED_CMAPS)}), a list of RGB(A) tuples or hex "
+            "strings to lerp between, or a callable t -> RGBA "
+            f"(got {cmap!r}: {exc})") from None
     t = min(max(float(t), 0.0), 1.0) * (len(stops) - 1)
     i = min(int(t), len(stops) - 2)
     f = t - i

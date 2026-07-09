@@ -770,15 +770,19 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
         from .tunnel import open_tunnel
         try:
             tunnel_handle = open_tunnel(port, provider=tunnel_provider)
+            # flush: THE line people tail in detached logs/CI — it must not
+            # sit in Python's block-buffered stdout while the app runs.
             print(f"[danvas] public URL: {tunnel_handle.url}"
-                  "   <- share this; served by danvasd behind it")
+                  "   <- share this; served by danvasd behind it",
+                  flush=True)
         except Exception as exc:  # noqa: BLE001
             warnings.warn(f"tunnel failed to start ({exc}); serving locally")
     canvas._broker = BrokerHandle(proc, client, tunnel_handle)
     url = f"http://127.0.0.1:{port}"
     if proc is not None:
         print(f"[danvas] serving via danvasd at {url}"
-              f"  (broker pid {proc.pid}; UI survives this process)")
+              f"  (broker pid {proc.pid}; UI survives this process)",
+              flush=True)
 
     if desktop:
         # Native window instead of a browser — the same webview.create_window

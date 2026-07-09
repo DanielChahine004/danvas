@@ -1154,6 +1154,19 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                     f"name to the new {component.__class__.__name__}",
                     stacklevel=2,
                 )
+            elif name == self._default_component_name(component):
+                # Nobody CHOSE this name — both panels just defaulted to the
+                # type's name, so the earlier one vanishing is almost never
+                # what the caller meant (five unnamed section headers collapse
+                # to one, silently). Explicitly-named re-inserts stay silent:
+                # that's the intended swap-in-place for re-run cells.
+                warnings.warn(
+                    f"a second unnamed {type(component).__name__} panel "
+                    f"replaced the previous one (both defaulted to "
+                    f"name={name!r}); pass name= to keep several on the "
+                    "canvas",
+                    stacklevel=2,
+                )
             # Swap-in-place: inherit the displaced panel's live position/rotation
             # when the caller didn't pin one, so re-inserting under the same name
             # (e.g. re-running a `canvas.webview(...)` cell) keeps where the user
@@ -2827,7 +2840,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         from .tunnel import open_tunnel
         self._tunnel = open_tunnel(port, provider=provider)
         print(f"danvas public URL: {self._tunnel.url}"
-              "   <- share this with anyone, anywhere")
+              "   <- share this with anyone, anywhere", flush=True)
 
     def _stop_tunnel(self):
         if self._tunnel is not None:
