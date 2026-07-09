@@ -227,3 +227,40 @@ jobs:
         with:
           files: out/*
           generate_release_notes: true
+
+  pypi:
+    # The same tag also publishes to PyPI (`pip install danvas` /
+    # `pixi add --pypi danvas`): the four platform wheels (broker inside),
+    # the pure py3-none-any fallback, and the sdist. Auth is PyPI Trusted
+    # Publishing (OIDC) — register this repo/workflow once as a (pending)
+    # publisher for `danvas` on pypi.org; no API token to store or rotate.
+    # Sync discipline: the tag IS the release — it must equal the pyproject
+    # version (asserted below), and PyPI versions are immutable (yank, never
+    # reuse), so GitHub releases and PyPI cannot drift.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-conform, build-aarch64]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+      - name: Assert the tag matches the pyproject version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          V=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          [ "$TAG" = "$V" ] || { echo "tag v$TAG != pyproject version $V" >&2; exit 1; }
+      - name: Collect platform wheels + build sdist and the pure wheel
+        run: |
+          mkdir -p dist
+          find staged -name '*.whl' -exec cp {} dist/ \;
+          python -m pip install build
+          python -m build --sdist --wheel --outdir dist
+          ls -la dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
