@@ -854,8 +854,17 @@ function updateComponent(id: string, payload: any): void {
     styleHandlers.get(id)?.(payload.post_style)
     return
   }
-  // Generic push() value — forwarded straight to the mounted node's `value`.
+  // Generic push() value — forwarded to the mounted node's `value` AND
+  // buffered, so a culled panel re-mounts current (registerLive replays the
+  // buffer, exactly as it already does for plots). Without the buffer a
+  // control that was scrolled out of view missed this frame and visually
+  // snapped back to its registered props on scroll-in — Python's state was
+  // right, the display lied. Custom iframes stay unbuffered: their push is
+  // an EVENT channel (an in-tab replay could double-fire side effects) and
+  // they re-sync through their own ready → owner-re-push contract instead.
   if (payload && payload.post !== undefined) {
+    const rec = store.peek(createShapeId(id)) as any
+    if (rec?.props?.component !== 'Custom') liveBuffer.set(id, payload.post)
     liveHandlers.get(id)?.(payload.post)
     return
   }
