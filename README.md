@@ -174,7 +174,7 @@ canvas.insert(s, x=80, y=80)
 | Component | Direction | API |
 |---|---|---|
 | `Slider` | bidirectional | `.value` (read/assign), `@on_change`, `.update(v)`; `step=` (fractional → float slider + number entry), `on_release=True`; live: `.min`, `.max`, `.step`, `.color` |
-| `Toggle` | bidirectional | `.value` (read/assign), `@on_change`, `.update(opt)`; `options=[...]`; live: `.options`, `.color` |
+| `Toggle` | bidirectional | `.value` (read/assign), `@on_change`, `.update(opt)`; positionals flexible: `toggle(["a","b"])` or `toggle("mode", ["a","b"])`; live: `.options`, `.color` |
 | `Button` | input | `@on_click`, `.value` (click count), `text=`, `.update(text)`; live: `.text`, `.color` |
 | `TextField` | bidirectional | single-line or `multiline=True`; `@on_change` on Enter/blur; `.value` (read/assign), `.update(text)`, `placeholder=`; live: `.placeholder`, `.color` |
 | `Label` | output | escaped text/number; `.text` (read/assign), `.update(text)`; `h="auto"`; live: `.color` |
@@ -952,7 +952,11 @@ canvas.serve(port=8000, host="0.0.0.0",
 
 **Tunnel** — expose to the internet over HTTPS; the bind stays on `127.0.0.1` and
 a shareable `https://…` URL is printed. `[tunnel]` downloads & caches cloudflared
-on first use; the tunnel closes with the server.
+on first use. The tunnel lives in a small detached **keeper** process, so the
+URL is **stable across script restarts** — iterate on your code all day, the
+link you shared keeps working. Stop it with
+`python -m danvas.tunnel --stop --port 8000` (`--status` prints the URL);
+pass `tunnel="ephemeral"` for a tunnel that closes with the script instead.
 
 ```python
 canvas.serve(port=8000, tunnel=True)
