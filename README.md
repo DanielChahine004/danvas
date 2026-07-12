@@ -193,7 +193,7 @@ canvas.insert(s, x=80, y=80)
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
-| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True` |
+| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True`, `keep_mounted=True` (survive scroll-out with state intact) |
 | `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
 
@@ -488,6 +488,12 @@ def handle(msg):
   live `--pc-*` variables and dark/light flag in, so the panel's CSS can use
   `var(--pc-bg)` / `var(--pc-text)` / `var(--pc-accent)` and track dark mode, the
   way an inline React panel does (a sandboxed iframe is otherwise theme-isolated).
+- **`keep_mounted=True`** exempts the panel from viewport culling: scrolled out
+  of view it's *hidden* rather than destroyed, so browser-local state — a 3D
+  camera, tool toggles, an in-progress interaction — survives scroll-out/
+  scroll-in, and a heavy engine isn't rebooted per scroll-in. `Model3D` sets it
+  by default; leave it off for cheap panels (culling is what keeps a canvas of
+  hundreds of panels fast).
 - `push_binary(bytes)` streams raw bytes (no base64); `canvas.onPush` gets an
   `ArrayBuffer`. Honours `queue="latest"` for video/sensor streams.
 - **`canvas.sendBinary(buf)`** transfers an `ArrayBuffer` *up* to Python with zero
