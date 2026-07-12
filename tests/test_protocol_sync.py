@@ -30,6 +30,8 @@ _CUSTOM_VIEW_TSX = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
 _CUSTOM_PY = os.path.join(_ROOT, "danvas", "components", "custom.py")
 _CUSTOM_SHIM_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "react",
                                "customShim.ts")
+_EXPORT_TS = os.path.join(_ROOT, "danvas", "frontend", "src", "engine",
+                          "export.ts")
 _GEN_JS = os.path.join(_ROOT, "danvas", "frontend", "src",
                        "protocol.generated.js")
 _GEN_SCRIPT = os.path.join(_ROOT, "scripts", "gen_protocol.py")
@@ -175,10 +177,12 @@ def test_iframe_keys_frontend_side_match_protocol():
     canonical = set(_protocol.IFRAME_MESSAGE_KEYS.values())
     used = set(_IFRAME_KEY_RE.findall(_read(_BRIDGE_TS)))
     used |= set(_IFRAME_KEY_RE.findall(_read(_CUSTOM_VIEW_TSX)))
+    # the export raster round-trip's parent half lives in engine/export.ts
+    used |= set(_IFRAME_KEY_RE.findall(_read(_EXPORT_TS)))
     assert used == canonical, (
-        "frontend iframe keys (bridge.ts + CustomView.tsx) disagree with "
-        f"_protocol.IFRAME_MESSAGE_KEYS; only in frontend: {used - canonical}, "
-        f"only in _protocol: {canonical - used}")
+        "frontend iframe keys (bridge.ts + CustomView.tsx + export.ts) "
+        "disagree with _protocol.IFRAME_MESSAGE_KEYS; only in frontend: "
+        f"{used - canonical}, only in _protocol: {canonical - used}")
 
 
 # -- the generated JS module is not stale ------------------------------------

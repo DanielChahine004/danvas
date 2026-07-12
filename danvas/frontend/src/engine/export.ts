@@ -60,6 +60,66 @@ const allPanelIds = (): string[] =>
     return !!r && r.typeName === 'panel'
   })
 
+// A sandboxed iframe's pixels are unreadable from the parent, so iframe
+// panels (Model3D, Heatmap, Custom) would export as blank boxes. Ask each
+// target iframe to rasterize ITSELF (the shim's __danvas_snap round-trip:
+// canvas.onSnapshot provider, else a same-origin-canvas composite), overlay
+// the returned image on the iframe and hide it for the clone. Returns a
+// restore function; iframes that don't answer within the timeout stay as
+// they were (a blank box beats a hung screenshot).
+async function rasterizeIframes(targets: Set<string>): Promise<() => void> {
+  const cleanups: Array<() => void> = []
+  const jobs: Array<Promise<void>> = []
+  for (const sid of targets) {
+    const wrap = document.querySelector(`[data-pc-panel-id="${CSS.escape(sid)}"]`)
+    const frame = wrap?.querySelector('iframe') as HTMLIFrameElement | null
+    if (!frame || !frame.contentWindow) continue
+    jobs.push(
+      new Promise<void>((resolve) => {
+        const token = 's' + Math.random().toString(36).slice(2)
+        const timer = setTimeout(() => {
+          window.removeEventListener('message', onMsg)
+          resolve()
+        }, 2500)
+        const onMsg = (e: MessageEvent) => {
+          const d: any = e.data
+          if (!d || !d.__danvas_snap_result || d.__danvas_snap_result.token !== token) return
+          clearTimeout(timer)
+          window.removeEventListener('message', onMsg)
+          const url = d.__danvas_snap_result.dataUrl
+          if (!url) return resolve()
+          const img = new Image()
+          img.src = url
+          const place = () => {
+            const host = frame.parentElement as HTMLElement
+            const prevPos = host.style.position
+            if (getComputedStyle(host).position === 'static') host.style.position = 'relative'
+            img.style.cssText =
+              `position:absolute;left:${frame.offsetLeft}px;top:${frame.offsetTop}px;` +
+              `width:${frame.offsetWidth}px;height:${frame.offsetHeight}px;`
+            host.appendChild(img)
+            const prevVis = frame.style.visibility
+            frame.style.visibility = 'hidden'
+            cleanups.push(() => {
+              img.remove()
+              frame.style.visibility = prevVis
+              host.style.position = prevPos
+            })
+            resolve()
+          }
+          // decode before the clone so the overlay has pixels, not a pending fetch
+          const dec = (img as any).decode ? (img as any).decode() : Promise.resolve()
+          dec.then(place, place)
+        }
+        window.addEventListener('message', onMsg)
+        frame.contentWindow!.postMessage({ __danvas_snap: token }, '*')
+      }),
+    )
+  }
+  await Promise.all(jobs)
+  return () => cleanups.forEach((fn) => fn())
+}
+
 // Render `shapeIds` (empty = whole page) to a PNG; resolve with raw base64 (no
 // data: prefix) to match the wire (`image` frame), or an error string.
 export async function toImage(shapeIds: string[]): Promise<{ base64?: string; error?: string }> {
@@ -80,6 +140,7 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
   // Let force-mount flush, then wait for content (Plotly, etc.) to be ready.
   await new Promise((r) => requestAnimationFrame(() => r(null)))
   await waitForPanelsReady()
+  const restoreIframes = await rasterizeIframes(targetSet)
 
   try {
     const { domToPng } = await import('modern-screenshot')
@@ -101,6 +162,7 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
   } catch (e: any) {
     return { error: String((e && e.message) || e) }
   } finally {
+    restoreIframes()
     exportTargets(null)
   }
 }
@@ -157,6 +219,7 @@ async function withExport(
   exportTargets(panelTargets)
   await new Promise((r) => requestAnimationFrame(() => r(null)))
   await waitForPanelsReady()
+  const restoreIframes = await rasterizeIframes(panelTargets)
   try {
     const mod: any = await import('modern-screenshot')
     const isDark = store.instance().darkMode
@@ -175,6 +238,7 @@ async function withExport(
   } catch (e: any) {
     return { ok: false, error: String((e && e.message) || e) }
   } finally {
+    restoreIframes()
     exportTargets(null)
   }
 }

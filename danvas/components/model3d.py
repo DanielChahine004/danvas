@@ -1770,6 +1770,38 @@ _VIEWER_HTML = """
         sync();
     };
 
+    // Export raster (canvas.screenshot() / PNG / SVG): a WebGL buffer reads
+    // blank after presentation, so redraw each surface and composite it in
+    // the SAME task — xeokit forced, the volume overlay redrawn, then the
+    // NavCube and axes gizmo at their layout positions.
+    canvas.onSnapshot(() => {
+        const dpr = devicePixelRatio || 1;
+        const W = innerWidth, H = innerHeight;
+        const out = document.createElement('canvas');
+        out.width = Math.max(1, W * dpr);
+        out.height = Math.max(1, H * dpr);
+        const g = out.getContext('2d');
+        g.scale(dpr, dpr);
+        g.fillStyle = '#1a1a1b';
+        g.fillRect(0, 0, W, H);
+        try {
+            viewer.scene.render(true);
+            g.drawImage(document.getElementById('xk'), 0, 0, W, H);
+        } catch (e) {}
+        try {
+            if (volGL && volumes.size) { drawVolumes(); g.drawImage(volGL.c, 0, 0, W, H); }
+        } catch (e) {}
+        for (const cid of ['nav', 'axes']) {
+            const c = document.getElementById(cid);
+            const r = c && c.getBoundingClientRect();
+            if (r && r.width > 0) {
+                try { g.drawImage(c, r.left, r.top, r.width, r.height); }
+                catch (e) {}
+            }
+        }
+        return out.toDataURL('image/png');
+    });
+
     // Test/introspection handle (harnesses assert bounds & camera through
     // it — the module scope is otherwise unreachable from outside).
     window._m3d = {

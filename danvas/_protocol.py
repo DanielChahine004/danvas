@@ -146,6 +146,8 @@ IFRAME_MESSAGE_KEYS = {
     "KEY": "__danvas_key",                       # iframe->parent tool-shortcut key
     "FIT": "__danvas_fit",                       # iframe->parent content-fit size
     "THEME": "__danvas_theme",                   # parent->iframe theme vars + dark flag
+    "SNAP": "__danvas_snap",                     # parent->iframe: rasterize yourself (exports)
+    "SNAP_RESULT": "__danvas_snap_result",       # iframe->parent: the raster (dataURL)
 }
 
 

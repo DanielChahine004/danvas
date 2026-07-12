@@ -110,8 +110,40 @@ export function customHelper(cid: string, forwardWheel: boolean): string {
     '},' +
     'releaseMicrophone:function(){' +
     `parent.postMessage({__danvas_mic:${id},action:'stop'},'*');` +
-    '}' +
+    '},' +
+    // canvas.onSnapshot(fn): the panel supplies its own raster for exports
+    // (fn -> dataURL or a Promise of one). Panels with WebGL should redraw
+    // and capture in the same task (a presented GL buffer reads blank).
+    'onSnapshot:function(fn){window.canvas._snapProvider=fn;}' +
     '};' +
+    // Export raster: the parent can't read a sandboxed iframe's pixels, so
+    // screenshots/PNG/SVG exports ask the iframe to rasterize ITSELF. The
+    // default composites every same-origin <canvas> at its layout position
+    // over the body background (HTML text isn't captured — panels that
+    // need more register canvas.onSnapshot).
+    "window.addEventListener('message',function(e){" +
+    'if(!(e.data&&e.data.__danvas_snap))return;' +
+    'var tok=e.data.__danvas_snap;' +
+    'function reply(url){' +
+    "parent.postMessage({__danvas_snap_result:{token:tok,dataUrl:url}},'*');}" +
+    'function fallback(){try{' +
+    'var dpr=devicePixelRatio||1,W=innerWidth,H=innerHeight;' +
+    "var out=document.createElement('canvas');" +
+    'out.width=Math.max(1,W*dpr);out.height=Math.max(1,H*dpr);' +
+    "var g=out.getContext('2d');g.scale(dpr,dpr);" +
+    'var bg=getComputedStyle(document.body).backgroundColor;' +
+    "if(bg&&bg!=='rgba(0, 0, 0, 0)'){g.fillStyle=bg;g.fillRect(0,0,W,H);}" +
+    "var cs=document.querySelectorAll('canvas');" +
+    'for(var i=0;i<cs.length;i++){var c=cs[i],r=c.getBoundingClientRect();' +
+    'if(r.width>0&&r.height>0){try{g.drawImage(c,r.left,r.top,r.width,r.height);}catch(_){}}}' +
+    "return out.toDataURL('image/png');}catch(_){return null;}}" +
+    'try{' +
+    'if(window.canvas._snapProvider){' +
+    'Promise.resolve(window.canvas._snapProvider())' +
+    '.then(function(u){reply(u||fallback());},function(){reply(fallback());});' +
+    '}else{reply(fallback());}' +
+    '}catch(_){reply(fallback());}' +
+    '});' +
     // themed=True: apply the parent-forwarded --pc-* variables + dark flag.
     "window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas_theme){' +
