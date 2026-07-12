@@ -58,7 +58,14 @@ function Panel({ id }: { id: string }) {
   const srcHidden = useValue('src-hidden:' + id, () => isSourceTagHidden(tagOfComponentId(componentIdOf(id))), [id])
   if (!shape) return null
   const { x, y, rotation, opacity, props } = shape
-  const show = (exportSet ? exportSet.has(id) : false) || visible
+  // keepMounted (Custom keep_mounted=True, e.g. Model3D): culling HIDES the
+  // content instead of unmounting it, so browser-local state — a 3D camera,
+  // window/level, tool toggles — survives scroll-out/scroll-in, and a heavy
+  // engine isn't rebooted per scroll-in. visibility (not display): a
+  // display:none wrapper has no box, so the IntersectionObserver could
+  // never see it re-enter the viewport.
+  const keep = !!(props as any).keepMounted
+  const show = (exportSet ? exportSet.has(id) : false) || visible || keep
   // A decorative ghost panel (grabbable=False + operable=False) is fully
   // click-through: its Card + content already set pointer-events:none, but this
   // wrapper would still catch the click over the panel's box (it has no handler,
@@ -83,6 +90,8 @@ function Panel({ id }: { id: string }) {
         transformOrigin: 'center',
         opacity,
         display: srcHidden ? 'none' : undefined,
+        visibility: keep && !visible && !(exportSet && exportSet.has(id))
+          ? 'hidden' : undefined,
         pointerEvents: ghost ? 'none' : undefined,
         // the UI inspector floats above the drawing SVG (a positive z-index beats
         // the later-in-DOM, z-auto DrawingLayer in this stacking context).

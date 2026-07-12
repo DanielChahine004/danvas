@@ -57,7 +57,10 @@ class Custom(_EventRouter, BaseComponent):
                   "forwardWheel": "bool -- forward wheel to canvas zoom "
                                   "(default true)",
                   "permissions": "str|null -- iframe allow= policy",
-                  "themed": "bool -- follow the canvas theme variables"},
+                  "themed": "bool -- follow the canvas theme variables",
+                  "keepMounted": "bool -- exempt from viewport culling "
+                                 "(hidden, not destroyed, off-screen; "
+                                 "browser-local state survives scrolling)"},
         "updates": {"data_patch": "merge changed data fields",
                     "post": "opaque value delivered to the document's "
                             "canvas.onPush"},
@@ -76,7 +79,8 @@ class Custom(_EventRouter, BaseComponent):
 
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, color=None, event_key="event",
-                 permissions=None, forward_wheel=True, themed=False):
+                 permissions=None, forward_wheel=True, themed=False,
+                 keep_mounted=False):
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -117,6 +121,14 @@ class Custom(_EventRouter, BaseComponent):
         # canvas. Set False for panels whose content does its own wheel handling
         # (e.g. a 3D viewer that zooms its own camera) so the canvas stays put.
         self._forward_wheel = forward_wheel
+        # ``keep_mounted=True`` exempts the panel from viewport culling: the
+        # iframe is HIDDEN (visibility) instead of destroyed when scrolled
+        # out of view, so browser-local state — a 3D camera, tool toggles,
+        # an in-progress interaction — survives scroll-out/scroll-in. For
+        # heavy panels (Model3D) this also skips a full engine reboot and
+        # data re-push per scroll-in. Off by default: a cheap panel is
+        # better re-created than kept resident.
+        self._keep_mounted = bool(keep_mounted)
         # ``themed=True`` makes the iframe follow the canvas theme: the frontend
         # forwards the live ``--pc-*`` CSS variables and the dark/light flag into the
         # document, so the panel's CSS can use ``var(--pc-bg)`` / ``var(--pc-text)``
@@ -274,6 +286,8 @@ class Custom(_EventRouter, BaseComponent):
         props["html"] = self._wrap(self._document())
         props["permissions"] = self._permissions
         props["themed"] = self._themed
+        if self._keep_mounted:
+            props["keepMounted"] = True
         # The frontend injects the interaction shim; this flag is its wheel
         # opt-out (panels whose content does its own wheel handling).
         props["forwardWheel"] = self._forward_wheel

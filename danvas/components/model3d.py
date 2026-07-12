@@ -1827,7 +1827,12 @@ class Model3D(Custom):
     def __init__(self, name="model3d", label=None, color=None, view=None):
         super().__init__(html=_VIEWER_HTML, name=name, label=label,
                          # the wheel zooms the model, not the canvas
-                         forward_wheel=False)
+                         forward_wheel=False,
+                         # scrolled out of view, the panel HIDES instead of
+                         # unmounting: the camera, W/L, Items and section
+                         # state survive, and there's no engine reboot +
+                         # multi-MB re-push per scroll-in.
+                         keep_mounted=True)
         self._init_color(color)
         # The owner-defined view: a preset string ("iso", "front", …) or a
         # dict ({"eye": ..., "look": ..., "up": ...} or {"preset": ...,
