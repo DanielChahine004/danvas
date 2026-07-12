@@ -598,6 +598,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         h = place.pop("h", place.pop("height", 340))
         panel = React(source=_trace.PANEL_JSX, name=name, label=label,
                       props={"history": self.trace_history()}, w=w, h=h)
+        # The panel accumulates its event log in browser-local state, which
+        # viewport culling would throw away (the register-time history seed
+        # below only refreshes on a RE-REGISTER — reconnect/new viewer — not
+        # an in-tab remount). Keep it mounted: culled = hidden, log intact.
+        panel._props["keepMounted"] = True
         # The panel seeds its view from props["history"] on mount, but that seed
         # was frozen here at open time. The live ring keeps growing, so anything
         # that re-mounts the panel from the server's props — a page reload, a
