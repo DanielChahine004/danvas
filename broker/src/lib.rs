@@ -1693,9 +1693,35 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
         // The host asks a browser for the free-form document / a rendered PNG
         // (canvas.save()/screenshot()); the browser is the only thing that can
         // answer. Relay to the browsers; the reply (snapshot/image, correlated
-        // by reqId) routes back to the sources.
+        // by reqId) routes back to the sources. A targeted screenshot's
+        // shapeIds carry the SOURCE's panel ids ("shape:<id>") — namespace
+        // the panel id with the source tag like every other owner->browser
+        // id, or the browser's store (which holds "shape:<tag>:<id>")
+        // matches nothing ("nothing to capture"). An empty list (whole
+        // page) passes through untouched.
         let h = hub.lock().unwrap();
-        h.fanout_browsers(&frame.to_string());
+        let tag = h
+            .sources
+            .get(label)
+            .map(|s| s.tag.clone())
+            .unwrap_or_default();
+        let mut f = frame.clone();
+        if let Some(obj) = f.as_object_mut() {
+            if let Some(Value::Array(ids)) = obj.get("shapeIds") {
+                let nids: Vec<Value> = ids
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(id) => {
+                            let bare = id.strip_prefix("shape:").unwrap_or(id);
+                            Value::String(format!("shape:{tag}:{bare}"))
+                        }
+                        other => other.clone(),
+                    })
+                    .collect();
+                obj.insert("shapeIds".into(), Value::Array(nids));
+            }
+        }
+        h.fanout_browsers(&f.to_string());
         return;
     }
     if kind == "graveyard_update" {
