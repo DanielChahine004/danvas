@@ -505,6 +505,13 @@ def handle(msg):
   `onPush`. *(These two are Custom-only — capturing a device from the sandboxed
   iframe needs the parent page's `getUserMedia`; the rest of the handle, binary
   included, is shared with React.)*
+- **`canvas.onSnapshot(fn)`** lets the panel draw itself into
+  `canvas.screenshot()` / copy-to-PNG/SVG exports (a sandboxed iframe's pixels
+  are unreadable from outside, so the iframe rasterizes *itself*). `fn` returns
+  a `dataURL` string (or a Promise of one) — typically composite your canvases
+  onto an offscreen canvas and `toDataURL()`. WebGL panels should re-render in
+  the same task before reading pixels. Without a provider, danvas composites
+  the iframe's `<canvas>` elements over its background automatically.
 - `forward_wheel=False` keeps wheel events inside the panel instead of forwarding
   them to the canvas (default `True` zooms the canvas, matching the bare canvas).
   Set it for content that does its own wheel handling — a 3D viewer zooming its
@@ -1344,10 +1351,15 @@ canvas.screenshot(slider)               # one panel; or [a, b] framed to their b
 wired, laid out, holding expected values — no pixels). `screenshot()` is the
 visual half for a VLM. Both round-trip to a connected browser, so `screenshot()`
 needs an open tab. It's a *scene* export (shapes at canvas coords, camera-
-independent), so it renders native panels faithfully but comes out blank for
-sandboxed iframes (`Custom`, `WebView`) and for continuously-streaming canvases
-mid-frame (`VideoFeed`, a live `LivePlot`); for those, drive a browser tool at the
-served URL.
+independent). Sandboxed iframes (`Custom`) rasterize *themselves* into the
+export: by default their own `<canvas>` elements are composited over the page
+background (enough for canvas-drawn content — `Model3D` ships its own provider
+that captures the 3D view), and a panel can take over with
+`canvas.onSnapshot(fn)` (below). Plain DOM content inside an iframe (text,
+divs) isn't paintable from script, so a DOM-heavy panel without a provider
+exports as background only — same for `WebView` (cross-origin) and
+continuously-streaming canvases mid-frame (`VideoFeed`); for those, drive a
+browser tool at the served URL.
 
 **From outside the process** — the running server exposes the same checks as
 HTTP, behind the auth gate:
