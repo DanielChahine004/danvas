@@ -40,6 +40,8 @@ function Component({ canvas, value, props }) {
         <input className="val"
           type="text"
           inputMode={isFloat ? "decimal" : "numeric"}
+          style={{ width: Math.min(12, Math.max(5,
+            String(raw !== null ? raw : show).length + 1)) + "ch" }}
           value={raw !== null ? raw : show}
           onFocus={(e) => { setRaw(show); const t = e.target; requestAnimationFrame(() => t.select()); }}
           onChange={(e) => setRaw(e.target.value)}

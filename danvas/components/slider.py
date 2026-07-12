@@ -15,9 +15,12 @@ _SLIDER_CSS = """
  display:flex;gap:10px;align-items:center;
  font:600 12px system-ui,-apple-system,sans-serif;color:var(--pc-text,#e6edf3)}
 .pc-slider input[type=range]{flex:1;min-width:0;accent-color:var(--pc-accent,#3b82f6)}
-.pc-slider .val{width:5ch;text-align:center;font-variant-numeric:tabular-nums;
+.pc-slider .val{width:5ch;flex:none;text-align:center;
+ font-variant-numeric:tabular-nums;
  background:none;border:none;border-bottom:1px solid transparent;color:inherit;
  font:inherit;padding:0;cursor:text;outline:none}
+/* the 5ch width is only the floor — the JSX sizes the field inline to the
+   value's actual length (capped at 12ch) so big numbers show every digit */
 .pc-slider .val:hover{border-bottom-color:rgba(255,255,255,.25)}
 .pc-slider .val:focus{border-bottom-color:var(--pc-accent,#3b82f6);
  box-shadow:0 2px 0 var(--pc-accent-t,rgba(59,130,246,.3))}
