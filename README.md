@@ -189,7 +189,7 @@ canvas.insert(s, x=80, y=80)
 | `AudioFeed` | output | `.update(pcm_chunk)` → Web Audio playback |
 | `Chat` | bidirectional | shared room across viewers; `.post(text)`, `@on_message` |
 | `WebView` | output | external site in an iframe; `.url` (read/assign), `.navigate(url)` |
-| `Model3D` | output | the 3D panel (xeokit + a WebGL2 ray marcher): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points(color_by=)/.lines()/.curve()/.vectors()/.voxels()/.isosurface()/.volume()/.visible/.clear()`) — orbit, mm snap measurements, section plane (cuts volumes too), X-ray/edges, NavCube + XYZ axes, MIP/Fog/Slice volume modes with window-level, per-layer Items panel, hover/`@on_pick` |
+| `Model3D` | output | the 3D panel (xeokit + a WebGL2 ray marcher): `.update(glb, points=, lines=, curve=, mesh_color=)`; named layers via `.layer(name)` (`.points(color_by=)/.lines()/.curve()/.vectors()/.voxels()/.isosurface()/.volume()/.visible/.clear()`) — orbit, mm snap measurements, section plane (cuts volumes too), X-ray/edges, NavCube + XYZ axes, MIP/Fog/Slice volume modes with window-level, per-layer Items panel, hover/`@on_pick`; `view=` starting camera + `.view(preset\|eye=,look=)` points every viewer |
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |

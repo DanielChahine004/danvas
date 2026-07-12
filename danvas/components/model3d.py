@@ -563,7 +563,7 @@ _VIEWER_HTML = """
         Viewer, GLTFLoaderPlugin, SectionPlanesPlugin, NavCubePlugin,
         DistanceMeasurementsPlugin, DistanceMeasurementsMouseControl,
         AngleMeasurementsPlugin, AngleMeasurementsMouseControl,
-        PointerLens, math
+        PointerLens, SceneModel, math
     } from "https://cdn.jsdelivr.net/npm/@xeokit/xeokit-sdk@2/dist/xeokit-sdk.es.min.js";
 
     const status = document.getElementById('status');
@@ -1001,6 +1001,35 @@ _VIEWER_HTML = """
         viewer.scene.on("sectionPlaneDestroyed", volDirty);
     }
 
+    function makeVolProxy(lname, aabb) {
+        // An INVISIBLE-but-collidable box entity mirroring the volume's
+        // bounds. Volumes render in the overlay, so xeokit's own
+        // scene.aabb — which the NavCube's face-preset flights and the
+        // camera machinery use — would otherwise not know they exist: a
+        // volume-only scene gave face clicks an empty box (only Fit
+        // worked, via unionAabb). collidable=true puts the bounds into
+        // every aabb consumer; visible=false keeps it unrendered.
+        const [x0, y0, z0, x1, y1, z1] = aabb;
+        const sm = new SceneModel(viewer.scene, {
+            id: "volbb:" + lname + ":" + (++frameSeq), isModel: true });
+        sm.createMesh({ id: "m", primitive: "triangles",
+            positions: [x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0,
+                        x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1],
+            indices: [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7] });
+        sm.createEntity({ id: "volbb:" + lname, meshIds: ["m"],
+                          isObject: true, visible: false, pickable: false,
+                          collidable: true });
+        sm.finalize();
+        return sm;
+    }
+
+    function dropVolProxy(V) {
+        if (V && V.proxy) {
+            try { V.proxy.destroy(); } catch (e) {}
+            V.proxy = null;
+        }
+    }
+
     function loadVolume(lname, buf) {
         // "DVV2" + u32le nx,ny,nz + f32le spacing xyz + f32le origin xyz
         // + uint8 voxels (x-fastest), world units = the model's (meters).
@@ -1042,12 +1071,15 @@ _VIEWER_HTML = """
                   o[0] + nx * s[0], o[1] + ny * s[1], o[2] + nz * s[2]];
         V.steps = Math.min(2 * Math.max(nx, ny, nz), 512);
         V.cmap = cmapId;
+        dropVolProxy(V);
+        V.proxy = makeVolProxy(lname, V.aabb);
         document.getElementById('btnVolMode').style.display = '';
         document.getElementById('wl').style.display = 'block';
         status.innerText = "RENDER COMPLETE";
+        if (viewSpec && !viewApplied) viewApplied = applyView(viewSpec);
         if (!loadedAny) {
             loadedAny = true;
-            viewer.cameraFlight.jumpTo({ aabb: V.aabb });
+            if (!viewApplied) viewer.cameraFlight.jumpTo({ aabb: V.aabb });
         }
         refreshClip();
         buildItems();
@@ -1073,6 +1105,46 @@ _VIEWER_HTML = """
             }
         }
         return a;
+    }
+
+    // ---- owner-defined views ---------------------------------------------
+    // {cmd:"view", preset|eye+look(+up), zoom} from Python: point THIS
+    // browser's camera (broadcast = every browser). Presets are framed
+    // against the union bounds; if content hasn't loaded yet the spec is
+    // held and applied on the first load, replacing the default fit.
+    let viewSpec = null;
+    let viewApplied = false;
+
+    function applyView(spec) {
+        const camera = viewer.camera;
+        if (spec.eye && spec.look) {
+            camera.eye = spec.eye;
+            camera.look = spec.look;
+            camera.up = spec.up || [0, 1, 0];
+            refreshClip();
+            volDirty();
+            return true;
+        }
+        const uab = unionAabb();
+        if (!uab) return false;          // nothing loaded yet — retried then
+        const DIRS = { front: [0, 0, 1], back: [0, 0, -1],
+                       right: [1, 0, 0], left: [-1, 0, 0],
+                       top: [0, 1, 0], bottom: [0, -1, 0],
+                       iso: [0.577, 0.577, 0.577] };
+        const dir = DIRS[spec.preset] || DIRS.iso;
+        const c = math.getAABB3Center(uab);
+        const diag = Math.max(math.getAABB3Diag(uab), 1e-6);
+        const dist = (diag / (spec.zoom || 1))
+                   / (2 * Math.tan((viewer.cameraFlight.fitFOV / 2)
+                                   * Math.PI / 180));
+        camera.eye = [c[0] + dir[0] * dist, c[1] + dir[1] * dist,
+                      c[2] + dir[2] * dist];
+        camera.look = [c[0], c[1], c[2]];
+        camera.up = spec.preset === "top" ? [0, 0, -1]
+                  : spec.preset === "bottom" ? [0, 0, 1] : [0, 1, 0];
+        refreshClip();
+        volDirty();
+        return true;
     }
 
     function applyLook() {
@@ -1406,6 +1478,7 @@ _VIEWER_HTML = """
             return;
         }
         if (volumes.has(lname)) {                  // GLB replaces a volume
+            dropVolProxy(volumes.get(lname));
             volumes.delete(lname);
             volChrome();
             volDirty();
@@ -1446,7 +1519,11 @@ _VIEWER_HTML = """
             }
             buildItems();
             status.innerText = "RENDER COMPLETE";
-            if (!loadedAny) { loadedAny = true; viewer.cameraFlight.jumpTo(m); }
+            if (viewSpec && !viewApplied) viewApplied = applyView(viewSpec);
+            if (!loadedAny) {
+                loadedAny = true;
+                if (!viewApplied) viewer.cameraFlight.jumpTo(m);
+            }
         });
         m.on("error", (e) => { status.innerText = "LOAD ERROR: " + e; });
     }
@@ -1468,6 +1545,11 @@ _VIEWER_HTML = """
             return;
         }
         if (!data || typeof data !== "object") return;
+        if (data.cmd === "view") {
+            viewSpec = data;
+            viewApplied = applyView(data);
+            return;
+        }
         if (data.cmd === "visible") {
             layerHidden[data.layer] = !data.on;
             buildItems();
@@ -1480,6 +1562,7 @@ _VIEWER_HTML = """
             }
             for (const lname of [...volumes.keys()]) {
                 if (data.layer != null && lname !== data.layer) continue;
+                dropVolProxy(volumes.get(lname));
                 volumes.delete(lname);
             }
             volChrome();
@@ -1687,6 +1770,16 @@ _VIEWER_HTML = """
         sync();
     };
 
+    // Test/introspection handle (harnesses assert bounds & camera through
+    // it — the module scope is otherwise unreachable from outside).
+    window._m3d = {
+        aabb: () => { const a = unionAabb(); return a ? Array.from(a) : null; },
+        sceneAabb: () => Array.from(viewer.scene.aabb),
+        camera: () => ({ eye: Array.from(viewer.camera.eye),
+                         look: Array.from(viewer.camera.look),
+                         up: Array.from(viewer.camera.up) }),
+    };
+
     canvas.send({event: 'ready'});
 </script>
 """
@@ -1717,7 +1810,10 @@ class Model3D(Custom):
                   "ray-marched volume fused into the scene)",
         "controls": "JSON via the update channel's `post` (Custom.push): "
                     "{cmd:'visible', layer, on} shows/hides a layer; "
-                    "{cmd:'clear', layer|null} removes one layer or all",
+                    "{cmd:'clear', layer|null} removes one layer or all; "
+                    "{cmd:'view', preset|eye+look(+up), zoom} points the "
+                    "camera (presets front/back/left/right/top/bottom/iso, "
+                    "framed against the scene bounds)",
         "note": "the viewer (xeokit) loads from its CDN; the browser needs "
                 "network access to cdn.jsdelivr.net on first render",
     }
@@ -1725,11 +1821,24 @@ class Model3D(Custom):
     default_w = 800
     default_h = 600
 
-    def __init__(self, name="model3d", label=None, color=None):
+    #: Presets the view API accepts (camera direction relative to the scene).
+    VIEW_PRESETS = ("front", "back", "left", "right", "top", "bottom", "iso")
+
+    def __init__(self, name="model3d", label=None, color=None, view=None):
         super().__init__(html=_VIEWER_HTML, name=name, label=label,
                          # the wheel zooms the model, not the canvas
                          forward_wheel=False)
         self._init_color(color)
+        # The owner-defined view: a preset string ("iso", "front", …) or a
+        # dict ({"eye": ..., "look": ..., "up": ...} or {"preset": ...,
+        # "zoom": ...}). Applied by every browser once content loads (and
+        # replayed to late-mounting viewers), replacing the default fit.
+        self._view = None
+        if view is not None:
+            if isinstance(view, str):
+                self._view = self._view_spec(preset=view)
+            else:
+                self._view = self._view_spec(**view)
         # Layer state: name -> {"glb": bytes|None, "visible": bool}. Binary
         # streams aren't replayed by the hub, so every layer's latest GLB
         # (and its visibility) is held here and re-pushed whenever a viewer
@@ -1749,6 +1858,50 @@ class Model3D(Custom):
                 self.push_binary(_layer_frame(lname, st["glb"]))
             if not st.get("visible", True):
                 self.push({"cmd": "visible", "layer": lname, "on": False})
+        if self._view is not None:
+            self.push(self._view)
+
+    @classmethod
+    def _view_spec(cls, preset=None, eye=None, look=None, up=None, zoom=None):
+        if preset is not None and preset not in cls.VIEW_PRESETS:
+            raise ValueError(
+                f"unknown view preset {preset!r}; choose from "
+                f"{list(cls.VIEW_PRESETS)} or pass eye=/look=")
+        if (eye is None) != (look is None):
+            raise ValueError("eye= and look= go together")
+        if preset is None and eye is None:
+            raise ValueError("view needs a preset or eye=/look=")
+        spec = {"cmd": "view"}
+        if preset is not None:
+            spec["preset"] = preset
+        if zoom is not None:
+            spec["zoom"] = float(zoom)
+        if eye is not None:
+            spec["eye"] = [float(v) for v in eye]
+            spec["look"] = [float(v) for v in look]
+            if up is not None:
+                spec["up"] = [float(v) for v in up]
+        return spec
+
+    def view(self, preset=None, *, eye=None, look=None, up=None, zoom=None):
+        """Point EVERY viewer's camera (and set the view late joiners get).
+
+        Either a ``preset`` — one of :attr:`VIEW_PRESETS`, framed against
+        the scene's bounds (``zoom=2`` moves twice as close as the fitted
+        distance) — or an explicit ``eye=``/``look=`` (``up=`` optional)
+        in world coordinates::
+
+            viewer.view("front")                     # everyone: front, fitted
+            viewer.view("iso", zoom=1.5)
+            viewer.view(eye=[0, 0.05, 0.1], look=[0, 0.01, 0])
+
+        Cameras stay independent afterwards — this points them once, it
+        doesn't lock them together. The spec is remembered: a browser that
+        connects (or a panel that remounts) later starts at this view.
+        """
+        self._view = self._view_spec(preset, eye=eye, look=look, up=up,
+                                     zoom=zoom)
+        self.push(self._view)
 
     def _layer_state(self, lname):
         return self._layers.setdefault(lname, {"glb": None, "visible": True})
