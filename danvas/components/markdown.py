@@ -3,7 +3,8 @@
 Markdown is converted to HTML in Python (using the ``markdown`` or
 ``markdown-it-py`` package if either is installed — richer output: tables,
 fenced code, etc. — otherwise a small built-in converter covering headings,
-bold/italic, inline code, fenced code, links, lists and paragraphs). The HTML is
+bold/italic, inline code, fenced code, links, lists, pipe tables and
+paragraphs). The HTML is
 then mounted as a **native React subtree** rather than inside a sandboxed iframe.
 
 Why native rather than an iframe: an iframe gets *rasterised* and then scaled
@@ -123,13 +124,53 @@ def _inline(text):
     return text
 
 
+def _table_row(line):
+    """Split one ``| a | b |`` line into cell strings (or None if not a row)."""
+    s = line.strip()
+    if not (s.startswith("|") and s.endswith("|") and len(s) > 1):
+        return None
+    return [c.strip() for c in s[1:-1].split("|")]
+
+
+_TABLE_RULE = re.compile(r"^:?-{3,}:?$")   # the |---|:--:|---| separator cells
+
+
+def _table_starts(lines, i):
+    """True when ``lines[i]`` is a table header row with a rule row under it.
+    A lone ``|…|`` line with no rule is NOT a table — it stays paragraph
+    text, and crucially the paragraph gatherer must still consume it (a
+    breaker that doesn't start a table would stall the line cursor)."""
+    header = _table_row(lines[i])
+    rule = _table_row(lines[i + 1]) if i + 1 < len(lines) else None
+    return bool(header and rule and len(rule) == len(header)
+                and all(_TABLE_RULE.match(c) for c in rule))
+
+
 def _basic_md(text):
-    """A compact Markdown subset: headings, lists, fenced code, paragraphs."""
+    """A compact Markdown subset: headings, lists, fenced code, pipe tables,
+    paragraphs."""
     out = []
     lines = text.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i]
+        # Pipe table: a |…| header row followed by a |---|---| rule row.
+        if _table_starts(lines, i):
+            header = _table_row(line)
+            cells = lambda row, tag: "".join(
+                f"<{tag}>" + _inline(_html.escape(c)) + f"</{tag}>"
+                for c in (row + [""] * len(header))[:len(header)])
+            out.append("<table><thead><tr>" + cells(header, "th")
+                       + "</tr></thead><tbody>")
+            i += 2
+            while i < len(lines):
+                row = _table_row(lines[i])
+                if row is None:
+                    break
+                out.append("<tr>" + cells(row, "td") + "</tr>")
+                i += 1
+            out.append("</tbody></table>")
+            continue
         # Fenced code block: emit verbatim (escaped), no inline formatting.
         if line.strip().startswith("```"):
             i += 1
@@ -166,7 +207,7 @@ def _basic_md(text):
         para = []
         while i < len(lines) and lines[i].strip() and not re.match(
             r"(#{1,3})\s+|\s*([-*]|\d+\.)\s+|```", lines[i]
-        ):
+        ) and not _table_starts(lines, i):
             para.append(_inline(_html.escape(lines[i])))
             i += 1
         out.append("<p>" + "<br>".join(para) + "</p>")
