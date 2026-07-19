@@ -1153,7 +1153,11 @@ _VIEWER_HTML = """
         scene.setObjectsXRayed(scene.objectIds, xrayed);
         for (const id of scene.objectIds) {
             const o = scene.objects[id];
-            if (o) o.edges = edgesOn;
+            // Translucent entities (alpha-colored overlays like an
+            // isosurface shell) get no edge overlay: a see-through helper
+            // should read as glass, not as a wireframe of its own
+            // tessellation striped across the model behind it.
+            if (o) o.edges = edgesOn && !(o.opacity < 0.999);
         }
     }
 
@@ -1203,29 +1207,90 @@ _VIEWER_HTML = """
             const m = ent.meshes && ent.meshes[0];
             return !!(m && m.layer && m.layer.primitive === "points");
         }
-        function pointIndex(ent, p) {
-            // Nearest cached vertex to the snapped position — exact on a
-            // snap hit. readableGeometryEnabled keeps positions CPU-side;
-            // cache them per entity (cleared on each model load).
+        function pointIndex(ent, p, lname, node) {
+            // Nearest known point to the snapped position — exact on a
+            // snap hit. Coordinates come from prepGLB's harvest (xeokit's
+            // readable geometry covers triangles only — getEachVertex on
+            // a points entity yields nothing), cached per entity (cleared
+            // on each model load) with a coarse spatial hash: hover runs
+            // at ~25Hz and a million-point cloud can't afford an O(N)
+            // scan per tick.
             let c = vtxCache[ent.id];
             if (!c) {
-                if (typeof ent.getEachVertex !== "function") return null;
-                const arr = [];
-                ent.getEachVertex((v) => arr.push(v[0], v[1], v[2]));
-                c = vtxCache[ent.id] = new Float64Array(arr);
+                const L = layers.get(lname);
+                let xyz = L && L.positions && L.positions[node];
+                if (!xyz) {
+                    if (typeof ent.getEachVertex !== "function") return null;
+                    const arr = [];
+                    ent.getEachVertex((v) => arr.push(v[0], v[1], v[2]));
+                    xyz = new Float64Array(arr);
+                }
+                if (!xyz.length) return null;
+                const a = ent.aabb;
+                const cell = Math.max(a[3] - a[0], a[4] - a[1],
+                                      a[5] - a[2], 1e-9) / 64;
+                const grid = new Map();
+                for (let i = 0; i < xyz.length; i += 3) {
+                    const k = Math.floor(xyz[i] / cell) + ","
+                            + Math.floor(xyz[i+1] / cell) + ","
+                            + Math.floor(xyz[i+2] / cell);
+                    let b = grid.get(k);
+                    if (!b) grid.set(k, b = []);
+                    b.push(i);
+                }
+                c = vtxCache[ent.id] = { xyz, cell, grid };
             }
+            const { xyz, cell, grid } = c;
             let best = null, bd = Infinity;
-            for (let i = 0; i < c.length; i += 3) {
-                const dx = c[i] - p[0], dy = c[i+1] - p[1], dz = c[i+2] - p[2];
+            const scan = (i) => {
+                const dx = xyz[i] - p[0], dy = xyz[i+1] - p[1],
+                      dz = xyz[i+2] - p[2];
                 const d = dx*dx + dy*dy + dz*dz;
                 if (d < bd) { bd = d; best = i / 3; }
-            }
+            };
+            const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell),
+                  cz = Math.floor(p[2] / cell);
+            for (let X = cx - 1; X <= cx + 1; X++)
+                for (let Y = cy - 1; Y <= cy + 1; Y++)
+                    for (let Z = cz - 1; Z <= cz + 1; Z++) {
+                        const b = grid.get(X + "," + Y + "," + Z);
+                        if (b) for (const i of b) scan(i);
+                    }
+            if (best === null)   // p beyond a cell from every vertex: rare
+                for (let i = 0; i < xyz.length; i += 3) scan(i);
             return best;
         }
         function inspect(canvasPos) {
-            const r = viewer.scene.pick({ canvasPos, snapToVertex: true,
-                                          snapRadius: 30 });
-            const p = r && (r.snappedWorldPos || r.worldPos);
+            // The entity is what's UNDER the cursor (surface pick); the
+            // snap pick only refines the coordinate to a vertex, and only
+            // when that vertex belongs to the same entity. A lone snap
+            // pick reports whichever entity owns the nearest vertex within
+            // the radius — up to that many px from the cursor, even past
+            // the silhouette — the "label for something I'm not pointing
+            // at" effect. Surfaceless entities (point clouds, lines) never
+            // surface-pick, so the snap result stands in for those.
+            const surf = viewer.scene.pick({ canvasPos, pickSurface: true });
+            const snap = viewer.scene.pick({ canvasPos, snapToVertex: true,
+                                             snapRadius: 12 });
+            const sp = snap && (snap.snappedWorldPos || snap.worldPos);
+            const scp = snap && snap.snappedCanvasPos;
+            const snapPx = scp ? Math.hypot(scp[0] - canvasPos[0],
+                                            scp[1] - canvasPos[1]) : Infinity;
+            let r = surf, p = surf && surf.worldPos;
+            if (p && sp && snap.entity && surf.entity
+                    && snap.entity.id === surf.entity.id) {
+                p = sp;                        // vertex-snapped, same entity
+            } else if (sp && snap.entity && isPointCloud(snap.entity)
+                       && snapPx <= 6) {
+                // The cursor is ON a dot. Snap only sees rendered
+                // (unoccluded) vertices, so this never resurrects a point
+                // hidden behind the surface — it just keeps 5px dots
+                // pickable when they float in front of a face that would
+                // otherwise win the surface pick.
+                r = snap; p = sp;
+            } else if (!p && sp) {
+                r = snap; p = sp;
+            }
             if (!p) return null;
             const ent = r.entity || null;
             // Globalized entity ids are "<modelId>#<node>", model ids are
@@ -1240,7 +1305,8 @@ _VIEWER_HTML = """
             }
             const info = { id: node, layer: lname, point: null,
                            pos: [fmt(p[0]), fmt(p[1]), fmt(p[2])] };
-            if (ent && isPointCloud(ent)) info.point = pointIndex(ent, p);
+            if (ent && isPointCloud(ent))
+                info.point = pointIndex(ent, p, lname, node);
             return info;
         }
         function label(info) {
@@ -1312,10 +1378,15 @@ _VIEWER_HTML = """
         //    whole primitive otherwise (trimesh exports lines indexless).
         //  * groups: where the node tree first branches — the Items
         //    panel's show/hide rows. counts: points/segments per node.
+        //  * positions: world-space point coordinates per point-cloud
+        //    node — xeokit's readable geometry covers triangles only
+        //    (getEachVertex on a points entity yields nothing), and the
+        //    hover/pick point INDEX needs the actual points.
         try {
             const dv = new DataView(buf);
             if (dv.getUint32(0, true) !== 0x46546C67) {   // ≠"glTF"
-                return { buf, groups: [], colors: {}, counts: {} };
+                return { buf, groups: [], colors: {}, counts: {},
+                         positions: {} };
             }
             const jlen = dv.getUint32(12, true);
             const json = JSON.parse(new TextDecoder().decode(
@@ -1375,17 +1446,81 @@ _VIEWER_HTML = """
                         ncomp === 4 ? sum[3] / acc.count : 1];
             }
 
+            // World matrix per node index (column-major), for putting
+            // harvested point coordinates into the frame they render in
+            // (a trimesh export hangs everything under a Z-up -> Y-up
+            // rotated root).
+            const world = {};
+            function nodeMat(nd) {
+                if (nd.matrix) return nd.matrix;
+                const [tx, ty, tz] = nd.translation || [0, 0, 0];
+                const [qx, qy, qz, qw] = nd.rotation || [0, 0, 0, 1];
+                const [sx, sy, sz] = nd.scale || [1, 1, 1];
+                const x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+                const xx = qx*x2, xy = qx*y2, xz = qx*z2, yy = qy*y2,
+                      yz = qy*z2, zz = qz*z2, wx = qw*x2, wy = qw*y2,
+                      wz = qw*z2;
+                return [(1-(yy+zz))*sx, (xy+wz)*sx, (xz-wy)*sx, 0,
+                        (xy-wz)*sy, (1-(xx+zz))*sy, (yz+wx)*sy, 0,
+                        (xz+wy)*sz, (yz-wx)*sz, (1-(xx+yy))*sz, 0,
+                        tx, ty, tz, 1];
+            }
+            function matMul(a, b) {
+                const o = new Array(16);
+                for (let c = 0; c < 4; c++)
+                    for (let r = 0; r < 4; r++)
+                        o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1]
+                                 + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+                return o;
+            }
+            const M_ID = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+            function walkW(idx, pm) {
+                const wm = matMul(pm, nodeMat(nodes[idx]));
+                world[idx] = wm;
+                (nodes[idx].children || []).forEach((ch) => walkW(ch, wm));
+            }
+            (scn.nodes || []).forEach((i) => walkW(i, M_ID));
+
+            function readPoints(prim, wm, out) {
+                // POSITION floats -> world space (float POSITION only;
+                // quantized extensions are rare enough to skip).
+                const acc = json.accessors[prim.attributes.POSITION];
+                if (!bin || acc.componentType !== 5126
+                        || acc.type !== "VEC3") return;
+                const bv = json.bufferViews[acc.bufferView];
+                if (bv.buffer !== 0) return;
+                const d = new DataView(bin.buffer, bin.byteOffset,
+                                       bin.byteLength);
+                const stride = bv.byteStride || 12;
+                const base = (bv.byteOffset || 0) + (acc.byteOffset || 0);
+                for (let i = 0; i < acc.count; i++) {
+                    const o = base + i * stride;
+                    const x = d.getFloat32(o, true),
+                          y = d.getFloat32(o + 4, true),
+                          z = d.getFloat32(o + 8, true);
+                    out.push(wm[0]*x + wm[4]*y + wm[8]*z + wm[12],
+                             wm[1]*x + wm[5]*y + wm[9]*z + wm[13],
+                             wm[2]*x + wm[6]*y + wm[10]*z + wm[14]);
+                }
+            }
+
             const colors = {};
             const counts = {};
-            for (const nd of nodes) {
+            const positions = {};
+            for (const [ni, nd] of nodes.entries()) {
                 if (!nd.name || nd.mesh === undefined) continue;
                 let count = 0;
+                let pos = null;
                 for (const prim of (json.meshes[nd.mesh] || {}).primitives
                                    || []) {
                     if (!prim.attributes) continue;
                     const pc = prim.attributes.POSITION !== undefined
                         ? json.accessors[prim.attributes.POSITION].count : 0;
-                    if (prim.mode === 0) count += pc;                // points
+                    if (prim.mode === 0) {                          // points
+                        count += pc;
+                        if (pc) readPoints(prim, world[ni] || M_ID,
+                                           pos = pos || []);
+                    }
                     else if (prim.mode === 1)                       // lines
                         count += Math.floor((prim.indices !== undefined
                             ? json.accessors[prim.indices].count : pc) / 2);
@@ -1396,6 +1531,8 @@ _VIEWER_HTML = """
                     }
                 }
                 if (count) counts[nd.name] = count;
+                if (pos && pos.length)
+                    positions[nd.name] = new Float32Array(pos);
             }
 
             let changed = false;
@@ -1432,7 +1569,7 @@ _VIEWER_HTML = """
                     }
                 }
             }
-            if (!changed) return { buf, groups, colors, counts };
+            if (!changed) return { buf, groups, colors, counts, positions };
             if (json.buffers && json.buffers[0])
                 json.buffers[0].byteLength = binLen + binPad + apLen;
 
@@ -1458,10 +1595,11 @@ _VIEWER_HTML = """
             off += 8;
             if (bin) { out.set(bin, off); off += binLen + binPad; }
             for (const a of appendix) { out.set(a, off); off += a.length; }
-            return { buf: out.buffer, groups, colors, counts };
+            return { buf: out.buffer, groups, colors, counts, positions };
         } catch (e) {
             console.warn("model3d: GLB prep skipped:", e);
-            return { buf, groups: [], colors: {}, counts: {} };
+            return { buf, groups: [], colors: {}, counts: {},
+                     positions: {} };
         }
     }
 
@@ -1485,7 +1623,8 @@ _VIEWER_HTML = """
         }
         let L = layers.get(lname);
         if (!L) {
-            L = { model: null, groups: [], colors: {}, counts: {}, seq: 0 };
+            L = { model: null, groups: [], colors: {}, counts: {},
+                  positions: {}, seq: 0 };
             layers.set(lname, L);
         }
         const mySeq = ++L.seq;
@@ -1499,6 +1638,7 @@ _VIEWER_HTML = """
         L.groups = prep.groups;
         L.colors = prep.colors;
         L.counts = prep.counts;
+        L.positions = prep.positions;
         const src = "m" + (++frameSeq) + ".glb";
         pendingBufs.set(src, prep.buf);
         status.innerText = "LOADING…";
@@ -1515,7 +1655,7 @@ _VIEWER_HTML = """
                 const o = viewer.scene.objects[m.id + "#" + n];
                 if (!o) continue;
                 o.colorize = [c[0], c[1], c[2]];
-                if (c[3] < 0.999) o.opacity = c[3];
+                if (c[3] < 0.999) { o.opacity = c[3]; o.edges = false; }
             }
             buildItems();
             status.innerText = "RENDER COMPLETE";
@@ -1555,6 +1695,13 @@ _VIEWER_HTML = """
             buildItems();
             volDirty();
         } else if (data.cmd === "clear") {
+            // Measurements/section anchor to entities about to be
+            // destroyed — same hygiene as a layer reload.
+            distance.clear();
+            angle.clear();
+            if (sectioning) {
+                sectionPlanes.clear(); sectioning = false; sync();
+            }
             for (const [lname, L] of [...layers]) {
                 if (data.layer != null && lname !== data.layer) continue;
                 if (L.model) { dropVtxCache(L.model); L.model.destroy(); }
@@ -1565,6 +1712,10 @@ _VIEWER_HTML = """
                 dropVolProxy(volumes.get(lname));
                 volumes.delete(lname);
             }
+            // An emptied scene forgets it ever framed: the next load
+            // jumps the camera to the new content (which may live at a
+            // different scale or place entirely).
+            if (!layers.size && !volumes.size) loadedAny = false;
             volChrome();
             volDirty();
             buildItems();
