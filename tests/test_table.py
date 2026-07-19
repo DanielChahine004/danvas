@@ -102,3 +102,45 @@ def test_table_defaults_to_auto_height():
     pinned = danvas.Table([{"x": 1}], h=300)
     assert pinned._auto_h is False
     assert pinned.register_props()["autoH"] is False
+
+
+def test_table_rows_hold_original_values_not_display_strings():
+    # The props ship display strings, but .rows / .cols / .value hand back the
+    # normalized ORIGINAL data — a selection callback can resolve indices
+    # without keeping a separate reference to the source (user feedback: the
+    # rows weren't retrievable at all, only rendered strings in _data).
+    t = danvas.Table([{"a": 1, "b": 2.5}, {"a": 3, "b": None}])
+    assert t.cols == ["a", "b"]
+    assert t.rows == [[1, 2.5], [3, None]]        # values, not "1"/"2.5"
+    assert t.value == t.rows                      # was inherited always-None
+    assert t._data["rows"] == [["1", "2.5"], ["3", ""]]   # wire stays strings
+
+
+def test_table_value_assignment_is_update():
+    t = danvas.Table([{"a": 1}])
+    t.value = [{"a": 7}, {"a": 8}]
+    assert t.rows == [[7], [8]]
+    assert t._data["rows"] == [["7"], ["8"]]
+
+
+def test_table_update_refreshes_rows():
+    t = danvas.Table([{"a": 1}])
+    t.update([{"z": "x"}, {"z": "y"}])
+    assert t.cols == ["z"]
+    assert t.rows == [["x"], ["y"]]
+
+
+def test_selected_rows_resolves_indices_to_original_rows():
+    t = danvas.Table([{"a": 1}, {"a": 2}, {"a": 3}])
+    t.selected = [2, 0]
+    assert t.selected == [0, 2]                   # setter sorts + dedups
+    assert t.selected_rows == [[1], [3]]          # original values, in order
+
+
+def test_programmatic_selection_reveals_checkbox_column():
+    # The CONTRACT promises a non-empty `selected` push reveals the checkbox
+    # column (it hides behind the `sel` toolbar button otherwise). Pin the
+    # React source on that path so it can't silently regress — user code
+    # relies on it and was told it's guaranteed, not an implementation detail.
+    src = danvas.Table([{"x": 1}]).register_props()["source"]
+    assert "props.selected.length" in src and "setShowSel(true)" in src

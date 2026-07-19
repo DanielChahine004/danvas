@@ -1367,9 +1367,31 @@ class Canvas(_FactoryMixin, _LayoutMixin):
 
         Any canvas object (panel or shape) or a name string is accepted as an
         anchor.  Returns the final ``(x, y)`` to use.
+
+        Bad anchors raise instead of silently landing the shape at the
+        default position: an unknown name is a typo, and a panel that was
+        never placed (no ``x=``/``y=``, no container) has no coordinates
+        until auto-layout assigns them at serve time — shapes are placed
+        NOW, so there is nothing to anchor to yet.
         """
-        def resolve(ref):
-            return self._named.get(ref) if isinstance(ref, str) else ref
+        def resolve(ref, kw):
+            if ref is None:
+                return None
+            obj = self._named.get(ref) if isinstance(ref, str) else ref
+            if obj is None:
+                raise ValueError(
+                    f"{kw}={ref!r} matches no panel or shape name on this "
+                    "canvas")
+            if getattr(obj, "x", None) is None \
+                    or getattr(obj, "y", None) is None:
+                nm = getattr(obj, "name", None) or type(obj).__name__
+                raise ValueError(
+                    f"{kw}= anchor {nm!r} has no position yet: it was "
+                    "created without x=/y= or a container, so auto-layout "
+                    "places it only at serve time. Give the anchor explicit "
+                    "coordinates (or a container), or place this shape with "
+                    "x=/y= directly.")
+            return obj
 
         def dim(ref, d):
             v = getattr(ref, d, None)
@@ -1377,10 +1399,10 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 v = ref._props.get(d)
             return float(v) if v is not None else 200.0
 
-        right_of = resolve(right_of)
-        left_of  = resolve(left_of)
-        below    = resolve(below)
-        above    = resolve(above)
+        right_of = resolve(right_of, "right_of")
+        left_of  = resolve(left_of, "left_of")
+        below    = resolve(below, "below")
+        above    = resolve(above, "above")
 
         if below is not None:
             x, y = below.x, below.y + dim(below, "h") + gap

@@ -629,7 +629,7 @@
      "pageSize": "number",
      "profiles": "list|null -- per-column summary stats",
      "rows": "list[list]",
-     "selected": "list[int]|absent -- programmatic row selection; applied silently (no selected event echoed)"
+     "selected": "list[int]|absent -- programmatic row selection; applied silently (no selected event echoed); a non-empty list also reveals the checkbox column (otherwise hidden behind the 'sel' toolbar button)"
     },
     "encoded": [],
     "events": [

@@ -703,3 +703,33 @@ def test_canvas_remove_shape_noop_when_already_gone():
     s = c.geo(x=0, y=0, name="box")
     c.remove_shape(s)
     c.remove_shape(s)  # second call — must not raise
+
+
+# ---------------------------------------------------------------------------
+# shape anchors fail loudly (user feedback: silent default placement)
+# ---------------------------------------------------------------------------
+def test_shape_anchor_unknown_name_raises():
+    # Anchoring to a name that matches nothing is a typo — landing the shape
+    # at the default position silently was the old, wrong behavior.
+    c = danvas.Canvas()
+    with pytest.raises(ValueError, match="matches no panel or shape"):
+        c.text(text="oops", below="no_such_name")
+
+
+def test_shape_anchor_unplaced_panel_raises():
+    # A free panel without x=/y= has no coordinates until auto-layout runs at
+    # serve time; shapes are placed immediately, so anchoring to it used to
+    # die with a bare TypeError (None + float). Now it says what to do.
+    c = danvas.Canvas()
+    lbl = c.label("floating", "auto-placed")
+    with pytest.raises(ValueError, match="no position yet"):
+        c.text(text="under", below=lbl)
+
+
+def test_shape_anchor_placed_panel_works():
+    # The documented path: any placed panel or shape anchors a shape factory.
+    c = danvas.Canvas()
+    lbl = c.label("pinned", "here", x=100, y=100)
+    t = c.text(text="under", below=lbl)
+    assert t.x == 100
+    assert t.y > 100

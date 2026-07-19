@@ -127,7 +127,10 @@ class Table(React):
                  "profiles": "list|null -- per-column summary stats",
                  "editable": "bool",
                  "selected": "list[int]|absent -- programmatic row selection; "
-                             "applied silently (no selected event echoed)"},
+                             "applied silently (no selected event echoed); a "
+                             "non-empty list also reveals the checkbox column "
+                             "(otherwise hidden behind the 'sel' toolbar "
+                             "button)"},
         "updates": {"data_patch": "merge changed data fields"},
         "events": [{"selected": "list[number] -- selected row indexes"},
                    {"edited": "object {row: number, col: number, value}"}],
@@ -146,6 +149,7 @@ class Table(React):
                          props=props)
         self._init_color(color)
         self._cols = cols  # kept so _handle_input can resolve ci → col name
+        self._rows = rows  # original values — props carry display strings only
         self._selected = []
         self._select_callbacks = []
         self._edit_callbacks = []
@@ -156,13 +160,55 @@ class Table(React):
         yield ("edit", self._edit_callbacks)
 
     @property
+    def cols(self):
+        """The normalized column header names (list of strings)."""
+        with self._lock:
+            return list(self._cols)
+
+    @property
+    def rows(self):
+        """The table's rows as supplied, normalized to lists — the ORIGINAL
+        values, not the display strings the browser renders. ``rows[i]``
+        corresponds to selection/edit index ``i`` (the ``#`` column), so
+        ``table.rows[i]`` resolves any event index without keeping a
+        separate reference to the source data."""
+        with self._lock:
+            return [list(r) for r in self._rows]
+
+    @property
+    def value(self):
+        """The table's content: the same original rows as :attr:`rows`.
+
+        Assignable — ``table.value = new_data`` is :meth:`update`. (Without
+        this, ``value`` would be an inherited always-``None`` — a trap for
+        code that reasonably expects a table's value to be its data.)"""
+        return self.rows
+
+    @value.setter
+    def value(self, data):
+        self.update(data)
+
+    @property
+    def selected_rows(self):
+        """The original rows currently selected, in index order — sugar for
+        ``[table.rows[i] for i in table.selected]``."""
+        with self._lock:
+            return [list(self._rows[i]) for i in self._selected
+                    if 0 <= i < len(self._rows)]
+
+    @property
     def selected(self):
         """The 0-based indices of currently selected rows in the original data.
 
         Assignable: ``table.selected = [0, 3]`` selects those rows in every
         browser (and ``[]`` clears). Programmatic selection is silent — it
         never fires ``on_select``, matching how a Python push of a control's
-        value never fires ``on_change``."""
+        value never fires ``on_change``.
+
+        The checkbox column is hidden until the ``sel`` toolbar button
+        toggles it on; assigning a non-empty selection here reveals it too
+        (guaranteed behavior, not an implementation detail). The selected
+        data itself is :attr:`selected_rows`."""
         with self._lock:
             return list(self._selected)
 
@@ -195,8 +241,10 @@ class Table(React):
         """Decorator: called with a list of selected row indices on each selection change.
 
         The indices are 0-based positions in the original Python data structure
-        (the same values shown in the ``#`` index column). Fires on every checkbox
-        toggle, including when the selection is cleared (empty list).
+        (the same values shown in the ``#`` index column) — resolve them with
+        :attr:`rows` / :attr:`selected_rows`. Fires on every checkbox toggle,
+        including when the selection is cleared (empty list). The checkboxes
+        live behind the ``sel`` toolbar button in the browser.
         See :meth:`on_change <danvas.components.base.BaseComponent.on_change>`
         for the full ``threaded`` / ``dedicated`` / ``queue`` semantics.
         ``threaded`` and ``dedicated`` are mutually exclusive.
@@ -228,6 +276,7 @@ class Table(React):
         cols, rows = _normalize(data)
         with self._lock:
             self._cols = cols
+            self._rows = rows
         super().update(**_table_props(cols, rows))
 
 
