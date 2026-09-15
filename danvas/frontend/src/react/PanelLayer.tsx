@@ -20,7 +20,7 @@ import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentI
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
 import { SelectionOverlay } from './SelectionOverlay'
-import { DrawingLayer, ArrowMarkerDefs } from './DrawingLayer'
+import { DrawingRun, ArrowMarkerDefs } from './DrawingLayer'
 
 // Unmount a panel's content once it's more than ~half a viewport outside the
 // visible area, so a canvas of hundreds of panels only pays for the visible ones.
@@ -94,7 +94,7 @@ function Panel({ id }: { id: string }) {
           ? 'hidden' : undefined,
         pointerEvents: ghost ? 'none' : undefined,
         // the UI inspector floats above the drawing SVG (a positive z-index beats
-        // the later-in-DOM, z-auto DrawingLayer in this stacking context).
+        // any later-in-DOM, z-auto DrawingRun svg in this stacking context).
         zIndex: shape.meta?.topmost ? 50 : undefined,
       }}
     >
@@ -109,15 +109,32 @@ function Panel({ id }: { id: string }) {
 // signals (which fire inside, independent of props). This is the big mobile
 // pan/pinch win — pan/zoom updates one transform instead of the whole subtree.
 const MemoPanel = memo(Panel)
-const MemoDrawings = memo(DrawingLayer)
+const MemoDrawings = memo(DrawingRun)
 
 export function PanelLayer() {
   const rootRef = useRef<HTMLDivElement>(null)
   const camLayerRef = useRef<HTMLDivElement>(null)
-  // Only panels render in the DOM layer; drawings/arrows render in the SVG
-  // DrawingLayer below. (typeName never changes per record, so peeking it
-  // untracked is fine — the filter re-runs only when the id list changes.)
-  const ids = useValue('ids', () => store.getIds().filter((id) => store.peek(id)?.typeName === 'panel'), [])
+  // The z-order, as DOM children: each panel is a div; each maximal run of
+  // consecutive drawings/arrows is one SVG (DrawingRun). Walking the ONE id
+  // list keeps DOM order == z-order, so drawings can interleave with panels.
+  // Runs are encoded as 'd:' + space-joined ids; panels as 'p:' + id. The
+  // result is a joined string so useValue's Object.is check sees "unchanged"
+  // when the list didn't move. (typeName never changes per record, so peeking
+  // it untracked is fine — this re-runs only when the id list changes.)
+  const layout = useValue('layout', () => {
+    const out: string[] = []
+    let run: string[] = []
+    for (const id of store.getIds()) {
+      const t = store.peek(id)?.typeName
+      if (t === 'panel') {
+        if (run.length) { out.push('d:' + run.join(' ')); run = [] }
+        out.push('p:' + id)
+      } else if (t === 'drawing' || t === 'arrow') run.push(id)
+    }
+    if (run.length) out.push('d:' + run.join(' '))
+    return out.join('\n')
+  }, [])
+  const children = layout ? layout.split('\n') : []
   const dark = useValue('dark', () => store.instance().darkMode, [])
   const grid = useValue('grid', () => store.instance().gridOn, [])
   // Background grid (toggled in Settings): a CSS line grid on the static root that
@@ -204,15 +221,15 @@ export function PanelLayer() {
         data-pc-camera-layer=""
         style={{ position: 'absolute', left: 0, top: 0, transform: layerTransform, transformOrigin: '0 0' }}
       >
-        {/* Drawings sent behind the panels (send-to-back) render below them. */}
-        <MemoDrawings below />
-        {ids.map((id) => (
-          <MemoPanel key={id} id={id} />
-        ))}
-        {/* Drawings/arrows render ABOVE the panels by default so user ink/arrows
-            can sit on top of panel content (e.g. an arrow over a slider). The SVG
-            is pointer-transparent, so the panels underneath stay interactive. */}
-        <MemoDrawings />
+        {/* z-order, in DOM order. A fresh drawing/arrow appends to the list, so it
+            lands on top; the SVGs are pointer-transparent, so panels under an
+            arrow stay interactive. A run's key is its first id: a run only
+            re-mounts when its leading record moves, which is a reorder anyway. */}
+        {children.map((c) =>
+          c.startsWith('p:')
+            ? <MemoPanel key={c.slice(2)} id={c.slice(2)} />
+            : <MemoDrawings key={'d:' + c.slice(2).split(' ')[0]} ids={c.slice(2)} />,
+        )}
       </div>
       <SelectionOverlay />
     </div>

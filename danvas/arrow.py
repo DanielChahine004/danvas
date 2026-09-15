@@ -90,10 +90,10 @@ class Arrow:
         return self
 
     # -- stacking order (z-index) ---------------------------------------------
-    # Arrows share the browser's ONE global z-order with shapes and panels;
-    # these mirror the panel/shape methods. A fresh arrow starts on top;
-    # relative to panels an arrow is either above ALL of them or below ALL
-    # of them (drawings render in two passes around the panel layer).
+    # Arrows share the browser's ONE global z-order with shapes and panels,
+    # and the DOM renders it faithfully, so an arrow can sit between two
+    # panels (above the notes it links, below an open one). These mirror
+    # the panel/shape methods. A fresh arrow starts on top.
     def to_front(self):
         """Raise this arrow above everything else on the canvas, live.
 

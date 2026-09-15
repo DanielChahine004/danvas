@@ -1,8 +1,7 @@
-// The drawing layer: an SVG rendered inside the camera transform, BELOW the
-// panels (the v1 z-band: drawings under panels). It renders Python-managed canvas
-// shapes (canvas.geo/text/line/frame) and connector arrows (canvas.connect).
-// Arrows reroute reactively as their bound endpoints move. Display-only in v1
-// (pointer-transparent) — user-drawn ink + drawing tools are a later milestone.
+// The drawing layer: SVG runs rendered inside the camera transform, interleaved
+// with the panels in z-order (see DrawingRun). It renders Python-managed canvas
+// shapes (canvas.geo/text/line/frame), user ink, and connector arrows
+// (canvas.connect). Arrows reroute reactively as their bound endpoints move.
 import { store } from '../engine/store'
 import { isSourceTagHidden, tagOfComponentId } from '../bridge'
 import { useValue } from './EngineContext'
@@ -86,30 +85,17 @@ function edgePoint(b: { x: number; y: number; w: number; h: number }, towards: {
   return { x: cx + dx * scale, y: cy + dy * scale }
 }
 
-// Drawings render in TWO passes around the panels so a shape can sit UNDER a panel
-// (send-to-back) or over it (default). The split point is the first panel in the
-// global z-order (idList): drawings before it go in the `below` layer, the rest
-// above. So a freshly-drawn shape lands on top; "send to back" drops it under the
-// panels (which stay clickable). `below` selects which bucket this instance draws.
-export function DrawingLayer({ below = false }: { below?: boolean }) {
-  const ids = useValue(
-    'draw-ids:' + below,
-    () => {
-      const all = store.getIds()
-      let cut = all.findIndex((id) => store.peek(id)?.typeName === 'panel')
-      if (cut < 0) cut = all.length
-      return all.filter((id, i) => {
-        const t = store.peek(id)?.typeName
-        if (t !== 'drawing' && t !== 'arrow') return false
-        return below ? i < cut : i >= cut
-      })
-    },
-    [below],
-  )
-  if (!ids.length) return null
+// Drawings, arrows and panels share ONE z-order (the store's id list), and the
+// DOM renders it faithfully: PanelLayer walks the list in order and emits each
+// panel as its own div and each maximal run of consecutive drawings/arrows as
+// one SVG (this component). DOM order == z-order, so a shape or arrow can sit
+// between two panels — above the ones it connects, below an open note.
+// `ids` is the run's record ids, space-joined (a string so memo() compares it).
+export function DrawingRun({ ids }: { ids: string }) {
+  if (!ids) return null
   return (
-    <svg data-pc-drawings={below ? 'below' : ''} style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', userSelect: 'none' }}>
-      {ids.map((id) => (
+    <svg data-pc-drawings="" style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', userSelect: 'none' }}>
+      {ids.split(' ').map((id) => (
         <Drawn key={id} id={id} />
       ))}
     </svg>
@@ -147,7 +133,8 @@ function Drawn({ id }: { id: string }) {
   if (rec.typeName === 'drawing') el = <DrawingShape rec={rec} />
   else if (rec.typeName === 'arrow') el = <ArrowShape rec={rec} />
   else return null
-  return erasing ? <g opacity={0.4}>{el}</g> : el
+  // tagged so tests/tools can find a drawing's DOM node (and its z-position).
+  return <g data-pc-drawing-id={id} opacity={erasing ? 0.4 : undefined}>{el}</g>
 }
 
 function DrawingShape({ rec }: { rec: DrawingRecord }) {

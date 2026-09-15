@@ -90,10 +90,9 @@ class BaseShape:
             self._bridge.remove_shape(self.id)
 
     # -- stacking order (z-index) ---------------------------------------------
-    # Shapes, arrows and panels share ONE global z-order in the browser, so
-    # these mirror the panel methods exactly. One structural bound: drawings
-    # and arrows render in two passes around the panels, so relative to
-    # panels a shape is either above ALL of them or below ALL of them.
+    # Shapes, arrows and panels share ONE global z-order in the browser and
+    # the DOM renders it faithfully (a shape can sit between two panels), so
+    # these mirror the panel methods exactly.
     def to_front(self):
         """Raise this shape above everything else on the canvas, live.
 

@@ -272,6 +272,68 @@ def test_order_frame_restacks_shapes_and_arrows(page_state):
         timeout=10_000)
 
 
+def test_drawings_interleave_with_panels_in_dom(page_state):
+    # Drawings/arrows and panels share ONE z-order, and the DOM renders it
+    # faithfully: a shape sent to the back sits BELOW every panel div, an
+    # arrow left on top sits ABOVE them, and one moved to just above a
+    # given panel lands between two panels (user report: an arrow could
+    # only be above ALL panels or below ALL of them, so a leader always
+    # crossed an open note).
+    page, errors, src = page_state
+    src._send({"type": "shape", "id": "zi1", "shapeType": "geo",
+               "x": 1200, "y": 400, "props": {"w": 60, "h": 40,
+                                              "geo": "rectangle"}})
+    src._send({"type": "arrow", "id": "zia", "start": "slider",
+               "end": "label"})
+    find = ("(sfx) => [...window.__danvas.store.ids()]"
+            ".findIndex(i => i.endsWith(':' + sfx) || i === 'shape:' + sfx)")
+    page.wait_for_function(
+        "() => ['zi1','zia'].every(sfx => (%s)(sfx) >= 0)" % find,
+        timeout=10_000)
+    src._send({"type": "order", "id": "zi1", "op": "back"})
+    page.wait_for_function("() => (%s)('zi1') === 0" % find, timeout=10_000)
+
+    # DOM position of a record relative to the panel divs: -1 below all,
+    # +1 above all, else the number of panels it sits above.
+    dom_rank = """(sfx) => {
+      const layer = document.querySelector('[data-pc-camera-layer]');
+      const kids = [...layer.children];
+      const node = layer.querySelector(
+        '[data-pc-drawing-id$=":' + sfx + '"], [data-pc-drawing-id="shape:' + sfx + '"]');
+      if (!node) return null;
+      const svg = node.closest('svg');
+      const at = kids.indexOf(svg);
+      const panels = kids.map((k, i) => [k, i]).filter(([k]) => k.hasAttribute('data-pc-panel-id'));
+      const above = panels.filter(([, i]) => i < at).length;
+      if (above === 0) return -1;
+      if (above === panels.length) return panels.length;
+      return above;
+    }"""
+    page.wait_for_function(
+        "() => (%s)('zi1') === -1 && (%s)('zia') === "
+        "document.querySelectorAll('[data-pc-panel-id]').length"
+        % (dom_rank, dom_rank), timeout=10_000)
+
+    # Now step the arrow down: 'backward' moves it one slot in the shared
+    # list (past a shape or a panel alike), so after a few steps it is under
+    # the topmost panel but still above the rest -- a position the old
+    # two-pass renderer could not draw.
+    n_panels = page.evaluate(
+        "() => document.querySelectorAll('[data-pc-panel-id]').length")
+    assert n_panels >= 2, n_panels
+    for _ in range(8):
+        before = page.evaluate("() => (%s)('zia')" % find)
+        src._send({"type": "order", "id": "zia", "op": "backward"})
+        page.wait_for_function("() => (%s)('zia') < %d" % (find, before),
+                               timeout=10_000)
+        rank = page.evaluate("() => (%s)('zia')" % dom_rank)
+        if 0 < rank < n_panels:
+            break
+    else:
+        pytest.fail("arrow never landed between two panels")
+    assert not errors, errors
+
+
 def test_auto_flow_lands_below_explicit_panels(page_state):
     # The auto-flow must not bury owner-positioned content: a panel with no
     # x/y flows BELOW the explicitly-placed panels, not into a fixed-origin
