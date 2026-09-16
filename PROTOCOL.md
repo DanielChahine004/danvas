@@ -144,8 +144,10 @@ Every served canvas is a hub by default, so this works against a plain
 
 - **Down** (hub → source): the normal subscriber stream — `welcome`, then the
   full state replay of the hub's canvas (read access), plus `input` / `layout`
-  frames for the panels this source registered (its callbacks), with the
-  `s<N>:` namespace already stripped.
+  / `set_props` / `request` frames for the panels this source registered (its
+  callbacks), with the `s<N>:` namespace already stripped and a `viewer` field
+  carrying the sender's roster id (server-stamped, never the client's claim) —
+  look it up in the `presence` roster for the sender's name/color/role.
 - **Up** (source → hub): `register` / `update` / `remove` / `arrow` / `draw`
   declare and mutate this source's own panels — the hub namespaces, caches,
   and fans them out to every browser. Anything else (`heartbeat`, an `input`

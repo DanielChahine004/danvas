@@ -273,6 +273,9 @@ def test_browser_input_routes_to_owner_stripped(hub):
             await br.send({"type": "input", "id": reg["id"],
                            "payload": {"value": 7}})
             got = await src.recv_until(lambda m: m.get("type") == "input")
+            # the hub stamps the sender's roster id so the owner can hand
+            # its handlers the documented viewer dict (id/name/color/role)
+            assert isinstance(got.pop("viewer", None), str), got
             assert got == {"type": "input", "id": "sl",
                            "payload": {"value": 7}}        # namespace stripped
     _run(go())
@@ -313,6 +316,7 @@ def test_set_props_routes_to_owner(hub):
             await br.send({"type": "set_props", "id": reg["id"],
                            "props": {"min": 5}})
             got = await src.recv_until(lambda m: m.get("type") == "set_props")
+            assert isinstance(got.pop("viewer", None), str), got   # sender stamp
             assert got == {"type": "set_props", "id": "sp",
                            "props": {"min": 5}}
     _run(go())

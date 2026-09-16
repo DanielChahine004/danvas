@@ -1202,6 +1202,11 @@ class _MergeHost:
             return True
         out = dict(msg)
         out["id"] = orig
+        # Stamp WHO did it (the sender's roster id, server-side) so the owner
+        # can hand its handlers the documented viewer dict — same as danvasd.
+        sender = self.bridge._viewers.get(ws)
+        if sender and sender.get("id"):
+            out["viewer"] = sender["id"]
         self._unoffset_out(up, out, kind)
         self._record(kind, cid, msg)
         if kind == "request" and msg.get("reqId") is not None:
