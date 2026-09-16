@@ -234,6 +234,8 @@ def test_e2e_dialin_source_on_a_real_canvas():
                 while True:
                     m = src.receive_json()
                     if m.get("type") == "input":
+                        # the hub stamps the sender's roster id (see PROTOCOL.md)
+                        assert isinstance(m.pop("viewer", None), str), m
                         assert m == {"type": "input", "id": "temp",
                                      "payload": {"value": 70}}
                         break
