@@ -55,7 +55,7 @@ def handle(value):
 canvas.serve(port=8000)   # opens the browser, blocks
 ```
 
-![The hello-world canvas: a SERVO_1 slider whose value live-updates a STATUS label reading "servo at 113"](docs/hello_world.png)
+![The hello-world canvas: a SERVO_1 slider whose value live-updates a STATUS label reading "servo at 113"](docs/screenshots/hello_world.png)
 
 ## The mental model
 
@@ -196,6 +196,8 @@ canvas.insert(s, x=80, y=80)
 | `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True`, `keep_mounted=True` (survive scroll-out with state intact) |
 | `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
+
+![The native panels on one canvas: label, slider, toggle, button, text field, markdown, table, plot, heatmap, histogram, live plot, image, download, upload, file browser, chat, and a custom HTML panel](docs/screenshots/catalogue.png)
 
 Most `color=` panels expose `.color` (and most accept `lock`/`chrome` flags) —
 see [Controlling panels live](#controlling-panels-live).
@@ -774,6 +776,8 @@ arrow.update(color="red", arrowhead_end="diamond")
 canvas.disconnect(arrow)                          # by object or by name
 ```
 
+![A signal-flow diagram: INPUT, GAIN, and OUTPUT panels wired with a "scale" arrow, a bent "result" arrow, and a dashed "monitor" arrow down to a STATUS panel reading "60 x 4 = 240"](docs/screenshots/signal_flow.png)
+
 | Arrow prop | Values |
 |---|---|
 | `text` | caption drawn on the arrow (live-writable; omit for none) |
@@ -825,6 +829,8 @@ canvas.set_view(navigation='scroll_y')                     # wheel scrolls inste
 canvas.set_view(read_only=True, ui=False, roles=["user"])  # scope to a login role
 canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)     # one viewer only
 ```
+
+![The page_layout example in scroll_y navigation: markdown headings, a slider, a Plotly chart, and a table stacked in one centred column like a web page](docs/screenshots/page_layout.png)
 
 Omit `x`/`y`/`zoom` and each viewer opens framed on the panels they can see. A
 constrained `navigation` mode makes the scroll wheel **pan** the free axis and
