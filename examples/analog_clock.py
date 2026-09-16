@@ -49,7 +49,8 @@ CLOCK_HTML = """
     text.setAttribute("font-size", "14px");
     text.setAttribute("fill", "#333");
     // Translate the numbers out to a radius of 80 before rotating them
-    text.setAttribute("transform", `rotate(${i * 30}) translate(80, 0) rotate(-${i * 30})`);
+    // Undo the position rotation, plus the group's -90 so the digits stand upright
+    text.setAttribute("transform", `rotate(${i * 30}) translate(80, 0) rotate(${90 - i * 30})`);
     text.textContent = i;
     numbersGroup.appendChild(text);
   }
