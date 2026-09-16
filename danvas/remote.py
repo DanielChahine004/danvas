@@ -247,6 +247,8 @@ class RemoteCanvas(Canvas):
             state = comp.state_payload()
             if state:
                 yield {"type": "update", "id": comp.id, "payload": state}
+        for shape in self._bridge._shapes.values():
+            yield shape.register_message()
         for arrow in self._arrows:
             yield arrow.register_message()
 
@@ -396,7 +398,16 @@ def _dispatch_hub_frame(bridge, msg):
         # roster entry (canvas.viewers[i]["cursor"]).
         v = bridge._viewers.get(msg.get("id"))
         if v is not None:
-            v["cursor"] = msg.get("pos") or msg.get("cursor")
+            x, y = msg.get("x"), msg.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                v["cursor"] = {"x": float(x), "y": float(y)}
+            else:
+                v["cursor"] = msg.get("pos") or msg.get("cursor")
+            # canvas.on_cursor observers, off the socket thread — the same
+            # fan-out the embedded server did.
+            if getattr(bridge, "_cursor_taps", None):
+                bridge._dispatch.submit(
+                    lambda vv=dict(v): bridge._tap_cursor(vv))
         return
     if kind == "chat":
         # The broker relays + replays chat among browsers itself; deliver it to
@@ -461,24 +472,28 @@ def _dispatch_hub_frame(bridge, msg):
             if shape is not None:
                 bridge._apply_shape_layout(shape, dict(msg), None)
         return
+    # The broker stamps the sender's roster id on relayed frames (`viewer`).
+    # The mirrored roster (bridge._viewers) is keyed by that id, so it stands
+    # in for the socket the embedded server keyed on: `_viewer_of` resolves it
+    # to the documented handler dict (id/name/color/cursor/device/role).
+    who = msg.get("viewer")
     if kind == "input":
         payload = msg.get("payload") or {}
         bridge._dispatch.submit(
-            lambda c=comp, p=payload: bridge._dispatch_input(c, p, None))
+            lambda c=comp, p=payload, w=who: bridge._dispatch_input(c, p, w))
     elif kind == "layout":
         bridge._dispatch.submit(
-            lambda c=comp, m=dict(msg): bridge._dispatch_layout(c, m, None))
+            lambda c=comp, m=dict(msg), w=who: bridge._dispatch_layout(c, m, w))
     elif kind == "request":
         # A panel's canvas.request(data): the broker routed the browser's
         # request to us (the owner). Answer it on the dispatch machinery and
         # reply with a `response` correlated by reqId — the broker fans it back
         # to exactly the asker (the same pending-request routing a browser gets
         # from the embedded server). The broker already gated operability, so
-        # dispatch straight to the handler; the requester's viewer identity
-        # isn't carried over the hub, so on_request's second arg is empty.
+        # dispatch straight to the handler.
         bridge._dispatch.submit(
-            lambda c=comp, r=msg.get("reqId"), d=msg.get("data"):
-            bridge._dispatch_request(c, r, d, None))
+            lambda c=comp, r=msg.get("reqId"), d=msg.get("data"), w=who:
+            bridge._dispatch_request(c, r, d, w))
     elif kind == "set_props":
         # The shared property plane, hub-routed: the broker delivered another
         # peer's write on OUR panel (id already stripped). Apply through the
@@ -826,6 +841,13 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
             state = comp.state_payload()
             if state:
                 yield {"type": "update", "id": comp.id, "payload": state}
+        # Managed shapes (canvas.geo/text/note/...) made BEFORE serve() only
+        # exist in bridge._shapes — add_shape's broadcast had no client yet —
+        # so they must ride the replay like panels do, or the README's own
+        # shapes example shows an empty canvas. Before the arrows: an arrow
+        # may bind to a shape.
+        for shape in bridge._shapes.values():
+            yield shape.register_message()
         for arrow in canvas._arrows:
             yield arrow.register_message()
 

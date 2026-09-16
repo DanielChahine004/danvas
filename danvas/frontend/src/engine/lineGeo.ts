@@ -481,8 +481,65 @@ export function linePointAt(a: Pt, b: Pt, bend: number, kind: ArrowKind, t: numb
 // marquee so you grab the actual drawn arc (perimeter-to-perimeter when bound), not
 // the part hidden inside a bound shape or the straight chord.
 export function lineSamples(rec: any): Pt[] {
+  const poly = polyPoints(rec)
+  if (poly.length > 2) return rec?.props?.spline === 'cubic' ? catmullRomSamples(poly) : poly
   const clip = clipArrow(rec)
   return clip ? clip.visible : []
+}
+
+// --- multi-point lines (canvas.line([...]) with 3+ control points) -----------
+// The line model above is a two-point connector (bindings, bend, elbow). A
+// Python polyline/spline carries every control point in `props.points`; these
+// render it through ALL of them, straight or as a Catmull-Rom cubic, and give
+// hit-testing the same samples. Bound lines never take this path.
+
+// All of an unbound line's control points, ordered, in page space ([] if < 2).
+export function polyPoints(rec: any): Pt[] {
+  if (rec?.props?.bindStart || rec?.props?.bindEnd) return []
+  const raw = rec?.props?.points ? (Object.values(rec.props.points) as any[]) : []
+  if (raw.length < 2) return []
+  const ord = [...raw].sort((u, v) => (u.index < v.index ? -1 : 1))
+  return ord.map((p) => ({ x: rec.x + p.x, y: rec.y + p.y }))
+}
+
+// Catmull-Rom spline through `pts` (uniform, tension 0.5), sampled `n` per leg.
+export function catmullRomSamples(pts: Pt[], n = 12): Pt[] {
+  if (pts.length < 3) return pts
+  const out: Pt[] = [pts[0]]
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]
+    for (let k = 1; k <= n; k++) {
+      const t = k / n
+      const t2 = t * t
+      const t3 = t2 * t
+      out.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      })
+    }
+  }
+  return out
+}
+
+// SVG path for a multi-point line: straight legs, or the cubic Bezier form of the
+// Catmull-Rom spline (exact, not sampled) when `spline === 'cubic'`.
+export function polyPathD(pts: Pt[], spline?: string): string {
+  if (pts.length < 2) return ''
+  if (spline !== 'cubic' || pts.length < 3) return 'M ' + pts.map((p) => `${p.x},${p.y}`).join(' L ')
+  let d = `M ${pts[0].x},${pts[0].y}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }
+    const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }
+    d += ` C ${c1.x},${c1.y} ${c2.x},${c2.y} ${p2.x},${p2.y}`
+  }
+  return d
 }
 
 // Polyline samples of a CONNECTOR arrow's VISIBLE (clipped, perimeter-to-perimeter)

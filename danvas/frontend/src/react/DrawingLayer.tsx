@@ -8,7 +8,7 @@ import { useValue } from './EngineContext'
 import { freehandStrokePath } from './freehand'
 import { colorOf, DRAW_FONT, labelEllipse, alignCss, type Align } from './palette'
 import { sanitizeRich, richToPlain } from './richtext'
-import { lineKind, clipArrow, recordNormal, polyPointAt, type ConnectorClip } from '../engine/lineGeo'
+import { lineKind, clipArrow, recordNormal, polyPointAt, polyPoints, polyPathD, type ConnectorClip } from '../engine/lineGeo'
 import { recordBBox } from '../engine/hittest'
 import { erasingIds } from '../engine/interaction'
 import type { ArrowRecord, DrawingRecord, CanvasRecord } from '../engine/types'
@@ -319,6 +319,27 @@ function LineShape({ rec, editing, stroke, sw, dashArray, opacity }: { rec: Draw
   const be = props.bindEnd
   useValue('lb-s:' + rec.id, () => (bs ? store.get(bs) : undefined), [bs])
   useValue('lb-e:' + rec.id, () => (be ? store.get(be) : undefined), [be])
+  // A Python polyline / cubic spline (canvas.line with 3+ points): draw through
+  // EVERY control point. The connector model below is two-point (bend/elbow/
+  // bindings) and used to draw only the first-to-last chord of these.
+  const poly = polyPoints(rec)
+  if (poly.length > 2) {
+    return (
+      <path
+        d={polyPathD(poly, props.spline)}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={sw}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dashArray}
+        opacity={opacity}
+        pointerEvents="visibleStroke"
+        markerStart={props.arrowStart ? 'url(#pc-arrowhead)' : undefined}
+        markerEnd={props.arrowEnd ?? props.arrow ? 'url(#pc-arrowhead)' : undefined}
+      />
+    )
+  }
   const clip = clipArrow(rec)
   if (!clip || clip.visible.length < 2) return null
   const kind = clip.kind

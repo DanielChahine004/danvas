@@ -1443,6 +1443,9 @@ class Bridge:
     # could otherwise spam the console).
 
     def _viewer_of(self, ws):
+        # Keyed by socket under the embedded server, by roster id under the
+        # broker (remote.py mirrors the hub's roster by id and passes the
+        # stamped sender id in place of a socket).
         return self._viewers.get(ws) or {}
 
     def _may_see(self, comp, viewer):

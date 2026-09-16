@@ -1257,6 +1257,14 @@ function createManagedShape(msg: any): void {
     const size = measuredTextProps(props)
     if (size) Object.assign(props, size)
   }
+  // Python ink (canvas.draw / canvas.highlight) arrives as tldraw-style
+  // `segments: [{type, points: [{x,y,z}]}]`; the renderer and hit-test read
+  // a flat `points` list. Flatten once here so every consumer sees one shape
+  // of record — before this, code-made ink never drew at all.
+  if ((msg.shapeType === 'draw' || msg.shapeType === 'highlight')
+      && !props.points && Array.isArray(props.segments)) {
+    props.points = props.segments.flatMap((s: any) => Array.isArray(s?.points) ? s.points : [])
+  }
   const rec: DrawingRecord = {
     typeName: 'drawing',
     id: shapeId,

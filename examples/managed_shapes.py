@@ -102,7 +102,7 @@ canvas.highlight([(50, 600), (250, 600)], color="light-green", size="l",
 counter = canvas.label("draw-counter", value="user-drawn shapes: 0",
                        x=40, y=740)
 last_event = canvas.label("last-event", value="—  (draw something on the canvas)",
-                          x=40, y=790, w=780)
+                          x=40, y=840, w=780)
 
 # ---------------------------------------------------------------------------
 # 8. Ephemeral drawing observation

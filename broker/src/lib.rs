@@ -1297,7 +1297,17 @@ async fn handle(
         let mut h = hub.lock().unwrap();
         h.browsers.remove(&conn_id);
         h.conns.remove(&conn_id);
-        h.viewers.remove(&conn_id);
+        if let Some(v) = h.viewers.remove(&conn_id) {
+            // peers drop the departed viewer's cursor at once (the roster
+            // refresh below covers the count; the cursor overlay is keyed
+            // by id and only hears cursor/cursor_gone).
+            if v.get("cursor").is_some() {
+                let gone = json!({"type": "cursor_gone",
+                                  "id": v.get("id").cloned().unwrap_or(Value::Null)})
+                    .to_string();
+                h.fanout_browsers(&gone);
+            }
+        }
         for subs in h.subs.values_mut() {
             subs.remove(&conn_id);
         }
@@ -2171,6 +2181,37 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
         }
         return;
     }
+    if kind == "cursor" {
+        // High-rate pointer telemetry (the browser throttles to one per frame
+        // and dead-bands it). Off unless the owner enabled cursors. Stored on
+        // the roster entry, relayed to the OTHER browsers for peer rendering
+        // (identity server-stamped, like chat), and to the sources so
+        // canvas.viewers[i]["cursor"] / canvas.on_cursor work through the
+        // broker as they did embedded. Never ledgered or tapped: it's spam.
+        let mut h = hub.lock().unwrap();
+        if !h.cursors {
+            return;
+        }
+        let (Some(x), Some(y)) = (frame.get("x").and_then(Value::as_f64),
+                                  frame.get("y").and_then(Value::as_f64)) else { return };
+        let text = {
+            let Some(v) = h.viewers.get_mut(&conn_id) else { return };
+            let obj = v.as_object_mut().unwrap();
+            obj.insert("cursor".into(), json!({"x": x, "y": y}));
+            json!({"type": "cursor", "id": obj.get("id").cloned().unwrap_or(Value::Null),
+                   "x": x, "y": y,
+                   "name": obj.get("name").cloned().unwrap_or(Value::Null),
+                   "color": obj.get("color").cloned().unwrap_or(Value::Null)})
+            .to_string()
+        };
+        h.fanout_browsers_except(&text, conn_id);
+        for src in h.sources.values() {
+            if let Some(tx) = &src.tx {
+                let _ = tx.send(Out::T(text.clone()));
+            }
+        }
+        return;
+    }
     if kind == "chat" {
         let Some(text) = frame.get("text").and_then(Value::as_str) else { return };
         if text.trim().is_empty() {
@@ -2399,6 +2440,14 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                     let mut out = frame.clone();
                     let obj = out.as_object_mut().unwrap();
                     obj.insert("id".into(), Value::String(rest.to_string()));
+                    // Stamp WHO did it: the sender's roster id, server-side
+                    // (never the client's claim), so the owner can hand its
+                    // handlers the documented viewer dict — id/name/color/
+                    // device/role — by looking the id up in the mirrored
+                    // roster. Without it every broker-served handler got {}.
+                    if let Some(vid) = h.viewers.get(&conn_id).and_then(|v| v.get("id")) {
+                        obj.insert("viewer".into(), vid.clone());
+                    }
                     // merged-view coords -> the source's own coords
                     if kind == "layout" {
                         shift_xy(obj, -offset.0, -offset.1);
