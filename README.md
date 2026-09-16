@@ -14,6 +14,8 @@ desktops — share one live canvas, with a viewer roster, live cursors, chat, an
 freehand drawing the host can read back. Share it across your LAN, behind a
 password, or over a public HTTPS tunnel — all built in, no extra services.
 
+![Two browsers on one canvas: the roster reads "2 viewers" and the other viewer's live cursor is drawn on the canvas](docs/screenshots/multiuser.png)
+
 ## Install
 
 ```bash
@@ -422,6 +424,8 @@ def adapt(viewer):
 
 ## Custom & React panels
 
+![A Custom panel running an SVG analog clock pushed from Python beside a React panel whose ping button has been clicked twice, with a STATUS label reading "ping #2"](docs/screenshots/custom_react.png)
+
 Two factories ship your own UI from Python. **`react`** mounts JSX as a real React
 subtree (native, theme-aware, interactive from first hover — reach for this
 first); **`custom`** drops HTML/CSS/JS into a sandboxed iframe. They share the
@@ -734,6 +738,8 @@ strokes, text, sticky notes, lines, frames, highlighter marks. These are
 Python-owned: they survive reload, update live, and are excluded from the
 free-form drawing sync.
 
+![Managed shapes: five geo shapes (rectangle, ellipse, diamond, star, cloud), a dashed status box, floating text, a red freehand wave, a violet rough circle, a black zigzag polyline, a blue cubic spline, two sticky notes, a frame, and two highlighter marks](docs/screenshots/shapes.png)
+
 | Factory | Creates | Key kwargs |
 |---|---|---|
 | `canvas.geo(x, y, w, h, geo=…)` | rectangle, ellipse, cloud, star, diamond, … | `geo`, `color`, `fill`, `dash`, `size`, `text` |
@@ -843,6 +849,8 @@ restores them without a restart (Python kept them alive). Override with
 `serve(ui_inspector=…, ui_graveyard=…)`.
 
 ## Roles: one rule for everything per-viewer
+
+![The leaderboard example seen by two logins side by side: the admin sees an entry form and the board; the viewer sees the board only](docs/screenshots/roles.png)
 
 > **Trust model in one line:** everyone admitted to a canvas (password/LAN/
 > tunnel) can put live UI — including JSX that runs in every viewer's browser
