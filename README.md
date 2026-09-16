@@ -206,22 +206,13 @@ see [Controlling panels live](#controlling-panels-live).
 
 ## Two bigger builds
 
-Both are in [`examples/`](examples/README.md) and run as shown, live.
+Parametric CAD in the 3D panel ([`cad_model3d.py`](examples/cad_model3d.py)): sliders rebuild a build123d part and push mesh, point cloud, line net, isosurface and volume layers into `Model3D`.
 
-**Parametric CAD in the 3D panel** — [`cad_model3d.py`](examples/cad_model3d.py):
-two sliders rebuild a build123d part; each change pushes the mesh, a
-value-coloured point cloud sampled inside it, a line net, an isosurface shell
-and a ray-marched volume into `Model3D` as separate layers, and the TRACE
-button animates a helix through it.
+![Two sliders rebuild a build123d part in the Model3D panel, then a helix traces itself around it](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/cad_model3d.gif)
 
-![Two sliders rebuild a build123d part in the Model3D panel: the polygon gains sides, the bore widens, then a helix traces itself around the part](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/cad_model3d.gif)
+A live LTspice front-end ([`circuit_dashboard.py`](examples/circuit_dashboard.py)): release a slider, LTspice re-simulates, and the schematic, transient, Bode plot and results redraw.
 
-**A live LTspice front-end** — [`circuit_dashboard.py`](examples/circuit_dashboard.py):
-five sliders are a Twin-T notch filter's knobs; releasing one writes a
-netlist, batch-runs LTspice, and redraws the schemdraw schematic, the
-transient ripple plot, the Bode plot and a results table.
-
-![Releasing a slider re-runs LTspice: the status flips to Running, then the schematic, transient plot, Bode plot and results redraw with the notch moved](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/circuit_dashboard.gif)
+![Releasing a slider re-runs LTspice and every panel redraws with the notch moved](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/circuit_dashboard.gif)
 
 ## The three data verbs
 
