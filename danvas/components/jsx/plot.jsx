@@ -29,7 +29,15 @@ function Component({ canvas, props }) {
     // expect on a chart. displaylogo:false drops the Plotly link. Full button set
     // is kept: Plot renders arbitrary figures (incl. scatter, where box/lasso
     // select are meaningful).
-    Plotly.react(node, fig.data || [], fig.layout || {}, { responsive: true, displaylogo: false });
+    // Plotly's default margins (80/80/100/80) eat a panel-sized chart: in a
+    // 300x220 panel they leave a 140x40 plot area. Default to tight margins
+    // (a title still gets headroom); a figure that sets layout.margin wins.
+    const layout = Object.assign({}, fig.layout || {});
+    if (!layout.margin) {
+      const titled = layout.title && (typeof layout.title === "string" || layout.title.text);
+      layout.margin = { l: 48, r: 16, t: titled ? 40 : 16, b: 40 };
+    }
+    Plotly.react(node, fig.data || [], layout, { responsive: true, displaylogo: false });
   });
   return (
     <div style={{ flex: 1, width: "100%", minHeight: 0, position: "relative" }}>

@@ -179,7 +179,7 @@ function Component({ canvas, props }) {
     <div className={"pc-tbl" + (editMode ? " pc-editable" : "")}>
       <style>{`__CSS__`}</style>
       <div className="pc-bar">
-        <input className="pc-filter" placeholder="filter rows\u2026" value={q}
+        <input className="pc-filter" placeholder="filter rows…" value={q}
                onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         <button className={"pc-btn" + (showIdx ? " on" : "")} title="show row index"
                 onClick={() => setShowIdx((v) => !v)}>#</button>
@@ -224,7 +224,7 @@ function Component({ canvas, props }) {
               <button className="pc-pg" title="previous page"
                       onClick={() => gotoPage(pg - 1)}>{"\u2039"}</button>
               <input className="pc-page" type="number" min={1} max={npages} value={pg}
-                     title="page \u2014 type a number or use the up/down arrows"
+                     title="page — type a number or use the up/down arrows"
                      onChange={(e) => gotoPage(parseInt(e.target.value, 10))} />
               <span className="pc-pages">{"/ " + npages.toLocaleString()}</span>
               <button className="pc-pg" title="next page"

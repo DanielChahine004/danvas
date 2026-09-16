@@ -354,3 +354,25 @@ def test_auto_flow_lands_below_explicit_panels(page_state):
         " return { fy: f.y, maxBottom: Math.max(...rest.map("
         "   s => s.y + (typeof s.props.h === 'number' ? s.props.h : 96))) }; }")
     assert placed["fy"] >= placed["maxBottom"], placed
+
+
+def test_unplaced_anchor_keeps_its_below_chain(page_state):
+    # An UNPLACED panel with a `below=` chain hanging off it (the page_layout
+    # example's title) must stay on top of its chain. The v0.6.7 flow fix
+    # counted rel-placed panels as owner-positioned, so the masonry re-pack
+    # pushed the flow-placed root beneath its own dependents.
+    page, errors, src = page_state
+    src.register_template("root", "label", text="I am the root")
+    src.register_template("kid", "label", text="I hang below root",
+                          rel={"kind": "below", "anchor": "root", "gap": 16})
+    get = ("(lbl) => { const s = window.__danvas.store;"
+           " const r = [...s.ids()].map(i => s.peek(i))"
+           ".find(x => x && x.typeName === 'panel' && x.props.label === lbl);"
+           " return r && [r.y, r.props.h]; }")
+    page.wait_for_function(
+        "() => { const g = %s; return !!g('root') && !!g('kid'); }" % get,
+        timeout=10_000)
+    time.sleep(1.0)                     # let the masonry re-pack settle
+    root, kid = page.evaluate("() => [(%s)('root'), (%s)('kid')]" % (get, get))
+    assert kid[0] >= root[0] + root[1], (root, kid)
+    assert abs(kid[0] - (root[0] + root[1] + 16)) < 1, (root, kid)

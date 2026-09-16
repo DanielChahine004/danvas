@@ -166,6 +166,7 @@ function relayoutFlow(): void {
       if (!shape || !p || (Math.abs(shape.x - p.x) < 0.5 && Math.abs(shape.y - p.y) < 0.5)) continue
       store.patch(it.id, { x: p.x, y: p.y })
       moves.push({ id: componentIdOf(it.id), x: p.x, y: p.y })
+      scheduleRelCascade(it.id) // a `below=` chain hanging off it follows
     }
   })
   for (const m of moves) sendRaw({ type: 'layout', auto: true, ...m })
@@ -206,6 +207,18 @@ function recordRel(shapeId: string, componentId: string, rel: any) {
   if (!relDeps.has(anchor)) relDeps.set(anchor, new Set())
   relDeps.get(anchor)!.add(shapeId)
   return spec
+}
+
+// Walk a rel chain to its root anchor: true when that root was placed by the
+// auto-flow (so the whole chain moves with the flow, and is not "explicit").
+function relRootIsFlow(spec: { anchor: string }): boolean {
+  let a = spec.anchor
+  const seen = new Set<string>()
+  while (relSpecs.has(a) && !seen.has(a)) {
+    seen.add(a)
+    a = relSpecs.get(a)!.anchor
+  }
+  return flowItems.has(a)
 }
 
 function resolveRel(
@@ -801,8 +814,12 @@ function registerComponent(msg: any): void {
     const auto = nextPosition(props.w, props.h)
     if (typeof px !== 'number') px = auto.x
     if (typeof py !== 'number') py = auto.y
-  } else {
-    noteExplicit(py, props.h)   // flow stays below owner-positioned panels
+  } else if (!(relPlaced && rel && relRootIsFlow(rel))) {
+    // flow stays below owner-positioned panels. A rel-placed panel whose chain
+    // is rooted in a FLOW-placed anchor is not owner-positioned — it derives
+    // from the flow. Counting it pushed its own anchor beneath it on re-pack
+    // (an unplaced title with a `below=` chain landed under the whole column).
+    noteExplicit(py, props.h)
   }
 
   const rec: PanelRecord = {
