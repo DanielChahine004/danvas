@@ -1,3 +1,10 @@
+"""Drop a uiverse.io CSS snippet into a Custom panel, unchanged.
+
+Paste the raw CSS + HTML of a community widget, wire its events to Python
+with canvas.custom(), and insert it chrome-less so the widget floats on the
+canvas as designed. Companion to react_styled_component.py (the
+styled-components flavour).
+"""
 import danvas
 
 # 1. PASTE RAW CSS FROM UIVERSE

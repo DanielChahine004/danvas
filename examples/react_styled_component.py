@@ -1,3 +1,10 @@
+"""A styled-components React widget as a native panel, no npm.
+
+Takes a uiverse.io styled-components snippet; canvas.react's from_uiverse
+rewrites the styled.div template literals into plain JSX + CSS the browser
+compiles in place. Companion to custom_styled_component.py (the raw-CSS
+flavour).
+"""
 import danvas
 
 

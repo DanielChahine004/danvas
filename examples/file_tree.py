@@ -1,3 +1,10 @@
+"""A file-tree browser as a React panel: Python walks the disk, JSX renders it.
+
+Python lists a directory into a nested structure and hands it to a React
+component as props; clicking a folder or file sends a `navigate`/`select`
+event back, Python re-walks and re-pushes. Chrome-less (frame=False,
+grabbable=False), so the tree floats directly on the canvas.
+"""
 import os
 import danvas
 

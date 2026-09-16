@@ -8,6 +8,7 @@ remember after editing anything generated:
 - ``gen_component_templates.py`` — component classes (JSX + CONTRACT) ->
   danvas/templates/components.json (guarded by tests/test_component_templates.py
   and tests/test_component_contracts.py)
+- ``gen_examples_index.py`` — examples/*.py docstrings -> examples/README.md
 
 Remember the consumers: the Rust SDK embeds components.json at compile time
 (cargo build after regenerating), and danvasd embeds the frontend dist AND
@@ -23,7 +24,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-    for script in ("gen_protocol.py", "gen_component_templates.py"):
+    for script in ("gen_protocol.py", "gen_component_templates.py",
+                   "gen_examples_index.py"):
         print(f"== {script}")
         subprocess.run([sys.executable, os.path.join(_HERE, script)],
                        check=True)

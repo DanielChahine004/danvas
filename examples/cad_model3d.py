@@ -1,3 +1,18 @@
+"""Parametric CAD in the Model3D panel: build123d part, point cloud, field layers.
+
+Two sliders (polygon sides, bore radius) rebuild a build123d part on every
+change and push it into the 3D viewer as LAYERS: the mesh, a value-coloured
+point cloud sampled inside it, a random line net, a helix curve the TRACE
+button animates, a translucent isosurface shell, and a ray-marched volume.
+Each layer update replaces only itself, so the camera and the other layers
+stay put. Also shows @canvas.on_edit: edit update_geometry(), save, and the
+canvas rebuilds.
+
+    pip install danvas build123d trimesh scipy numpy
+    python examples/cad_model3d.py
+"""
+import os
+import tempfile
 import time
 
 import danvas
@@ -31,6 +46,7 @@ def sample_inside(mesh, count, rng):
 
 
 canvas = danvas.Canvas()
+GLB = os.path.join(tempfile.gettempdir(), "danvas_cad_part.glb")
 sides_slider = canvas.slider("SIDES", min=3, max=120, step=1, default=6)
 radius_slider = canvas.slider("HOLE_RADIUS", min=1, max=19, default=5, below=sides_slider)
 trace_button = canvas.button("TRACE", text="▶ trace path", below=radius_slider)
@@ -56,13 +72,13 @@ def update_geometry():
         part = part - bore
 
         asm = Compound(children=[part])
-        export_gltf(asm, "part.glb", binary=True)
+        export_gltf(asm, GLB, binary=True)
 
         # Random points inside the part's volume, and random pairings of
         # them as segments. to_geometry() BAKES node transforms (the GLB's
         # root carries the Z-up -> Y-up rotation), so samples land in the
         # same frame the part renders in.
-        mesh = trimesh.load("part.glb").to_geometry()
+        mesh = trimesh.load(GLB).to_geometry()
         rng = np.random.default_rng(0)   # fixed seed: same points/pairs on
         n = N_POINTS & ~1                # every rebuild; even, so pairs
         pts = sample_inside(mesh, n, rng)   # come out whole
@@ -83,7 +99,7 @@ def update_geometry():
         field = 0.024 - np.sqrt(X ** 2 + Z ** 2)
 
         # >>> the viewer is LAYERS: each call replaces only its own layer.
-        viewer.layer("part").update("part.glb", mesh_color=STEEL)
+        viewer.layer("part").update(GLB, mesh_color=STEEL)
         viewer.layer("cloud").points(          # value-colored: radius from
             pts, color_by=np.hypot(pts[:, 0], pts[:, 2]))   # the bore axis
         viewer.layer("net").lines(pts[rng.permutation(n)].reshape(-1, 2, 3),
@@ -151,4 +167,4 @@ def _(_v):
         update_geometry()
 
 
-canvas.serve(open_browser=False)
+canvas.serve()

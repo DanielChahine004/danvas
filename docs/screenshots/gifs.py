@@ -53,8 +53,12 @@ def _save_gif(frames, path, fps=FPS, width=WIDTH):
               loop=0, optimize=True, disposal=1)
 
 
-def record(name, script, clip, viewport=(1000, 560), dark=True, out_dir=None):
-    """Run `clip(browser, port, opts, rec)` against a live canvas; write name.gif."""
+def record(name, script, clip, viewport=(1000, 560), dark=True, out_dir=None,
+           width=WIDTH, args=None, channel=None, headless=True):
+    """Run `clip(browser, port, opts, rec)` against a live canvas; write name.gif.
+
+    `headless=False` opens a real window (not needed by any current clip;
+    headless Chromium renders the 3D viewer's WebGL fine)."""
     port = shoot._free_port()
     import subprocess
     proc = subprocess.Popen([sys.executable, "-c", shoot._PATCH, script, str(port)],
@@ -64,11 +68,11 @@ def record(name, script, clip, viewport=(1000, 560), dark=True, out_dir=None):
         shoot._wait_port(port, proc)
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            browser = pw.chromium.launch()
+            browser = pw.chromium.launch(args=args or [], channel=channel, headless=headless)
             rec = Recorder()
             clip(browser, port, dict(viewport=viewport, dark=dark, scale=1), rec)
             browser.close()
-        _save_gif(rec.frames, out)
+        _save_gif(rec.frames, out, width=width)
         print("wrote", os.path.relpath(out, shoot.ROOT),
               f"({len(rec.frames)} frames, {os.path.getsize(out) // 1024} KB)")
         return out
@@ -264,6 +268,76 @@ CLIPS = {
     "arrows": dict(script=os.path.join(EXAMPLES, "locked_and_arrows.py"), clip=arrows_clip),
     "custom_react": dict(script=os.path.join(HERE, "custom_react.py"), clip=custom_react_clip),
 }
+
+# --- the two bigger builds ---------------------------------------------------
+# Heavier deps: cad needs build123d + trimesh + scipy; circuit needs LTspice
+# installed plus the ltspice + schemdraw packages. Both are real runs — the
+# CAD part is rebuilt and the circuit re-simulated on every slider change.
+
+def _capture_for(page, rec, seconds, shot, every=0.12):
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        rec.add(shot(page))
+        time.sleep(every)
+
+
+def cad_clip(browser, port, opts, rec):
+    page = _open(browser, port, **dict(opts, viewport=(1500, 900)))
+    _settle(page, 4, 7.0)                       # build123d + the WebGL viewer
+    _frame(page, 0.8, (-60, -90))
+    shot = lambda p: _shot(p, (24, 24, 8, 24))
+    rec.add(shot(page))
+    rec.hold(8)
+    for sides in (4, 5, 8, 24):                 # each change rebuilds the part
+        _set_range(page, "SIDES", sides)
+        _capture_for(page, rec, 2.2, shot)
+    _set_range(page, "HOLE_RADIUS", 14)
+    _capture_for(page, rec, 2.2, shot)
+    page.locator("[data-pc-panel-id] button", has_text="trace").first.click()
+    _capture_for(page, rec, 3.6, shot)          # the helix draws itself in
+    rec.hold(10)
+
+
+_TEXT_HAS = "t => document.body.innerText.includes(t)"
+
+
+def _release_range(page, panel_label, value):
+    """Set a slider and let go: an on_release=True slider reports on pointerup."""
+    _set_range(page, panel_label, value)
+    page.evaluate("""(label) => {
+      const el = [...document.querySelectorAll('[data-pc-panel-id]')]
+        .find(p => p.innerText.trim().toUpperCase().startsWith(label.toUpperCase()));
+      el.querySelector('input[type=range]')
+        .dispatchEvent(new PointerEvent('pointerup', {bubbles: true}));
+    }""", panel_label)
+
+
+def circuit_clip(browser, port, opts, rec):
+    page = _open(browser, port, **dict(opts, viewport=(1700, 1120)))
+    _settle(page, 10, 3.0)
+    # frame FIRST: an off-screen panel is culled from the DOM, and the status
+    # label is what the waits below read
+    _frame(page, 0.78, (-40, -60))
+    time.sleep(1.0)                              # panels mount after the fit
+    page.wait_for_function(_TEXT_HAS, arg="Idle", timeout=60_000)
+    shot = lambda p: _shot(p, (16, 16, 16, 16))
+    rec.add(shot(page))
+    rec.hold(8)
+    for label, value in (("Capacitor C", 60), ("Ripple freq", 40), ("Capacitor C", 16)):
+        _release_range(page, label, value)      # on_release -> a real LTspice run
+        page.wait_for_function(_TEXT_HAS, arg="Running", timeout=10_000)
+        rec.add(shot(page))
+        page.wait_for_function(_TEXT_HAS, arg="Idle", timeout=60_000)
+        time.sleep(0.6)
+        rec.add(shot(page))
+        rec.hold(12)
+
+
+CLIPS["cad_model3d"] = dict(script=os.path.join(EXAMPLES, "cad_model3d.py"),
+                            clip=cad_clip, width=1100)
+CLIPS["circuit_dashboard"] = dict(script=os.path.join(EXAMPLES, "circuit_dashboard.py"),
+                                  clip=circuit_clip, width=1200)
+
 
 if __name__ == "__main__":
     wanted = sys.argv[1:] or list(CLIPS)
