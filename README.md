@@ -14,7 +14,7 @@ desktops — share one live canvas, with a viewer roster, live cursors, chat, an
 freehand drawing the host can read back. Share it across your LAN, behind a
 password, or over a public HTTPS tunnel — all built in, no extra services.
 
-![Two browsers on one canvas: the roster reads "2 viewers" and the other viewer's live cursor is drawn on the canvas](docs/screenshots/multiuser.png)
+![Two browsers on one canvas: either one drags the slider and the other follows, each showing the other's live cursor, roster reading "2 viewers"](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/multiuser.gif)
 
 ## Install
 
@@ -57,7 +57,7 @@ def handle(value):
 canvas.serve(port=8000)   # opens the browser, blocks
 ```
 
-![The hello-world canvas: a SERVO_1 slider whose value live-updates a STATUS label reading "servo at 113"](docs/screenshots/hello_world.png)
+![The hello-world canvas: dragging the SERVO_1 slider live-updates the STATUS label through the Python handler](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/hello_world.gif)
 
 ## The mental model
 
@@ -199,7 +199,7 @@ canvas.insert(s, x=80, y=80)
 | `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=` |
 | `Inspector` | output | live panel/globals state browser |
 
-![The native panels on one canvas: label, slider, toggle, button, text field, markdown, table, plot, heatmap, histogram, live plot, image, download, upload, file browser, chat, and a custom HTML panel](docs/screenshots/catalogue.png)
+![The native panels on one canvas: label, slider, toggle, button, text field, markdown, table, plot, heatmap, histogram, live plot, image, download, upload, file browser, chat, and a custom HTML panel](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/catalogue.png)
 
 Most `color=` panels expose `.color` (and most accept `lock`/`chrome` flags) —
 see [Controlling panels live](#controlling-panels-live).
@@ -424,7 +424,7 @@ def adapt(viewer):
 
 ## Custom & React panels
 
-![A Custom panel running an SVG analog clock pushed from Python beside a React panel whose ping button has been clicked twice, with a STATUS label reading "ping #2"](docs/screenshots/custom_react.png)
+![A Custom panel running an SVG analog clock ticking from Python pushes, beside a React panel whose ping button is clicked three times while a STATUS label counts the pings](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/custom_react.gif)
 
 Two factories ship your own UI from Python. **`react`** mounts JSX as a real React
 subtree (native, theme-aware, interactive from first hover — reach for this
@@ -738,7 +738,7 @@ strokes, text, sticky notes, lines, frames, highlighter marks. These are
 Python-owned: they survive reload, update live, and are excluded from the
 free-form drawing sync.
 
-![Managed shapes: five geo shapes (rectangle, ellipse, diamond, star, cloud), a dashed status box, floating text, a red freehand wave, a violet rough circle, a black zigzag polyline, a blue cubic spline, two sticky notes, a frame, and two highlighter marks](docs/screenshots/shapes.png)
+![Managed shapes: five geo shapes (rectangle, ellipse, diamond, star, cloud), a dashed status box, floating text, a red freehand wave, a violet rough circle, a black zigzag polyline, a blue cubic spline, two sticky notes, a frame, and two highlighter marks](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/shapes.png)
 
 | Factory | Creates | Key kwargs |
 |---|---|---|
@@ -782,7 +782,7 @@ arrow.update(color="red", arrowhead_end="diamond")
 canvas.disconnect(arrow)                          # by object or by name
 ```
 
-![A signal-flow diagram: INPUT, GAIN, and OUTPUT panels wired with a "scale" arrow, a bent "result" arrow, and a dashed "monitor" arrow down to a STATUS panel reading "60 x 4 = 240"](docs/screenshots/signal_flow.png)
+![A signal-flow diagram: values pushed down the arrows as the INPUT slider moves, then the stages unlocked and the GAIN panel dragged while its three arrows reroute](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/arrows.gif)
 
 | Arrow prop | Values |
 |---|---|
@@ -836,7 +836,7 @@ canvas.set_view(read_only=True, ui=False, roles=["user"])  # scope to a login ro
 canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)     # one viewer only
 ```
 
-![The page_layout example in scroll_y navigation: markdown headings, a slider, a Plotly chart, and a table stacked in one centred column like a web page](docs/screenshots/page_layout.png)
+![The page_layout example in scroll_y navigation: markdown headings, a slider, a Plotly chart, and a table stacked in one centred column like a web page](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/page_layout.png)
 
 Omit `x`/`y`/`zoom` and each viewer opens framed on the panels they can see. A
 constrained `navigation` mode makes the scroll wheel **pan** the free axis and
@@ -850,7 +850,7 @@ restores them without a restart (Python kept them alive). Override with
 
 ## Roles: one rule for everything per-viewer
 
-![The leaderboard example seen by two logins side by side: the admin sees an entry form and the board; the viewer sees the board only](docs/screenshots/roles.png)
+![The leaderboard example seen by two logins side by side: the admin sees an entry form and the board; the viewer sees the board only](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/roles.png)
 
 > **Trust model in one line:** everyone admitted to a canvas (password/LAN/
 > tunnel) can put live UI — including JSX that runs in every viewer's browser
@@ -1384,6 +1384,8 @@ curl localhost:8000/__screenshot__.png -o canvas.png   # PNG; needs a tab to ren
 ```
 
 ## Tracking an ML training run
+
+![A LivePlot streaming two traces, scrolling as points arrive twenty times a second](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/live_plot.gif)
 
 The panels *are* the dashboard — no logging framework. Make each once, keep the
 handle, push from your loop. Being bidirectional, the same loop can read controls
