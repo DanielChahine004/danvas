@@ -214,8 +214,13 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
 //    is replicated to the other viewers via a bounded log in state._clicks
 //    (element id, else a structural path); late joiners replay it in order,
 //    so deterministic toggles converge.
+//  - Plotly graphs (when the page has Plotly loaded): each graph's relayout
+//    deltas — 3D camera, 2D zoom/pan, axis ranges — are shared under
+//    state["_plotly:<graph id or path>"] and applied with Plotly.relayout
+//    on the other side; a library hook, not a page hook.
 // What no generic hook can see — state that lives only in JS and is driven
-// by dragging (a Plotly camera) — a page shares itself with canvas.setState.
+// by dragging in a library we don't know — a page shares itself with
+// canvas.setState.
 const AUTO_SYNC =
   '(function(){' +
   'var applying=false,seen=0;' +
@@ -246,13 +251,30 @@ const AUTO_SYNC =
   'document.addEventListener("click",function(e){if(applying)return;var b=e.target&&e.target.closest&&e.target.closest(BTN);' +
   'if(!b)return;var log=(window.canvas.state&&window.canvas.state._clicks)||[];' +
   'log=log.concat([pathOf(b)]);if(log.length>200)log=log.slice(-200);seen=log.length;window.canvas.setState({_clicks:log});},true);' +
+  'var PK="_plotly:";' +
+  'function plotlyKey(gd){return PK+(gd.id||pathOf(gd));}' +
+  'function plotlyOf(k){var sel=k.slice(PK.length);var el=null;' +
+  'try{el=sel.indexOf(">")<0&&sel.charAt(0)!=="#"?document.getElementById(sel):document.querySelector(sel.charAt(0)==="#"?sel:sel);}catch(_){}' +
+  'return el&&el.on?el:null;}' +
+  'function hookPlotly(){if(!window.Plotly)return;var gs=document.querySelectorAll(".js-plotly-plot");' +
+  'for(var i=0;i<gs.length;i++){(function(gd){if(gd.__dvSync||!gd.on)return;gd.__dvSync=true;var t=null,pend={};' +
+  'gd.on("plotly_relayout",function(ev){if(applying||!ev)return;Object.assign(pend,ev);if(t)return;' +
+  't=setTimeout(function(){t=null;var k=plotlyKey(gd);var cur=(window.canvas.state&&window.canvas.state[k])||{};' +
+  'var merged=Object.assign({},cur,pend);pend={};gd.__dvLast=JSON.stringify(merged);var p={};p[k]=merged;window.canvas.setState(p);},80);});' +
+  '})(gs[i]);}}' +
+  'function applyPlotly(s){if(!window.Plotly)return;for(var k in s){if(k.indexOf(PK)!==0)continue;' +
+  'var gd=plotlyOf(k);if(!gd)continue;var j=JSON.stringify(s[k]);if(gd.__dvLast===j)continue;gd.__dvLast=j;' +
+  'try{window.Plotly.relayout(gd,s[k]);}catch(_){}}}' +
   'function apply(s){if(!s)return;applying=true;try{' +
   'var cs=controls();for(var k in cs){if(k in s&&k!=="_clicks"){if(setVal(cs[k],s[k]))fire(cs[k]);}}' +
+  'hookPlotly();applyPlotly(s);' +
   'var log=s._clicks||[];for(var i=seen;i<log.length;i++){var sel=log[i];var el=null;' +
   'try{el=sel.charAt(0)==="#"&&sel.indexOf(">")<0?document.getElementById(sel.slice(1)):document.querySelector(sel);}catch(_){}' +
   'if(el)el.click();}seen=log.length;}finally{applying=false;}}' +
   'window.canvas.onState(apply);' +
   'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){apply(window.canvas.state);});}' +
+  // graphs can be created any time after load: keep hooking new ones
+  'setInterval(hookPlotly,1000);' +
   '})();'
 
 
