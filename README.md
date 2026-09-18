@@ -492,6 +492,11 @@ def handle(msg):
     panel.push("clicked")  # → canvas.onPush in the iframe
 ```
 
+- `canvas.custom(path="dashboard.html")` embeds a local HTML file as-is (read
+  once; `panel.watch()` / `hot_reload=True` re-read it on save). A page that never
+  touches `canvas` is simply displayed; external assets need absolute URLs, since
+  the sandboxed iframe can't reach your disk. `export_html()` goes the other way:
+  see [Inspecting & screenshotting](#inspecting--screenshotting-llm-feedback-loop).
 - `html`/`css`/`js` may be separate strings (handy for pasted snippets). A bare
   fragment is wrapped with a base reset (sane margins, `box-sizing`, centred), so
   you don't hand-write a `<style>` reset; a complete `<html>` page is left as-is.
