@@ -214,11 +214,14 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
 //    is replicated to the other viewers via a bounded log in state._clicks
 //    (element id, else a structural path); late joiners replay it in order,
 //    so deterministic toggles converge.
-//  - Plotly graphs (when the page has Plotly loaded): each graph's live view
-//    — 3D camera, 2D axis ranges — is polled every 100 ms (Plotly's own
-//    relayout event fires only on release, and a 3D drag can slip past it)
-//    and shared under state["_plotly:<graph id or path>"], applied with
-//    Plotly.relayout on the other side; a library hook, not a page hook.
+//  - Plotly graphs (when the page has Plotly loaded): the live view — 3D
+//    camera, 2D axis ranges — of the graph the user is TOUCHING is polled
+//    every 100 ms (Plotly's own relayout fires only on release, and a 3D
+//    drag can slip past it) and shared under state["_plotly:<graph id or
+//    path>"], applied with Plotly.relayout on the other side. Only the
+//    touched graph is shared: a page that links its graphs' cameras itself
+//    replicates to the siblings on the far side, as it does locally — sharing
+//    every graph raced that linking and left siblings misaligned.
 // What no generic hook can see — state that lives only in JS and is driven
 // by dragging in a library we don't know — a page shares itself with
 // canvas.setState.
@@ -264,10 +267,15 @@ const AUTO_SYNC =
   'if(n.indexOf("scene")===0&&o._scene&&o._scene.getCamera){try{d[n+".camera"]=o._scene.getCamera();}catch(_){}}' +
   'else if((n.indexOf("xaxis")===0||n.indexOf("yaxis")===0)&&o.range&&!o._isSubplotObj){d[n+".range"]=o.range.slice();}}' +
   'return rnd(d);}' +
-  'function pollPlotly(){if(applying||!window.Plotly)return;var gs=document.querySelectorAll(".js-plotly-plot");' +
-  'for(var i=0;i<gs.length;i++){var gd=gs[i];var d=viewOf(gd);if(!d)continue;var j=JSON.stringify(d);' +
-  'if(j===gd.__dvPoll)continue;gd.__dvPoll=j;if(j===gd.__dvLast)continue;' +
-  'var k=plotlyKey(gd);var p={};p[k]=d;gd.__dvLast=j;window.canvas.setState(p);}}' +
+  'var activeGd=null,activeAt=0;' +
+  'function touch(e){var gd=e.target&&e.target.closest&&e.target.closest(".js-plotly-plot");if(gd){activeGd=gd;activeAt=Date.now();}}' +
+  'document.addEventListener("pointerdown",touch,true);document.addEventListener("wheel",touch,true);' +
+  'document.addEventListener("pointermove",function(e){if(e.buttons)touch(e);},true);' +
+  'function pollPlotly(){if(applying||!window.Plotly||!activeGd)return;' +
+  'if(Date.now()-activeAt>1500){activeGd=null;return;}' +
+  'var gd=activeGd;var d=viewOf(gd);if(!d)return;var j=JSON.stringify(d);' +
+  'if(j===gd.__dvPoll)return;gd.__dvPoll=j;if(j===gd.__dvLast)return;' +
+  'var k=plotlyKey(gd);var p={};p[k]=d;gd.__dvLast=j;window.canvas.setState(p);}' +
   'function hookPlotly(){if(!window.Plotly||window.__dvPlotlyPoll)return;window.__dvPlotlyPoll=setInterval(pollPlotly,100);}' +
   'function applyPlotly(s){if(!window.Plotly)return;for(var k in s){if(k.indexOf(PK)!==0)continue;' +
   'var gd=plotlyOf(k);if(!gd)continue;var j=JSON.stringify(rnd(s[k]));if(gd.__dvLast===j)continue;gd.__dvLast=j;' +

@@ -61,6 +61,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+danvas = "danvas.__main__:main"
+
 [project.optional-dependencies]
 # The Python reference hub: `python -m danvas.merge` (a neutral, compute-less
 # aggregator) runs on FastAPI/uvicorn. Not needed to serve a canvas (that's the

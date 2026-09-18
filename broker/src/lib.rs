@@ -811,6 +811,8 @@ pub async fn run(cfg: Config) -> std::io::Result<()> {
     }
     let addr = SocketAddr::from((cfg.host, cfg.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    STARTED.get_or_init(unix_now);
+    write_registry(cfg.port, &cfg.host.to_string());
     // The human-facing line: the page URL, browser-clickable. (The wire
     // endpoint is ws://<addr>/ws; SDKs derive it, people never open it.)
     if cfg.announce {
@@ -1010,10 +1012,64 @@ async fn upload_handler(
 /// per merged panel with the cross-process identity and source liveness.
 async fn health_handler(State(hub): State<Arc<Mutex<Hub>>>) -> impl IntoResponse {
     let h = hub.lock().unwrap();
+    // The owning processes (dial-in sources), with the pid each announced
+    // (`?pid=` on its socket) — what `python -m danvas ps/kill` needs.
+    let sources: Vec<Value> = h
+        .viewers
+        .values()
+        .filter(|v| v.get("device").and_then(Value::as_str) == Some("process"))
+        .map(|v| json!({"label": v.get("name").cloned().unwrap_or(Value::Null),
+                        "pid": v.get("pid").cloned().unwrap_or(Value::Null),
+                        "script": v.get("script").cloned().unwrap_or(Value::Null)}))
+        .collect();
+    let browsers = h
+        .viewers
+        .values()
+        .filter(|v| v.get("device").and_then(Value::as_str) != Some("process"))
+        .count();
     axum::Json(json!({
         "danvasd": env!("CARGO_PKG_VERSION"),
         "run_id": h.run_id,
+        "port": h.host_port,
+        "pid": std::process::id(),
+        "started": *STARTED.get_or_init(unix_now),
+        "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+        "sources": sources,
+        "retained": h.sources.iter().filter(|(_, s)| !s.live).map(|(l, _)| l.clone()).collect::<Vec<_>>(),
+        "viewers": browsers,
     }))
+}
+
+static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// `~/.danvas/running/<pid>.json` (or `$DANVAS_HOME/running/`): one file per
+/// live broker, written at bind so `python -m danvas ps` can find canvases
+/// whose terminal is long gone (the broker outlives its script on purpose).
+/// Never removed here — a killed process can't — the lister prunes entries
+/// whose /__health__ no longer answers.
+fn write_registry(port: u16, host: &str) {
+    let base = std::env::var("DANVAS_HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok().map(|h| format!("{h}/.danvas")))
+        .or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.danvas")));
+    let Some(base) = base else { return };
+    let dir = std::path::Path::new(&base).join("running");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let entry = json!({
+        "pid": std::process::id(),
+        "port": port,
+        "host": host,
+        "started": *STARTED.get_or_init(unix_now),
+        "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+        "danvasd": env!("CARGO_PKG_VERSION"),
+    });
+    let _ = std::fs::write(dir.join(format!("{}.json", std::process::id())), entry.to_string());
 }
 
 async fn describe_handler(
@@ -1200,6 +1256,8 @@ async fn handle(
             // a solo user must not read "2 viewers".
             "color": color,
             "device": if is_source { "process" } else { "desktop" },
+            "pid": q.get("pid").and_then(|p| p.parse::<u64>().ok()),
+            "script": q.get("script").cloned(),
             "role": role.clone(),
         }));
         let p = h.presence_frame().to_string();

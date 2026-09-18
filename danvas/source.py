@@ -38,6 +38,7 @@ ordered dispatch thread (a slow handler delays later events, not the socket).
 
 import asyncio
 import json
+import os
 import queue
 import threading
 import traceback
@@ -73,7 +74,13 @@ class SourceClient:
         # ?source=1 marks the connection as a dial-in source to the hub;
         # vname labels it in the viewer roster.
         sep = "&" if "?" in ws_uri else "?"
-        self._uri = f"{ws_uri}{sep}source=1&label={label}&vname={label}"
+        # pid: lets the hub's /__health__ name the owning process, so
+        # `python -m danvas ps` / `kill` can find and stop it.
+        import sys as _sys
+        from urllib.parse import quote as _q
+        script = _q(os.path.basename(_sys.argv[0] or "") or "python")
+        self._uri = (f"{ws_uri}{sep}source=1&label={label}&vname={label}"
+                     f"&pid={os.getpid()}&script={script}")
         # Everything this source has declared, for replay on (re)connect —
         # the client-side twin of the hub's upstream cache.
         self._registers = {}      # cid -> register msg

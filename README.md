@@ -1573,6 +1573,22 @@ and sessions survive edits.
 reference hub behind `python -m danvas.merge`), `danvas/components/` (the panels),
 `danvas/frontend/src/bridge.js` (the browser side).
 
+## Finding and stopping running canvases
+
+A served canvas is two processes — your script and the `danvasd` broker — and
+the broker outlives the script on purpose, so a closed terminal can leave a
+canvas serving silently. The `danvas` command finds them:
+
+```bash
+danvas ps            # every running canvas: port, broker pid, owner script, viewers, uptime
+danvas kill 8010     # stop the owner script(s), then the broker, on that port
+danvas kill --all
+```
+
+(`python -m danvas ps` works the same.) Each broker registers itself in
+`~/.danvas/running/` when it binds; `ps` asks every entry's `/__health__` who
+owns it and prunes the ones that no longer answer.
+
 ## Debugging the wire
 
 Everything is JSON frames over one WebSocket, so "why didn't it update" is always
