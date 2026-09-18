@@ -124,7 +124,8 @@ class _FactoryMixin:
 
     def custom(self, html=None, path=None, css=None, js=None, name="custom",
                label=None, keep_mounted=False, forward_wheel=True,
-               themed=False, permissions=None, **place: Unpack[Place]):
+               themed=False, permissions=None, sync=False,
+               **place: Unpack[Place]):
         """Insert a :class:`~danvas.Custom`. See :meth:`insert` for ``place``.
 
         ``html``/``css``/``js`` may be given as separate strings (e.g. pasted
@@ -140,11 +141,18 @@ class _FactoryMixin:
         zoom) instead of zooming the canvas; ``themed=True`` forwards the
         live ``--pc-*`` theme variables into the document; ``permissions``
         grants sandboxed-iframe features (e.g. ``"camera"``).
+
+        ``sync=True`` makes ANY page's native controls shared between viewers
+        with no change to the page: inputs/selects/textareas (by id or name)
+        converge on one value and button clicks replicate, all through the
+        panel's shared ``state`` (readable as ``panel.state``). Drag-driven
+        JS state (a chart's camera) can't be seen generically — a page shares
+        that itself with ``canvas.setState``.
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
                           name=name, label=label, keep_mounted=keep_mounted,
                           forward_wheel=forward_wheel, themed=themed,
-                          permissions=permissions, **place)
+                          permissions=permissions, sync=sync, **place)
 
     def download(self, name="download", source=None, filename=None, text=None, label=None,
                  **place: Unpack[Place]):

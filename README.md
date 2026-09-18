@@ -503,6 +503,14 @@ def handle(msg):
   touches `canvas` is simply displayed; external assets need absolute URLs, since
   the sandboxed iframe can't reach your disk. `export_html()` goes the other way:
   see [Inspecting & screenshotting](#inspecting--screenshotting-llm-feedback-loop).
+- **`sync=True` makes any such page shared between viewers, unedited.** Its native
+  controls (inputs, sliders, checkboxes, selects, textareas — by `id` or `name`)
+  converge on one value, and button clicks replicate, so two people on a
+  `serve(tunnel=True)` link drive the same page together and a late joiner opens
+  where it is. It's the shared `state` below, bound by DOM identity; Python reads
+  it as `panel.state`. What no generic hook can see — state that lives only in JS
+  and is driven by dragging (a chart's camera) — a page shares itself with
+  `canvas.setState`.
 - **Shared state**, the same slot React panels have: the page reads `canvas.state`,
   listens with `canvas.onState(fn)` (fires once on registration, then per change)
   and writes `canvas.setState(patch)` — every viewer converges on it and Python

@@ -126,6 +126,7 @@
      "keepMounted": "bool -- exempt from viewport culling (hidden, not destroyed, off-screen; browser-local state survives scrolling)",
      "permissions": "str|null -- iframe allow= policy",
      "state": "object -- shared state, one dict for every viewer; the page reads canvas.state / canvas.onState and writes canvas.setState (a set_props frame); Python reads panel.state",
+     "sync": "bool -- the shim auto-shares the page's native controls (by id/name) and button clicks through state, no page changes (default false)",
      "themed": "bool -- follow the canvas theme variables"
     },
     "updates": {

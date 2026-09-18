@@ -401,3 +401,97 @@ def test_shared_state_written_from_inside_panels(page_state):
         " return !!c && c.echo === 14 && !!r && r.echo === 11; }" % get,
         timeout=15_000)
     assert not errors, errors
+
+
+_LOOK = ("() => { const c = window.__danvas && window.__danvas.camera; if (!c) return;"
+         " c.markInitialFitDone(); c.setCamera({x: -1300, y: -250, z: 1}, {force: true}); }")
+
+
+def _frame_with(page, marker, selector, timeout=15_000):
+    """The Custom iframe (Playwright Frame) whose srcdoc carries `marker`
+    (the panel's composed id appears in the injected shim), once `selector`
+    exists in its document. Keeps the camera on the test panel (an off-screen
+    panel is culled — no iframe; the once-per-load auto-fit would zoom out)."""
+    deadline = time.time() + timeout / 1000
+    while time.time() < deadline:
+        page.evaluate(_LOOK)
+        for f in page.frames:
+            if f == page.main_frame:
+                continue
+            try:
+                el = f.frame_element()
+                if marker in (el.get_attribute("srcdoc") or ""):
+                    f.wait_for_selector(selector, timeout=timeout)
+                    return f
+            except Exception:
+                pass
+        time.sleep(0.1)
+    dbg = page.evaluate("() => { const s = window.__danvas && window.__danvas.store; if (!s) return 'no store';"
+                        " const ids = [...s.ids()]; const cam = s.camera();"
+                        " return {n: ids.length, cam, iframes: document.querySelectorAll('iframe').length,"
+                        " synced: ids.filter(i => i.endsWith(':synced')).map(i => { const r = s.peek(i); return [r.x, r.y, r.props.w, r.props.h]; })}; }")
+    raise AssertionError(f"no iframe carrying {marker!r}; frames: {[f.url for f in page.frames]}; {dbg}")
+
+
+def test_sync_true_shares_a_plain_pages_controls_between_browsers(page_state):
+    # Custom(sync=True): an unedited HTML page's native controls and button
+    # clicks converge between two browsers through the panel's state, with
+    # the page never mentioning `canvas`. Browser A moves a slider and picks
+    # a select; B's copies follow AND B's page-side listeners run (the label
+    # it derives from the slider updates). A clicks a toggle button; B's
+    # toggles too. Python reads it all as panel.state.
+    page, errors, src = page_state
+    html = ("<input id=sl type=range min=0 max=100 value=10>"
+            "<span id=lbl>10</span>"
+            "<select id=mode><option>a</option><option>b</option></select>"
+            "<button id=tog>off</button>"
+            "<script>"
+            "sl.addEventListener('input',function(){lbl.textContent=sl.value});"
+            "tog.addEventListener('click',function(){tog.textContent=tog.textContent==='off'?'on':'off'});"
+            "</script>")
+    src.register("synced", "Custom", props={"html": html, "w": 260, "h": 140,
+                                            "sync": True}, x=1400, y=320)
+
+    # The fixture's owner is a raw SourceClient; do what a Canvas does with a
+    # viewer's set_props {state}: store it and broadcast the full state.
+    seen_frames = []
+
+    def echo_state(m):
+        if m.get("type") != "set_props":
+            return
+        seen_frames.append(m)
+        state = (m.get("props") or {}).get("state")
+        if m.get("id") == "synced" and isinstance(state, dict):
+            src._send({"type": "update", "id": "synced", "payload": {"state": state}})
+    src.on_frame(echo_state)
+    fa = _frame_with(page, ":synced", "#sl")
+    page_b = page.context.browser.new_context().new_page()
+    page_b.goto(page.url)
+    page_b.wait_for_function("() => !!window.__danvas", timeout=15_000)
+    fb = _frame_with(page_b, ":synced", "#sl")
+    # A moves the slider (a real input event, as a drag would fire)
+    fa.locator("#sl").evaluate(
+        "el => { el.value = 73; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    st_js = ("() => { const s = window.__danvas.store; const id = [...s.ids()]"
+             ".find(i => i.endsWith(':synced')); return id && s.peek(id).props.state; }")
+    try:
+        fb.wait_for_function("() => document.getElementById('sl').value === '73'", timeout=15_000)
+    except Exception:
+        raise AssertionError({"A_store": page.evaluate(st_js), "B_store": page_b.evaluate(st_js),
+                              "A_val": fa.locator("#sl").input_value(), "B_val": fb.locator("#sl").input_value(),
+                              "A_shim": fa.evaluate("() => [typeof canvas.setState, JSON.stringify(canvas.state)]"),
+                              "frames_seen": seen_frames})
+    assert fb.locator("#lbl").inner_text() == "73"          # B's own listener ran
+    # A picks a select option
+    fa.locator("#mode").select_option("b")
+    fb.wait_for_function("() => document.getElementById('mode').value === 'b'", timeout=15_000)
+    # A clicks the toggle; B's toggle flips too
+    fa.locator("#tog").click()
+    fb.wait_for_function("() => document.getElementById('tog').textContent === 'on'", timeout=15_000)
+    # and the store on B holds it all as the panel's shared state
+    st = page_b.evaluate(
+        "() => { const s = window.__danvas.store; const id = [...s.ids()]"
+        ".find(i => i.endsWith(':synced')); return s.peek(id).props.state; }")
+    assert st["sl"] == "73" and st["mode"] == "b" and st["_clicks"] == ["#tog"], st
+    page_b.context.close()
+    assert not errors, errors

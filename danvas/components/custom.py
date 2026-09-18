@@ -140,7 +140,10 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
                   "state": "object -- shared state, one dict for every "
                            "viewer; the page reads canvas.state / "
                            "canvas.onState and writes canvas.setState "
-                           "(a set_props frame); Python reads panel.state"},
+                           "(a set_props frame); Python reads panel.state",
+                  "sync": "bool -- the shim auto-shares the page's native "
+                          "controls (by id/name) and button clicks through "
+                          "state, no page changes (default false)"},
         "updates": {"data_patch": "merge changed data fields",
                     "post": "opaque value delivered to the document's "
                             "canvas.onPush",
@@ -161,7 +164,7 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, color=None, event_key="event",
                  permissions=None, forward_wheel=True, themed=False,
-                 keep_mounted=False):
+                 keep_mounted=False, sync=False):
         self._init_state()
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
@@ -211,6 +214,9 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         # data re-push per scroll-in. Off by default: a cheap panel is
         # better re-created than kept resident.
         self._keep_mounted = bool(keep_mounted)
+        # sync=True: the frontend shim auto-shares the page's native controls
+        # (by id/name) and button clicks through `state` — any HTML, unedited.
+        self._sync = bool(sync)
         # ``themed=True`` makes the iframe follow the canvas theme: the frontend
         # forwards the live ``--pc-*`` CSS variables and the dark/light flag into the
         # document, so the panel's CSS can use ``var(--pc-bg)`` / ``var(--pc-text)``
@@ -372,6 +378,8 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         props["themed"] = self._themed
         if self._keep_mounted:
             props["keepMounted"] = True
+        if self._sync:
+            props["sync"] = True
         # The frontend injects the interaction shim; this flag is its wheel
         # opt-out (panels whose content does its own wheel handling).
         props["forwardWheel"] = self._forward_wheel

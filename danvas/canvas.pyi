@@ -185,6 +185,7 @@ class Canvas:
         name: str = ...,
         label: str | None = ...,
         keep_mounted: bool = ...,
+        sync: bool = ...,
         forward_wheel: bool = ...,
         themed: bool = ...,
         permissions: str | list[str] | None = ...,

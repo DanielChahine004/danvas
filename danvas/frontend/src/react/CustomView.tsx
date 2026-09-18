@@ -88,8 +88,9 @@ export function CustomView({ shape }: { shape: any }) {
   // fragments) the base reset, keyed by this browser's composed panel id.
   const srcDoc = useMemo(
     () => prepareCustomDoc(shape.props.html || '', id,
-                           shape.props.forwardWheel !== false),
-    [shape.props.html, shape.props.forwardWheel, id],
+                           shape.props.forwardWheel !== false,
+                           !!(shape.props as any).sync),
+    [shape.props.html, shape.props.forwardWheel, (shape.props as any).sync, id],
   )
 
   return (

@@ -40,7 +40,7 @@ const FRAGMENT_RESET =
  * (wheel-zoom unless `forwardWheel` is off, right-drag pan, context menu,
  * tool shortcuts).
  */
-export function customHelper(cid: string, forwardWheel: boolean): string {
+export function customHelper(cid: string, forwardWheel: boolean, sync = false): string {
   const id = JSON.stringify(cid)
   const wheel = forwardWheel
     ? "window.addEventListener('wheel',function(e){e.preventDefault();" +
@@ -200,9 +200,61 @@ export function customHelper(cid: string, forwardWheel: boolean): string {
     "if(k==='Escape'||_shortcuts.indexOf(k)>=0)" +
     "parent.postMessage({__danvas_key:{key:e.key}},'*');" +
     '});' +
+    (sync ? AUTO_SYNC : '') +
     '</script>'
   )
 }
+
+// Custom(sync=True): share the page's NATIVE controls and button clicks
+// through canvas.state, by DOM identity, with no change to the page.
+//  - a control (input/select/textarea/contenteditable) with an id or name:
+//    its value lives in state[key]; a change writes it, an incoming value
+//    sets it and dispatches input+change so the page's own listeners run.
+//  - a button (button / [role=button] / input[type=button|submit]): a click
+//    is replicated to the other viewers via a bounded log in state._clicks
+//    (element id, else a structural path); late joiners replay it in order,
+//    so deterministic toggles converge.
+// What no generic hook can see — state that lives only in JS and is driven
+// by dragging (a Plotly camera) — a page shares itself with canvas.setState.
+const AUTO_SYNC =
+  '(function(){' +
+  'var applying=false,seen=0;' +
+  "var CTRL='input,select,textarea,[contenteditable=\"\"],[contenteditable=true]';" +
+  "var BTN='button,[role=button],input[type=button],input[type=submit]';" +
+  'function keyOf(el){return el.id||el.getAttribute("name")||null;}' +
+  'function pathOf(el){var p=[];while(el&&el.nodeType===1&&el!==document.body){' +
+  'if(el.id){p.unshift("#"+el.id);break;}var i=1,s=el;while((s=s.previousElementSibling))i++;' +
+  'p.unshift(el.tagName.toLowerCase()+":nth-child("+i+")");el=el.parentElement;}return p.join(">");}' +
+  'function isBtn(el){return !!(el.closest&&el.closest(BTN));}' +
+  'function valOf(el){var t=el.type;if(t==="checkbox")return !!el.checked;' +
+  'if(t==="radio"){var g=document.querySelector("input[type=radio][name="+JSON.stringify(el.name)+"]:checked");return g?g.value:null;}' +
+  'if(el.isContentEditable)return el.innerHTML;return el.value;}' +
+  'function setVal(el,v){var t=el.type;' +
+  'if(t==="checkbox"){if(!!el.checked===!!v)return false;el.checked=!!v;return true;}' +
+  'if(t==="radio"){var r=document.querySelector("input[type=radio][name="+JSON.stringify(el.name)+"][value="+JSON.stringify(String(v))+"]");' +
+  'if(!r||r.checked)return false;r.checked=true;return true;}' +
+  'if(el.isContentEditable){if(el.innerHTML===v)return false;el.innerHTML=v;return true;}' +
+  'if(String(el.value)===String(v))return false;el.value=v;return true;}' +
+  'function fire(el){el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));}' +
+  'function controls(){var out={};document.querySelectorAll(CTRL).forEach(function(el){' +
+  'if(isBtn(el)||el.type==="button"||el.type==="submit"||el.type==="file"||el.type==="password")return;' +
+  'var k=keyOf(el);if(k&&!(k in out))out[k]=el;});return out;}' +
+  'document.addEventListener("input",function(e){onEdit(e);},true);' +
+  'document.addEventListener("change",function(e){onEdit(e);},true);' +
+  'function onEdit(e){if(applying)return;var el=e.target;if(!el||!el.matches||!el.matches(CTRL)||isBtn(el))return;' +
+  'var k=keyOf(el);if(!k)return;var p={};p[k]=valOf(el);window.canvas.setState(p);}' +
+  'document.addEventListener("click",function(e){if(applying)return;var b=e.target&&e.target.closest&&e.target.closest(BTN);' +
+  'if(!b)return;var log=(window.canvas.state&&window.canvas.state._clicks)||[];' +
+  'log=log.concat([pathOf(b)]);if(log.length>200)log=log.slice(-200);seen=log.length;window.canvas.setState({_clicks:log});},true);' +
+  'function apply(s){if(!s)return;applying=true;try{' +
+  'var cs=controls();for(var k in cs){if(k in s&&k!=="_clicks"){if(setVal(cs[k],s[k]))fire(cs[k]);}}' +
+  'var log=s._clicks||[];for(var i=seen;i<log.length;i++){var sel=log[i];var el=null;' +
+  'try{el=sel.charAt(0)==="#"&&sel.indexOf(">")<0?document.getElementById(sel.slice(1)):document.querySelector(sel);}catch(_){}' +
+  'if(el)el.click();}seen=log.length;}finally{applying=false;}}' +
+  'window.canvas.onState(apply);' +
+  'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){apply(window.canvas.state);});}' +
+  '})();'
+
 
 /**
  * The full srcdoc for a Custom iframe: pass owner-wrapped documents through
@@ -210,8 +262,8 @@ export function customHelper(cid: string, forwardWheel: boolean): string {
  * reset) with the local composed id.
  */
 export function prepareCustomDoc(html: string, cid: string,
-                                 forwardWheel: boolean): string {
+                                 forwardWheel: boolean, sync = false): string {
   if (html.includes(CUSTOM_SHIM_MARKER)) return html
   const body = isFullDocument(html) ? html : FRAGMENT_RESET + html
-  return customHelper(cid, forwardWheel) + body
+  return customHelper(cid, forwardWheel, sync) + body
 }
