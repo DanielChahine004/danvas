@@ -214,10 +214,11 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
 //    is replicated to the other viewers via a bounded log in state._clicks
 //    (element id, else a structural path); late joiners replay it in order,
 //    so deterministic toggles converge.
-//  - Plotly graphs (when the page has Plotly loaded): each graph's relayout
-//    deltas — 3D camera, 2D zoom/pan, axis ranges — are shared under
-//    state["_plotly:<graph id or path>"] and applied with Plotly.relayout
-//    on the other side; a library hook, not a page hook.
+//  - Plotly graphs (when the page has Plotly loaded): each graph's live view
+//    — 3D camera, 2D axis ranges — is polled every 100 ms (Plotly's own
+//    relayout event fires only on release, and a 3D drag can slip past it)
+//    and shared under state["_plotly:<graph id or path>"], applied with
+//    Plotly.relayout on the other side; a library hook, not a page hook.
 // What no generic hook can see — state that lives only in JS and is driven
 // by dragging in a library we don't know — a page shares itself with
 // canvas.setState.
@@ -256,15 +257,21 @@ const AUTO_SYNC =
   'function plotlyOf(k){var sel=k.slice(PK.length);var el=null;' +
   'try{el=sel.indexOf(">")<0&&sel.charAt(0)!=="#"?document.getElementById(sel):document.querySelector(sel.charAt(0)==="#"?sel:sel);}catch(_){}' +
   'return el&&el.on?el:null;}' +
-  'function hookPlotly(){if(!window.Plotly)return;var gs=document.querySelectorAll(".js-plotly-plot");' +
-  'for(var i=0;i<gs.length;i++){(function(gd){if(gd.__dvSync||!gd.on)return;gd.__dvSync=true;var t=null,pend={};' +
-  'gd.on("plotly_relayout",function(ev){if(applying||!ev)return;Object.assign(pend,ev);if(t)return;' +
-  't=setTimeout(function(){t=null;var k=plotlyKey(gd);var cur=(window.canvas.state&&window.canvas.state[k])||{};' +
-  'var merged=Object.assign({},cur,pend);pend={};gd.__dvLast=JSON.stringify(merged);var p={};p[k]=merged;window.canvas.setState(p);},80);});' +
-  '})(gs[i]);}}' +
+  // round so a re-applied camera compares equal (no echo ping-pong)
+  'function rnd(v){return JSON.parse(JSON.stringify(v,function(k,x){return typeof x==="number"?Math.round(x*1e6)/1e6:x;}));}' +
+  'function viewOf(gd){var fl=gd._fullLayout;if(!fl)return null;var d={};' +
+  'for(var n in fl){var o=fl[n];if(!o||typeof o!=="object")continue;' +
+  'if(n.indexOf("scene")===0&&o._scene&&o._scene.getCamera){try{d[n+".camera"]=o._scene.getCamera();}catch(_){}}' +
+  'else if((n.indexOf("xaxis")===0||n.indexOf("yaxis")===0)&&o.range&&!o._isSubplotObj){d[n+".range"]=o.range.slice();}}' +
+  'return rnd(d);}' +
+  'function pollPlotly(){if(applying||!window.Plotly)return;var gs=document.querySelectorAll(".js-plotly-plot");' +
+  'for(var i=0;i<gs.length;i++){var gd=gs[i];var d=viewOf(gd);if(!d)continue;var j=JSON.stringify(d);' +
+  'if(j===gd.__dvPoll)continue;gd.__dvPoll=j;if(j===gd.__dvLast)continue;' +
+  'var k=plotlyKey(gd);var p={};p[k]=d;gd.__dvLast=j;window.canvas.setState(p);}}' +
+  'function hookPlotly(){if(!window.Plotly||window.__dvPlotlyPoll)return;window.__dvPlotlyPoll=setInterval(pollPlotly,100);}' +
   'function applyPlotly(s){if(!window.Plotly)return;for(var k in s){if(k.indexOf(PK)!==0)continue;' +
-  'var gd=plotlyOf(k);if(!gd)continue;var j=JSON.stringify(s[k]);if(gd.__dvLast===j)continue;gd.__dvLast=j;' +
-  'try{window.Plotly.relayout(gd,s[k]);}catch(_){}}}' +
+  'var gd=plotlyOf(k);if(!gd)continue;var j=JSON.stringify(rnd(s[k]));if(gd.__dvLast===j)continue;gd.__dvLast=j;' +
+  'try{window.Plotly.relayout(gd,s[k]);}catch(_){}var v=viewOf(gd);if(v)gd.__dvPoll=JSON.stringify(v);}}' +
   'function apply(s){if(!s)return;applying=true;try{' +
   'var cs=controls();for(var k in cs){if(k in s&&k!=="_clicks"){if(setVal(cs[k],s[k]))fire(cs[k]);}}' +
   'hookPlotly();applyPlotly(s);' +
