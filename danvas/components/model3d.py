@@ -2049,6 +2049,20 @@ class Model3D(Custom):
         if self._view is not None:
             self.push(self._view)
 
+    def _export_frames(self):
+        # The standalone export (Custom.export_html) replays exactly what a
+        # late-joining viewer gets: every layer's GLB, hidden-layer flags,
+        # then the view.
+        frames = []
+        for lname, st in self._layers.items():
+            if st.get("glb") is not None:
+                frames.append(_layer_frame(lname, st["glb"]))
+            if not st.get("visible", True):
+                frames.append({"cmd": "visible", "layer": lname, "on": False})
+        if self._view is not None:
+            frames.append(self._view)
+        return frames
+
     @classmethod
     def _view_spec(cls, preset=None, eye=None, look=None, up=None, zoom=None):
         if preset is not None and preset not in cls.VIEW_PRESETS:

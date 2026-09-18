@@ -31,7 +31,9 @@ On the Python side, register handlers with ``@panel.on("event")`` to route by an
 ``@panel.on_request`` to answer :meth:`request` calls.
 """
 
+import base64
 import json
+import os
 import re
 import traceback
 
@@ -42,6 +44,76 @@ from ..bridge import BINARY_CUSTOM
 # A panel's ``html`` is treated as a complete page (left untouched, no base reset)
 # only when it brings its own document shell; otherwise it's a fragment we wrap.
 _FULL_DOCUMENT_RE = re.compile(r"<\s*(?:!doctype|html|body)\b", re.IGNORECASE)
+
+
+
+# The `canvas` API a standalone export runs against: the same surface the
+# frontend's customShim.ts injects into a live iframe, with the parent-bound
+# halves turned into no-ops. onPush still delivers via window messages, so
+# the embedded replay below reaches the panel's handlers exactly as a live
+# push would (JSON objects and ArrayBuffers alike).
+_STANDALONE_SHIM = (
+    "<script>window.canvas={"
+    "standalone:true,"
+    "send:function(){},sendBinary:function(){},"
+    "onPush:function(fn){window.addEventListener('message',function(e){"
+    "if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}});},"
+    "request:function(){return Promise.reject(new Error('standalone export: no Python behind this panel'));},"
+    "setView:function(){},viewport:function(){return function(){};},"
+    "chat:{send:function(){},setName:function(){},"
+    "history:function(){return Promise.resolve([]);},"
+    "subscribe:function(){return function(){};},identity:function(){return function(){};}},"
+    "requestCamera:function(){},releaseCamera:function(){},"
+    "requestMicrophone:function(){},releaseMicrophone:function(){},"
+    "onSnapshot:function(fn){window.canvas._snapProvider=fn;},"
+    "screenshot:function(){return Promise.reject(new Error('standalone export'));},"
+    "on_edit:function(){}"
+    "};</script>"
+)
+
+_STANDALONE_REPLAY = (
+    "<script>(function(){"
+    "var F=%s;"
+    "function b64(s){var bin=atob(s),n=bin.length,u=new Uint8Array(n);"
+    "for(var i=0;i<n;i++){u[i]=bin.charCodeAt(i);}return u.buffer;}"
+    "function go(){for(var i=0;i<F.length;i++){var f=F[i];"
+    "window.postMessage({__danvas:(f.b!==undefined?b64(f.b):f.j)},'*');}}"
+    "if(document.readyState==='complete'){setTimeout(go,0);}"
+    "else{window.addEventListener('load',function(){setTimeout(go,0);});}"
+    "})();</script>"
+)
+
+
+def _standalone_document(document, frames, title=None):
+    """`document` (a Custom iframe document, fragment or full page) with the
+    standalone shim in front of its scripts and the replay after them."""
+    encoded = []
+    for f in frames:
+        if isinstance(f, (bytes, bytearray, memoryview)):
+            encoded.append({"b": base64.b64encode(bytes(f)).decode("ascii")})
+        else:
+            encoded.append({"j": f})
+    # "</" would end the script element early if a payload carried it
+    blob = json.dumps(encoded, separators=(",", ":")).replace("</", "<\\/")
+    replay = _STANDALONE_REPLAY % blob
+    head = ""
+    if title:
+        head = "<title>%s</title>" % (title.replace("&", "&amp;").replace("<", "&lt;"))
+    m = re.search(r"<head[^>]*>", document, re.I)
+    if m:
+        doc = document[:m.end()] + head + _STANDALONE_SHIM + document[m.end():]
+    else:
+        m = re.search(r"<html[^>]*>", document, re.I)
+        if m:
+            doc = document[:m.end()] + "<head>" + head + _STANDALONE_SHIM + "</head>" + document[m.end():]
+        else:
+            doc = "<!doctype html><meta charset=\"utf-8\">" + head + _STANDALONE_SHIM + document
+    m = re.search(r"</body>", doc, re.I)
+    if m:
+        doc = doc[:m.start()] + replay + doc[m.start():]
+    else:
+        doc = doc + replay
+    return doc
 
 
 class Custom(_EventRouter, BaseComponent):
@@ -361,7 +433,42 @@ class Custom(_EventRouter, BaseComponent):
         scroll position — intact, so it suits high-rate streaming (e.g. video
         frames) and live two-way panels.
         """
+        self._last_push = data
         self._send_update({"post": data})
+
+    # -- standalone export ----------------------------------------------------
+    def _export_frames(self):
+        """The pushes a standalone export replays on load, in order — each a
+        JSON-able value (as :meth:`push`) or ``bytes`` (as :meth:`push_binary`).
+        The default is the last :meth:`push`, if any; panels that hold richer
+        state override this (Model3D replays every layer and its view)."""
+        last = getattr(self, "_last_push", None)
+        return [] if last is None else [last]
+
+    def export_html(self, path=None, *, frames=None, title=None):
+        """Write this panel as ONE self-contained HTML file: the iframe document,
+        a stub of the in-iframe ``canvas`` API, and a replay of the panel's
+        current state — so someone with no danvas (and no Python) can open it
+        and see the panel as it looks right now.
+
+        What survives is whatever the panel renders client-side from the
+        replayed pushes: a Model3D keeps orbit, section, measure, X-ray and
+        its layers; a Plotly chart stays interactive. What doesn't: anything
+        answered by Python (``canvas.send`` / ``request`` are no-ops), so
+        controls move but nothing responds. Documents that load libraries
+        from a CDN (Model3D's xeokit) still need the network to open.
+
+        ``frames`` overrides :meth:`_export_frames` (a list of push values /
+        bytes). Returns the HTML string; writes it to ``path`` when given.
+        """
+        doc = _standalone_document(
+            self._document(),
+            list(frames) if frames is not None else self._export_frames(),
+            title or self.label or self.name)
+        if path is not None:
+            with open(os.fspath(path), "w", encoding="utf-8") as f:
+                f.write(doc)
+        return doc
 
     # -- input routing (browser -> Python) -----------------------------------
     # on() / on_message() / _handle_input() come from _EventRouter, shared with

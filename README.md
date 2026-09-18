@@ -1371,6 +1371,20 @@ canvas.screenshot(path="canvas.png")    # whole canvas → PNG (bytes returned)
 canvas.screenshot(slider)               # one panel; or [a, b] framed to their bounds
 ```
 
+**Sharing one panel as a file.** `Custom` and `React`-free iframe panels —
+`Model3D` above all — can be written out as a single self-contained HTML that
+opens with no danvas and no Python:
+
+```python
+viewer.export_html("part.html")         # the 3D viewer + every layer + its view
+clock.export_html("clock.html")         # any Custom panel; replays its last push
+```
+
+Everything client-side still works (orbit, section plane, measurements, X-ray,
+layer toggles; Plotly stays interactive). `canvas.send`/`request` become
+no-ops, so controls move but nothing answers, and a document that loads a
+library from a CDN (`Model3D`'s xeokit) needs the network to open.
+
 `describe()` is the cheap text half (confirm the right components exist, are
 wired, laid out, holding expected values — no pixels). `screenshot()` is the
 visual half for a VLM. Both round-trip to a connected browser, so `screenshot()`
