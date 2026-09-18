@@ -705,6 +705,9 @@ class _MergeHost:
             for k in ("x", "y", "rotation", "opacity"):
                 if isinstance(rest.get(k), (int, float)):
                     reg[k] = rest.pop(k)
+            # Shared panel state: the register carries it (same fold as danvasd)
+            if "state" in rest and isinstance(reg.get("props"), dict):
+                reg["props"]["state"] = rest.pop("state")
             if "post" in rest:
                 props = reg.get("props")
                 data = props.get("data") if isinstance(props, dict) else None

@@ -274,14 +274,15 @@ class _FactoryMixin:
         return self._make(WebView, url, name=name, label=label, **place)
 
     def model3d(self, name="model3d", label=None, color=None, view=None,
-                **place: Unpack[Place]):
+                shared_camera=False, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Model3D` — the prebuilt CAD/3D viewer:
         ``viewer.update(glb_bytes_or_path_or_trimesh)`` shows the model with
         orbit, snap measurements, and a section plane. ``view=`` sets the
         starting camera (a preset like ``"iso"``/``"front"``, or
-        ``{"eye": ..., "look": ...}``). See :meth:`insert`."""
+        ``{"eye": ..., "look": ...}``). ``shared_camera=True`` shares every
+        viewer's orbit/pan/zoom (presenter mode). See :meth:`insert`."""
         return self._make(Model3D, name=name, label=label, color=color,
-                          view=view, **place)
+                          view=view, shared_camera=shared_camera, **place)
 
     def plot(self, name="plot", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Plot`. See :meth:`insert` for ``place``."""

@@ -1490,7 +1490,7 @@ class Bridge:
     # message, same as a drag) rather than individual property assignment.
     _LAYOUT_PROP_KEYS = ("x", "y", "w", "h", "rotation", "opacity")
 
-    def _apply_props(self, comp, props):
+    def _apply_props(self, comp, props, viewer=None):
         """Apply a ``set_props`` petition through the component's own setters.
 
         Runs on the dispatch thread (a slow/odd setter can't stall the wire).
@@ -1502,6 +1502,7 @@ class Bridge:
         dropped with a log line — the owner's echoed state remains canonical,
         which is what keeps every replica convergent.
         """
+        wrote_state = "state" in props
         layout = {k: props.pop(k) for k in list(props)
                   if k in self._LAYOUT_PROP_KEYS or k in LAYOUT_FLAGS}
         if layout:
@@ -1532,6 +1533,9 @@ class Bridge:
             else:
                 _log.debug("set_props: %s has no writable property %r",
                            type(comp).__name__, k)
+        # A viewer wrote the shared state (canvas.setState): tell Python.
+        if wrote_state and hasattr(comp, "_fire_state"):
+            comp._fire_state(viewer)
 
     def _on_message(self, ws, raw):
         try:
@@ -1642,7 +1646,8 @@ class Bridge:
                 props = msg.get("props")
                 if allowed and isinstance(props, dict) and props:
                     self._dispatch.submit(
-                        lambda c=comp, p=dict(props): self._apply_props(c, p))
+                        lambda c=comp, p=dict(props), v=dict(viewer):
+                        self._apply_props(c, p, v))
                 elif not allowed:
                     _log.debug("dropped set_props for %s: not permitted",
                                msg.get("id"))

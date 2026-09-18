@@ -503,8 +503,9 @@ def _dispatch_hub_frame(bridge, msg):
         # a hard lock refuses (PROTOCOL.md § the shared property plane).
         if not getattr(comp, "locked", False):
             bridge._dispatch.submit(
-                lambda c=comp, p=dict(msg.get("props") or {}):
-                bridge._apply_props(c, p))
+                lambda c=comp, p=dict(msg.get("props") or {}),
+                v=dict(bridge._viewers.get(who) or {}):
+                bridge._apply_props(c, p, v))
 
 
 # -- serve(broker=True): the binary broker serves; this process is a source --

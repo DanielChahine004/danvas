@@ -50,6 +50,16 @@ export function CustomView({ shape }: { shape: any }) {
     postTheme()
   }, [postTheme, shape.props.html]) // re-push when theme/dark changes or the doc reloads
 
+  // Shared state into the iframe: on every change, and again when the document
+  // (re)loads so a fresh page starts current (canvas.state / canvas.onState).
+  const stateJson = JSON.stringify((shape.props as any).state || {})
+  const postState = useCallback(() => {
+    const el = ref.current
+    if (!el || !el.contentWindow) return
+    el.contentWindow.postMessage({ __danvas_state: JSON.parse(stateJson) }, '*')
+  }, [stateJson])
+  useEffect(() => { postState() }, [postState])
+
   // Push Python data into the iframe (the live `post` channel). Binary arrives as
   // an ArrayBuffer and is transferred (zero-copy) rather than structured-cloned.
   useEffect(() => {
@@ -104,7 +114,7 @@ export function CustomView({ shape }: { shape: any }) {
       }}
       // Once the document (and its theme listener) is live, push the theme in —
       // the mount-time effect can run before the iframe has parsed its script.
-      onLoad={themed ? postTheme : undefined}
+      onLoad={() => { if (themed) postTheme(); postState() }}
       // Keep the engine from hijacking drags/zoom meant for the iframe content.
       // (No drawing layer yet, so drawingOnTop is always false.)
       onPointerDown={ghost || !toolIsSelect ? undefined : (e: any) => e.stopPropagation()}

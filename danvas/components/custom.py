@@ -39,6 +39,7 @@ import traceback
 
 from .base import BaseComponent
 from ._routing import _EventRouter
+from ._state import _SharedState
 from ..bridge import BINARY_CUSTOM
 
 # A panel's ``html`` is treated as a complete page (left untouched, no base reset)
@@ -54,7 +55,9 @@ _FULL_DOCUMENT_RE = re.compile(r"<\s*(?:!doctype|html|body)\b", re.IGNORECASE)
 # push would (JSON objects and ArrayBuffers alike).
 _STANDALONE_SHIM = (
     "<script>window.canvas={"
-    "standalone:true,"
+    "standalone:true,state:%s,"
+    "onState:function(fn){setTimeout(function(){fn(window.canvas.state);},0);},"
+    "setState:function(p){window.canvas.state=Object.assign({},window.canvas.state,p||{});},"
     "send:function(){},sendBinary:function(){},"
     "onPush:function(fn){window.addEventListener('message',function(e){"
     "if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}});},"
@@ -84,7 +87,7 @@ _STANDALONE_REPLAY = (
 )
 
 
-def _standalone_document(document, frames, title=None):
+def _standalone_document(document, frames, title=None, state=None):
     """`document` (a Custom iframe document, fragment or full page) with the
     standalone shim in front of its scripts and the replay after them."""
     encoded = []
@@ -96,18 +99,19 @@ def _standalone_document(document, frames, title=None):
     # "</" would end the script element early if a payload carried it
     blob = json.dumps(encoded, separators=(",", ":")).replace("</", "<\\/")
     replay = _STANDALONE_REPLAY % blob
+    shim = _STANDALONE_SHIM % json.dumps(state or {}).replace("</", "<\\/")
     head = ""
     if title:
         head = "<title>%s</title>" % (title.replace("&", "&amp;").replace("<", "&lt;"))
     m = re.search(r"<head[^>]*>", document, re.I)
     if m:
-        doc = document[:m.end()] + head + _STANDALONE_SHIM + document[m.end():]
+        doc = document[:m.end()] + head + shim + document[m.end():]
     else:
         m = re.search(r"<html[^>]*>", document, re.I)
         if m:
-            doc = document[:m.end()] + "<head>" + head + _STANDALONE_SHIM + "</head>" + document[m.end():]
+            doc = document[:m.end()] + "<head>" + head + shim + "</head>" + document[m.end():]
         else:
-            doc = "<!doctype html><meta charset=\"utf-8\">" + head + _STANDALONE_SHIM + document
+            doc = "<!doctype html><meta charset=\"utf-8\">" + head + shim + document
     m = re.search(r"</body>", doc, re.I)
     if m:
         doc = doc[:m.start()] + replay + doc[m.start():]
@@ -116,7 +120,7 @@ def _standalone_document(document, frames, title=None):
     return doc
 
 
-class Custom(_EventRouter, BaseComponent):
+class Custom(_SharedState, _EventRouter, BaseComponent):
     component = "Custom"
     # Language-neutral contract (see PROTOCOL.md section: component contracts).
     CONTRACT = {
@@ -132,10 +136,15 @@ class Custom(_EventRouter, BaseComponent):
                   "themed": "bool -- follow the canvas theme variables",
                   "keepMounted": "bool -- exempt from viewport culling "
                                  "(hidden, not destroyed, off-screen; "
-                                 "browser-local state survives scrolling)"},
+                                 "browser-local state survives scrolling)",
+                  "state": "object -- shared state, one dict for every "
+                           "viewer; the page reads canvas.state / "
+                           "canvas.onState and writes canvas.setState "
+                           "(a set_props frame); Python reads panel.state"},
         "updates": {"data_patch": "merge changed data fields",
                     "post": "opaque value delivered to the document's "
-                            "canvas.onPush"},
+                            "canvas.onPush",
+                    "state": "the full shared state after a write"},
         "events": "free-form -- whatever the document's canvas.send posts",
         "binary": "CUSTOM (code 3) out via push(); INPUT (code 5) in via "
                   "the document's canvas.sendBinary",
@@ -153,6 +162,7 @@ class Custom(_EventRouter, BaseComponent):
                  label=None, w=None, h=None, color=None, event_key="event",
                  permissions=None, forward_wheel=True, themed=False,
                  keep_mounted=False):
+        self._init_state()
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -356,6 +366,8 @@ class Custom(_EventRouter, BaseComponent):
     def register_props(self):
         props = dict(self._props)  # label, w, h
         props["html"] = self._wrap(self._document())
+        if self._state:
+            props["state"] = dict(self._state)
         props["permissions"] = self._permissions
         props["themed"] = self._themed
         if self._keep_mounted:
@@ -464,7 +476,7 @@ class Custom(_EventRouter, BaseComponent):
         doc = _standalone_document(
             self._document(),
             list(frames) if frames is not None else self._export_frames(),
-            title or self.label or self.name)
+            title or self.label or self.name, state=self._state)
         if path is not None:
             with open(os.fspath(path), "w", encoding="utf-8") as f:
                 f.write(doc)

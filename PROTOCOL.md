@@ -267,6 +267,19 @@ Permissions: a **browser** passes the same gate as `input` (roles, `operable`,
 `lock_for`); a **process peer** (dial-in source, merge proxy) is authoritative
 — only a hard `locked` stops it.
 
+**Shared panel state.** Embedded panels (`Custom`, `React`) carry one
+browser-writable property, `state` (a JSON object), so what a page does to
+itself can be shared the way a slider's value is. A page writes it with
+`set_props` (`{"type": "set_props", "id": ..., "props": {"state": {...full
+state...}}}`, last-writer-wins); the owner applies it and broadcasts
+`{"type": "update", "id": ..., "payload": {"state": {...}}}`; the register
+frame's `props.state` carries it for late joiners (a hub folds the latest
+`state` update into its cached register). The writing browser applies its
+own write locally first and drops the echo of it, so a continuous write (a
+dragged 3D camera) never snaps back. In the page: `canvas.state`,
+`canvas.onState(fn)`, `canvas.setState(patch)`; in Python: `panel.state`,
+`panel.set_state(**patch)`, `@panel.on_state`.
+
 `subscribe` is the events half: a subscribed connection receives a copy of a
 panel's `input` frames (the originator excluded; the owner's handlers are
 unaffected), so any process can *react* to any panel — behavior stays where

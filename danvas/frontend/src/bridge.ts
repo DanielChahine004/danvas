@@ -906,6 +906,15 @@ function updateComponent(id: string, payload: any): void {
   const shapeId = createShapeId(id)
   const shape = store.peek(shapeId)
   if (!shape) return
+  if (payload && payload.state !== undefined) {
+    // the echo of a state this browser just wrote: keep ours (see setPanelState)
+    const own = ownState.get(id)
+    if (own && Date.now() - own.t < 1500 && JSON.stringify(payload.state) !== own.json) {
+      payload = { ...payload }
+      delete payload.state
+      if (Object.keys(payload).length === 0) return
+    }
+  }
   const { x, y, rotation, opacity, locked, movable, resizable, interactive, selectable, frame, frameColor, wheelLocal, data_patch, ...props } = payload
   const patch: any = { props: { ...props } }
   // data_patch carries only the changed props (React.update sends a delta, not the
@@ -1397,6 +1406,26 @@ export function unregisterStyle(id: string): void {
 // === browser -> Python =======================================================
 export function sendInput(id: string, payload: any): void {
   sendRaw({ type: 'input', id, payload })
+}
+
+// --- shared panel state (Custom / React) --------------------------------------
+// A page's canvas.setState(patch): merge into the panel's props.state, apply
+// HERE first (the writer never waits on the round trip), then write through
+// the property plane. The owner applies + broadcasts the full state; the
+// echo of our own write is dropped for a moment so a continuous write (a
+// dragged 3D camera) never snaps back to a stale value.
+const ownState = new Map<string, { json: string; t: number }>()
+export function setPanelState(compId: string, patch: any): void {
+  const shapeId = createShapeId(compId)
+  const rec = store.peek(shapeId) as any
+  const state = { ...((rec?.props?.state as any) || {}), ...(patch || {}) }
+  ownState.set(compId, { json: JSON.stringify(state), t: Date.now() })
+  if (rec) applyRemote(() => store.patch(shapeId, { props: { state } }))
+  sendRaw({ type: 'set_props', id: compId, props: { state } })
+}
+export function panelState(compId: string): any {
+  const rec = store.peek(createShapeId(compId)) as any
+  return (rec?.props?.state as any) || {}
 }
 export function sendPanelError(id: string, message: any): void {
   sendRaw({ type: 'panel_error', id, message: String(message) })
@@ -2232,6 +2261,8 @@ if (typeof window !== 'undefined') {
       fitFromIframe(e.source, d.__danvas_fit)
     } else if (d.__danvas) {
       sendInput(d.__danvas, d.data)
+    } else if (d.__danvas_set_state) {
+      setPanelState(d.__danvas_set_state, d.state)
     } else if (d.__danvas_binary && d.data instanceof ArrayBuffer) {
       sendBinary(d.__danvas_binary, d.data)
     } else if (d.__danvas_camera) {

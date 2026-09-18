@@ -74,10 +74,11 @@ import re
 from ..bridge import BINARY_REACT
 from . import _theme
 from .base import BaseComponent
+from ._state import _SharedState
 from ._routing import _EventRouter
 
 
-class React(_EventRouter, BaseComponent):
+class React(_SharedState, _EventRouter, BaseComponent):
     component = "React"
     BINARY_TYPE = BINARY_REACT
 
@@ -88,6 +89,7 @@ class React(_EventRouter, BaseComponent):
                  name="react", label=None, w=None, h=None, color=None, props=None,
                  scope=None, event_key="event", queue="fifo",
                  wasm=None, wasm_path=None, forward_wheel=True):
+        self._init_state()
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         self._path = path   # remembered so watch() can reload it
@@ -189,6 +191,8 @@ class React(_EventRouter, BaseComponent):
     def _compose_props(self, data):
         props = dict(self._props)  # label, w, h
         props["source"] = self._source
+        if self._state:
+            props["state"] = dict(self._state)
         props["data"] = json.dumps(data)
         props["css"] = self._css
         props["autoH"] = self._auto_h

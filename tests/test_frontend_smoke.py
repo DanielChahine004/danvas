@@ -376,3 +376,28 @@ def test_unplaced_anchor_keeps_its_below_chain(page_state):
     root, kid = page.evaluate("() => [(%s)('root'), (%s)('kid')]" % (get, get))
     assert kid[0] >= root[0] + root[1], (root, kid)
     assert abs(kid[0] - (root[0] + root[1] + 16)) < 1, (root, kid)
+
+
+def test_shared_state_written_from_inside_panels(page_state):
+    # canvas.setState in a Custom iframe and in a React component lands in the
+    # store's props.state (applied locally first, then written through the
+    # property plane). Both start from the register frame's state.
+    page, errors, src = page_state
+    src.register("st_custom", "Custom", props={
+        "html": "<p>state</p><script>canvas.onState(function(s){"
+                "if(s.seed&&!s.echo){canvas.setState({echo:s.seed*2});}});</script>",
+        "w": 200, "h": 100, "state": {"seed": 7}}, x=1400, y=40)
+    src.register("st_react", "React", props={
+        "source": "function Component({canvas, state}){"
+                  "React.useEffect(function(){"
+                  "if(state.seed&&!state.echo){canvas.setState({echo:state.seed+1});}"
+                  "},[state.seed,state.echo]);return React.createElement('p',null,'r');}",
+        "data": "{}", "w": 200, "h": 100, "state": {"seed": 10}}, x=1400, y=180)
+    get = ("(sfx) => { const s = window.__danvas.store; const id = [...s.ids()]"
+           ".find(i => i.endsWith(':' + sfx)); const r = id && s.peek(id);"
+           " return r && r.props && r.props.state; }")
+    page.wait_for_function(
+        "() => { const g = %s; const c = g('st_custom'), r = g('st_react');"
+        " return !!c && c.echo === 14 && !!r && r.echo === 11; }" % get,
+        timeout=15_000)
+    assert not errors, errors

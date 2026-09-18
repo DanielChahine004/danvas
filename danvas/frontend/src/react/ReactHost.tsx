@@ -17,6 +17,8 @@ import {
   requestData,
   registerLive,
   unregisterLive,
+  setPanelState,
+  panelState,
   registerStyle,
   unregisterStyle,
   componentIdOf,
@@ -239,6 +241,9 @@ export default function ReactHost({ shape }: { shape: any }) {
   const canvas = React.useMemo(
     () => ({
       send: (data: any) => sendInput(id, data),
+      // shared state (see bridge.ts setPanelState): read `state`, write setState
+      get state() { return panelState(id) },
+      setState: (patch: any) => setPanelState(id, patch),
       sendBinary: (buf: any) => sendBinary(id, buf instanceof ArrayBuffer ? buf : buf.buffer || buf),
       request: (data: any) => requestData(id, data),
       onFrame: (cb: (d: any) => void) => {
@@ -466,7 +471,7 @@ export default function ReactHost({ shape }: { shape: any }) {
       >
         {shape.props.css ? <style>{shape.props.css}</style> : null}
         <Boundary resetKey={Comp} onError={(e: any) => sendPanelError(id, e.message || String(e))}>
-          <Comp canvas={canvas} value={streamed} props={userProps} />
+          <Comp canvas={canvas} value={streamed} props={userProps} state={(shape.props as any).state || {}} />
         </Boundary>
       </div>
     </div>

@@ -1668,6 +1668,33 @@ _VIEWER_HTML = """
         m.on("error", (e) => { status.innerText = "LOAD ERROR: " + e; });
     }
 
+    // ---- shared camera (opt-in: Model3D(shared_camera=True)) -------------
+    // This browser's orbit/pan/zoom -> canvas.setState({view}) (settled,
+    // ~12/s); a peer's arrives via onState and is applied unless this
+    // browser moved its own camera in the last second (no fighting mid-drag).
+    let sharedCam = !!(canvas.state && canvas.state.shared_camera);
+    let ownCamAt = 0, camTimer = null, applyingPeer = false;
+    function shareCamera() {
+        if (!sharedCam || applyingPeer) return;
+        if (camTimer) return;
+        camTimer = setTimeout(() => {
+            camTimer = null;
+            ownCamAt = Date.now();
+            const c = viewer.camera;
+            canvas.setState({ view: { eye: [...c.eye], look: [...c.look], up: [...c.up] } });
+        }, 80);
+    }
+    if (canvas.onState) {
+        canvas.onState((s) => {
+            if (s && s.shared_camera) sharedCam = true;
+            if (!s || !s.view || !s.view.eye) return;
+            if (Date.now() - ownCamAt < 1000) return;      // mid-own-drag: keep ours
+            applyingPeer = true;
+            try { applyView(s.view); } finally { applyingPeer = false; }
+        });
+        viewer.camera.on("matrix", shareCamera);
+    }
+
     canvas.onPush((data) => {
         // Binary: a layer frame ("DVL1" + u16le name length + name + GLB)
         // or a bare GLB, which addresses the "model" layer. JSON: controls.
@@ -2007,7 +2034,8 @@ class Model3D(Custom):
     #: Presets the view API accepts (camera direction relative to the scene).
     VIEW_PRESETS = ("front", "back", "left", "right", "top", "bottom", "iso")
 
-    def __init__(self, name="model3d", label=None, color=None, view=None):
+    def __init__(self, name="model3d", label=None, color=None, view=None,
+                 shared_camera=False):
         super().__init__(html=_VIEWER_HTML, name=name, label=label,
                          # the wheel zooms the model, not the canvas
                          forward_wheel=False,
@@ -2022,6 +2050,11 @@ class Model3D(Custom):
         # "zoom": ...}). Applied by every browser once content loads (and
         # replayed to late-mounting viewers), replacing the default fit.
         self._view = None
+        # shared_camera: every viewer's orbit/pan/zoom is shared through the
+        # panel's state (state["view"]); a late joiner opens at that view.
+        # Opt-in: two people orbiting at once fight each other.
+        if shared_camera:
+            self._init_state({"shared_camera": True})
         if view is not None:
             if isinstance(view, str):
                 self._view = self._view_spec(preset=view)

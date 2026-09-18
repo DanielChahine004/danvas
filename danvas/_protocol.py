@@ -139,6 +139,8 @@ IFRAME_MESSAGE_KEYS = {
     "CHAT_IDENTITY": "__danvas_chat_identity",   # parent->iframe identity change
     "CAMERA": "__danvas_camera",                 # iframe->parent requestCamera/release
     "MIC": "__danvas_mic",                       # iframe->parent requestMicrophone/release
+    "STATE": "__danvas_state",                   # parent->iframe shared state (canvas.state / onState)
+    "SET_STATE": "__danvas_set_state",           # iframe->parent canvas.setState (-> set_props)
     "ERROR": "__danvas_error",                   # iframe->parent JS error report
     "WHEEL": "__danvas_wheel",                   # iframe->parent wheel -> canvas zoom
     "PAN": "__danvas_pan",                       # iframe->parent pan delta

@@ -447,6 +447,14 @@ fn fold_state(src: &mut Source, nsid: &str, payload: Map<String, Value>) {
                     obj.insert(k.into(), rest.remove(k).unwrap());
                 }
             }
+            // Shared panel state (Custom/React `state`): the register frame
+            // carries it, so fold the latest value into props — a late
+            // joiner opens current in one frame (PROTOCOL.md, shared state).
+            if let Some(state) = rest.remove("state") {
+                if let Some(props) = obj.get_mut("props").and_then(Value::as_object_mut) {
+                    props.insert("state".into(), state);
+                }
+            }
             if let Some(post) = rest.get("post").cloned() {
                 let folded = obj
                     .get_mut("props")

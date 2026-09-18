@@ -59,6 +59,18 @@ export function customHelper(cid: string, forwardWheel: boolean): string {
     "onPush:function(fn){window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}' +
     '});},' +
+    // Shared state: one dict per panel, the same for every viewer. `state` is
+    // kept current by the parent; setState merges, applies locally, and writes
+    // through the property plane (a set_props frame) so every other viewer —
+    // and Python (panel.state / @on_state) — converge on it.
+    'state:{},' +
+    "onState:function(fn){window.addEventListener('message',function(e){" +
+    'if(e.data&&e.data.__danvas_state!==undefined){fn(window.canvas.state);}' +
+    '});if(window.canvas._stateReady){setTimeout(function(){fn(window.canvas.state);},0);}},' +
+    'setState:function(patch){' +
+    'var s=Object.assign({},window.canvas.state||{},patch||{});window.canvas.state=s;' +
+    `parent.postMessage({__danvas_set_state:${id},state:s},'*');` +
+    '},' +
     'request:function(data){return new Promise(function(res,rej){' +
     "var rid='r'+Math.random().toString(36).slice(2)+Date.now();" +
     'function h(e){if(e.data&&e.data.__danvas_response===rid){' +
@@ -121,6 +133,9 @@ export function customHelper(cid: string, forwardWheel: boolean): string {
     // default composites every same-origin <canvas> at its layout position
     // over the body background (HTML text isn't captured — panels that
     // need more register canvas.onSnapshot).
+    "window.addEventListener('message',function(e){" +
+    'if(e.data&&e.data.__danvas_state!==undefined){window.canvas.state=e.data.__danvas_state||{};window.canvas._stateReady=true;}' +
+    '});' +
     "window.addEventListener('message',function(e){" +
     'if(!(e.data&&e.data.__danvas_snap))return;' +
     'var tok=e.data.__danvas_snap;' +

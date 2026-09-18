@@ -454,6 +454,12 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
                        css='button { font-size: 18px; }')
 ```
 
+- **`state`** is the panel's *shared* state — one dict every viewer sees, unlike
+  `useState`, which is per browser. The component receives it as the `state`
+  prop and writes it with `canvas.setState(patch)`; every other viewer re-renders
+  with it, a late joiner starts from it, and Python reads `panel.state` /
+  reacts with `@panel.on_state(fn(state, viewer))` (or seeds it: `panel.set_state(...)`).
+  Last-writer-wins; the writer never waits on the round trip.
 - `value` is the latest `push(data)`; `props` is the `update(**props)` dict
   (replayed on reconnect). The `canvas` prop is the bridge handle:
   `send(data)` (→ `@on`/`@on_message`), `request(data)` (awaitable, → `@on_request`),
@@ -497,6 +503,13 @@ def handle(msg):
   touches `canvas` is simply displayed; external assets need absolute URLs, since
   the sandboxed iframe can't reach your disk. `export_html()` goes the other way:
   see [Inspecting & screenshotting](#inspecting--screenshotting-llm-feedback-loop).
+- **Shared state**, the same slot React panels have: the page reads `canvas.state`,
+  listens with `canvas.onState(fn)` (fires once on registration, then per change)
+  and writes `canvas.setState(patch)` — every viewer converges on it and Python
+  sees `panel.state` / `@panel.on_state`. Anything the page does to itself that
+  you *want* other viewers to see (a camera, a selection, a form) goes here;
+  everything else stays per-browser. `Model3D(shared_camera=True)` is built on
+  it: one viewer's orbit/pan/zoom becomes everyone's (presenter mode).
 - `html`/`css`/`js` may be separate strings (handy for pasted snippets). A bare
   fragment is wrapped with a base reset (sane margins, `box-sizing`, centred), so
   you don't hand-write a `<style>` reset; a complete `<html>` page is left as-is.
