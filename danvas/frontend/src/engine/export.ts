@@ -13,29 +13,11 @@ import { signal } from 'alien-signals'
 import { store } from './store'
 import { editor } from './editor'
 import { recordBBox } from './hittest'
-import type { PanelRecord, WriteSignal } from './types'
+import type { WriteSignal } from './types'
 
 // Panels to force-mount during an export (so culled ones are captured). null when
 // not exporting. PanelLayer reads this.
 export const exportTargets = signal<Set<string> | null>(null) as WriteSignal<Set<string> | null>
-
-function boundsOf(ids: string[]): { x: number; y: number; w: number; h: number } | null {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity
-  let any = false
-  for (const id of ids) {
-    const r = store.peek(id) as PanelRecord | undefined
-    if (!r) continue
-    any = true
-    minX = Math.min(minX, r.x)
-    minY = Math.min(minY, r.y)
-    maxX = Math.max(maxX, r.x + r.props.w)
-    maxY = Math.max(maxY, r.y + r.props.h)
-  }
-  return any ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : null
-}
 
 // Block until no panel is still showing its "compiling…"/"loading…" placeholder,
 // so a screenshot captures rendered UI, not a spinner. Bounded.
@@ -54,10 +36,10 @@ function waitForPanelsReady(budgetMs = 8000): Promise<void> {
   })
 }
 
-const allPanelIds = (): string[] =>
+const allSceneIds = (): string[] =>
   store.ids().filter((id) => {
     const r = store.peek(id)
-    return !!r && r.typeName === 'panel'
+    return !!r && ['panel', 'drawing', 'arrow'].includes(r.typeName)
   })
 
 // A sandboxed iframe's pixels are unreadable from the parent, so iframe
@@ -129,11 +111,13 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
 
   const wanted = shapeIds.length
     ? shapeIds.map((s) => (s.startsWith('shape:') ? s : `shape:${s}`)).filter((id) => store.has(id))
-    : allPanelIds()
+    : allSceneIds()
   if (!wanted.length) return { error: 'nothing to capture' }
 
-  const bounds = boundsOf(wanted)
+  const bounds = boundsOfRecords(wanted)
   if (!bounds) return { error: 'no bounds' }
+  // Keep strokes and arrowheads at scene edges inside the image.
+  const pad = 8
 
   const targetSet = new Set(wanted)
   exportTargets(targetSet)
@@ -146,16 +130,17 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
     const { domToPng } = await import('modern-screenshot')
     const isDark = store.instance().darkMode
     const dataUrl = await domToPng(layer, {
-      width: Math.ceil(bounds.w),
-      height: Math.ceil(bounds.h),
+      width: Math.ceil(bounds.w + pad * 2),
+      height: Math.ceil(bounds.h + pad * 2),
       backgroundColor: isDark ? '#1d1d20' : '#fbfbfb',
       scale: 2, // crisp text for LLM legibility
       // Frame the bounds at z=1 on the CLONE only (live view untouched).
-      style: { transform: `translate(${-bounds.x}px, ${-bounds.y}px) scale(1)`, transformOrigin: '0 0' },
+      style: { transform: `translate(${pad - bounds.x}px, ${pad - bounds.y}px) scale(1)`, transformOrigin: '0 0' },
       // Drop non-target panels from the clone (so a subset shot shows only them).
       filter: (node: any) => {
         const pid = node && node.getAttribute && node.getAttribute('data-pc-panel-id')
-        return !(pid && !targetSet.has(pid))
+        const did = node && node.getAttribute && node.getAttribute('data-pc-drawing-id')
+        return !(pid && !targetSet.has(pid)) && !(did && !targetSet.has(did))
       },
     })
     return { base64: dataUrl.split(',')[1] }
@@ -179,7 +164,12 @@ function boundsOfRecords(ids: string[]): { x: number; y: number; w: number; h: n
     maxY = -Infinity,
     any = false
   for (const id of ids) {
-    const b = recordBBox(store.peek(id))
+    const record = store.peek(id)
+    let b = recordBBox(record)
+    // Managed notes may omit dimensions; match DrawingLayer's 160px defaults.
+    if (record?.typeName === 'drawing' && record.shapeType === 'note') {
+      b = { x: record.x, y: record.y, w: record.props.w || 160, h: record.props.h || 160 }
+    }
     if (!b) continue
     any = true
     minX = Math.min(minX, b.x)

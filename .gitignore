@@ -49,3 +49,7 @@ claude.ps1
 .code-review-graph/
 .codebaser/
 examples/test.py
+
+# Local test coverage artifacts
+.coverage
+htmlcov/

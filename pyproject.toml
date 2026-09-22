@@ -63,8 +63,12 @@ classifiers = [
 
 [project.scripts]
 danvas = "danvas.__main__:main"
+danvas-mcp = "danvas.mcp_server:main"
 
 [project.optional-dependencies]
+# Optional MCP integration; the base SDK continues to support Python 3.9.
+mcp = ["mcp>=2.2,<3; python_version >= '3.10'"]
+mcp-test = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-cov>=6", "playwright>=1.50", "ruff>=0.9", "mypy>=1.15"]
 # The Python reference hub: `python -m danvas.merge` (a neutral, compute-less
 # aggregator) runs on FastAPI/uvicorn. Not needed to serve a canvas (that's the
 # danvasd binary) or to connect to one — only to run the Python hub itself.

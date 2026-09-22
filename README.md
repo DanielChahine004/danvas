@@ -41,6 +41,13 @@ already-JPEG bytes with `VideoFeed(encode=False)`, which needs nothing. For loca
 development, clone and `pip install -e .` (a checkout builds `danvasd` with
 `cargo build --release --manifest-path broker/Cargo.toml`).
 
+## MCP integration
+
+An optional MCP server lets AI assistants create and edit live canvases, read
+browser input, capture screenshots, and save/reload boards. Install this checkout
+with `pip install -e ".[mcp]"` (Python 3.10+) and run `danvas-mcp`. See the
+[MCP setup, tool reference and verification guide](docs/mcp.md).
+
 ## Hello world
 
 ```python
