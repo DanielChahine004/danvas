@@ -1,6 +1,6 @@
 """Quantify the danvas wire: startup, interaction round-trip latency, JSON +
 video throughput (with conflation behavior), and broker memory -- the numbers
-the README's "measured on the wire" table comes from.
+the manual's "measured on the wire" table (docs/guide.md) comes from.
 
 A raw-frame probe plays the browser role and the Rust conformance target the
 owner role, all over loopback. Build both first:
