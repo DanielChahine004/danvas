@@ -59,7 +59,7 @@ canvas.serve(port=8000)   # opens the browser, blocks
 
 ![The hello-world canvas: dragging the SERVO_1 slider live-updates the STATUS label through the Python handler](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/hello_world.gif)
 
-**Writing danvas code, or asking an AI to?** [The danvas manual](docs/guide.md) is the
+**Writing danvas code, or asking an AI to?** [The danvas manual](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md) is the
 complete reference: conventions and a one-page quick reference first, then
 every feature in depth. Point an assistant at it before it starts.
 
@@ -68,24 +68,24 @@ every feature in depth. Point an assistant at it before it starts.
 - **Panels for everything**: controls, tables, Plotly charts, live telemetry,
   heatmaps, video and audio, chat, file upload and download, a CAD/3D viewer
   with volume rendering, and your own React or HTML. [Catalogue below](#the-component-catalogue).
-- **Your own UI, two ways**: [`react(...)`](docs/guide.md#react) mounts JSX natively;
-  [`custom(...)`](docs/guide.md#custom) drops in any HTML page — `custom(path="page.html",
+- **Your own UI, two ways**: [`react(...)`](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#react) mounts JSX natively;
+  [`custom(...)`](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#custom) drops in any HTML page — `custom(path="page.html",
   sync=True)` even shares an unedited page's controls between everyone viewing it.
 - **Multi-user by default**: a viewer roster, live cursors, chat, shared ink,
-  and logins with [roles](docs/guide.md#roles-one-rule-for-everything-per-viewer) that
+  and logins with [roles](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#roles-one-rule-for-everything-per-viewer) that
   scope what each person sees and can do.
-- **Sharing built in**: LAN, password, or a [public HTTPS tunnel](docs/guide.md#serving--sharing)
+- **Sharing built in**: LAN, password, or a [public HTTPS tunnel](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#serving--sharing)
   with a link that survives script restarts; widen or narrow reach live.
 - **Resilient**: the UI survives your script crashing and heals on restart;
-  [`persist=`](docs/guide.md#saving--loading) restores values and layout across runs;
-  [`danvas ps` / `kill`](docs/guide.md#finding-and-stopping-running-canvases) finds
+  [`persist=`](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#saving--loading) restores values and layout across runs;
+  [`danvas ps` / `kill`](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#finding-and-stopping-running-canvases) finds
   canvases left running in the background.
-- **Fast iteration**: [hot reload](docs/guide.md#serving--sharing) swaps edited function
+- **Fast iteration**: [hot reload](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#serving--sharing) swaps edited function
   bodies without restarting, `@canvas.on_edit` re-runs a function when you save
-  it, and [`describe()` / `screenshot()`](docs/guide.md#inspecting--screenshotting-llm-feedback-loop)
+  it, and [`describe()` / `screenshot()`](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#inspecting--screenshotting-llm-feedback-loop)
   let a script, or an AI editing it, check what it built.
-- **Any language**: one documented [wire protocol](PROTOCOL.md); Python, [Rust](danvas-rust/)
-  and [Node](danvas-node/) SDKs, and an Arduino serial bridge.
+- **Any language**: one documented [wire protocol](https://github.com/DanielChahine004/danvas/blob/main/PROTOCOL.md); Python, [Rust](https://github.com/DanielChahine004/danvas/tree/main/danvas-rust/)
+  and [Node](https://github.com/DanielChahine004/danvas/tree/main/danvas-node/) SDKs, and an Arduino serial bridge.
 
 ## The component catalogue
 
@@ -118,7 +118,7 @@ every feature in depth. Point an assistant at it before it starts.
 ![The native panels on one canvas: label, slider, toggle, button, text field, markdown, table, plot, heatmap, histogram, live plot, image, download, upload, file browser, chat, and a custom HTML panel](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/catalogue.png)
 
 Most `color=` panels expose `.color` (and most accept `lock`/`chrome` flags) —
-see [Controlling panels live](docs/guide.md#controlling-panels-live).
+see [Controlling panels live](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md#controlling-panels-live).
 
 ### Your own panels
 
@@ -135,20 +135,20 @@ def _(msg, viewer):
 
 ## Two bigger builds
 
-Parametric CAD in the 3D panel ([`cad_model3d.py`](examples/cad_model3d.py)): sliders rebuild a build123d part and push mesh, point cloud, line net, isosurface and volume layers into `Model3D`.
+Parametric CAD in the 3D panel ([`cad_model3d.py`](https://github.com/DanielChahine004/danvas/blob/main/examples/cad_model3d.py)): sliders rebuild a build123d part and push mesh, point cloud, line net, isosurface and volume layers into `Model3D`.
 
 ![Two sliders rebuild a build123d part in the Model3D panel, then a helix traces itself around it](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/cad_model3d.gif)
 
-A live LTspice front-end ([`circuit_dashboard.py`](examples/circuit_dashboard.py)): release a slider, LTspice re-simulates, and the schematic, transient, Bode plot and results redraw.
+A live LTspice front-end ([`circuit_dashboard.py`](https://github.com/DanielChahine004/danvas/blob/main/examples/circuit_dashboard.py)): release a slider, LTspice re-simulates, and the schematic, transient, Bode plot and results redraw.
 
 ![Releasing a slider re-runs LTspice and every panel redraws with the notch moved](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/circuit_dashboard.gif)
 
 ## Learn more
 
-- [The danvas manual](docs/guide.md) — conventions, quick reference, and every feature in depth.
-- [examples/](examples/README.md) — 50 runnable scripts grouped by topic.
-- [PROTOCOL.md](PROTOCOL.md) — the wire contract, for other languages and tools.
-- [SECURITY.md](SECURITY.md) — the trust model.
+- [The danvas manual](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md) — conventions, quick reference, and every feature in depth.
+- [examples/](https://github.com/DanielChahine004/danvas/blob/main/examples/README.md) — 50 runnable scripts grouped by topic.
+- [PROTOCOL.md](https://github.com/DanielChahine004/danvas/blob/main/PROTOCOL.md) — the wire contract, for other languages and tools.
+- [SECURITY.md](https://github.com/DanielChahine004/danvas/blob/main/SECURITY.md) — the trust model.
 
 ## Examples
 
@@ -185,12 +185,12 @@ matplotlib/plotly examples need `pip install matplotlib plotly`.
 The frontend bundle in `danvas/frontend/dist/` is committed; rebuild with
 `cd danvas/frontend && npm install && npm run build`, then
 `cargo build --release --manifest-path broker/Cargo.toml` (the broker embeds it).
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/DanielChahine004/danvas/blob/main/CONTRIBUTING.md).
 
 ## Licence
 
 danvas's own source code is under the
-[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later). Commercial
+[GNU Affero General Public License v3.0](https://github.com/DanielChahine004/danvas/blob/main/LICENSE) (AGPL-3.0-or-later). Commercial
 licences — which waive the AGPL copyleft for internal or proprietary use — are
 available on request via daniel.chahine004@gmail.com.
 
@@ -198,7 +198,7 @@ available on request via daniel.chahine004@gmail.com.
 `danvas/frontend/dist/` is compiled from third-party packages under *their*
 licences — all **permissive (MIT)**, built on [Preact](https://preactjs.com)
 (the [Inter](https://rsms.me/inter/) typeface is under the SIL Open Font License).
-See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+See [THIRD_PARTY_LICENSES.md](https://github.com/DanielChahine004/danvas/blob/main/THIRD_PARTY_LICENSES.md).
 
 **No frontend licence key is required.** The frontend is fully open and permissive
 — there is no proprietary component, no production licence key, and no watermark.
