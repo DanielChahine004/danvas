@@ -144,10 +144,12 @@ class _FactoryMixin:
 
         ``sync=True`` makes ANY page's native controls shared between viewers
         with no change to the page: inputs/selects/textareas (by id or name)
-        converge on one value and button clicks replicate, all through the
-        panel's shared ``state`` (readable as ``panel.state``). Drag-driven
-        JS state (a chart's camera) can't be seen generically — a page shares
-        that itself with ``canvas.setState``.
+        converge on one value, button clicks replicate and Plotly views follow,
+        all through the panel's shared ``state`` (readable as ``panel.state``).
+        ``sync="local"`` binds the same things per viewer instead: nothing is
+        shared, but the page comes back as you left it after scrolling out or
+        reloading. Other drag-driven JS state a page keeps itself with
+        ``canvas.setState`` / ``canvas.setViewState``.
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
                           name=name, label=label, keep_mounted=keep_mounted,

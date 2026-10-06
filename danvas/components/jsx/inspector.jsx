@@ -1,5 +1,6 @@
 
 function ViewReadout({ canvas }) {
+
   // The current viewport (canvas centre + zoom) — the x/y/zoom serve(view=...)
   // and set_view() take. canvas.viewport calls back live as the camera moves.
   const [v, setV] = React.useState(null);
@@ -122,8 +123,11 @@ function DetailView({ selected, detail, onBack, onRefresh, onShow, controlStyle 
 }
 
 function Component({ canvas, props }) {
-  const [query, setQuery] = React.useState("");
-  const [typeFilter, setTypeFilter] = React.useState("all");
+  // view state survives culling (canvas.useViewState); older frontends: plain useState
+  const useView = (canvas && canvas.useViewState) || ((k, i) => React.useState(i));
+
+  const [query, setQuery] = useView('query', "");
+  const [typeFilter, setTypeFilter] = useView('typeFilter', "all");
   // Which row is drilled into (its key), or null for the table view.
   const [selected, setSelected] = React.useState(null);
 

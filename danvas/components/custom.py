@@ -58,6 +58,8 @@ _STANDALONE_SHIM = (
     "standalone:true,state:%s,"
     "onState:function(fn){setTimeout(function(){fn(window.canvas.state);},0);},"
     "setState:function(p){window.canvas.state=Object.assign({},window.canvas.state,p||{});},"
+    "viewState:{},setViewState:function(p){window.canvas.viewState=Object.assign({},window.canvas.viewState,p||{});},"
+    "onViewState:function(){},"
     "send:function(){},sendBinary:function(){},"
     "onPush:function(fn){window.addEventListener('message',function(e){"
     "if(e.data&&e.data.__danvas!==undefined){fn(e.data.__danvas);}});},"
@@ -141,9 +143,11 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
                            "viewer; the page reads canvas.state / "
                            "canvas.onState and writes canvas.setState "
                            "(a set_props frame); Python reads panel.state",
-                  "sync": "bool -- the shim auto-shares the page's native "
-                          "controls (by id/name) and button clicks through "
-                          "state, no page changes (default false)"},
+                  "sync": "bool|'local' -- the shim auto-binds the page's "
+                          "native controls (by id/name), button clicks and "
+                          "Plotly views: true shares them through state; "
+                          "'local' keeps them per viewer (survives culling "
+                          "and reloads, not shared). Default false"},
         "updates": {"data_patch": "merge changed data fields",
                     "post": "opaque value delivered to the document's "
                             "canvas.onPush",
@@ -216,7 +220,9 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         self._keep_mounted = bool(keep_mounted)
         # sync=True: the frontend shim auto-shares the page's native controls
         # (by id/name) and button clicks through `state` — any HTML, unedited.
-        self._sync = bool(sync)
+        if sync not in (True, False, "local", None):
+            raise ValueError('sync must be True, False or "local"')
+        self._sync = sync or False
         # ``themed=True`` makes the iframe follow the canvas theme: the frontend
         # forwards the live ``--pc-*`` CSS variables and the dark/light flag into the
         # document, so the panel's CSS can use ``var(--pc-bg)`` / ``var(--pc-text)``
@@ -379,7 +385,7 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         if self._keep_mounted:
             props["keepMounted"] = True
         if self._sync:
-            props["sync"] = True
+            props["sync"] = self._sync           # True (shared) | "local" (per viewer)
         # The frontend injects the interaction shim; this flag is its wheel
         # opt-out (panels whose content does its own wheel handling).
         props["forwardWheel"] = self._forward_wheel

@@ -9,7 +9,7 @@
 // mic) are handled by the global window listener in bridge.ts.
 import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks'
 import { useEditor, useValue } from './EngineContext'
-import { sendPanelError, componentIdOf, registerLive, unregisterLive } from '../bridge'
+import { sendPanelError, componentIdOf, registerLive, unregisterLive, getViewState } from '../bridge'
 import { prepareCustomDoc } from './customShim'
 
 // The canvas theme variables forwarded into a themed=True iframe so its CSS can
@@ -89,7 +89,7 @@ export function CustomView({ shape }: { shape: any }) {
   const srcDoc = useMemo(
     () => prepareCustomDoc(shape.props.html || '', id,
                            shape.props.forwardWheel !== false,
-                           !!(shape.props as any).sync),
+                           (shape.props as any).sync || false),
     [shape.props.html, shape.props.forwardWheel, (shape.props as any).sync, id],
   )
 
@@ -115,7 +115,12 @@ export function CustomView({ shape }: { shape: any }) {
       }}
       // Once the document (and its theme listener) is live, push the theme in —
       // the mount-time effect can run before the iframe has parsed its script.
-      onLoad={() => { if (themed) postTheme(); postState() }}
+      onLoad={() => {
+        if (themed) postTheme()
+        postState()
+        // this viewer's view state, so a remounted document starts where it was
+        ref.current?.contentWindow?.postMessage({ __danvas_view: getViewState(id) }, '*')
+      }}
       // Keep the engine from hijacking drags/zoom meant for the iframe content.
       // (No drawing layer yet, so drawingOnTop is always false.)
       onPointerDown={ghost || !toolIsSelect ? undefined : (e: any) => e.stopPropagation()}

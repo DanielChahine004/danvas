@@ -407,14 +407,14 @@ _LOOK = ("() => { const c = window.__danvas && window.__danvas.camera; if (!c) r
          " c.markInitialFitDone(); c.setCamera({x: -1300, y: -250, z: 1}, {force: true}); }")
 
 
-def _frame_with(page, marker, selector, timeout=15_000):
+def _frame_with(page, marker, selector, timeout=15_000, look=None):
     """The Custom iframe (Playwright Frame) whose srcdoc carries `marker`
     (the panel's composed id appears in the injected shim), once `selector`
     exists in its document. Keeps the camera on the test panel (an off-screen
     panel is culled — no iframe; the once-per-load auto-fit would zoom out)."""
     deadline = time.time() + timeout / 1000
     while time.time() < deadline:
-        page.evaluate(_LOOK)
+        page.evaluate(look or _LOOK)
         for f in page.frames:
             if f == page.main_frame:
                 continue
@@ -494,4 +494,88 @@ def test_sync_true_shares_a_plain_pages_controls_between_browsers(page_state):
         ".find(i => i.endsWith(':synced')); return s.peek(id).props.state; }")
     assert st["sl"] == "73" and st["mode"] == "b" and st["_clicks"] == ["#tog"], st
     page_b.context.close()
+    assert not errors, errors
+
+
+# -- view state: what a viewer did to a panel survives the panel being culled --
+
+_AWAY = "() => { const c = window.__danvas.camera; c.markInitialFitDone(); c.setCamera({x: 9000, y: 9000, z: 1}, {force: true}); }"
+_BACK = "() => { const c = window.__danvas.camera; c.markInitialFitDone(); c.setCamera({x: -2950, y: 0, z: 1}, {force: true}); }"
+
+
+def _cull_and_return(page, gone_js):
+    """Scroll the test panels out of view until `gone_js` holds (unmounted),
+    then back."""
+    page.evaluate(_AWAY)
+    page.wait_for_function(gone_js, timeout=10_000)
+    page.evaluate(_BACK)
+
+
+def test_view_state_survives_culling(page_state):
+    # A React panel's canvas.useViewState and a table's sort/filter come back
+    # after the panel is scrolled out (unmounted) and back in; a plain
+    # useState next to it resets — the difference is the point. Nothing here
+    # touches Python.
+    page, errors, src = page_state
+    src.register("vs_react", "React", props={
+        "source": "function Component({canvas}){"
+                  "const [kept, setKept] = canvas.useViewState('n', 0);"
+                  "const [lost, setLost] = React.useState(0);"
+                  "return React.createElement('div', null,"
+                  " React.createElement('button', {id: 'vs-inc', onClick: () => { setKept(kept + 1); setLost(lost + 1); }}, 'inc'),"
+                  " React.createElement('span', {id: 'vs-kept'}, String(kept)),"
+                  " React.createElement('span', {id: 'vs-lost'}, String(lost)));}",
+        "data": "{}", "w": 220, "h": 100}, x=3000, y=40)
+    src.register_template("vs_table", "table", cols=["name", "score"],
+                          rows=[["bob", 2], ["alice", 9], ["carol", 5]],
+                          numeric=[False, True], x=3000, y=200)
+    page.evaluate(_BACK)
+    page.wait_for_selector("#vs-inc", timeout=15_000)
+    for _ in range(3):
+        page.click("#vs-inc")
+    page.wait_for_function("() => document.getElementById('vs-kept').textContent === '3'")
+    filt = page.locator("[data-pc-panel-id] .pc-filter").last
+    filt.fill("al")
+    page.wait_for_timeout(300)
+
+    _cull_and_return(page, "() => !document.getElementById('vs-inc')")
+    page.wait_for_selector("#vs-inc", timeout=15_000)
+    assert page.inner_text("#vs-kept") == "3"         # useViewState: kept
+    assert page.inner_text("#vs-lost") == "0"         # plain useState: reset
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('[data-pc-panel-id] .pc-filter')]"
+        ".some(el => el.value === 'al')", timeout=10_000)
+    assert not errors, errors
+
+
+def test_sync_local_restores_a_plain_page_after_culling_but_does_not_share(page_state):
+    # Custom(sync="local"): an unedited page's controls come back as THIS
+    # viewer left them after scrolling out and back in — and another viewer
+    # sees nothing of it.
+    page, errors, src = page_state
+    html = ("<input id=lsl type=range min=0 max=100 value=10>"
+            "<select id=lmode><option>a</option><option>b</option></select>")
+    src.register("vs_local", "Custom", props={"html": html, "w": 240, "h": 100,
+                                              "sync": "local"}, x=3000, y=500)
+    page.evaluate(_BACK)
+    fa = _frame_with(page, ":vs_local", "#lsl", look=_BACK)
+    fa.locator("#lsl").evaluate(
+        "el => { el.value = 66; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    fa.locator("#lmode").select_option("b")
+    page.wait_for_timeout(300)
+
+    other = page.context.browser.new_context().new_page()
+    other.goto(page.url)
+    other.wait_for_function("() => !!window.__danvas", timeout=15_000)
+    fb = _frame_with(other, ":vs_local", "#lsl", look=_BACK)
+    page.wait_for_timeout(500)
+    assert fb.locator("#lsl").input_value() == "10"      # not shared
+    assert fb.locator("#lmode").input_value() == "a"
+    other.context.close()
+
+    _cull_and_return(page, "() => ![...document.querySelectorAll('iframe')]"
+                           ".some(f => (f.getAttribute('srcdoc') || '').includes(':vs_local'))")
+    fa = _frame_with(page, ":vs_local", "#lsl", look=_BACK)
+    fa.wait_for_function("() => document.getElementById('lsl').value === '66'", timeout=10_000)
+    assert fa.locator("#lmode").input_value() == "b"
     assert not errors, errors

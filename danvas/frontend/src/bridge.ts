@@ -1423,6 +1423,41 @@ export function setPanelState(compId: string, patch: any): void {
   if (rec) applyRemote(() => store.patch(shapeId, { props: { state } }))
   sendRaw({ type: 'set_props', id: compId, props: { state } })
 }
+// --- per-viewer VIEW state (survives culling and reloads) ---------------------
+// A panel scrolled out of view unmounts; on scroll-in it rebuilds from what the
+// frontend still holds. Python-owned values and shared `state` live in the
+// store; this is the third kind — "my view of this panel" (a table's sort and
+// filter, a half-typed draft, a chart's zoom) — kept HERE, per browser, never
+// sent anywhere. Mirrored to sessionStorage so a page reload keeps it too.
+const VIEW_KEY = 'pc-view'
+const viewCache: Map<string, any> = (() => {
+  try {
+    const raw = sessionStorage.getItem(VIEW_KEY)
+    return new Map(Object.entries(raw ? JSON.parse(raw) : {}))
+  } catch {
+    return new Map()
+  }
+})()
+let viewSaveTimer: any = null
+function saveViews(): void {
+  if (viewSaveTimer) return
+  viewSaveTimer = setTimeout(() => {
+    viewSaveTimer = null
+    try {
+      sessionStorage.setItem(VIEW_KEY, JSON.stringify(Object.fromEntries(viewCache)))
+    } catch {
+      /* quota / private mode: the in-memory cache still covers culling */
+    }
+  }, 250)
+}
+export function getViewState(compId: string): any {
+  return viewCache.get(compId) || {}
+}
+export function setViewState(compId: string, patch: any): void {
+  viewCache.set(compId, { ...(viewCache.get(compId) || {}), ...(patch || {}) })
+  saveViews()
+}
+
 export function panelState(compId: string): any {
   const rec = store.peek(createShapeId(compId)) as any
   return (rec?.props?.state as any) || {}
@@ -2263,6 +2298,8 @@ if (typeof window !== 'undefined') {
       sendInput(d.__danvas, d.data)
     } else if (d.__danvas_set_state) {
       setPanelState(d.__danvas_set_state, d.state)
+    } else if (d.__danvas_set_view) {
+      setViewState(d.__danvas_set_view, d.state)
     } else if (d.__danvas_binary && d.data instanceof ArrayBuffer) {
       sendBinary(d.__danvas_binary, d.data)
     } else if (d.__danvas_camera) {

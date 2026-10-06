@@ -37,7 +37,27 @@ function Component({ canvas, props }) {
       const titled = layout.title && (typeof layout.title === "string" || layout.title.text);
       layout.margin = { l: 48, r: 16, t: titled ? 40 : 16, b: 40 };
     }
-    Plotly.react(node, fig.data || [], layout, { responsive: true, displaylogo: false });
+    Plotly.react(node, fig.data || [], layout, { responsive: true, displaylogo: false }).then(() => {
+      if (!canvas || !canvas.setViewState) return;
+      if (!node.__dvView) {
+        node.__dvView = true;
+        const saved = (canvas.viewState || {}).relayout;
+        if (saved && Object.keys(saved).length) Plotly.relayout(node, saved);
+        node.on("plotly_relayout", (ev) => {
+          if (!ev) return;
+          const cur = (canvas.viewState || {}).relayout || {};
+          // autorange resets drop the saved ranges for that axis
+          const next = Object.assign({}, cur);
+          for (const k in ev) {
+            if (k.endsWith(".autorange")) {
+              const ax = k.slice(0, -10);
+              for (const c in next) if (c.startsWith(ax + ".range")) delete next[c];
+            } else next[k] = ev[k];
+          }
+          canvas.setViewState({ relayout: next });
+        });
+      }
+    });
   });
   return (
     <div style={{ flex: 1, width: "100%", minHeight: 0, position: "relative" }}>

@@ -1,5 +1,8 @@
 
 function Component({ canvas, props }) {
+  // view state survives culling (canvas.useViewState); older frontends: plain useState
+  const useView = (canvas && canvas.useViewState) || ((k, i) => React.useState(i));
+
   const cols = props.cols || [];
   const numeric = props.numeric || [];
   const profiles = props.profiles || [];
@@ -12,15 +15,15 @@ function Component({ canvas, props }) {
   React.useEffect(() => { setRows(props.rows || []); }, [props.rows]);
   const total = rows.length;
 
-  const [sortCol, setSortCol] = React.useState(-1);
-  const [sortDir, setSortDir] = React.useState(0);  // 1 asc, -1 desc, 0 none
-  const [q, setQ] = React.useState("");
-  const [colFilter, setColFilter] = React.useState(null);
-  const [page, setPage] = React.useState(1);
-  const [showIdx, setShowIdx] = React.useState(false);
-  const [hiddenCols, setHiddenCols] = React.useState(new Set());
+  const [sortCol, setSortCol] = useView('sortCol', -1);
+  const [sortDir, setSortDir] = useView('sortDir', 0);  // 1 asc, -1 desc, 0 none
+  const [q, setQ] = useView('q', "");
+  const [colFilter, setColFilter] = useView('colFilter', null);
+  const [page, setPage] = useView('page', 1);
+  const [showIdx, setShowIdx] = useView('showIdx', false);
+  const [hiddenCols, setHiddenCols] = useView('hiddenCols', new Set());
   const [colMenuOpen, setColMenuOpen] = React.useState(false);
-  const [showSel, setShowSel] = React.useState(false);
+  const [showSel, setShowSel] = useView('showSel', false);
   const [selectedRows, setSelectedRows] = React.useState(new Set());
   // Programmatic selection: Python pushed `selected` (table.selected = [...]).
   // Applied silently — no echo back — mirroring how a Python push of a value
@@ -32,7 +35,7 @@ function Component({ canvas, props }) {
   }, [props.selected]);
   const selAllRef = React.useRef(null);
   const editable = !!props.editable;
-  const [editMode, setEditMode] = React.useState(false);
+  const [editMode, setEditMode] = useView('editMode', false);
   const [editCell, setEditCell] = React.useState(null);  // {ri, ci}
   const [editVal, setEditVal] = React.useState("");
   const editRef = React.useRef(null);

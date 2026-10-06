@@ -1,9 +1,12 @@
 
 function Component({ canvas }) {
+  // view state survives culling (canvas.useViewState); older frontends: plain useState
+  const useView = (canvas && canvas.useViewState) || ((k, i) => React.useState(i));
+
   const chat = canvas.chat;
   const [me, setMe] = React.useState(null);
   const [messages, setMessages] = React.useState(() => [...chat.history()]);
-  const [draft, setDraft] = React.useState("");
+  const [draft, setDraft] = useView('draft', "");
   const [nameDraft, setNameDraft] = React.useState("");
   const [editingName, setEditingName] = React.useState(false);
   const listRef = React.useRef(null);

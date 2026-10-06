@@ -460,6 +460,13 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
   with it, a late joiner starts from it, and Python reads `panel.state` /
   reacts with `@panel.on_state(fn(state, viewer))` (or seeds it: `panel.set_state(...)`).
   Last-writer-wins; the writer never waits on the round trip.
+- **`canvas.useViewState(key, init)`** is a drop-in for `useState` for *view*
+  state — a sort column, a filter, a selected tab — that should survive the panel
+  being scrolled out of view (panels off-screen are unmounted, which resets plain
+  `useState`) and the page being reloaded, but stay **per viewer**: never shared,
+  never sent to Python. The built-in Table (sort, filters, page, column picks),
+  Inspector filters, Chat draft and Plot zoom use it, so they come back as you
+  left them.
 - `value` is the latest `push(data)`; `props` is the `update(**props)` dict
   (replayed on reconnect). The `canvas` prop is the bridge handle:
   `send(data)` (→ `@on`/`@on_message`), `request(data)` (awaitable, → `@on_request`),
@@ -512,6 +519,11 @@ def handle(msg):
   below, bound by DOM identity; Python reads it as `panel.state`. What no generic
   hook can see — drag-driven state inside a library we don't know — a page
   shares itself with `canvas.setState`.
+- **`sync="local"`** binds exactly the same things per viewer instead: nothing is
+  shared, but the page comes back as *you* left it after scrolling out of view or
+  reloading — a hand-written filter bar keeps its picks with no code. A page
+  can also keep its own view state with `canvas.viewState` /
+  `canvas.setViewState(patch)` / `canvas.onViewState(fn)`.
 - **Shared state**, the same slot React panels have: the page reads `canvas.state`,
   listens with `canvas.onState(fn)` (fires once on registration, then per change)
   and writes `canvas.setState(patch)` — every viewer converges on it and Python
@@ -536,7 +548,8 @@ def handle(msg):
   camera, tool toggles, an in-progress interaction — survives scroll-out/
   scroll-in, and a heavy engine isn't rebooted per scroll-in. `Model3D` sets it
   by default; leave it off for cheap panels (culling is what keeps a canvas of
-  hundreds of panels fast).
+  hundreds of panels fast) — for restoring a page's *controls* after a cull,
+  `sync="local"` is the lighter tool.
 - `push_binary(bytes)` streams raw bytes (no base64); `canvas.onPush` gets an
   `ArrayBuffer`. Honours `queue="latest"` for video/sensor streams.
 - **`canvas.sendBinary(buf)`** transfers an `ArrayBuffer` *up* to Python with zero

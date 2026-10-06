@@ -19,6 +19,8 @@ import {
   unregisterLive,
   setPanelState,
   panelState,
+  getViewState,
+  setViewState,
   registerStyle,
   unregisterStyle,
   componentIdOf,
@@ -244,6 +246,24 @@ export default function ReactHost({ shape }: { shape: any }) {
       // shared state (see bridge.ts setPanelState): read `state`, write setState
       get state() { return panelState(id) },
       setState: (patch: any) => setPanelState(id, patch),
+      // per-viewer view state (bridge.ts getViewState): a drop-in for
+      // useState that survives the panel being culled and the page reloading
+      useViewState: (key: string, init?: any) => {
+        const [v, setV] = React.useState(() => {
+          const c = getViewState(id)
+          return key in c ? c[key] : typeof init === 'function' ? init() : init
+        })
+        const set = React.useCallback((nv: any) => {
+          setV((prev: any) => {
+            const val = typeof nv === 'function' ? nv(prev) : nv
+            setViewState(id, { [key]: val })
+            return val
+          })
+        }, [])
+        return [v, set]
+      },
+      get viewState() { return getViewState(id) },
+      setViewState: (patch: any) => setViewState(id, patch),
       sendBinary: (buf: any) => sendBinary(id, buf instanceof ArrayBuffer ? buf : buf.buffer || buf),
       request: (data: any) => requestData(id, data),
       onFrame: (cb: (d: any) => void) => {

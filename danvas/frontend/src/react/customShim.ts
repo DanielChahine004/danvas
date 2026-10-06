@@ -40,7 +40,7 @@ const FRAGMENT_RESET =
  * (wheel-zoom unless `forwardWheel` is off, right-drag pan, context menu,
  * tool shortcuts).
  */
-export function customHelper(cid: string, forwardWheel: boolean, sync = false): string {
+export function customHelper(cid: string, forwardWheel: boolean, sync: boolean | string = false): string {
   const id = JSON.stringify(cid)
   const wheel = forwardWheel
     ? "window.addEventListener('wheel',function(e){e.preventDefault();" +
@@ -67,6 +67,16 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
     "onState:function(fn){window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas_state!==undefined){fn(window.canvas.state);}' +
     '});if(window.canvas._stateReady){setTimeout(function(){fn(window.canvas.state);},0);}},' +
+    // Per-viewer view state (never shared; survives culling + reload):
+    // `viewState` is delivered by the parent when the document loads.
+    'viewState:{},' +
+    'setViewState:function(patch){' +
+    'var s=Object.assign({},window.canvas.viewState||{},patch||{});window.canvas.viewState=s;' +
+    `parent.postMessage({__danvas_set_view:${id},state:s},'*');` +
+    '},' +
+    "onViewState:function(fn){window.addEventListener('message',function(e){" +
+    'if(e.data&&e.data.__danvas_view!==undefined){fn(window.canvas.viewState);}' +
+    '});if(window.canvas._viewReady){setTimeout(function(){fn(window.canvas.viewState);},0);}},' +
     'setState:function(patch){' +
     'var s=Object.assign({},window.canvas.state||{},patch||{});window.canvas.state=s;' +
     `parent.postMessage({__danvas_set_state:${id},state:s},'*');` +
@@ -135,6 +145,7 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
     // need more register canvas.onSnapshot).
     "window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas_state!==undefined){window.canvas.state=e.data.__danvas_state||{};window.canvas._stateReady=true;}' +
+    'if(e.data&&e.data.__danvas_view!==undefined){window.canvas.viewState=e.data.__danvas_view||{};window.canvas._viewReady=true;}' +
     '});' +
     "window.addEventListener('message',function(e){" +
     'if(!(e.data&&e.data.__danvas_snap))return;' +
@@ -200,7 +211,7 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
     "if(k==='Escape'||_shortcuts.indexOf(k)>=0)" +
     "parent.postMessage({__danvas_key:{key:e.key}},'*');" +
     '});' +
-    (sync ? AUTO_SYNC : '') +
+    (sync ? autoSync(sync === 'local') : '') +
     '</script>'
   )
 }
@@ -225,8 +236,14 @@ export function customHelper(cid: string, forwardWheel: boolean, sync = false): 
 // What no generic hook can see — state that lives only in JS and is driven
 // by dragging in a library we don't know — a page shares itself with
 // canvas.setState.
-const AUTO_SYNC =
+// sync="local": the same bindings, backed by the per-viewer view state
+// instead of the shared state — a filter bar that survives scrolling out
+// for ME without being pushed to everyone.
+const autoSync = (local: boolean): string =>
   '(function(){' +
+  (local
+    ? 'function S(){return window.canvas.viewState||{};}function W(p){window.canvas.setViewState(p);}function ON(f){window.canvas.onViewState(f);}'
+    : 'function S(){return window.canvas.state||{};}function W(p){window.canvas.setState(p);}function ON(f){window.canvas.onState(f);}') +
   'var applying=false,seen=0;' +
   "var CTRL='input,select,textarea,[contenteditable=\"\"],[contenteditable=true]';" +
   "var BTN='button,[role=button],input[type=button],input[type=submit]';" +
@@ -251,10 +268,10 @@ const AUTO_SYNC =
   'document.addEventListener("input",function(e){onEdit(e);},true);' +
   'document.addEventListener("change",function(e){onEdit(e);},true);' +
   'function onEdit(e){if(applying)return;var el=e.target;if(!el||!el.matches||!el.matches(CTRL)||isBtn(el))return;' +
-  'var k=keyOf(el);if(!k)return;var p={};p[k]=valOf(el);window.canvas.setState(p);}' +
+  'var k=keyOf(el);if(!k)return;var p={};p[k]=valOf(el);W(p);}' +
   'document.addEventListener("click",function(e){if(applying)return;var b=e.target&&e.target.closest&&e.target.closest(BTN);' +
-  'if(!b)return;var log=(window.canvas.state&&window.canvas.state._clicks)||[];' +
-  'log=log.concat([pathOf(b)]);if(log.length>200)log=log.slice(-200);seen=log.length;window.canvas.setState({_clicks:log});},true);' +
+  'if(!b)return;var log=S()._clicks||[];' +
+  'log=log.concat([pathOf(b)]);if(log.length>200)log=log.slice(-200);seen=log.length;W({_clicks:log});},true);' +
   'var PK="_plotly:";' +
   'function plotlyKey(gd){return PK+(gd.id||pathOf(gd));}' +
   'function plotlyOf(k){var sel=k.slice(PK.length);var el=null;' +
@@ -275,7 +292,7 @@ const AUTO_SYNC =
   'if(Date.now()-activeAt>1500){activeGd=null;return;}' +
   'var gd=activeGd;var d=viewOf(gd);if(!d)return;var j=JSON.stringify(d);' +
   'if(j===gd.__dvPoll)return;gd.__dvPoll=j;if(j===gd.__dvLast)return;' +
-  'var k=plotlyKey(gd);var p={};p[k]=d;gd.__dvLast=j;window.canvas.setState(p);}' +
+  'var k=plotlyKey(gd);var p={};p[k]=d;gd.__dvLast=j;W(p);}' +
   'function hookPlotly(){if(!window.Plotly||window.__dvPlotlyPoll)return;window.__dvPlotlyPoll=setInterval(pollPlotly,100);}' +
   'function applyPlotly(s){if(!window.Plotly)return;for(var k in s){if(k.indexOf(PK)!==0)continue;' +
   'var gd=plotlyOf(k);if(!gd)continue;var j=JSON.stringify(rnd(s[k]));if(gd.__dvLast===j)continue;gd.__dvLast=j;' +
@@ -286,8 +303,8 @@ const AUTO_SYNC =
   'var log=s._clicks||[];for(var i=seen;i<log.length;i++){var sel=log[i];var el=null;' +
   'try{el=sel.charAt(0)==="#"&&sel.indexOf(">")<0?document.getElementById(sel.slice(1)):document.querySelector(sel);}catch(_){}' +
   'if(el)el.click();}seen=log.length;}finally{applying=false;}}' +
-  'window.canvas.onState(apply);' +
-  'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){apply(window.canvas.state);});}' +
+  'ON(apply);' +
+  'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){apply(S());});}' +
   // graphs can be created any time after load: keep hooking new ones
   'setInterval(hookPlotly,1000);' +
   '})();'
@@ -299,7 +316,7 @@ const AUTO_SYNC =
  * reset) with the local composed id.
  */
 export function prepareCustomDoc(html: string, cid: string,
-                                 forwardWheel: boolean, sync = false): string {
+                                 forwardWheel: boolean, sync: boolean | string = false): string {
   if (html.includes(CUSTOM_SHIM_MARKER)) return html
   const body = isFullDocument(html) ? html : FRAGMENT_RESET + html
   return customHelper(cid, forwardWheel, sync) + body

@@ -141,6 +141,8 @@ IFRAME_MESSAGE_KEYS = {
     "MIC": "__danvas_mic",                       # iframe->parent requestMicrophone/release
     "STATE": "__danvas_state",                   # parent->iframe shared state (canvas.state / onState)
     "SET_STATE": "__danvas_set_state",           # iframe->parent canvas.setState (-> set_props)
+    "VIEW": "__danvas_view",                     # parent->iframe this viewer's view state (on load)
+    "SET_VIEW": "__danvas_set_view",             # iframe->parent canvas.setViewState (browser-local)
     "ERROR": "__danvas_error",                   # iframe->parent JS error report
     "WHEEL": "__danvas_wheel",                   # iframe->parent wheel -> canvas zoom
     "PAN": "__danvas_pan",                       # iframe->parent pan delta
