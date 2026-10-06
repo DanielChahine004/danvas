@@ -182,7 +182,7 @@ canvas.insert(s, x=80, y=80)
 | `Label` | output | escaped text/number; `.text` (read/assign), `.update(text)`; `h="auto"`; live: `.color` |
 | `Markdown` | output | rendered Markdown; `.text` (read/assign), `.update(text)`, `.html` (rendered) |
 | `Image` | output | path/URL/bytes/Matplotlib/PIL/array; `.src` (read/assign — reads the wire-canonical data:/http URL), `.update(src)`, `.fit` (read/assign); live: `.color` |
-| `Table` | bidirectional | DataFrame/Series/records/dict/array → sortable, filterable, paginated; toolbar toggles index/column-visibility/row-selection (+ ✎ edit when `editable=True`); `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected` (read/assign, silent), `.update(data)` |
+| `Table` | bidirectional | DataFrame/Series/records/dict/array → sortable, filterable, paginated; toolbar toggles index/column-visibility/row-selection (+ ✎ edit when `editable=True`); `@on_select(indices)`, `@on_edit(row, col, value)`; `.selected` (read/assign, silent), `.update(data)`; each viewer's sort/filter/page survives scrolling out |
 | `Plot` | output | `.update(fig)` — a Plotly figure rendered natively, with the interactive toolbar (zoom/pan/box-zoom/save-PNG on hover) |
 | `LivePlot` | output | streaming telemetry; `.push({trace: y \| [y…]}, x=)`, `.clear()`, `smoothing=`; live: `.max_points`, `.mode`, `.color` |
 | `Histogram` | output | distribution over time; `.add(values, step)`; `color=` tints frame + chart |
@@ -195,8 +195,8 @@ canvas.insert(s, x=80, y=80)
 | `FileBrowser` | bidirectional | navigate a folder (sandboxed to `root=`); `@on_select`, `.value`, `pattern=` |
 | `Upload` | input | click/drop zone receiving a viewer's file; `@on_upload`, `.text` (read/assign), `dest=` (stream to disk), `accept=`, `multiple=`, `max_size=` |
 | `Download` | input | button sending a host file/`bytes` to the viewer; `source=` or `@provide`, `.text` (read/assign), `filename=` |
-| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True`, `keep_mounted=True` (survive scroll-out with state intact); `sync=True` shares any page's controls (and Plotly views) between viewers; shared `.state` / `@on_state`; `.export_html(path)` |
-| `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=`; shared `state` prop + `canvas.setState` / `@on_state` |
+| `Custom` | bidirectional | arbitrary HTML/CSS/JS in a sandboxed iframe; `@on(event)`/`@on_message`/`@on_request`/`@on_binary`, `.push(data)`/`.push_binary(bytes)`, `.update(html)`; `themed=True`, `keep_mounted=True` (survive scroll-out with state intact); `sync=True` shares any page's controls (and Plotly views) between viewers, `sync="local"` keeps them per viewer across culling; shared `.state` / `@on_state`; `.export_html(path)` |
+| `React` | bidirectional | your JSX, compiled in-browser, theme-aware; `@on(event)`/`@on_request`/`@on_binary`, `.update(**props)`, `.push(data)`/`.push_binary(bytes)`, `css=`; shared `state` prop + `canvas.setState` / `@on_state`; `canvas.useViewState` for per-viewer state that survives culling |
 | `Inspector` | output | live panel/globals state browser |
 
 ![The native panels on one canvas: label, slider, toggle, button, text field, markdown, table, plot, heatmap, histogram, live plot, image, download, upload, file browser, chat, and a custom HTML panel](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/catalogue.png)
