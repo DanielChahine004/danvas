@@ -238,10 +238,21 @@ def _run_keeper(port, provider):
         while True:
             time.sleep(2)
             if t._proc is not None and t._proc.poll() is not None:
-                # The tunnel process died (network blip, provider restart):
-                # reopen. Quick tunnels mint a new URL here — unavoidable —
-                # but scripts restarting no longer do.
-                t = open_tunnel(port, provider=provider)
+                # The tunnel process died (network blip, sleep, provider
+                # restart): reopen. Quick tunnels mint a new URL here —
+                # unavoidable — but scripts restarting no longer do. Retry
+                # with backoff while offline instead of dying (which deleted
+                # the state file and left no tunnel at all).
+                delay = 2
+                while True:
+                    try:
+                        t = open_tunnel(port, provider=provider)
+                        break
+                    except Exception as exc:  # offline, cloudflared hiccup
+                        print(f"[danvas.tunnel] reopen failed ({exc}); "
+                              f"retrying in {delay}s", flush=True)
+                        time.sleep(delay)
+                        delay = min(60, delay * 2)
                 publish(t)
     finally:
         try:

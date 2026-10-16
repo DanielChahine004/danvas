@@ -731,7 +731,8 @@ export function HostingButton() {
           <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--ui-muted)' }}>
             Sharing widens who can reach this canvas — LAN is anyone on this
             network; a tunnel is anyone with the link. The local URL keeps
-            working either way.
+            working either way. A public link only works while this machine
+            is awake and online, and it changes if the tunnel restarts.
           </div>
         </div>
       )}

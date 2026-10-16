@@ -340,6 +340,9 @@ struct Hub {
     hosting_error: Option<String>,
     lan_shutdown: Option<tokio::sync::watch::Sender<bool>>,
     tunnel_child: Option<std::process::Child>,
+    /// Bumped whenever the tunnel is (re)started or turned off: the watcher
+    /// task for an older generation stops.
+    tunnel_gen: u64,
     /// In-flight file pulls (HTTP download -> owning source): reqId ->
     /// (meta, bytes, sources-still-undeclined).
     pending_files: HashMap<String, (Option<Value>, Option<Vec<u8>>, usize)>,
@@ -2348,6 +2351,9 @@ async fn hosting_action(hub: Arc<Mutex<Hub>>, action: String) {
                                 let mut h = hub.lock().unwrap();
                                 h.tunnel_child = Some(child);
                                 h.tunnel_url = Some(url);
+                                h.tunnel_gen += 1;
+                                tokio::spawn(watch_tunnel(hub.clone(), bin.clone(), port,
+                                                          h.tunnel_gen));
                             }
                         }
                     }
@@ -2356,6 +2362,7 @@ async fn hosting_action(hub: Arc<Mutex<Hub>>, action: String) {
         }
         "host_tunnel_off" => {
             let mut h = hub.lock().unwrap();
+            h.tunnel_gen += 1; // retire the watcher
             if let Some(mut c) = h.tunnel_child.take() {
                 let _ = c.kill();
             }
@@ -2369,6 +2376,62 @@ async fn hosting_action(hub: Arc<Mutex<Hub>>, action: String) {
     h.broadcast_hosting();
 }
 
+/// Keep the 🌐 public link alive: when cloudflared exits (network loss, a
+/// sleep it didn't survive), start a new one and tell every viewer. A quick
+/// tunnel can't keep its hostname, so the link changes — the panel says so
+/// instead of showing a dead URL. `gen` retires this watcher when the tunnel
+/// is turned off or replaced.
+async fn watch_tunnel(hub: Arc<Mutex<Hub>>, bin: String, port: u16, gen: u64) {
+    let mut failures = 0u32;
+    let mut lost: Option<String> = None; // the link that died, until replaced
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        {
+            let mut h = hub.lock().unwrap();
+            if h.tunnel_gen != gen {
+                return; // turned off or replaced
+            }
+            let alive = matches!(h.tunnel_child.as_mut().map(|c| c.try_wait()),
+                                 Some(Ok(None)));
+            if alive {
+                continue;
+            }
+            if let Some(url) = h.tunnel_url.take() {
+                lost = Some(url);
+            }
+            h.tunnel_child = None;
+            h.hosting_busy = Some("host_tunnel".into());
+            h.hosting_error = Some("the public link dropped — reconnecting…".into());
+            h.broadcast_hosting();
+        }
+        // back off while offline: 0, 5, 10 … 60 s
+        tokio::time::sleep(std::time::Duration::from_secs((5 * failures as u64).min(60))).await;
+        let res = spawn_tunnel(&bin, port).await;
+        let mut h = hub.lock().unwrap();
+        if h.tunnel_gen != gen {
+            if let Ok((mut c, _)) = res {
+                let _ = c.kill();
+            }
+            return;
+        }
+        h.hosting_busy = None;
+        match res {
+            Ok((child, url)) => {
+                failures = 0;
+                h.hosting_error = lost.take().filter(|o| o != &url).map(|o| format!(
+                    "the public link changed (cloudflared restarted): {o} no longer works, share the new one"));
+                h.tunnel_child = Some(child);
+                h.tunnel_url = Some(url);
+            }
+            Err(e) => {
+                failures = (failures + 1).min(12);
+                h.hosting_error = Some(format!("public link down, retrying: {e}"));
+            }
+        }
+        h.broadcast_hosting();
+    }
+}
+
 /// Spawn `cloudflared tunnel --url http://127.0.0.1:port` and read the
 /// trycloudflare URL it prints on stderr.
 async fn spawn_tunnel(bin: &str, port: u16) -> Result<(std::process::Child, String), String> {
@@ -2377,22 +2440,31 @@ async fn spawn_tunnel(bin: &str, port: u16) -> Result<(std::process::Child, Stri
     let mut child = Command::new(bin)
         .args(["tunnel", "--url", &format!("http://127.0.0.1:{port}"),
                "--no-autoupdate"])
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cloudflared failed to start: {e}"))?;
     let stderr = child.stderr.take().ok_or("no cloudflared stderr")?;
-    // cloudflared prints the URL within a few seconds; scan its stderr.
+    // cloudflared prints the URL within a few seconds; scan its stderr — and
+    // KEEP draining it for the tunnel's whole life. Returning once the URL was
+    // found closed the pipe, and cloudflared logs on every reconnect: on
+    // macOS/Linux its next log line (e.g. after the laptop slept) died of
+    // SIGPIPE, taking the public link down (Cloudflare error 1033).
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let re_host = "trycloudflare.com";
+        let mut tx = Some(tx);
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.is_none() {
+                continue;
+            }
             if let Some(i) = line.find("https://") {
                 let url: String = line[i..]
                     .split_whitespace().next().unwrap_or("").to_string();
                 if url.contains(re_host) {
-                    let _ = tx.send(url);
-                    return;
+                    if let Some(t) = tx.take() {
+                        let _ = t.send(url);
+                    }
                 }
             }
         }

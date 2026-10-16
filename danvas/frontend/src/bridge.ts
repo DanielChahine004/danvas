@@ -1964,7 +1964,11 @@ function syncMergeUrl(list: any[]): void {
   if (!mergeState.isHost || typeof window === 'undefined' || !window.history?.replaceState) return
   try {
     const url = new URL(window.location.href)
-    if (list.length) url.searchParams.set('sources', list.map((s) => s.uri).join(','))
+    // `dialin:<label>` entries are this hub's own local sources — meaningless
+    // to anyone else and they leak process labels into a link people share,
+    // so only real (re-dialable) merge sources go in the URL.
+    const uris = list.map((s) => s.uri).filter((u: string) => u && !String(u).startsWith('dialin:'))
+    if (uris.length) url.searchParams.set('sources', uris.join(','))
     else url.searchParams.delete('sources')
     window.history.replaceState(null, '', url.toString())
   } catch {

@@ -1222,6 +1222,14 @@ link you shared keeps working. Stop it with
 `python -m danvas.tunnel --stop --port 8000` (`--status` prints the URL);
 pass `tunnel="ephemeral"` for a tunnel that closes with the script instead.
 
+A quick tunnel's link lives only while **this machine is awake and online**.
+If the tunnel process has to restart (network loss, a sleep it didn't
+survive, a reboot), Cloudflare issues a *new* random hostname; the old link
+then shows Cloudflare's "Error 1033". The keeper and the 🌐 button reconnect
+on their own, and the 🌐 panel shows the new link (and that the old one
+stopped working). For a link that never changes, use a named Cloudflare tunnel
+pointed at the local port.
+
 ```python
 canvas.serve(port=8000, tunnel=True)
 ```
