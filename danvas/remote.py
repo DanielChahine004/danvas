@@ -51,10 +51,10 @@ class _RemoteBridge(Bridge):
     The component layer talks to the bridge through a thin waist (broadcast /
     conflated / per-viewer sends / ``register_live`` / the ``_emit`` tail);
     re-pointing that waist at ``SourceClient._send`` makes the entire native
-    component stack remote-transparent. Per-viewer scoping (roles/client
-    overlays) has no meaning on a single upstream pipe — the hub applies its
-    own role filtering to its own viewers — so those sends collapse to the
-    shared frame.
+    component stack remote-transparent. Per-viewer sends (role / client
+    overlays) ride up the one pipe with their scope attached — ``to`` on
+    update/remove frames, ``roles``/``client`` on view frames — and the hub
+    delivers them to just those viewers and replays them per viewer.
     """
 
     def __init__(self, client):
@@ -279,11 +279,15 @@ class RemoteCanvas(Canvas):
     # -- replay / inbound -------------------------------------------------------
     def _replay_frames(self):
         """The frames that reconstruct this process's panels on the hub."""
+        # shared define()/style() assets before any panel that uses them
+        if self._bridge._shared_components or self._bridge._shared_styles:
+            yield self._bridge.shared_message()
         for comp in self._bridge._components.values():
             yield self._bridge.register_message(comp)
             state = comp.state_payload()
             if state:
                 yield {"type": "update", "id": comp.id, "payload": state}
+            yield from _scoped_replay(comp)
         for shape in self._bridge._shapes.values():
             yield shape.register_message()
         for arrow in self._arrows:
@@ -896,11 +900,19 @@ def serve_via_broker(canvas, port=8000, open_browser=True, block=True,
     bridge._client = client
 
     def _replay():
+        # canvas.define()/style() shared assets FIRST: a panel that uses a
+        # defined helper must never render before it ("useSel is not
+        # defined"). A define() made before serve() never left this process,
+        # and the hub drops a source's cache when it re-dials — so it rides
+        # every (re)connect, like the panels do.
+        if bridge._shared_components or bridge._shared_styles:
+            yield bridge.shared_message()
         for comp in bridge._components.values():
             yield bridge.register_message(comp)
             state = comp.state_payload()
             if state:
                 yield {"type": "update", "id": comp.id, "payload": state}
+            yield from _scoped_replay(comp)
         # Managed shapes (canvas.geo/text/note/...) made BEFORE serve() only
         # exist in bridge._shapes — add_shape's broadcast had no client yet —
         # so they must ride the replay like panels do, or the README's own

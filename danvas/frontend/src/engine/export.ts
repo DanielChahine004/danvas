@@ -13,6 +13,23 @@ import { signal } from 'alien-signals'
 import { store } from './store'
 import { editor } from './editor'
 import { recordBBox } from './hittest'
+
+// One paint so freshly mounted panels lay out — but a hidden tab runs no
+// requestAnimationFrame callbacks at all, which made canvas.screenshot() hang
+// unless a board tab was in front. Race a short timer so it always resolves.
+function nextFrame(): Promise<void> {
+  return new Promise((r) => {
+    let done = false
+    const fin = () => {
+      if (!done) {
+        done = true
+        r()
+      }
+    }
+    requestAnimationFrame(fin)
+    setTimeout(fin, 50)
+  })
+}
 import type { PanelRecord, WriteSignal } from './types'
 
 // Panels to force-mount during an export (so culled ones are captured). null when
@@ -120,6 +137,17 @@ async function rasterizeIframes(targets: Set<string>): Promise<() => void> {
   return () => cleanups.forEach((fn) => fn())
 }
 
+// 2x for crisp text (LLM legibility) — but capped so the PNG stays a size a
+// browser can rasterize and a model can take in: framing far-apart or huge
+// panels used to exceed the canvas limit and come back as a blank few bytes.
+const EXPORT_MAX_SIDE = 4096
+const EXPORT_MAX_PIXELS = 12_000_000
+function exportScale(w: number, h: number): number {
+  const side = EXPORT_MAX_SIDE / Math.max(1, w, h)
+  const area = Math.sqrt(EXPORT_MAX_PIXELS / Math.max(1, w * h))
+  return Math.min(2, side, area)
+}
+
 // Render `shapeIds` (empty = whole page) to a PNG; resolve with raw base64 (no
 // data: prefix) to match the wire (`image` frame), or an error string.
 export async function toImage(shapeIds: string[]): Promise<{ base64?: string; error?: string }> {
@@ -138,7 +166,7 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
   const targetSet = new Set(wanted)
   exportTargets(targetSet)
   // Let force-mount flush, then wait for content (Plotly, etc.) to be ready.
-  await new Promise((r) => requestAnimationFrame(() => r(null)))
+  await nextFrame()
   await waitForPanelsReady()
   const restoreIframes = await rasterizeIframes(targetSet)
 
@@ -149,7 +177,7 @@ export async function toImage(shapeIds: string[]): Promise<{ base64?: string; er
       width: Math.ceil(bounds.w),
       height: Math.ceil(bounds.h),
       backgroundColor: isDark ? '#1d1d20' : '#fbfbfb',
-      scale: 2, // crisp text for LLM legibility
+      scale: exportScale(bounds.w, bounds.h),
       // Frame the bounds at z=1 on the CLONE only (live view untouched).
       style: { transform: `translate(${-bounds.x}px, ${-bounds.y}px) scale(1)`, transformOrigin: '0 0' },
       // Drop non-target panels from the clone (so a subset shot shows only them).
@@ -217,7 +245,7 @@ async function withExport(
   const PAD = 8
   const panelTargets = new Set(wanted.filter((id) => store.peek(id)?.typeName === 'panel'))
   exportTargets(panelTargets)
-  await new Promise((r) => requestAnimationFrame(() => r(null)))
+  await nextFrame()
   await waitForPanelsReady()
   const restoreIframes = await rasterizeIframes(panelTargets)
   try {

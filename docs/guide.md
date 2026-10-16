@@ -233,8 +233,8 @@ python -m danvas.serial COM3 [--baud 9600]           # bridge a serial device on
 python -m danvas.bake script.py --name App           # package as a desktop app
 ```
 
-HTTP on a served canvas: `/__describe__` (JSON inventory), `/__screenshot__.png`
-(needs an open tab), `/__health__` (broker pid, owners, viewers),
+HTTP on a served canvas: `/__describe__` (JSON inventory with positions, sizes and
+who measured each auto height), `/__screenshot__.png[?timeout=s]` (needs an open tab), `/__health__` (broker pid, owners, viewers),
 `/__templates__` (panel templates for other-language SDKs).
 
 ## 8. Common mistakes
@@ -1627,8 +1627,10 @@ library from a CDN (`Model3D`'s xeokit) needs the network to open.
 
 `describe()` is the cheap text half (confirm the right components exist, are
 wired, laid out, holding expected values — no pixels). `screenshot()` is the
-visual half for a VLM. Both round-trip to a connected browser, so `screenshot()`
-needs an open tab. It's a *scene* export (shapes at canvas coords, camera-
+visual half for a VLM. `screenshot()` needs an open tab (a background tab
+works); browser-only state — what one viewer ticked in a table, their view
+state — is whatever *that* tab shows. Framing several big panels at once
+makes a large PNG; capture them one at a time to keep each image small. It's a *scene* export (shapes at canvas coords, camera-
 independent). Sandboxed iframes (`Custom`) rasterize *themselves* into the
 export: by default their own `<canvas>` elements are composited over the page
 background (enough for canvas-drawn content — `Model3D` ships its own provider

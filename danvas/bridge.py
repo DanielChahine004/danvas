@@ -2702,7 +2702,12 @@ class Bridge:
         if not (self._connections or self._viewers):
             raise RuntimeError("no connected browser to capture from")
         req_id = uuid.uuid4().hex
-        waiter = {"event": threading.Event(), "data": None, "error": None}
+        # How many tabs will answer: browsers only (a process peer on the
+        # roster never renders). Errors wait for all of them; see _image_reply.
+        tabs = sum(1 for v in list(self._viewers.values())
+                   if v.get("device") != "process")
+        waiter = {"event": threading.Event(), "data": None, "error": None,
+                  "expect": max(1, tabs)}
         self._snapshot_waiters[req_id] = waiter
         try:
             self.broadcast({

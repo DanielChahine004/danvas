@@ -828,6 +828,7 @@ fn build_app(hub: Arc<Mutex<Hub>>) -> Router {
         // TCP accept alone can't (a hung broker still accepts).
         .route("/__health__", get(health_handler))
         .route("/__describe__", get(describe_handler))
+        .route("/__screenshot__.png", get(screenshot_handler))
         .route("/__templates__", get(|| async {
             ([(header::CONTENT_TYPE, "application/json")], TEMPLATES)
         }))
@@ -1180,6 +1181,14 @@ async fn describe_handler(
     for (label, src) in &h.sources {
         for id in &src.reg_order {
             if let Some(reg) = src.registers.get(id) {
+                let upd = src.updates.get(id);
+                let size = |k: &str| {
+                    upd.and_then(|u| u.get(k))
+                        .or_else(|| reg.get("props").and_then(|p| p.get(k)))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                };
+                let auto = |k: &str| panel_auto(src, id, k);
                 components.push(json!({
                     "id": id,
                     "name": reg.get("name").cloned().unwrap_or(Value::Null),
@@ -1188,6 +1197,13 @@ async fn describe_handler(
                     "component": reg.get("component").cloned().unwrap_or(Value::Null),
                     "x": reg.get("x").cloned().unwrap_or(Value::Null),
                     "y": reg.get("y").cloned().unwrap_or(Value::Null),
+                    // sizes: the latest folded update (a resize / content
+                    // fit) over the register's props
+                    "w": size("w"),
+                    "h": size("h"),
+                    "auto_h": auto("autoH"),
+                    "measured_by": src.measured.get(id).map(|m| json!(m.0)).unwrap_or(Value::Null),
+                    "measured_at": src.measured.get(id).map(|m| json!(m.1)).unwrap_or(Value::Null),
                     "source": label,
                     "status": if src.live { "live" } else { "offline" },
                 }));
@@ -1199,6 +1215,46 @@ async fn describe_handler(
         json!({"components": components}).to_string(),
     )
         .into_response()
+}
+
+/// GET /__screenshot__.png[?timeout=secs]: the whole board as a PNG, rendered
+/// by a connected browser (the only thing that can render it). 503 with no
+/// browser open, 504 if none answers in time.
+async fn screenshot_handler(
+    State(hub): State<Arc<Mutex<Hub>>>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let secs: f64 = q.get("timeout").and_then(|v| v.parse().ok()).unwrap_or(15.0);
+    let req_id = format!("shot-{}", now_hex());
+    let rx = {
+        let mut h = hub.lock().unwrap();
+        if !h.authed(&headers) {
+            return (StatusCode::UNAUTHORIZED, "login required").into_response();
+        }
+        let tabs = h.browsers.len();
+        if tabs == 0 {
+            return (StatusCode::SERVICE_UNAVAILABLE,
+                    "no browser has the canvas open to render it").into_response();
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        h.pending_images.insert(req_id.clone(),
+                                PendingImage { tx: Some(tx), expect: tabs, errors: 0 });
+        h.fanout_browsers(&json!({"type": "get_image", "reqId": req_id,
+                                  "shapeIds": []}).to_string());
+        rx
+    };
+    let res = tokio::time::timeout(std::time::Duration::from_secs_f64(secs.clamp(1.0, 120.0)), rx).await;
+    hub.lock().unwrap().pending_images.remove(&req_id);
+    match res {
+        Ok(Ok(Ok(b64))) => match b64_decode(b64.split_once(',').map(|(_, d)| d).unwrap_or(&b64)) {
+            Some(png) => ([(header::CONTENT_TYPE, "image/png"),
+                           (header::CACHE_CONTROL, "no-store")], png).into_response(),
+            None => (StatusCode::BAD_GATEWAY, "browser sent an undecodable image").into_response(),
+        },
+        Ok(Ok(Err(e))) => (StatusCode::BAD_GATEWAY, format!("screenshot failed: {e}")).into_response(),
+        _ => (StatusCode::GATEWAY_TIMEOUT, "timed out waiting for a browser to render").into_response(),
+    }
 }
 
 async fn static_handler(
@@ -1214,7 +1270,12 @@ async fn static_handler(
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
     // Unknown paths fall back to the SPA index, matching the Python server.
-    let file = DIST.get_file(path).or_else(|| DIST.get_file("index.html"));
+    let (file, path) = match DIST.get_file(path) {
+        Some(f) => (Some(f), path),
+        // the SPA fallback is HTML whatever extension was asked for (it used
+        // to go out as image/png for a .png path)
+        None => (DIST.get_file("index.html"), "index.html"),
+    };
     match file {
         Some(f) => {
             let mime = match path.rsplit_once('.').map(|(_, e)| e) {
@@ -1405,6 +1466,21 @@ async fn handle(
                         }
                     }
                     out.push(f.to_string());
+                }
+                if !is_source {
+                    let vid = format!("v{conn_id}");
+                    for nsid in &s.reg_order {
+                        let Some((by_role, by_client)) = s.scoped.get(nsid) else { continue };
+                        if !role_may_see(&role, &panel_roles(s, nsid, None)) {
+                            continue;
+                        }
+                        let layers = role.as_deref().and_then(|r| by_role.get(r))
+                            .into_iter().chain(by_client.get(&vid));
+                        for payload in layers {
+                            out.push(json!({"type": "update", "id": nsid,
+                                            "payload": payload}).to_string());
+                        }
+                    }
                 }
             }
             // Freehand ink is a browser-render concern: a source contributing
@@ -1751,6 +1827,7 @@ fn attach_source(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, tx: Tx) {
         src.updates.clear();
         src.arrows.clear();
         src.shapes.clear();
+        src.scoped.clear();
         src.shared = None;
         src.graveyard = None;
         src.drawings.clear();
@@ -2016,6 +2093,55 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
     let nsid = ns(&raw_id);
     let obj = frame.as_object_mut().unwrap();
     obj.insert("id".into(), Value::String(nsid.clone()));
+    // A per-viewer frame (`to: {roles: [..]}` / `to: {client: id}`, from
+    // send_to_role / send_to_client): reaches only those viewers, folds into
+    // their overlay, and leaves the shared cache alone.
+    if let Some(Value::Object(to)) = obj.remove("to") {
+        if matches!(kind.as_str(), "update" | "remove") {
+            let roles: Vec<String> = to.get("roles").and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default();
+            let client = to.get("client").and_then(Value::as_str).map(String::from);
+            let (ox, oy) = h.sources.get(label).map(|s| s.offset).unwrap_or((0.0, 0.0));
+            let src = h.sources.get_mut(label).unwrap();
+            if kind == "update" {
+                let mut payload = obj.get("payload").and_then(Value::as_object)
+                    .cloned().unwrap_or_default();
+                shift_xy(&mut payload, ox, oy);
+                obj.insert("payload".into(), Value::Object(payload.clone()));
+                let entry = src.scoped.entry(nsid.clone()).or_default();
+                for r in &roles {
+                    entry.0.entry(r.clone()).or_default().extend(payload.clone());
+                }
+                if let Some(c) = &client {
+                    entry.1.entry(c.clone()).or_default().extend(payload.clone());
+                }
+            } else if let Some(entry) = src.scoped.get_mut(&nsid) {
+                // removed for those viewers: their overlay goes with it
+                for r in &roles {
+                    entry.0.remove(r);
+                }
+                if let Some(c) = &client {
+                    entry.1.remove(c);
+                }
+            }
+            let panel = h.sources.get(label)
+                .map(|s| panel_roles(s, &nsid, None)).unwrap_or_default();
+            let text = serde_json::to_string(&*obj).unwrap_or_default();
+            for (bid, btx) in &h.browsers {
+                let vrole = viewer_role(&h, *bid);
+                let vid = h.viewers.get(bid).and_then(|v| v.get("id"))
+                    .and_then(Value::as_str);
+                let targeted = vrole.as_deref().map(|r| roles.iter().any(|x| x == r))
+                    .unwrap_or(false)
+                    || (client.is_some() && vid == client.as_deref());
+                if targeted && (kind == "remove" || role_may_see(&vrole, &panel)) {
+                    let _ = btx.send(Out::T(text.clone()));
+                }
+            }
+            return;
+        }
+    }
     match kind.as_str() {
         "register" => {
             // Re-stamp ownership: on the composed canvas the owner is the
@@ -2050,6 +2176,7 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
             src.reg_order.retain(|i| i != &nsid);
             src.registers.remove(&nsid);
             src.updates.remove(&nsid);
+            src.scoped.remove(&nsid);
             src.arrows.remove(&nsid);
             src.shapes.remove(&nsid);
         }

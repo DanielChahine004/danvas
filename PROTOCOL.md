@@ -160,7 +160,14 @@ Every served canvas is a hub by default, so this works against a plain
   look it up in the `presence` roster for the sender's name/color/role.
 - **Up** (source → hub): `register` / `update` / `remove` / `arrow` / `draw`
   declare and mutate this source's own panels — the hub namespaces, caches,
-  and fans them out to every browser. Anything else (`heartbeat`, an `input`
+  and fans them out to every browser. An `update`/`remove` may carry
+  `to: {"roles": [..]}` or `to: {"client": "<viewer id>"}`: the hub delivers
+  it to those viewers only, folds it into a per-role / per-viewer overlay
+  (never the shared cache), and replays the overlay after the shared state
+  when such a viewer connects (a client overlay ends with that connection).
+  A `view` frame is scoped the same way by top-level `roles` / `client`.
+  `shared` frames (define/style) must precede the registers that use them in
+  the replay; the hub tags each with its `source`. Anything else (`heartbeat`, an `input`
   on a hub panel it observed) is treated as ordinary viewer traffic: a source
   is also a subscriber that may petition.
 - **Identity is the label.** Reconnecting under the same label replaces the
