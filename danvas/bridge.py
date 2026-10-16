@@ -248,6 +248,12 @@ class Bridge:
         self._send_locks = {}  # ws -> asyncio.Lock
         self._loop = None
         self._snapshot_waiters = {}  # reqId -> {"event": Event, "data": ...}
+        # Layout-settled reports from browsers (canvas.wait_settled/on_settled):
+        # a sequence number + the latest report, under a condition variable.
+        self._settled_taps = []
+        self._settle_cv = threading.Condition()
+        self._settle_seq = 0
+        self._last_settled = None
         self._loaded_doc = None  # last full document loaded, replayed on connect
         # Live free-form drawings (the records a *user* draws, not danvas
         # panels) keyed by record id. Browsers relay their changes as `draw`
@@ -520,6 +526,59 @@ class Bridge:
     def remove_connect_tap(self, fn):
         if fn in self._connect_taps:
             self._connect_taps.remove(fn)
+
+    # -- layout settled (canvas.wait_settled / canvas.on_settled) -------------
+    def add_settled_tap(self, fn):
+        """Register ``fn(report)`` for every browser ``settled`` report."""
+        self._settled_taps.append(fn)
+        return fn
+
+    def remove_settled_tap(self, fn):
+        if fn in self._settled_taps:
+            self._settled_taps.remove(fn)
+
+    def _on_settled(self, pending, viewer):
+        """A browser says its content-fit sizes have landed and the cascades
+        they set off are done. ``pending`` lists auto-sized panels (wire ids)
+        it still hasn't measured; reported back as panel names."""
+        names = []
+        for cid in pending or ():
+            comp = self._components.get(cid)
+            names.append(getattr(comp, "name", None) or cid)
+        report = {"viewer": dict(viewer or {}), "pending": names}
+        with self._settle_cv:
+            self._settle_seq += 1
+            self._last_settled = report
+            self._settle_cv.notify_all()
+        for fn in list(self._settled_taps):
+            self._dispatch.submit(lambda f=fn, r=dict(report): self._safe_tap(f, r))
+
+    @staticmethod
+    def _safe_tap(fn, arg):
+        try:
+            fn(arg)
+        except Exception:
+            traceback.print_exc()
+
+    def wait_settled(self, timeout=10.0):
+        """Block until a browser reports the layout settled with nothing left
+        to measure; return that report, or None on timeout."""
+        self._warn_if_blocking_on_dispatch("canvas.wait_settled()")
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        with self._settle_cv:
+            start = self._settle_seq
+        # ask for a fresh report (a browser that's already quiet answers at once)
+        self.broadcast({"type": "settle_check"})
+        with self._settle_cv:
+            while True:
+                last = self._last_settled
+                if self._settle_seq > start and last and not last["pending"]:
+                    return dict(last)
+                left = deadline - _time.monotonic()
+                if left <= 0:
+                    return None
+                self._settle_cv.wait(left)
 
     def _tap_connect(self, viewer):
         for fn in list(self._connect_taps):
@@ -1801,13 +1860,31 @@ class Bridge:
             if waiter is not None:
                 waiter["data"] = msg.get("data")
                 waiter["event"].set()
+        elif kind == "settled":
+            self._on_settled(msg.get("pending") or [], self._viewer_of(ws))
         elif kind == "image":
             # Reply to a request_image (canvas.screenshot); base64 PNG or error.
-            waiter = self._snapshot_waiters.get(msg.get("reqId"))
-            if waiter is not None:
-                waiter["data"] = msg.get("data")
-                waiter["error"] = msg.get("error")
-                waiter["event"].set()
+            self._image_reply(msg)
+
+    def _image_reply(self, msg):
+        """Fold one browser's ``image`` reply into its waiter.
+
+        Every open tab is asked, so the first *good* image wins and an error
+        only counts once every tab has answered — otherwise a tab that can't
+        render (it lacks the panel, nothing mounted) beat a good capture from
+        another tab and screenshot() failed.
+        """
+        waiter = self._snapshot_waiters.get(msg.get("reqId"))
+        if waiter is None or waiter["event"].is_set():
+            return
+        if msg.get("data") and not msg.get("error"):
+            waiter["data"], waiter["error"] = msg.get("data"), None
+            waiter["event"].set()
+            return
+        waiter["error"] = msg.get("error") or "no image returned"
+        waiter["replies"] = waiter.get("replies", 0) + 1
+        if waiter["replies"] >= waiter.get("expect", 1):
+            waiter["event"].set()
 
     def _dispatch_input(self, comp, payload, ws):
         """Run a component's input handler (off the loop) and echo its state.

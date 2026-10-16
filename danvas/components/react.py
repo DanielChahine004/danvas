@@ -76,6 +76,7 @@ from . import _theme
 from .base import BaseComponent
 from ._state import _SharedState
 from ._routing import _EventRouter
+from .custom import _check_fit_width
 
 
 class React(_SharedState, _EventRouter, BaseComponent):
@@ -88,8 +89,14 @@ class React(_SharedState, _EventRouter, BaseComponent):
     def __init__(self, source=None, path=None, jsx=None, css=None, css_path=None,
                  name="react", label=None, w=None, h=None, color=None, props=None,
                  scope=None, event_key="event", queue="fifo",
-                 wasm=None, wasm_path=None, forward_wheel=True):
+                 wasm=None, wasm_path=None, forward_wheel=True,
+                 keep_mounted=False, fit_width=None):
         self._init_state()
+        # keep_mounted=True: culling hides this panel instead of unmounting it
+        # (same as Custom), so React-local state survives scrolling away.
+        self._keep_mounted = bool(keep_mounted)
+        # fit_width=N: lay out at design width N, scale to the panel's width.
+        self._fit_width = _check_fit_width(fit_width)
         size = {k: v for k, v in (("w", w), ("h", h)) if v is not None}
         super().__init__(name=name, label=label, queue=queue, **size)
         self._path = path   # remembered so watch() can reload it
@@ -199,6 +206,10 @@ class React(_SharedState, _EventRouter, BaseComponent):
         props["autoW"] = self._auto_w
         props["libs"] = json.dumps(self._libs)
         props["wasm"] = self._wasm_b64 or ""
+        if self._keep_mounted:
+            props["keepMounted"] = True
+        if self._fit_width:
+            props["fitWidth"] = self._fit_width
         return props
 
     def _data_for(self, role=None, client_id=None):

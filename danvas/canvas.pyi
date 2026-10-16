@@ -189,6 +189,7 @@ class Canvas:
         forward_wheel: bool = ...,
         themed: bool = ...,
         permissions: str | list[str] | None = ...,
+        fit_width: float | None = ...,
         **place: Any,
     ) -> Custom: ...
     def file_browser(
@@ -211,6 +212,10 @@ class Canvas:
         label: str | None = ...,
         props: dict[str, Any] | None = ...,
         scope: list[str] | None = ...,
+        wasm: bytes | None = ...,
+        wasm_path: str | None = ...,
+        keep_mounted: bool = ...,
+        fit_width: float | None = ...,
         **place: Any,
     ) -> React: ...
     def markdown(
@@ -347,6 +352,9 @@ class Canvas:
     def trace(
         self, name: str = ..., label: str = ..., deep: bool = ..., **place: Any
     ) -> Any: ...
+    def wait_settled(self, timeout: float = ...) -> dict[str, Any] | None: ...
+    def on_settled(self, fn: Callable[[dict[str, Any]], Any]) -> Callable[[dict[str, Any]], Any]: ...
+    def off_settled(self, fn: Callable[[dict[str, Any]], Any]) -> None: ...
     def on_cursor(
         self, fn: Callable[[dict[str, Any]], Any]
     ) -> Callable[[dict[str, Any]], Any]: ...

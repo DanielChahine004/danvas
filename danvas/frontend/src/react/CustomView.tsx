@@ -7,9 +7,9 @@
 // iframe over postMessage (zero-copy for binary), and relay panel errors back
 // to the owner. The outbound iframe messages (send/binary/wheel/fit/camera/
 // mic) are handled by the global window listener in bridge.ts.
-import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useEditor, useValue } from './EngineContext'
-import { sendPanelError, componentIdOf, registerLive, unregisterLive, getViewState } from '../bridge'
+import { sendPanelError, componentIdOf, registerLive, unregisterLive, getViewState, getViewerState } from '../bridge'
 import { prepareCustomDoc } from './customShim'
 
 // The canvas theme variables forwarded into a themed=True iframe so its CSS can
@@ -93,9 +93,25 @@ export function CustomView({ shape }: { shape: any }) {
     [shape.props.html, shape.props.forwardWheel, (shape.props as any).sync, id],
   )
 
-  return (
+  const fitWidth = Number((shape.props as any).fitWidth) || 0
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(1)
+  useEffect(() => {
+    if (!fitWidth) return
+    const box = boxRef.current
+    if (!box) return
+    const upd = () => box.clientWidth > 0 && setScale(box.clientWidth / fitWidth)
+    upd()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(upd)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [fitWidth])
+
+  const frame = (
     <iframe
       ref={ref}
+      data-pc-fit-width={fitWidth || undefined}
       title={shape.props.label}
       srcDoc={srcDoc}
       // allow-scripts lets interactive content run; no allow-same-origin keeps the
@@ -104,9 +120,10 @@ export function CustomView({ shape }: { shape: any }) {
       sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
       allow={shape.props.permissions || undefined}
       style={{
-        flex: 1,
-        minHeight: 0,
-        width: '100%',
+        ...(fitWidth
+          ? // fit_width: a fixed design width scaled to the panel (see ReactHost)
+            { position: 'absolute', left: 0, top: 0, width: fitWidth, height: `${100 / scale}%`, transform: `scale(${scale})`, transformOrigin: '0 0' }
+          : { flex: 1, minHeight: 0, width: '100%' }),
         border: 'none',
         borderRadius: 4,
         background: shape.meta?.noFrame ? 'transparent' : 'var(--pc-bg)',
@@ -120,11 +137,19 @@ export function CustomView({ shape }: { shape: any }) {
         postState()
         // this viewer's view state, so a remounted document starts where it was
         ref.current?.contentWindow?.postMessage({ __danvas_view: getViewState(id) }, '*')
+        ref.current?.contentWindow?.postMessage({ __danvas_viewer: getViewerState() }, '*')
       }}
       // Keep the engine from hijacking drags/zoom meant for the iframe content.
       // (No drawing layer yet, so drawingOnTop is always false.)
       onPointerDown={ghost || !toolIsSelect ? undefined : (e: any) => e.stopPropagation()}
       onDragStart={(e: any) => e.preventDefault()}
     />
+  )
+  return fitWidth ? (
+    <div ref={boxRef} data-pc-fit-box="" style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+      {frame}
+    </div>
+  ) : (
+    frame
   )
 }

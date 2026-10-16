@@ -122,6 +122,17 @@ def _standalone_document(document, frames, title=None, state=None):
     return doc
 
 
+
+def _check_fit_width(fit_width):
+    """Validate ``fit_width=`` (a design width in px, or None/0 for off)."""
+    if fit_width in (None, 0, False):
+        return None
+    if isinstance(fit_width, bool) or not isinstance(fit_width, (int, float)) \
+            or fit_width <= 0:
+        raise ValueError("fit_width must be a positive number of pixels "
+                         "(the content's design width), e.g. fit_width=880")
+    return float(fit_width)
+
 class Custom(_SharedState, _EventRouter, BaseComponent):
     component = "Custom"
     # Language-neutral contract (see PROTOCOL.md section: component contracts).
@@ -168,8 +179,11 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
     def __init__(self, html=None, path=None, css=None, js=None, name="custom",
                  label=None, w=None, h=None, color=None, event_key="event",
                  permissions=None, forward_wheel=True, themed=False,
-                 keep_mounted=False, sync=False):
+                 keep_mounted=False, sync=False, fit_width=None):
         self._init_state()
+        # fit_width=N: lay out at design width N, scale to the panel's width
+        # (frontend: CustomView + fitFromIframe). Width auto-fit can't apply.
+        self._fit_width = _check_fit_width(fit_width)
         # ``h="auto"`` fits the panel's height to its rendered content: the
         # iframe measures its document and the frontend resizes the shape (and
         # reports the result back, so ``comp.h`` syncs). It keeps re-fitting on
@@ -391,6 +405,8 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         props["themed"] = self._themed
         if self._keep_mounted:
             props["keepMounted"] = True
+        if self._fit_width:
+            props["fitWidth"] = self._fit_width
         if self._sync:
             props["sync"] = self._sync           # True (shared) | "local" (per viewer)
         # The frontend injects the interaction shim; this flag is its wheel

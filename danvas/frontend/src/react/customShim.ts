@@ -77,6 +77,15 @@ export function customHelper(cid: string, forwardWheel: boolean, sync: boolean |
     "onViewState:function(fn){window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas_view!==undefined){fn(window.canvas.viewState);}' +
     '});if(window.canvas._viewReady){setTimeout(function(){fn(window.canvas.viewState);},0);}},' +
+    // Per-viewer BOARD state: one dict shared by every panel, this viewer only.
+    'viewerState:{},' +
+    'setViewerState:function(patch){' +
+    'window.canvas.viewerState=Object.assign({},window.canvas.viewerState||{},patch||{});' +
+    "parent.postMessage({__danvas_set_viewer:1,patch:patch||{}},'*');" +
+    '},' +
+    "onViewerState:function(fn){window.addEventListener('message',function(e){" +
+    'if(e.data&&e.data.__danvas_viewer!==undefined){fn(window.canvas.viewerState);}' +
+    '});setTimeout(function(){fn(window.canvas.viewerState);},0);},' +
     'setState:function(patch){' +
     'var s=Object.assign({},window.canvas.state||{},patch||{});window.canvas.state=s;' +
     `parent.postMessage({__danvas_set_state:${id},state:s},'*');` +
@@ -146,6 +155,7 @@ export function customHelper(cid: string, forwardWheel: boolean, sync: boolean |
     "window.addEventListener('message',function(e){" +
     'if(e.data&&e.data.__danvas_state!==undefined){window.canvas.state=e.data.__danvas_state||{};window.canvas._stateReady=true;}' +
     'if(e.data&&e.data.__danvas_view!==undefined){window.canvas.viewState=e.data.__danvas_view||{};window.canvas._viewReady=true;}' +
+    'if(e.data&&e.data.__danvas_viewer!==undefined){window.canvas.viewerState=e.data.__danvas_viewer||{};}' +
     '});' +
     "window.addEventListener('message',function(e){" +
     'if(!(e.data&&e.data.__danvas_snap))return;' +

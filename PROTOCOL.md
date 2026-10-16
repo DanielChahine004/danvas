@@ -64,7 +64,8 @@ replay again and must rebuild from it.
 | `arrow` / `shape` / `shape_update` | connector arrows and managed shapes |
 | `order` | z-order list |
 | `draw` | free-form ink diff: `{diff: {added, updated, removed}}` |
-| `view` | camera / chrome change |
+| `view` | camera / chrome change; keys include `read_only` and `observer` (see below) |
+| `settle_check` | the owner asks for a fresh `settled` report |
 | `welcome` / `shared` / `chat` / `presence` / `cursor` / `cursor_gone` | session plumbing |
 | `response` | reply to a client `request` (`{req, ...}`) |
 | `container_sync` / `reflow` / `graveyard_update` | layout machinery |
@@ -84,6 +85,7 @@ replay again and must rebuild from it.
 | `snapshot` / `image` / `panel_error` | replies + error reports |
 | `set_props` | write any panel's properties: `{id, props: {...}}` (shared plane, below) |
 | `subscribe` / `unsubscribe` | receive a panel's `input` events without owning it |
+| `settled` | content-fit sizes have landed and the layout went quiet: `{pending: [ids]}` (auto-sized panels not yet measured) |
 
 The server enforces authorization on ingress: an `input`/`request`/binary
 frame for a panel that is `locked`, non-`operable`, role-hidden, or

@@ -124,7 +124,7 @@ class _FactoryMixin:
 
     def custom(self, html=None, path=None, css=None, js=None, name="custom",
                label=None, keep_mounted=False, forward_wheel=True,
-               themed=False, permissions=None, sync=False,
+               themed=False, permissions=None, sync=False, fit_width=None,
                **place: Unpack[Place]):
         """Insert a :class:`~danvas.Custom`. See :meth:`insert` for ``place``.
 
@@ -150,11 +150,17 @@ class _FactoryMixin:
         shared, but the page comes back as you left it after scrolling out or
         reloading. Other drag-driven JS state a page keeps itself with
         ``canvas.setState`` / ``canvas.setViewState``.
+
+        ``fit_width=N`` lays the content out at a fixed design width of ``N``
+        pixels and scales it to the panel's actual width (a CSS transform, so
+        every browser renders it the same — unlike CSS ``zoom``); with an auto
+        height, the panel's height is the content height times that scale.
         """
         return self._make(Custom, html=html, path=path, css=css, js=js,
                           name=name, label=label, keep_mounted=keep_mounted,
                           forward_wheel=forward_wheel, themed=themed,
-                          permissions=permissions, sync=sync, **place)
+                          permissions=permissions, sync=sync,
+                          fit_width=fit_width, **place)
 
     def download(self, name="download", source=None, filename=None, text=None, label=None,
                  **place: Unpack[Place]):
@@ -199,7 +205,8 @@ class _FactoryMixin:
 
     def react(self, source=None, path=None, jsx=None, css=None, css_path=None,
               name="react", label=None, props=None, scope=None,
-              wasm=None, wasm_path=None, **place: Unpack[Place]):
+              wasm=None, wasm_path=None, keep_mounted=False, fit_width=None,
+              **place: Unpack[Place]):
         """Insert a :class:`~danvas.React` panel — the workhorse for custom UI.
 
         ``source`` is JSX defining ``function Component(...)`` (or load it from a
@@ -216,13 +223,21 @@ class _FactoryMixin:
         file. The module is compiled once in the browser and its exports are
         available as ``await canvas.wasm`` inside the JSX component.
 
+        ``keep_mounted=True`` hides the panel instead of unmounting it when it
+        scrolls out of view, so React-local state (``useState``, a scroll
+        position) survives. ``fit_width=N`` lays the content out at a fixed design width of ``N``
+        pixels and scales it to the panel's actual width (a CSS transform, so
+        every browser renders it the same — unlike CSS ``zoom``); with an auto
+        height, the panel's height is the content height times that scale.
+
         Placement, visibility (``roles`` / ``lock_for``), the lock/chrome flags,
         and ``queue`` all flow through ``**place`` — see :meth:`insert` (and the
         :class:`Place` keys your editor now autocompletes).
         """
         return self._make(React, source=source, path=path, jsx=jsx, css=css,
                           css_path=css_path, name=name, label=label, props=props,
-                          scope=scope, wasm=wasm, wasm_path=wasm_path, **place)
+                          scope=scope, wasm=wasm, wasm_path=wasm_path,
+                          keep_mounted=keep_mounted, fit_width=fit_width, **place)
 
     def markdown(self, text="", name="markdown", label=None, **place: Unpack[Place]):
         """Insert a :class:`~danvas.Markdown` panel. See :meth:`insert` for ``place``."""

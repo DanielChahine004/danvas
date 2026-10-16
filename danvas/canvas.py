@@ -652,6 +652,41 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Remove a cursor observer registered with :meth:`on_cursor`."""
         self._bridge.remove_cursor_tap(fn)
 
+    def wait_settled(self, timeout=10.0):
+        """Block until the layout has settled in a browser; return its report.
+
+        "Settled" means a browser has measured every content-fit panel
+        (``h="auto"``) and the cascades those sizes set off (``below=`` chains,
+        flows, containers) have gone quiet — so ``x/y/w/h`` (and
+        :meth:`describe`) now hold real numbers instead of placeholders. Use it
+        before reading positions for your own placement, or before a
+        :meth:`screenshot`::
+
+            canvas.serve(block=False)
+            if canvas.wait_settled():
+                print(canvas.describe())
+
+        Returns ``{"viewer": {...}, "pending": []}`` from the browser that
+        reported, or ``None`` if none did within ``timeout`` (no browser open,
+        or only a hidden tab — a background tab doesn't measure). Needs a
+        browser: the browser is what measures.
+        """
+        return self._bridge.wait_settled(timeout)
+
+    def on_settled(self, fn):
+        """Run ``fn(report)`` whenever a browser reports the layout settled.
+
+        ``report`` is ``{"viewer": {...}, "pending": [names]}``; ``pending``
+        lists auto-sized panels that browser hasn't measured yet (normally
+        empty). Fires after load and again after any later content-fit change
+        settles. Runs on the dispatch thread. Remove with :meth:`off_settled`.
+        """
+        return self._bridge.add_settled_tap(fn)
+
+    def off_settled(self, fn):
+        """Remove an observer registered with :meth:`on_settled`."""
+        self._bridge.remove_settled_tap(fn)
+
     def on_connect(self, fn):
         """Run ``fn(viewer)`` once each time a viewer connects. Decorator-friendly.
 

@@ -87,12 +87,12 @@ MESSAGE_TYPES_OUT = (
     "container_sync", "reflow", "get_snapshot", "get_image", "load_snapshot",
     "draw", "presence", "cursor", "cursor_gone", "view", "welcome",
     "graveyard_update", "shared", "chat", "response", "hosting",
-    "serve_config",
+    "serve_config", "settle_check",
 )
 MESSAGE_TYPES_IN = (
     "heartbeat", "cursor", "set_name", "chat", "ui", "input", "layout",
     "graveyard", "restore", "draw", "request", "panel_error", "snapshot",
-    "image", "set_props", "subscribe", "unsubscribe",
+    "image", "set_props", "subscribe", "unsubscribe", "settled",
 )
 
 # -- merge control-plane tags (browser <-> merge server) --------------------
@@ -143,6 +143,8 @@ IFRAME_MESSAGE_KEYS = {
     "SET_STATE": "__danvas_set_state",           # iframe->parent canvas.setState (-> set_props)
     "VIEW": "__danvas_view",                     # parent->iframe this viewer's view state (on load)
     "SET_VIEW": "__danvas_set_view",             # iframe->parent canvas.setViewState (browser-local)
+    "VIEWER": "__danvas_viewer",                 # parent->iframe this viewer's board-wide state
+    "SET_VIEWER": "__danvas_set_viewer",         # iframe->parent canvas.setViewerState (browser-local)
     "ERROR": "__danvas_error",                   # iframe->parent JS error report
     "WHEEL": "__danvas_wheel",                   # iframe->parent wheel -> canvas zoom
     "PAN": "__danvas_pan",                       # iframe->parent pan delta

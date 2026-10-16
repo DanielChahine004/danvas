@@ -95,7 +95,7 @@ canvas.serve(port=8000)                                    # LAST line: opens br
 |---|---|---|---|---|
 | Panel value / props | Python (and value controls via input) | everyone | yes / yes / with `persist=` | `update`, live properties, `on_change` |
 | Shared `state` (Custom, React) | the page *or* Python | everyone | yes / yes / no | JS `canvas.setState(patch)`, `canvas.state`, `canvas.onState`; Py `panel.state`, `set_state`, `@on_state` |
-| View state | the page | that viewer only | yes / yes / no | React `canvas.useViewState(key, init)`; Custom `canvas.setViewState`, `sync="local"` |
+| View state | the page | that viewer only | yes / yes / no | one panel: React `canvas.useViewState(key, init)`; Custom `canvas.setViewState`, `sync="local"`. Whole board (link panels for one viewer): React `canvas.useViewerState(key, init)`; Custom `canvas.viewerState`, `setViewerState`, `onViewerState` |
 
 11. **`canvas` means two things.** In Python it's your `danvas.Canvas`. Inside
     a Custom page or React component, `canvas` is the in-panel JS bridge
@@ -134,8 +134,8 @@ canvas.serve(port=8000)                                    # LAST line: opens br
 | `download(name, source=None, filename=None, text=None)` | `.set_source(...)`, `@provide` → `(filename, bytes)` | — |
 | `model3d(name, view=None, shared_camera=False)` | `.update(glb, points=, lines=, curve=, mesh_color=)`, `.layer(name)`, `.view(preset \| eye=, look=)`, `.export_html(path)` | `@on_pick(info)` |
 | `inspector(name, refresh=1.0, source="components")` | — | — |
-| `custom(html \| path=, css=, js=, keep_mounted=False, forward_wheel=True, themed=False, permissions=None, sync=False)` | `.push(data)`, `.push_binary(bytes)`, `.update(html=, css=, js=)`, `.state`, `.set_state(**p)`, `.export_html(path)` | `@on(event)`, `@on_message(msg)`, `@on_request(event)`, `@on_binary(bytes)`, `@on_state(state, viewer)`, `@on_error(msg)` |
-| `react(source \| jsx=, css=, path=, props=None, scope=None, wasm=None)` | `.update(**props)`, `.push(data)`, `.push_binary(bytes)`, `.state`, `.set_state(**p)`, `.watch()`, `.validate()` | same as Custom |
+| `custom(html \| path=, css=, js=, keep_mounted=False, forward_wheel=True, themed=False, permissions=None, sync=False, fit_width=None)` | `.push(data)`, `.push_binary(bytes)`, `.update(html=, css=, js=)`, `.state`, `.set_state(**p)`, `.export_html(path)` | `@on(event)`, `@on_message(msg)`, `@on_request(event)`, `@on_binary(bytes)`, `@on_state(state, viewer)`, `@on_error(msg)` |
+| `react(source \| jsx=, css=, path=, props=None, scope=None, wasm=None, keep_mounted=False, fit_width=None)` | `.update(**props)`, `.push(data)`, `.push_binary(bytes)`, `.state`, `.set_state(**p)`, `.watch()`, `.validate()` | same as Custom |
 | `show(value, name=None)` | picks the best panel for any value | — |
 
 **Model3D layers** — `layer = viewer.layer("name")`, each replaced
@@ -185,7 +185,7 @@ User freehand: `@canvas.on_draw(event)`, `canvas.drawings`.
 | Merging | `merge(url, password=, at=(x, y))`, `unmerge(url)`, `move_merge(url, x, y)`, `merges`, `sources` |
 | Files | `serve_bytes(data, filename, ttl=, role=)` → URL; `receive_files(on_file, dest=, max_size=, role=)` → URL |
 | Persistence | `save(path)`, `load(path, formation=True)`, `serve(persist=True \| path)`, `ledger` |
-| Inspect & debug | `describe()`, `screenshot(target=None, path=)`, `on_frame`, `on_dispatch`, `trace()`, `trace_calls()`, `trace_history()`, `serve(debug=True)` |
+| Inspect & debug | `describe()`, `screenshot(target=None, path=)`, `wait_settled(timeout=)`, `on_settled(fn(report))`, `on_frame`, `on_dispatch`, `trace()`, `trace_calls()`, `trace_history()`, `serve(debug=True)` |
 | Packaging | `bake(name=, icon=, onefile=, window_size=)` |
 | Notebooks | `capture_cells(cols=)`, `stop_capturing_cells()` |
 
@@ -211,7 +211,8 @@ React source must define `function Component({ canvas, value, props, state })`
 | `canvas.sendBinary(arrayBuffer)` | bytes up | `@panel.on_binary(bytes)` |
 | `canvas.onPush(fn)` (Custom) / `value` prop (React) / `canvas.onFrame(fn)` | receive `panel.push(...)` | `panel.push(data)`, `push_binary(b)` |
 | `canvas.state`, `canvas.setState(p)`, `canvas.onState(fn)` (React: `state` prop) | shared state | `panel.state`, `set_state`, `@on_state` |
-| `canvas.useViewState(k, init)` (React) / `canvas.viewState`, `setViewState`, `onViewState` (Custom) | per-viewer view state | — |
+| `canvas.useViewState(k, init)` (React) / `canvas.viewState`, `setViewState`, `onViewState` (Custom) | per-viewer view state, this panel | — |
+| `canvas.useViewerState(k, init)` (React) / `canvas.viewerState`, `setViewerState`, `onViewerState` (Custom) | per-viewer state shared by every panel on the board | — |
 | `canvas.viewport(cb)`, `canvas.setView({x, y, zoom})` | read / move the camera | — |
 | `canvas.chat.send/history/subscribe/identity` | the shared chat room | `Chat` |
 | `canvas.requestCamera(opts)`, `requestMicrophone(opts)` (Custom) | capture devices via the parent page | `@on_binary` |
@@ -622,6 +623,26 @@ counter = canvas.react(jsx='<button onClick={() => canvas.send({n: 1})}>tap</but
   never sent to Python. The built-in Table (sort, filters, page, column picks),
   Inspector filters, Chat draft and Plot zoom use it, so they come back as you
   left them.
+- **`canvas.useViewerState(key, init)`** is the same, but one dict for the
+  **whole board**: every panel reading a key sees every other panel's writes, for
+  this viewer only. It's how two panels are linked for one person — ticking rows
+  in a table drives what a chart draws — without the selection leaking to other
+  viewers (shared `state` would) or a round trip through Python. Custom pages
+  get it as `canvas.viewerState` / `canvas.setViewerState(patch)` /
+  `canvas.onViewerState(fn)`.
+
+  ```jsx
+  // table panel                                  // chart panel
+  const [picked, setPicked] =                     const [picked] =
+    canvas.useViewerState("picked", [])             canvas.useViewerState("picked", [])
+  ```
+- **`keep_mounted=True`** (React) keeps the component mounted, hidden, when it
+  scrolls out of view, so plain `useState` survives too — same as on Custom.
+- **`fit_width=N`** renders the component at a fixed design width of `N` px and
+  scales it to the panel's width — a board of 880-px-wide designs shrinks to fit
+  smaller panels. It's a transform, so every browser renders it the same (CSS
+  `zoom` doesn't), and an auto height is the content height × the scale. Works
+  on `custom()` too.
 - `value` is the latest `push(data)`; `props` is the `update(**props)` dict
   (replayed on reconnect). The `canvas` prop is the bridge handle:
   `send(data)` (→ `@on`/`@on_message`), `request(data)` (awaitable, → `@on_request`),
@@ -1045,7 +1066,16 @@ canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)     # one viewer only
 
 ![The page_layout example in scroll_y navigation: markdown headings, a slider, a Plotly chart, and a table stacked in one centred column like a web page](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/page_layout.png)
 
-Omit `x`/`y`/`zoom` and each viewer opens framed on the panels they can see. A
+Omit `x`/`y`/`zoom` and each viewer opens framed on the panels they can see.
+A link can override the first view: `http://host:8000/?x=400&y=300&zoom=1.5`
+opens on a point, and `?focus=<panel name or label>` opens framed on one panel
+(after its size settles) — handy for sharing a link, or pointing an agent's
+browser straight at what it should check.
+
+**Moving around:** the wheel zooms at the cursor; right-drag, middle-drag or
+**Space + drag** pans with any tool; the hand tool (**H**) pans with a left drag
+(and is remembered across reloads); **V** goes back to select. Two fingers pinch
+and pan on touch. A
 constrained `navigation` mode makes the scroll wheel **pan** the free axis and
 locks the other axis + the zoom — useful for vertical dashboards / horizontal
 timelines; it persists across reloads.
@@ -1566,7 +1596,20 @@ canvas.describe()                       # plain-data inventory: one dict per pan
                                         # — type, value, x/y/w/h, visible, locked
 canvas.screenshot(path="canvas.png")    # whole canvas → PNG (bytes returned)
 canvas.screenshot(slider)               # one panel; or [a, b] framed to their bounds
+canvas.wait_settled(timeout=10)         # block until a browser has measured every
+                                        # h="auto" panel and the layout went quiet
 ```
+
+**Heights of `h="auto"` panels are measurements.** Python holds a placeholder
+until a browser renders the panel and reports its height; every open tab
+measures, and the latest report wins. Only a *visible* tab reports (a background
+tab re-measures when it comes back), and a zero measurement is never sent.
+`describe()` says which viewer reported each auto height and when
+(`measured_by`, `measured_at`). Code that does its own placement from sizes should
+call `canvas.wait_settled()` first (or react in `@canvas.on_settled`), rather than
+reading `h` right after `serve()`. Auto-sized panels stay mounted (hidden) while
+culled until they've measured once, so an off-screen panel doesn't hold the
+layout up.
 
 **Sharing one panel as a file.** `Custom` and `React`-free iframe panels —
 `Model3D` above all — can be written out as a single self-contained HTML that

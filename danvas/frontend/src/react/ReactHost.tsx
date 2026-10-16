@@ -20,6 +20,9 @@ import {
   setPanelState,
   panelState,
   getViewState,
+  getViewerState,
+  setViewerState,
+  subscribeViewerState,
   setViewState,
   registerStyle,
   unregisterStyle,
@@ -263,6 +266,27 @@ export default function ReactHost({ shape }: { shape: any }) {
         return [v, set]
       },
       get viewState() { return getViewState(id) },
+      // per-viewer BOARD state (bridge.ts getViewerState): like useViewState but
+      // one dict for the whole board, so panels can be linked for one viewer
+      useViewerState: (key: string, init?: any) => {
+        const [v, setV] = React.useState(() => {
+          const c = getViewerState()
+          return key in c ? c[key] : typeof init === 'function' ? init() : init
+        })
+        React.useEffect(
+          () => subscribeViewerState((s) => { if (key in s) setV(s[key]) }),
+          [key],
+        )
+        const set = React.useCallback((nv: any) => {
+          const cur = getViewerState()
+          const prev = key in cur ? cur[key] : v
+          const val = typeof nv === 'function' ? nv(prev) : nv
+          setViewerState({ [key]: val })
+        }, [key, v])
+        return [v, set]
+      },
+      get viewerState() { return getViewerState() },
+      setViewerState: (patch: any) => setViewerState(patch),
       setViewState: (patch: any) => setViewState(id, patch),
       sendBinary: (buf: any) => sendBinary(id, buf instanceof ArrayBuffer ? buf : buf.buffer || buf),
       request: (data: any) => requestData(id, data),
@@ -350,10 +374,29 @@ export default function ReactHost({ shape }: { shape: any }) {
   }, [id, libsReady])
 
   // h="auto" / w="auto": fit the panel to the rendered content.
+  // fit_width=N: lay the content out at a fixed design width N and scale it to
+  // the panel's width (a transform, so it renders the same in every browser —
+  // unlike CSS zoom). The scale is read synchronously from the host's width
+  // wherever it's needed, so an auto height is always content height × scale.
+  const fitWidth = Number((shape.props as any).fitWidth) || 0
   const autoH = !!shape.props.autoH
-  const autoW = !!shape.props.autoW
+  const autoW = !!shape.props.autoW && !fitWidth
   const hostRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const scaleOf = (host: HTMLElement | null) => (fitWidth && host && host.clientWidth > 0 ? host.clientWidth / fitWidth : 1)
+  const [scale, setScale] = React.useState(1)
+  React.useEffect(() => {
+    if (!fitWidth) return
+    const host = hostRef.current
+    if (!host) return
+    const upd = () => setScale(scaleOf(host))
+    upd()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(upd)
+    ro.observe(host)
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitWidth, libsReady])
   React.useEffect(() => {
     if (!autoH && !autoW) return
     const host = hostRef.current
@@ -361,7 +404,7 @@ export default function ReactHost({ shape }: { shape: any }) {
     if (!host || !content) return
     const measure = () =>
       fitNative(id, host, {
-        h: autoH ? content.scrollHeight : undefined,
+        h: autoH ? content.scrollHeight * scaleOf(host) : undefined,
         w: autoW ? content.scrollWidth : undefined,
       })
     measure()
@@ -371,8 +414,17 @@ export default function ReactHost({ shape }: { shape: any }) {
       ro.observe(content)
       ro.observe(host)
     }
-    return () => ro && ro.disconnect()
-  }, [autoH, autoW, id, shape.props.source, shape.props.data, libsReady])
+    // fitNative ignores a hidden tab's measurements; catch up once it's seen.
+    const onVis = () => {
+      if (document.visibilityState === 'visible') measure()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      ro && ro.disconnect()
+      document.removeEventListener('visibilitychange', onVis)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoH, autoW, fitWidth, id, shape.props.source, shape.props.data, libsReady])
 
   const sharedSrc = React.useMemo(() => Object.values(getSharedComponents()).join('\n\n'), [sharedV])
   const fullSource = sharedSrc ? `${sharedSrc}\n\n${shape.props.source || ''}` : shape.props.source || ''
@@ -478,22 +530,48 @@ export default function ReactHost({ shape }: { shape: any }) {
       onTouchEnd={ghost ? undefined : (e: any) => e.stopPropagation()}
       onDragStart={(e: any) => e.preventDefault()}
     >
-      <div
-        ref={contentRef}
-        style={
-          autoH || autoW
-            ? {
-                flex: '0 0 auto',
-                ...(autoW ? { width: 'max-content', maxWidth: 'none', alignSelf: 'flex-start' } : { minWidth: 0 }),
-              }
-            : { display: 'contents' }
-        }
-      >
-        {shape.props.css ? <style>{shape.props.css}</style> : null}
-        <Boundary resetKey={Comp} onError={(e: any) => sendPanelError(id, e.message || String(e))}>
-          <Comp canvas={canvas} value={streamed} props={userProps} state={(shape.props as any).state || {}} />
-        </Boundary>
-      </div>
+      {fitWidth ? (
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+          <div
+            ref={contentRef}
+            data-pc-fit-width={fitWidth}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: fitWidth,
+              // fixed height: fill the scaled box; auto height: natural content height
+              height: autoH ? 'auto' : `${100 / scale}%`,
+              display: 'flex',
+              flexDirection: 'column',
+              transform: `scale(${scale})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            {shape.props.css ? <style>{shape.props.css}</style> : null}
+            <Boundary resetKey={Comp} onError={(e: any) => sendPanelError(id, e.message || String(e))}>
+              <Comp canvas={canvas} value={streamed} props={userProps} state={(shape.props as any).state || {}} />
+            </Boundary>
+          </div>
+        </div>
+      ) : (
+        <div
+          ref={contentRef}
+          style={
+            autoH || autoW
+              ? {
+                  flex: '0 0 auto',
+                  ...(autoW ? { width: 'max-content', maxWidth: 'none', alignSelf: 'flex-start' } : { minWidth: 0 }),
+                }
+              : { display: 'contents' }
+          }
+        >
+          {shape.props.css ? <style>{shape.props.css}</style> : null}
+          <Boundary resetKey={Comp} onError={(e: any) => sendPanelError(id, e.message || String(e))}>
+            <Comp canvas={canvas} value={streamed} props={userProps} state={(shape.props as any).state || {}} />
+          </Boundary>
+        </div>
+      )}
     </div>
   )
 }
