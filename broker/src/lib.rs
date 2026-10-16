@@ -180,6 +180,54 @@ struct Source {
     shared: Option<Value>,
     /// Latest graveyard_update (item ids namespaced).
     graveyard: Option<Value>,
+    /// nsid -> (viewer id, unix secs) of the last content-fit size report, so
+    /// /__describe__ can say which browser a recorded height came from.
+    measured: HashMap<String, (String, u64)>,
+    /// Per-viewer overlays (`update(roles=)` / `update(client_id=)`,
+    /// `set_layout(roles=/client_id=)`): nsid -> (role -> folded payload,
+    /// viewer id -> folded payload). Delivered only to those viewers and
+    /// replayed to them on (re)connect after the shared state — never folded
+    /// into the shared cache everyone else replays.
+    scoped: HashMap<String, (HashMap<String, Map<String, Value>>, HashMap<String, Map<String, Value>>)>,
+}
+
+/// An HTTP screenshot waiting on the browsers: the first good image wins; an
+/// error only answers once every asked tab has failed.
+struct PendingImage {
+    tx: Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
+    expect: usize,
+    errors: usize,
+}
+
+/// Minimal standard-alphabet base64 decoder (the browser's PNG reply) — the
+/// one place the broker needs it, not worth a dependency.
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => (c - b'A') as u32,
+            b'a'..=b'z' => (c - b'a' + 26) as u32,
+            b'0'..=b'9' => (c - b'0' + 52) as u32,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            _ => return None,
+        })
+    };
+    let bytes: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= val(*c)? << (18 - 6 * i);
+        }
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
 }
 
 /// Rewrite every record id (diff keys, records' own `id`, arrow bindings)
@@ -263,6 +311,13 @@ struct Hub {
     /// The hub view (camera/chrome), folded from sources' `view` frames and
     /// baked into welcome for late joiners.
     hub_view: Map<String, Value>,
+    /// set_view(roles=) / set_view(client_id=) layers: role -> view delta and
+    /// viewer id ("v<conn>") -> view delta. Precedence on welcome and for the
+    /// read_only/observer gate is global < role < client, like the Python hub.
+    role_views: HashMap<String, Map<String, Value>>,
+    client_views: HashMap<String, Map<String, Value>>,
+    /// GET /__screenshot__.png in flight: reqId -> the waiting HTTP request.
+    pending_images: HashMap<String, PendingImage>,
     /// serve(merge_server=): a standing merge server URL the UI shows a
     /// "Merge…" button for (welcome.mergeServer). self_url is the address that
     /// server dials back to reach this canvas.
@@ -690,6 +745,47 @@ fn viewer_role(h: &Hub, conn_id: u64) -> Option<String> {
         .and_then(|v| v.get("role"))
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+/// The merged view one viewer sees: global < their role's layer < their own.
+fn view_for(h: &Hub, role: &Option<String>, vid: &str) -> Map<String, Value> {
+    let mut v = h.hub_view.clone();
+    if let Some(r) = role.as_deref().and_then(|r| h.role_views.get(r)) {
+        for (k, x) in r {
+            v.insert(k.clone(), x.clone());
+        }
+    }
+    if let Some(c) = h.client_views.get(vid) {
+        for (k, x) in c {
+            v.insert(k.clone(), x.clone());
+        }
+    }
+    v
+}
+
+/// (read_only, observer) for a connection. `observer` implies `read_only`:
+/// read_only freezes the board (no ink / move / resize / delete / restore /
+/// merge edits); observer also makes every panel inert.
+fn view_gate(h: &Hub, conn_id: u64) -> (bool, bool) {
+    let role = viewer_role(h, conn_id);
+    let v = view_for(h, &role, &format!("v{conn_id}"));
+    let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let observer = flag("observer");
+    (observer || flag("read_only"), observer)
+}
+
+/// Does this relayed panel content-fit along `key` ("autoH"/"autoW")? The
+/// register props, overlaid by any folded update (a manual resize pins it).
+fn panel_auto(src: &Source, nsid: &str, key: &str) -> bool {
+    if let Some(v) = src.updates.get(nsid).and_then(|u| u.get(key)) {
+        return v.as_bool().unwrap_or(false);
+    }
+    src.registers
+        .get(nsid)
+        .and_then(|r| r.get("props"))
+        .and_then(|p| p.get(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// The role allowlist a relayed panel declared ([] = everyone). `frame` lets
@@ -1218,6 +1314,10 @@ async fn handle(
     // Welcome first, always — the client's version check reads it.
     let welcome = {
         let h = hub.lock().unwrap();
+        let welcome_view = {
+            let v = view_for(&h, &role, &format!("v{conn_id}"));
+            if v.is_empty() { Value::Null } else { Value::Object(v) }
+        };
         json!({
             "type": "welcome",
             "protocol": PROTOCOL_VERSION,
@@ -1230,8 +1330,7 @@ async fn handle(
                      "color": color, "device": "desktop",
                      "role": role.clone()},
             "runId": h.run_id,
-            "view": if h.hub_view.is_empty() { Value::Null }
-                    else { Value::Object(h.hub_view.clone()) },
+            "view": welcome_view,
             "mergeHost": true,
             "mergeServer": h.merge_server,
             "selfUrl": h.self_url,
@@ -1342,6 +1441,9 @@ async fn handle(
         let text = match msg {
             Message::Text(t) => t,
             Message::Binary(b) => {
+                if !is_source && view_gate(&hub.lock().unwrap(), conn_id).1 {
+                    continue; // observer: binary input is interaction too
+                }
                 binary_frame(&hub, is_source, &label, b);
                 continue;
             }
@@ -1363,6 +1465,13 @@ async fn handle(
         let mut h = hub.lock().unwrap();
         h.browsers.remove(&conn_id);
         h.conns.remove(&conn_id);
+        let vid = format!("v{conn_id}");
+        h.client_views.remove(&vid);
+        for src in h.sources.values_mut() {
+            for (_, by_client) in src.scoped.values_mut() {
+                by_client.remove(&vid);
+            }
+        }
         if let Some(v) = h.viewers.remove(&conn_id) {
             // peers drop the departed viewer's cursor at once (the roster
             // refresh below covers the count; the cursor overlay is keyed
@@ -1759,19 +1868,69 @@ fn source_frame(hub: &Arc<Mutex<Hub>>, label: &str, conn_id: u64, mut frame: Val
     if kind == "view" {
         // The source (e.g. the transplanted host) sets camera/chrome: fold
         // for late joiners' welcome, relay live.
+        // A scoped frame (`roles` / `client`, from set_view(roles=) /
+        // set_view(client_id=)) folds into that layer and reaches only those
+        // viewers; an unscoped one is the global default.
         let mut h = hub.lock().unwrap();
-        if let Some(Value::Object(delta)) = frame.get("view") {
-            for (k, v) in delta {
+        let roles: Option<Vec<String>> = frame.get("roles").and_then(Value::as_array).map(|a| {
+            a.iter().filter_map(Value::as_str).map(String::from).collect()
+        });
+        let client = frame.get("client").and_then(Value::as_str).map(String::from);
+        let delta = match frame.get("view") {
+            Some(Value::Object(d)) => d.clone(),
+            _ => Map::new(),
+        };
+        let text = json!({"type": "view", "view": delta}).to_string();
+        if let Some(vid) = client {
+            let layer = h.client_views.entry(vid.clone()).or_default();
+            for (k, v) in &delta {
+                layer.insert(k.clone(), v.clone());
+            }
+            let target = h
+                .viewers
+                .iter()
+                .find(|(_, v)| v.get("id").and_then(Value::as_str) == Some(vid.as_str()))
+                .map(|(cid, _)| *cid);
+            if let Some(tx) = target.and_then(|c| h.browsers.get(&c)) {
+                let _ = tx.send(Out::T(text));
+            }
+        } else if let Some(roles) = roles {
+            for r in &roles {
+                let layer = h.role_views.entry(r.clone()).or_default();
+                for (k, v) in &delta {
+                    layer.insert(k.clone(), v.clone());
+                }
+            }
+            for (bid, btx) in &h.browsers {
+                let vrole = viewer_role(&h, *bid);
+                if vrole.as_deref().map(|r| roles.iter().any(|x| x == r)).unwrap_or(false) {
+                    let _ = btx.send(Out::T(text.clone()));
+                }
+            }
+        } else {
+            for (k, v) in &delta {
                 h.hub_view.insert(k.clone(), v.clone());
             }
+            h.fanout_browsers_except(&text, conn_id);
         }
-        let text = frame.to_string();
-        h.fanout_browsers_except(&text, conn_id);
+        return;
+    }
+    if kind == "settle_check" {
+        // canvas.wait_settled(): ask every browser for a fresh `settled`.
+        hub.lock().unwrap().fanout_browsers(&frame.to_string());
         return;
     }
     if kind == "shared" {
+        // Tag the frame with its source: each source's define()/style() set is
+        // cumulative for THAT source, so the browser keeps one set per source
+        // and merges them — two processes defining helpers no longer clobber
+        // each other (last-frame-wins did).
         let mut h = hub.lock().unwrap();
+        let mut frame = frame;
         if let Some(src) = h.sources.get_mut(label) {
+            if let Some(obj) = frame.as_object_mut() {
+                obj.insert("source".into(), Value::String(src.tag.clone()));
+            }
             src.shared = Some(frame.clone());
         }
         let text = frame.to_string();
@@ -2120,8 +2279,105 @@ async fn spawn_tunnel(bin: &str, port: u16) -> Result<(std::process::Child, Stri
     }
 }
 
-fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
-    let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, mut frame: Value) {
+    let kind_owned = frame.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+    let kind = kind_owned.as_str();
+    // serve(view=) / set_view read_only + observer, enforced here (the hub
+    // relays ink and geometry to the other browsers before any owner sees
+    // it). A read-only viewer keeps exactly one layout right: its content-fit
+    // size report on an auto-sized axis — measurement, not editing.
+    {
+        let h = hub.lock().unwrap();
+        let (read_only, observer) = view_gate(&h, conn_id);
+        if read_only {
+            match kind {
+                "draw" | "graveyard" | "restore" | "merge_add" | "merge_auth"
+                | "merge_remove" | "merge_offset" => return,
+                "layout" => {
+                    if frame.get("fit").and_then(Value::as_bool) != Some(true) {
+                        return;
+                    }
+                    let cid = frame.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                    let src = cid
+                        .split_once(':')
+                        .and_then(|(tag, _)| h.tag_to_label.get(tag))
+                        .and_then(|l| h.sources.get(l));
+                    let Some(src) = src else { return };
+                    let mut out = Map::new();
+                    for (k, auto) in [("h", "autoH"), ("w", "autoW")] {
+                        if let Some(v) = frame.get(k) {
+                            if !v.is_null() && panel_auto(src, &cid, auto) {
+                                out.insert(k.into(), v.clone());
+                            }
+                        }
+                    }
+                    if out.is_empty() {
+                        return;
+                    }
+                    out.insert("type".into(), json!("layout"));
+                    out.insert("id".into(), json!(cid));
+                    out.insert("fit".into(), json!(true));
+                    frame = Value::Object(out);
+                }
+                _ => {}
+            }
+        }
+        if observer && matches!(kind, "input" | "set_props" | "request") {
+            if kind == "request" {
+                if let (Some(req), Some(tx)) =
+                    (frame.get("reqId"), h.browsers.get(&conn_id))
+                {
+                    let _ = tx.send(Out::T(json!({"type": "response", "reqId": req,
+                        "error": "observer view: panels are read-only"}).to_string()));
+                }
+            }
+            return;
+        }
+    }
+    if kind == "image" {
+        let mut h = hub.lock().unwrap();
+        let req = frame.get("reqId").and_then(Value::as_str).unwrap_or("").to_string();
+        if let Some(p) = h.pending_images.get_mut(&req) {
+            let data = frame.get("data").and_then(Value::as_str).filter(|d| !d.is_empty());
+            let err = frame.get("error").and_then(Value::as_str);
+            match (data, err) {
+                (Some(d), None) => {
+                    if let Some(tx) = p.tx.take() {
+                        let _ = tx.send(Ok(d.to_string()));
+                    }
+                }
+                _ => {
+                    p.errors += 1;
+                    if p.errors >= p.expect {
+                        if let Some(tx) = p.tx.take() {
+                            let _ = tx.send(Err(err.unwrap_or("no image returned").to_string()));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+    }
+    if kind == "settled" {
+        // A browser's content-fit sizes have landed (canvas.wait_settled /
+        // on_settled): each source hears it with its own still-unmeasured
+        // panel ids (stripped) and who reported it.
+        let h = hub.lock().unwrap();
+        let who = h.viewers.get(&conn_id).and_then(|v| v.get("id")).cloned()
+            .unwrap_or(Value::Null);
+        let pending: Vec<String> = frame.get("pending").and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+            .unwrap_or_default();
+        for src in h.sources.values() {
+            let Some(tx) = &src.tx else { continue };
+            let prefix = format!("{}:", src.tag);
+            let mine: Vec<&str> = pending.iter()
+                .filter_map(|p| p.strip_prefix(prefix.as_str())).collect();
+            let _ = tx.send(Out::T(json!({"type": "settled", "pending": mine,
+                                          "viewer": who}).to_string()));
+        }
+        return;
+    }
     if kind == "snapshot" || kind == "image" {
         // A browser's reply to a host get_snapshot/get_image: route to the
         // sources (the requesting source matches by reqId; others ignore it).
@@ -2539,8 +2795,15 @@ fn client_frame(hub: &Arc<Mutex<Hub>>, conn_id: u64, frame: Value) {
                     }
                 }
                 if !geom.is_empty() {
+                    let who = h.viewers.get(&conn_id)
+                        .and_then(|v| v.get("id")).and_then(Value::as_str)
+                        .unwrap_or("").to_string();
+                    let fit = frame.get("fit").and_then(Value::as_bool) == Some(true);
                     if let Some(src) = h.sources.get_mut(&label) {
                         fold_state(src, &cid, geom.clone());
+                        if fit {
+                            src.measured.insert(cid.clone(), (who, unix_now()));
+                        }
                     }
                     let text = json!({"type": "update", "id": cid,
                                       "payload": geom}).to_string();

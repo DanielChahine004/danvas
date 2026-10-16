@@ -151,7 +151,7 @@ label color visible value queue` (read/write); `move(x, y)`, `resize(w, h)`,
 `to_back()`, `forward()`, `backward()`, `lock()/unlock()`, `pin()/unpin()`,
 `locked draggable resizable operable grabbable frame` (live flags),
 `add_role(r)/remove_role(r)/roles`, `persist(get, set)`, `handlers`,
-`@on_layout(comp)`.
+`@on_layout(comp[, viewer])`.
 
 ## 4. Shapes and arrows
 
@@ -177,7 +177,7 @@ User freehand: `@canvas.on_draw(event)`, `canvas.drawings`.
 |---|---|
 | Manage panels | `insert(obj, **place)`, `remove(p)`, `hide(p)`, `unhide(p)`, `clear()`, `components`, `canvas["name"]`, `"name" in canvas` |
 | Layout | `column(...)`, `row(...)`, `grid(cols, slot=(w, h), gap)`, `container(mode)`, `streamlit()`, `reset_layout()` — use as `with canvas.column(): ...` or `.add(panel)` |
-| View | `set_view(x=, y=, zoom=, locked=, ui=, grid=, read_only=, navigation="free" \| "scroll_y" \| "scroll_x", roles=, client_id=)` |
+| View | `set_view(x=, y=, zoom=, locked=, ui=, grid=, read_only=, observer=, navigation="free" \| "scroll_y" \| "scroll_x", roles=, client_id=)` |
 | Events | `on_connect(fn(viewer))`, `on_disconnect`, `on_cursor`, `on_draw`, `on_event(name)` + `emit(name, data)`, `on_edit` (re-run a function when its source is saved), `background(fn)`, `events` |
 | React shared code | `define(name, source)` (a component every React panel can use), `style(css)` (global stylesheet) |
 | People | `viewers` (list of viewer dicts), `wait_for_client()` |
@@ -474,7 +474,7 @@ plot = canvas.live_plot("temps", queue="latest")   # or plot.queue = "latest" la
 | `@chat.on_message` | Chat | `(entry)` | viewer posts |
 | `@browser.on_select` / `on_navigate` | FileBrowser | `(path)` / `(cwd)` | file clicked / dir changed |
 | `@upload.on_upload` | Upload | `(file)` | file received (`file.data` or `file.path`) |
-| `@panel.on_layout` | any | `(comp)` | user drags/resizes the panel |
+| `@panel.on_layout` | any | `(comp[, viewer])` | a drag/resize, or a content-fit height landing; `viewer` (when the handler takes it) says who — a person's browser either way, never your own code |
 | `@panel.on("event")` / `on_message` | Custom, React | `(msg)` | `canvas.send(...)` from the panel |
 | `@panel.on_binary` | Custom, React | `(data: bytes)` | `canvas.sendBinary(buf)` from the panel |
 | `@panel.on_request("event")` | Custom, React | `(req)` | `await canvas.request(...)` — return resolves the Promise |
@@ -1029,7 +1029,8 @@ Pass a `view` dict to `serve` (all keys optional), and change it live with
 | `min_zoom`, `max_zoom` | clamp zoom range |
 | `ui` | `False` hides the editor chrome **and** the Inspector button |
 | `grid` | `True` shows the background grid |
-| `read_only` | `True` blocks freehand drawing (enforced server-side too) |
+| `read_only` | `True` freezes the board: no drawing, moving, resizing, deleting or restoring panels and shapes, no pasted images, no undo; the editing toolbar shrinks to select + pan. Panel controls still work. Enforced by the server too |
+| `observer` | `True` = `read_only` plus inert panels: look, pan and zoom, never click or edit — for an agent or a demo screen. Its content-fit size reports are still accepted |
 | `navigation` | `'free'` (default), `'scroll_y'`, `'scroll_x'`, or a `(mode, zoom)` tuple |
 
 ```python
@@ -1038,6 +1039,7 @@ canvas.serve(view={"x": 200, "y": 160, "zoom": 1.0, "locked": True, "ui": False}
 canvas.set_view(ui=False)                                  # change live; only keys you pass
 canvas.set_view(navigation='scroll_y')                     # wheel scrolls instead of zooming
 canvas.set_view(read_only=True, ui=False, roles=["user"])  # scope to a login role
+canvas.set_view(observer=True, roles=["agent"])            # an agent login that can only look
 canvas.set_view(x=0, y=0, zoom=1.5, client_id=some_id)     # one viewer only
 ```
 

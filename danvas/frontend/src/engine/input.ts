@@ -153,10 +153,35 @@ function enablePinch(el: HTMLElement): () => void {
   }
 }
 
-// Right-click-drag pans. The context menu is suppressed only when the drag moved
-// (>4px), so a plain right-click is still free for a future context menu.
+// Right-drag, middle-drag and Space+drag pan (any tool), as does a left-drag
+// with the hand tool. The context menu is suppressed only when a right-drag
+// moved (>4px), so a plain right-click still opens it.
 function enableRightDragPan(el: HTMLElement): () => void {
   let panning = false
+  // Space held = temporary hand tool (the design-tool convention). Ignored
+  // while typing or with a control focused, where Space means something.
+  let spaceDown = false
+  const typingIn = (t: EventTarget | null) => {
+    const n = t as HTMLElement | null
+    return !!n && (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(n.tagName) || n.isContentEditable)
+  }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.code !== 'Space' || typingIn(e.target) || store.instance().editingId) return
+    e.preventDefault()
+    if (!spaceDown) {
+      spaceDown = true
+      el.classList.add('pc-space-pan')
+    }
+  }
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code !== 'Space') return
+    spaceDown = false
+    el.classList.remove('pc-space-pan')
+  }
+  const onBlur = () => {
+    spaceDown = false
+    el.classList.remove('pc-space-pan')
+  }
   let moved = 0
   let suppressMenuUntil = 0
   let lastX = 0
@@ -201,7 +226,8 @@ function enableRightDragPan(el: HTMLElement): () => void {
     const handPan = e.button === 0 && tool === 'hand'
     // Immediate grab: a right-drag (any mode), or a hand-tool pan with the mouse, or
     // the hand tool in free (non-document) mode.
-    if (e.button === 2 || (handPan && (!inScroll || e.pointerType !== 'touch'))) {
+    const spacePan = e.button === 0 && spaceDown && e.pointerType !== 'touch'
+    if (e.button === 2 || e.button === 1 || spacePan || (handPan && (!inScroll || e.pointerType !== 'touch'))) {
       begin(e)
       return
     }
@@ -277,6 +303,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
     // Always suppress the browser menu; open ours only on a click (not a pan-drag).
     e.preventDefault()
     if (moved > 4) return
+    if (store.instance().readOnly) return // its actions all edit the board
     openContextMenuAt(e.clientX, e.clientY, e.target)
   }
   // Any left-press dismisses an open context menu.
@@ -317,7 +344,13 @@ function enableRightDragPan(el: HTMLElement): () => void {
   }
   window.addEventListener('pointerup', onWindowUp, true)
   window.addEventListener('contextmenu', onWindowContextMenu, true)
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', onBlur)
   return () => {
+    window.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('keyup', onKeyUp)
+    window.removeEventListener('blur', onBlur)
     el.removeEventListener('pointerdown', onDown, true)
     el.removeEventListener('pointerdown', onDownDismiss)
     el.removeEventListener('pointermove', onMove, true)

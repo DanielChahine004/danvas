@@ -1879,6 +1879,11 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 "visible": c.visible,
                 "locked": c.locked,
                 "x": c.x, "y": c.y, "w": c.w, "h": c.h,
+                # content-fit height: h is a browser's measurement — which
+                # browser and when (None until one has reported)
+                "auto_h": bool(getattr(c, "_auto_h", False)),
+                "measured_by": (getattr(c, "_measured", None) or {}).get("by"),
+                "measured_at": (getattr(c, "_measured", None) or {}).get("at"),
             })
         for a in self._arrows:
             rows.append({
@@ -1888,6 +1893,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
                 "value": _short(f"{a.start.id} → {a.end.id}"),
                 "visible": True, "locked": "",
                 "x": "", "y": "", "w": "", "h": "",
+                "auto_h": "", "measured_by": None, "measured_at": None,
             })
         return rows
 
@@ -2347,7 +2353,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         "x": float, "y": float, "zoom": float,
         "min_zoom": float, "max_zoom": float,
         "locked": bool, "ui": bool, "grid": bool, "read_only": bool,
-        "navigation": _coerce_navigation,
+        "observer": bool, "navigation": _coerce_navigation,
     }
 
     @classmethod
@@ -2473,7 +2479,14 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         * ``ui`` — ``False`` hides the canvas's toolbars/menus for a chrome-free
           surface (defaults to shown).
         * ``grid`` — ``True`` shows the background grid.
-        * ``read_only`` — ``True`` puts the canvas in read-only mode (no drawing).
+        * ``read_only`` — ``True`` makes the board itself read-only: no drawing,
+          no moving/resizing/deleting/restoring panels or shapes, no pasted
+          images. Panel controls (buttons, sliders, …) still work. Enforced by
+          the server, not just hidden in the browser.
+        * ``observer`` — ``True`` is ``read_only`` plus inert panels: the viewer
+          can pan, zoom and look, but never moves, edits or clicks anything —
+          the mode for an agent or a demo screen. Content-fit size reports
+          (``h="auto"``) from these viewers are still accepted.
 
         ``desktop`` selects a native app window (via pywebview) instead of the
         system browser. It defaults to ``None`` = auto: on inside a baked
@@ -2807,7 +2820,7 @@ class Canvas(_FactoryMixin, _LayoutMixin):
         """Change viewport/navigation properties live on connected browsers.
 
         Accepts the same options as ``serve(view=...)`` (initial camera, zoom
-        limits, ``locked``, ``ui``, ``grid``, ``read_only``), given as a dict
+        limits, ``locked``, ``ui``, ``grid``, ``read_only``, ``observer``), given as a dict
         and/or keyword args, and pushes them to connected canvases::
 
             canvas.set_view(ui=False)                      # hide toolbars everywhere

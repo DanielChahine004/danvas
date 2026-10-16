@@ -16,7 +16,7 @@ import { setContainer } from '../engine/editor'
 import { attachCameraInput } from '../engine/input'
 import { attachInteraction } from '../engine/interaction'
 import { exportTargets } from '../engine/export'
-import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentId } from '../bridge'
+import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentId, measuredPanels } from '../bridge'
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
 import { SelectionOverlay } from './SelectionOverlay'
@@ -55,6 +55,7 @@ function Panel({ id }: { id: string }) {
   // mounted, so its local React state (a table's sort, a custom panel's useState)
   // survives a hide/show and it keeps updating live. On a plain canvas the id is a
   // bare uuid → empty tag → never hidden, so this is inert off a merge view.
+  const observer = useValue('observer', () => store.instance().observer, [])
   const srcHidden = useValue('src-hidden:' + id, () => isSourceTagHidden(tagOfComponentId(componentIdOf(id))), [id])
   if (!shape) return null
   const { x, y, rotation, opacity, props } = shape
@@ -64,8 +65,12 @@ function Panel({ id }: { id: string }) {
   // engine isn't rebooted per scroll-in. visibility (not display): a
   // display:none wrapper has no box, so the IntersectionObserver could
   // never see it re-enter the viewport.
-  const keep = !!(props as any).keepMounted
-  const show = (exportSet ? exportSet.has(id) : false) || visible || keep
+  // An auto-sized panel that hasn't measured yet is kept mounted (hidden) even
+  // when culled: layouts hang off its real height (below= chains, flows,
+  // canvas.wait_settled), and that shouldn't wait for someone to scroll to it.
+  const auto = !!((props as any).autoH || (props as any).autoW)
+  const unmeasured = useValue('measured:' + id, () => auto && !measuredPanels().has(id), [id, auto])
+  const keep = !!(props as any).keepMounted || unmeasured
   // A decorative ghost panel (grabbable=False + operable=False) is fully
   // click-through: its Card + content already set pointer-events:none, but this
   // wrapper would still catch the click over the panel's box (it has no handler,
@@ -73,6 +78,7 @@ function Panel({ id }: { id: string }) {
   // wrapper out of hit-testing too so the gesture falls through to whatever is
   // under it — e.g. a slider the orb is floating over.
   const ghost = !!shape.meta?.noGrab && !!shape.meta?.lockInput && !shape.isLocked
+  const show = (exportSet ? exportSet.has(id) : false) || visible || keep
   return (
     <div
       ref={ref}
@@ -92,13 +98,17 @@ function Panel({ id }: { id: string }) {
         display: srcHidden ? 'none' : undefined,
         visibility: keep && !visible && !(exportSet && exportSet.has(id))
           ? 'hidden' : undefined,
-        pointerEvents: ghost ? 'none' : undefined,
+        pointerEvents: ghost || observer ? 'none' : undefined,
         // the UI inspector floats above the drawing SVG (a positive z-index beats
         // any later-in-DOM, z-auto DrawingRun svg in this stacking context).
         zIndex: shape.meta?.topmost ? 50 : undefined,
       }}
     >
-      {show ? <PanelForShape shape={shape} /> : null}
+      {show ? (
+        // view.observer: look, never touch — the content can't take focus or
+        // input, and the wheel falls through to the canvas (zoom).
+        observer ? <div inert style={{ display: 'contents' }}><PanelForShape shape={shape} /></div> : <PanelForShape shape={shape} />
+      ) : null}
     </div>
   )
 }

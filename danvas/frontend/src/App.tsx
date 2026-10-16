@@ -25,6 +25,8 @@ export function App() {
   // chrome (toolbar/style panel/buttons) follows the canvas theme via CSS vars on
   // the root — see `.pc-ui` / `.pc-ui-light` in theme.css.
   const dark = useValue('app-dark', () => store.instance().darkMode, [])
+  // read_only / observer: no style panel, undo, graveyard or merge launcher
+  const ro = useValue('app-ro', () => store.instance().readOnly, [])
 
   useEffect(() => {
     // Dark by default on first visit; otherwise honour the saved choice.
@@ -51,18 +53,18 @@ export function App() {
       <CursorLayer />
       <SignOutButton />
       {!hideUi && <InspectorButton />}
-      {!hideUi && <GraveyardButton />}
+      {!hideUi && !ro && <GraveyardButton />}
       {!hideUi && <MergeHostPanel />}
       {!hideUi && <HostingButton />}
-      {!hideUi && <MergeLaunchButton />}
+      {!hideUi && !ro && <MergeLaunchButton />}
       {!hideUi && <MergeOriginDot />}
       {hideUi && <KioskHandTool />}
       <PanelLayer />
       {!hideUi && <SettingsButton />}
-      {!hideUi && <UndoRedoButtons />}
+      {!hideUi && !ro && <UndoRedoButtons />}
       {!hideUi && <Toolbar />}
-      {!hideUi && <StylePanel />}
-      {!hideUi && <StyleToggle />}
+      {!hideUi && !ro && <StylePanel />}
+      {!hideUi && !ro && <StyleToggle />}
       <TextEditor />
       {!hideUi && <ContextMenu />}
     </div>

@@ -1484,7 +1484,38 @@ class Bridge:
             return False
         if viewer.get("role") in getattr(comp, "_lock_for", ()):
             return False
+        if self._view_gate(viewer)[1]:
+            return False                       # observer: panels are inert
         return self._effective_flag(comp, viewer, "operable")
+
+    def _view_gate(self, viewer):
+        """``(read_only, observer)`` for one viewer's effective view.
+
+        ``read_only`` freezes the board (no draw / move / resize / delete /
+        restore); ``observer`` additionally makes every panel inert, and
+        implies ``read_only``. Both come from ``serve(view=)`` / ``set_view``
+        at any scope (global, role, client).
+        """
+        viewer = viewer or {}
+        view = self._view_for(viewer.get("id"), viewer.get("role")) or {}
+        observer = bool(view.get("observer"))
+        return observer or bool(view.get("read_only")), observer
+
+    @staticmethod
+    def _fit_only(comp, msg):
+        """The part of a read-only viewer's ``layout`` frame that may land: a
+        content-fit size report (``fit``) on an axis the panel auto-sizes.
+        Measurements aren't edits — an observer may be the only browser open —
+        but a move, a manual resize, or a "fit" on a fixed axis is dropped.
+        Returns the trimmed frame, or None."""
+        if not msg.get("fit"):
+            return None
+        out = {"type": "layout", "id": msg.get("id"), "fit": True}
+        if msg.get("h") is not None and getattr(comp, "_auto_h", False):
+            out["h"] = msg["h"]
+        if msg.get("w") is not None and getattr(comp, "_auto_w", False):
+            out["w"] = msg["w"]
+        return out if ("h" in out or "w" in out) else None
 
     # Placement keys a set_props petition routes through set_layout (one live
     # message, same as a drag) rather than individual property assignment.
@@ -1670,9 +1701,15 @@ class Bridge:
                 # aren't enforced here): a viewer who can't see the panel has no
                 # legitimate layout frames for it — its shape never registered
                 # in their browser.
-                if not self._may_see(comp, self._viewer_of(ws)):
+                viewer = self._viewer_of(ws)
+                if not self._may_see(comp, viewer):
                     _log.debug("dropped layout for %s: viewer not authorized", cid)
                     return
+                if self._view_gate(viewer)[0]:
+                    msg = self._fit_only(comp, msg)
+                    if msg is None:
+                        _log.debug("dropped layout for %s: read_only view", cid)
+                        return
                 self._dispatch.submit(
                     lambda c=comp, m=msg: self._dispatch_layout(c, m, ws)
                 )
@@ -1680,7 +1717,8 @@ class Bridge:
                 # A Python-managed shape (canvas.geo/text/line/…) was moved/resized
                 # in the browser — store the new geometry so it replays on reload.
                 shape = self._shapes.get(cid)
-                if shape is not None:
+                if shape is not None and not self._view_gate(
+                        self._viewer_of(ws))[0]:
                     self._apply_shape_layout(shape, msg, ws)
         elif kind == "graveyard":
             # User deleted a danvas-managed object (panel / shape / arrow). All go
@@ -1691,7 +1729,9 @@ class Bridge:
             cid = msg.get("id")
             target = (self._components.get(cid) or self._shapes.get(cid)
                       or self._arrows.get(cid))
-            if target is not None and not self._may_see(target, self._viewer_of(ws)):
+            viewer = self._viewer_of(ws)
+            if target is not None and (not self._may_see(target, viewer)
+                                       or self._view_gate(viewer)[0]):
                 _log.debug("dropped graveyard for %s: viewer not authorized", cid)
                 return
             self._graveyard(cid)
@@ -1701,7 +1741,9 @@ class Bridge:
             # Same role gate as graveyard — an unauthorized viewer can't resurrect
             # a panel their role may not see.
             comp = self._graveyarded.get(msg.get("id"))
-            if comp is not None and not self._may_see(comp, self._viewer_of(ws)):
+            viewer = self._viewer_of(ws)
+            if self._view_gate(viewer)[0] or (
+                    comp is not None and not self._may_see(comp, viewer)):
                 _log.debug("dropped restore for %s: viewer not authorized",
                            msg.get("id"))
                 return
@@ -1719,9 +1761,7 @@ class Bridge:
             # A read_only view blocks the drawing tools in the browser; enforce
             # the same rule here so a forged draw frame from a read-only viewer
             # (by role, client, or the global view) is dropped too.
-            viewer = self._viewer_of(ws)
-            view = self._view_for(viewer.get("id"), viewer.get("role")) or {}
-            if view.get("read_only"):
+            if self._view_gate(self._viewer_of(ws))[0]:
                 _log.debug("dropped draw: viewer's view is read_only")
                 return
             diff = msg.get("diff") or {}
@@ -1899,7 +1939,14 @@ class Bridge:
         effective_msg = msg
         if msg.get("auto") and comp.x is not None:
             effective_msg = {k: v for k, v in msg.items() if k not in ("x", "y", "auto")}
-        comp._apply_remote_layout(effective_msg, self._viewers.get(ws, {}))
+        viewer = self._viewers.get(ws, {})
+        if msg.get("fit"):
+            # Which browser's measurement this height is, and when — every open
+            # tab measures and the last report wins, so describe() shows it.
+            import time as _time
+            comp._measured = {"by": viewer.get("name") or viewer.get("id"),
+                              "at": _time.time()}
+        comp._apply_remote_layout(effective_msg, viewer)
         geom = {k: msg[k] for k in ("x", "y", "w", "h", "rotation", "autoH", "autoW")
                 if msg.get(k) is not None}
         if geom:

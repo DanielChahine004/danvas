@@ -220,3 +220,8 @@
     max-height: calc(100dvh - 200px) !important;
   }
 }
+
+/* Space held: temporary hand tool (input.ts) — grab cursor everywhere, and
+   iframes click-through so the drag reaches the canvas. */
+.pc-space-pan, .pc-space-pan * { cursor: grab !important; }
+.pc-space-pan iframe { pointer-events: none; }

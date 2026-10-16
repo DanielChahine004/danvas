@@ -1075,8 +1075,7 @@ class _MergeHost:
             self._loop.create_task(up.send({"type": "draw", "diff": stripped}))
         if any(bare[bucket] for bucket in ("added", "updated", "removed")):
             viewer = self.bridge._viewers.get(ws) or {}
-            view = self.bridge._view_for(viewer.get("id"), viewer.get("role")) or {}
-            if not view.get("read_only"):
+            if not self.bridge._view_gate(viewer)[0]:
                 self.bridge._apply_draw(bare)
                 self.bridge.broadcast({"type": "draw", "diff": bare}, exclude=ws)
 

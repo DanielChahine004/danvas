@@ -44,12 +44,14 @@ const CSS = `
 
 export function Toolbar() {
   const tool = useValue('tb-tool', () => store.instance().tool, [])
+  const readOnly = useValue('tb-ro', () => store.instance().readOnly, [])
+  const tools = readOnly ? TOOLS.filter((t) => t.tool === 'select' || t.tool === 'hand') : TOOLS
   const set = (t: Tool) => store.transact('local', () => store.instance({ ...store.instance(), tool: t }))
   return (
     <div class="pc-toolbar-wrap">
       <style>{CSS}</style>
       <div class="pc-toolbar">
-        {TOOLS.flatMap(({ tool: t, title, divider }) => {
+        {tools.flatMap(({ tool: t, title, divider }) => {
         const btn = (
           <button
             key={t}
@@ -64,7 +66,7 @@ export function Toolbar() {
             <Icon name={t} size={23} />
           </button>
         )
-          return divider ? [btn, <div key={t + '-div'} class="pc-tool-div" />] : [btn]
+          return divider && !readOnly ? [btn, <div key={t + '-div'} class="pc-tool-div" />] : [btn]
         })}
       </div>
     </div>

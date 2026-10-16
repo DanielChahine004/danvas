@@ -6,8 +6,8 @@
 // Drawing creation makes local DrawingRecords on the same layer Python shapes
 // use; each gesture is one undo step (begin/endGroup). Sync to Python lands in
 // the draw-sync stage.
-import { signal } from 'alien-signals'
-import { store } from './store'
+import { effect, signal } from 'alien-signals'
+import { store, rememberTool } from './store'
 import { editor, screenToPage } from './editor'
 import { navMode } from './camera'
 import { hitTestDrawing, hitTestErase, hitTestArrow, hitTestLabel, labelParamAt, recordsInRect, recordBBox, bindTargetAt } from './hittest'
@@ -317,6 +317,9 @@ export function attachInteraction(container: HTMLElement): () => void {
     if (gesturing()) return // a two-finger pinch owns the gesture
     clearInteracting() // a fresh canvas interaction brings the selection box back
     const tool = store.instance().tool
+    // read_only / observer view: no selecting, moving, drawing or erasing — a
+    // press goes straight through to the panel content (or to the camera).
+    if (store.instance().readOnly) return
     // In a scroll/document mode a touch is either scrolling the page (camera) or a tap
     // on panel content — never a canvas marquee/panel-move. Bail so the press reaches
     // the content (the deferred scroll in input.ts handles drag-to-scroll). Mouse and
@@ -683,6 +686,14 @@ export function attachInteraction(container: HTMLElement): () => void {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
     if (store.instance().editingId) return // editing inline — let the textarea own keys
     const mod = e.ctrlKey || e.metaKey
+    if (store.instance().readOnly) {
+      // read-only: only the navigation tools switch; nothing edits
+      const k = e.key.toLowerCase()
+      if (!mod && (k === 'v' || k === 'h')) {
+        store.transact('local', () => store.instance({ ...store.instance(), tool: k === 'h' ? 'hand' : 'select' }))
+      }
+      return
+    }
     if (mod && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault()
       if (e.shiftKey) store.redo()
@@ -741,6 +752,7 @@ export function attachInteraction(container: HTMLElement): () => void {
   // Double-click: edit an existing text/note/geo/line label, or drop a new text
   // shape on empty canvas (whiteboard-style).
   const onDblClick = (e: MouseEvent) => {
+    if (store.instance().readOnly) return
     const tool = store.instance().tool
     if (tool !== 'select' && tool !== 'text') return
     const target = e.target as HTMLElement
@@ -781,7 +793,7 @@ export function attachInteraction(container: HTMLElement): () => void {
 
   // Paste an image from the clipboard (screenshots included) -> viewport centre.
   const onPaste = (e: ClipboardEvent) => {
-    if (store.instance().editingId) return
+    if (store.instance().editingId || store.instance().readOnly) return
     const t = e.target as HTMLElement | null
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
     const items = e.clipboardData?.items
@@ -802,6 +814,7 @@ export function attachInteraction(container: HTMLElement): () => void {
     if (e.dataTransfer && Array.from(e.dataTransfer.items || []).some((i) => i.type.startsWith('image/'))) e.preventDefault()
   }
   const onDrop = (e: DragEvent) => {
+    if (store.instance().readOnly) return
     const files = e.dataTransfer?.files
     const imgs = files ? Array.from(files).filter((f) => f.type.startsWith('image/')) : []
     if (!imgs.length) return
@@ -810,6 +823,8 @@ export function attachInteraction(container: HTMLElement): () => void {
     imgs.forEach((f, i) => void addImageFromFile(f, { x: base.x + i * 16, y: base.y + i * 16 }))
   }
 
+  // The navigation tool (select / hand) is remembered across reloads.
+  const stopToolMemory = effect(() => rememberTool(store.instance().tool))
   container.addEventListener('pointerdown', onPointerDown)
   container.addEventListener('dblclick', onDblClick)
   container.addEventListener('dragover', onDragOver)
@@ -819,6 +834,7 @@ export function attachInteraction(container: HTMLElement): () => void {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('paste', onPaste)
   return () => {
+    stopToolMemory()
     container.removeEventListener('pointerdown', onPointerDown)
     container.removeEventListener('dblclick', onDblClick)
     container.removeEventListener('dragover', onDragOver)

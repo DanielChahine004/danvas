@@ -886,6 +886,14 @@ class BaseComponent:
 
         Called with the component after its stored geometry has been updated
         from the browser. Use it to react to (or persist) hand-arranged layouts.
+        Declare a second parameter to also get the ``viewer`` dict of whoever
+        did it (same shape as ``on_message``'s). Your own ``set_layout`` /
+        ``move`` calls never fire it — only browsers do, including a browser's
+        content-fit height report for an ``h="auto"`` panel::
+
+            @panel.on_layout
+            def moved(comp, viewer):
+                print(viewer["name"], "put it at", comp.x, comp.y)
         """
         self._layout_callbacks.append(fn)
         return fn

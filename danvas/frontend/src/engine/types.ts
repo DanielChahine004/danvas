@@ -101,6 +101,8 @@ export interface DrawStyle {
 export interface InstanceState {
   darkMode: boolean
   readOnly: boolean
+  // view.observer: read-only AND panel content is inert (look, never touch)
+  observer: boolean
   gridOn: boolean
   lockedCamera: boolean
   zoomLimits: { min: number; max: number }

@@ -13,13 +13,33 @@ import type { Camera, CanvasRecord, Change, Id, InstanceState, Source, WriteSign
 // One undo step: each touched record's state before and after the gesture.
 type HistEntry = Map<Id, { before?: CanvasRecord; after?: CanvasRecord }>
 
+// The navigation tool (select / hand) survives a reload; drawing tools don't —
+// coming back to an armed pen is a surprise, coming back to pan mode isn't.
+const TOOL_KEY = 'pc-tool'
+function savedTool(): 'select' | 'hand' {
+  try {
+    return localStorage.getItem(TOOL_KEY) === 'hand' ? 'hand' : 'select'
+  } catch {
+    return 'select'
+  }
+}
+export function rememberTool(tool: string): void {
+  if (tool !== 'select' && tool !== 'hand') return
+  try {
+    localStorage.setItem(TOOL_KEY, tool)
+  } catch {
+    /* storage blocked — the tool just won't persist */
+  }
+}
+
 const DEFAULT_INSTANCE: InstanceState = {
   darkMode: true,
   readOnly: false,
+  observer: false,
   gridOn: false,
   lockedCamera: false,
   zoomLimits: { min: 0.1, max: 8 },
-  tool: 'select',
+  tool: savedTool(),
   style: { color: 'blue', size: 'm', fill: 'none', dash: 'solid', opacity: 1 },
   hoveredId: null,
   selectedIds: [],

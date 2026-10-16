@@ -12,7 +12,7 @@ import { generateKeyBetween } from 'fractional-indexing'
 import { effect, signal } from 'alien-signals'
 import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
-import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera } from './engine/camera'
+import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera, fitCameraToBounds } from './engine/camera'
 import { openContextMenuAt } from './engine/contextmenu'
 import { toImage } from './engine/export'
 import { measuredTextSize } from './react/measure'
@@ -657,6 +657,11 @@ function handle(msg: any): void {
       break
     case 'register':
       registerComponent(msg)
+      noteLinkFocus(msg)
+      noteFitActivity()
+      break
+    case 'settle_check':
+      noteFitActivity() // Python is waiting on a fresh `settled` report
       break
     case 'update':
       updateComponent(msg.id, msg.payload || {})
@@ -1342,20 +1347,85 @@ function clearManaged(): void {
   styleBuffer.clear()
   resetFlow()
   resetInitialFit()
+  measuredPanels(new Set())
 }
 
 // === content-fit (h="auto" / w="auto") =======================================
+// Which browser's measurement lands matters: every open tab measures and the
+// last report wins. So a report is only sent from a tab the user can actually
+// see (a background tab is throttled and can hold a stale layout), and a zero
+// measurement (content not laid out yet, or display:none) is never trusted.
+// When a tab comes back into view, every auto panel re-measures (ReactHost
+// and the iframe fit script both listen for visibilitychange).
+function fitTrustworthy(fit: { h?: number; w?: number }): boolean {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false
+  if (typeof fit.h === 'number' && !(fit.h > 0)) return false
+  if (typeof fit.w === 'number' && !(fit.w > 0)) return false
+  return true
+}
+
+// === layout settled (canvas.wait_settled / canvas.on_settled) ==============
+// Only the browser knows when content-fit sizes have landed and the cascades
+// they trigger have finished. Once fit/register activity goes quiet it reports
+// `settled`, listing any auto-sized panels that still haven't measured
+// (normally none: they stay mounted until they do). Python asks for a fresh
+// report with `settle_check`. A hidden tab owes its report until it's visible.
+const SETTLE_QUIET_MS = 400
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+let settleOwed = false
+function noteFitActivity(): void {
+  settleOwed = true
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(reportSettled, SETTLE_QUIET_MS)
+}
+function reportSettled(): void {
+  settleTimer = null
+  if (!settleOwed) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  settleOwed = false
+  const measured = measuredPanels()
+  const pending: string[] = []
+  for (const id of store.getIds()) {
+    const r = store.peek(id) as any
+    if (r && r.typeName === 'panel' && (r.props?.autoH || r.props?.autoW) && !measured.has(id)) {
+      pending.push(componentIdOf(id))
+    }
+  }
+  sendRaw({ type: 'settled', pending })
+  if (linkFocus) scheduleLinkFocus(true)
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && settleOwed) noteFitActivity()
+  })
+}
+
+// Panels that have reported at least one content measurement in this tab. An
+// auto-sized panel stays mounted (hidden) while culled until it has, so a
+// layout that hangs off its height never waits on someone scrolling to it.
+export const measuredPanels = signal<Set<string>>(new Set()) as WriteSignal<Set<string>>
+function markMeasured(shapeId: string): void {
+  const cur = measuredPanels()
+  if (cur.has(shapeId)) return
+  const next = new Set(cur)
+  next.add(shapeId)
+  measuredPanels(next)
+  noteFitActivity()
+}
+
 // Native ReactHost measures its content and calls this; resize the record to fit
 // and report the geometry to Python (same read-back path as a user resize),
 // then re-pack whatever layout the panel belongs to (flow / refit group /
 // container tree).
 export function fitNative(componentId: string, hostEl: HTMLElement, fit: { h?: number; w?: number }): void {
   if (!hostEl || !fit) return
+  if (!fitTrustworthy(fit)) return
   const shapeId = createShapeId(componentId)
   const shape = store.peek(shapeId)
   if (!shape) return
+  markMeasured(shapeId)
   const props: any = {}
-  const report: any = { type: 'layout', id: componentId }
+  const report: any = { type: 'layout', id: componentId, fit: true }
   if (typeof fit.h === 'number') {
     const overhead = Math.max(0, shape.props.h - hostEl.offsetHeight)
     const h = Math.max(40, Math.ceil(fit.h + overhead))
@@ -1375,6 +1445,7 @@ export function fitNative(componentId: string, hostEl: HTMLElement, fit: { h?: n
   if (props.h === undefined && props.w === undefined) return // settled — don't ping-pong
   applyRemote(() => store.patch(shapeId, { props }))
   sendRaw(report)
+  noteFitActivity()
   // The panel's footprint changed — re-pack whatever layout it belongs to.
   if (props.h !== undefined) scheduleRelCascade(shapeId) // rel chains below it
   if (flowItems.has(shapeId)) scheduleRelayout() // masonry auto-flow
@@ -1458,6 +1529,47 @@ export function setViewState(compId: string, patch: any): void {
   saveViews()
 }
 
+// --- per-viewer BOARD state (canvas.useViewerState) --------------------------
+// View state above is scoped to one panel. This is the board-wide twin: one
+// dict per viewer, readable and writable by EVERY panel on the board, never
+// sent to Python or other viewers — so two panels can be linked for one person
+// (ticking rows in a table drives what a chart shows) without leaking the
+// selection to everyone, which shared `state` would. Same sessionStorage
+// mirror; Custom iframes see it as canvas.viewerState / onViewerState.
+const VIEWER_STATE_KEY = 'pc-viewer-state'
+let viewerState: Record<string, any> = (() => {
+  try {
+    const raw = sessionStorage.getItem(VIEWER_STATE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+})()
+const viewerSubs = new Set<(s: Record<string, any>) => void>()
+export function getViewerState(): Record<string, any> {
+  return viewerState
+}
+export function setViewerState(patch: Record<string, any>): void {
+  viewerState = { ...viewerState, ...(patch || {}) }
+  try {
+    sessionStorage.setItem(VIEWER_STATE_KEY, JSON.stringify(viewerState))
+  } catch {
+    /* quota / private mode: in-memory still links panels this session */
+  }
+  for (const fn of viewerSubs) fn(viewerState)
+  for (const f of Array.from(document.querySelectorAll('iframe'))) {
+    try {
+      ;(f as HTMLIFrameElement).contentWindow?.postMessage({ __danvas_viewer: viewerState }, '*')
+    } catch {
+      /* detached frame */
+    }
+  }
+}
+export function subscribeViewerState(fn: (s: Record<string, any>) => void): () => void {
+  viewerSubs.add(fn)
+  return () => viewerSubs.delete(fn)
+}
+
 export function panelState(compId: string): any {
   const rec = store.peek(createShapeId(compId)) as any
   return (rec?.props?.state as any) || {}
@@ -1533,15 +1645,25 @@ export function subscribeShared(cb: (v: number) => void): () => void {
   sharedListeners.add(cb)
   return () => sharedListeners.delete(cb)
 }
+// One cumulative define()/style() set per source (the hub tags each frame
+// with `source`; a lone canvas sends untagged frames, keyed ''), merged — so
+// two processes that both define helpers each keep theirs.
+const sharedBySource = new Map<string, { components: Record<string, string>; styles: string }>()
 function applyShared(msg: any): void {
-  sharedComponents = msg.components || {}
+  sharedBySource.set(String(msg.source || ''), { components: msg.components || {}, styles: msg.styles || '' })
+  sharedComponents = {}
+  const styles: string[] = []
+  for (const v of sharedBySource.values()) {
+    Object.assign(sharedComponents, v.components)
+    if (v.styles) styles.push(v.styles)
+  }
   let el = document.getElementById('pc-shared-styles')
   if (!el) {
     el = document.createElement('style')
     el.id = 'pc-shared-styles'
     document.head.appendChild(el)
   }
-  el.textContent = msg.styles || ''
+  el.textContent = styles.join('\n')
   sharedVersion += 1
   for (const cb of sharedListeners) cb(sharedVersion)
 }
@@ -1968,10 +2090,66 @@ let viewConfig: any = null
 let initialCameraApplied = false
 
 function hasExplicitCamera(): boolean {
+  if (hasLinkCamera || linkFocus) return true // a deep link owns the first view
   return (
     !!viewConfig &&
     (typeof viewConfig.x === 'number' || typeof viewConfig.y === 'number' || typeof viewConfig.zoom === 'number')
   )
+}
+
+// --- deep links: ?x=&y=&zoom= and ?focus=<panel name or label> ----------------
+// A link (or an agent) can open the board straight onto a point or a panel. The
+// URL beats serve(view=)'s camera for the first view only; a later live
+// set_view still moves the camera as usual.
+const linkParams: URLSearchParams = (() => {
+  try {
+    return new URLSearchParams(location.search)
+  } catch {
+    return new URLSearchParams()
+  }
+})()
+function linkNum(k: string): number | undefined {
+  const v = linkParams.get(k)
+  const n = v === null || v === '' ? NaN : Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+const linkCamera: { x?: number; y?: number; zoom?: number } = {}
+for (const k of ['x', 'y', 'zoom'] as const) {
+  const n = linkNum(k)
+  if (n !== undefined) linkCamera[k] = n
+}
+const hasLinkCamera = Object.keys(linkCamera).length > 0
+let linkFocus: string | null = linkParams.get('focus') || null
+let linkFocusShape: string | null = null
+let linkFocusTimer: ReturnType<typeof setTimeout> | null = null
+function noteLinkFocus(msg: any): void {
+  if (!linkFocus || linkFocusShape) return
+  if (msg.name === linkFocus || (msg.props && msg.props.label === linkFocus) || msg.id === linkFocus) {
+    linkFocusShape = createShapeId(msg.id)
+    scheduleLinkFocus()
+  }
+}
+// Re-run until sizes settle (an auto-height panel grows after its register),
+// then let go: reportSettled calls this one last time.
+function scheduleLinkFocus(final = false): void {
+  if (!linkFocusShape) {
+    if (final && linkFocus) {
+      // no such panel: forget the link and fall back to the usual initial fit
+      linkFocus = null
+      scheduleInitialFit(hasExplicitCamera)
+    }
+    return
+  }
+  if (linkFocusTimer) clearTimeout(linkFocusTimer)
+  linkFocusTimer = setTimeout(() => {
+    linkFocusTimer = null
+    const r = store.peek(linkFocusShape!) as any
+    if (r && r.props) {
+      fitCameraToBounds({ x: r.x, y: r.y, w: r.props.w || 1, h: r.props.h || 1 })
+      markInitialFitDone()
+    }
+    if (final) linkFocus = linkFocusShape = null
+  }, final ? 0 : 150)
 }
 
 function applyViewOptions(v: any): void {
@@ -1979,6 +2157,19 @@ function applyViewOptions(v: any): void {
   const inst = store.instance()
   const next = { ...inst }
   if (typeof v.read_only === 'boolean') next.readOnly = v.read_only
+  if (typeof v.observer === 'boolean') next.observer = v.observer
+  if (typeof v.read_only === 'boolean' || typeof v.observer === 'boolean') {
+    // the server's view layers resolve the flags; observer implies read-only
+    const ro = !!((viewConfig && viewConfig.read_only) || (viewConfig && viewConfig.observer))
+    next.readOnly = ro
+    next.observer = !!(viewConfig && viewConfig.observer)
+    if (ro) {
+      // drop any drawing tool / selection the viewer had before going read-only
+      if (next.tool !== 'select' && next.tool !== 'hand') next.tool = 'select'
+      next.selectedIds = []
+      next.editingId = null
+    }
+  }
   if (typeof v.grid === 'boolean') next.gridOn = v.grid
   if (typeof v.locked === 'boolean') next.lockedCamera = v.locked
   if (typeof v.min_zoom === 'number' || typeof v.max_zoom === 'number') {
@@ -1996,10 +2187,9 @@ function applyViewOptions(v: any): void {
 function setViewConfig(view: any): void {
   viewConfig = view
   emitViewConfig()
-  if (!view) return
-  applyViewOptions(view)
-  if (!initialCameraApplied) {
-    applyCameraFrom(view)
+  if (view) applyViewOptions(view)
+  if (!initialCameraApplied && (view || hasLinkCamera)) {
+    applyCameraFrom({ ...(view || {}), ...linkCamera })
     initialCameraApplied = true
   }
 }
@@ -2027,20 +2217,29 @@ function fitFromIframe(sourceWin: any, fit: any): void {
     (f) => (f as HTMLIFrameElement).contentWindow === sourceWin,
   ) as HTMLIFrameElement | undefined
   if (!iframe) return
+  if (!fitTrustworthy(fit)) return
   const shapeId = createShapeId(fit.id)
   const shape = store.peek(shapeId) as PanelRecord | undefined
   if (!shape) return
+  markMeasured(shapeId)
   const props: any = {}
-  const report: any = { type: 'layout', id: fit.id }
+  const report: any = { type: 'layout', id: fit.id, fit: true }
+  // fit_width: the iframe is a fixed design width scaled into a box — its
+  // document height × the scale is what the panel shows, and the overhead is
+  // measured against the (untransformed) box, not the scaled iframe.
+  const fw = Number((shape.props as any).fitWidth) || 0
+  const box = fw ? (iframe.parentElement as HTMLElement | null) : null
+  const sizeEl: HTMLElement = box || iframe
+  const scale = box && box.clientWidth > 0 ? box.clientWidth / fw : 1
   if (typeof fit.h === 'number') {
-    const overhead = Math.max(0, shape.props.h - iframe.offsetHeight)
-    const h = Math.max(40, Math.ceil(fit.h + overhead))
+    const overhead = Math.max(0, shape.props.h - sizeEl.offsetHeight)
+    const h = Math.max(40, Math.ceil(fit.h * scale + overhead))
     if (Math.abs(h - shape.props.h) >= 3) {
       props.h = h
       report.h = h
     }
   }
-  if (typeof fit.w === 'number') {
+  if (typeof fit.w === 'number' && !fw) {
     const overhead = Math.max(0, shape.props.w - iframe.offsetWidth)
     const w = Math.max(40, Math.ceil(fit.w + overhead))
     if (Math.abs(w - shape.props.w) >= 3) {
@@ -2051,6 +2250,7 @@ function fitFromIframe(sourceWin: any, fit: any): void {
   if (props.h === undefined && props.w === undefined) return // settled — don't ping-pong
   applyRemote(() => store.patch(shapeId, { props }))
   sendRaw(report)
+  noteFitActivity()
   if (props.h !== undefined) scheduleRelCascade(shapeId)
   if (flowItems.has(shapeId)) scheduleRelayout()
   settleArmedReflows(fit.id)
@@ -2300,6 +2500,8 @@ if (typeof window !== 'undefined') {
       setPanelState(d.__danvas_set_state, d.state)
     } else if (d.__danvas_set_view) {
       setViewState(d.__danvas_set_view, d.state)
+    } else if (d.__danvas_set_viewer) {
+      setViewerState(d.patch || {})
     } else if (d.__danvas_binary && d.data instanceof ArrayBuffer) {
       sendBinary(d.__danvas_binary, d.data)
     } else if (d.__danvas_camera) {

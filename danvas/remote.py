@@ -72,10 +72,14 @@ class _RemoteBridge(Bridge):
         self._client._send(msg)
 
     def send_to_client(self, viewer_id, msg):
-        self._client._send(msg)
+        # Carry the scope up: the hub keeps per-client / per-role layers (view
+        # layers for welcome + the read_only/observer gate; update overlays
+        # for panel content) and delivers the frame to just those viewers.
+        # Without it a client- or role-scoped update reached everyone.
+        self._client._send(_scoped(msg, client=viewer_id))
 
     def send_to_role(self, role, msg):
-        self._client._send(msg)
+        self._client._send(_scoped(msg, roles=[role]))
 
     def broadcast_conflated(self, comp_id, *, msg=None, data=None, exclude=None,
                             **kw):
@@ -105,6 +109,39 @@ class _RemoteBridge(Bridge):
         if state:
             self._client._send({"type": "update", "id": component.id,
                                 "payload": state})
+
+
+def _scoped(msg, roles=None, client=None):
+    """``msg`` addressed to some viewers, in the hub's vocabulary."""
+    kind = msg.get("type")
+    if kind == "view":
+        return {**msg, "client": client} if client is not None \
+            else {**msg, "roles": roles}
+    if kind in ("update", "remove"):
+        return {**msg, "to": {"client": client} if client is not None
+                else {"roles": roles}}
+    return msg
+
+
+def _scoped_replay(comp):
+    """Per-viewer overlay frames for one panel (``update(roles=/client_id=)``,
+    ``set_layout(roles=/client_id=)``), so a (re)dial restores them on the hub
+    — it drops a source's cache when the same label dials again."""
+    import json as _json
+    role_data = getattr(comp, "_role_data", None) or {}
+    client_data = getattr(comp, "_client_data", None) or {}
+    for kind, layout, data, key in (
+            ("roles", getattr(comp, "_role_layout", {}), role_data, "role"),
+            ("client", getattr(comp, "_client_layout", {}), client_data, "client_id")):
+        for who in set(layout) | set(data):
+            payload = {}
+            if layout.get(who):
+                payload.update(comp._layout_payload(dict(layout[who])))
+            if who in data and hasattr(comp, "_data_for"):
+                payload["data"] = _json.dumps(comp._data_for(**{key: who}))
+            if payload:
+                to = {"roles": [who]} if kind == "roles" else {"client": who}
+                yield {"type": "update", "id": comp.id, "payload": payload, "to": to}
 
 
 class RemoteHandle:
@@ -427,6 +464,19 @@ def _dispatch_hub_frame(bridge, msg):
         # relay/replay; we only mirror state and notify, we don't re-broadcast.)
         bridge._apply_draw(msg.get("diff") or {})
         return
+    # A read_only / observer viewer (serve(view=) / set_view at any scope)
+    # can't change the board. The broker enforces this too; checking here as
+    # well keeps an older broker (or a Python merge hub) from letting it slip.
+    who = msg.get("viewer")
+    read_only, observer = (bridge._view_gate(bridge._viewers.get(who))
+                           if who is not None else (False, False))
+    if read_only and kind in ("graveyard", "restore"):
+        return
+    if observer and kind in ("input", "request", "set_props"):
+        if kind == "request" and msg.get("reqId") is not None:
+            bridge._reply(msg["reqId"],
+                          error="observer view: panels are read-only")
+        return
     if kind == "graveyard":
         # The broker routed a browser's delete of one of our objects (stripped to
         # our own id): graveyard it (restorable, off the live canvas) as embedded.
@@ -467,16 +517,19 @@ def _dispatch_hub_frame(bridge, msg):
         # browser: store the new geometry (it replays on reload) and relay it to
         # the other clients, exactly as the embedded server does — the owner
         # isn't a component, so it wouldn't be found above.
-        if kind == "layout":
+        if kind == "layout" and not read_only:
             shape = bridge._shapes.get(msg.get("id"))
             if shape is not None:
                 bridge._apply_shape_layout(shape, dict(msg), None)
         return
+    if kind == "layout" and read_only:
+        msg = bridge._fit_only(comp, msg)
+        if msg is None:
+            return
     # The broker stamps the sender's roster id on relayed frames (`viewer`).
     # The mirrored roster (bridge._viewers) is keyed by that id, so it stands
     # in for the socket the embedded server keyed on: `_viewer_of` resolves it
     # to the documented handler dict (id/name/color/cursor/device/role).
-    who = msg.get("viewer")
     if kind == "input":
         payload = msg.get("payload") or {}
         bridge._dispatch.submit(

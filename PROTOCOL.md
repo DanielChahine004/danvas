@@ -89,6 +89,14 @@ The server enforces authorization on ingress: an `input`/`request`/binary
 frame for a panel that is `locked`, non-`operable`, role-hidden, or
 `lock_for`-locked for this viewer is dropped before any handler runs.
 
+The viewer's effective view (global < role < client) gates further:
+**`read_only`** drops `draw`, `graveyard`, `restore` and the merge control
+frames, and every `layout` except a content-fit report (`fit: true`) on an
+axis the panel auto-sizes (trimmed to that `h`/`w`). **`observer`** implies
+`read_only` and also drops `input`, `set_props`, binary input and `request`
+(answered with an error `response`). A content-fit `layout` carries
+`fit: true`; browsers send one only from a visible tab.
+
 ## Binary envelope
 
 `[type: u8][idLen: u8][id: idLen bytes, utf-8][payload]`

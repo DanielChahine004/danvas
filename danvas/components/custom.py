@@ -336,6 +336,13 @@ class Custom(_SharedState, _EventRouter, BaseComponent):
         on_load = ("fitW();" if self._auto_w else "") + \
                   ("fitH();" if self._auto_h else "")
         parts.append(f"window.addEventListener('load',function(){{{on_load}}});")
+        # The parent ignores fit reports from a hidden tab (a background tab can
+        # hold a stale layout, and the last report wins) — so re-measure the
+        # moment the tab is visible again.
+        if self._auto_h:
+            parts.append(
+                "document.addEventListener('visibilitychange',function(){"
+                "if(document.visibilityState==='visible')fitH();});")
         parts.append("})();</script>")
         return "".join(parts)
 
