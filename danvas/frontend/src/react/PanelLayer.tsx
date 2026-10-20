@@ -16,6 +16,7 @@ import { setContainer } from '../engine/editor'
 import { attachCameraInput } from '../engine/input'
 import { attachInteraction } from '../engine/interaction'
 import { exportTargets } from '../engine/export'
+import { attachImageLod } from './imageLod'
 import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentId, measuredPanels } from '../bridge'
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
@@ -29,6 +30,7 @@ import { DrawingRun, ArrowMarkerDefs } from './DrawingLayer'
 // integrity is owned by Python, so dropping a culled panel's local React state is
 // safe (it re-mounts from the record + replayed value on scroll-in).
 const CULL_MARGIN = '60%'
+const UNMOUNT_DELAY_MS = 4000
 
 function Panel({ id }: { id: string }) {
   const shape = useValue('rec:' + id, () => store.get(id) as PanelRecord | undefined, [id])
@@ -38,14 +40,33 @@ function Panel({ id }: { id: string }) {
   useEffect(() => {
     const el = ref.current
     if (!el || typeof IntersectionObserver === 'undefined') return
+    // Hysteresis: mount at once on the way in, but unmount only after the
+    // panel has stayed out of range for a few seconds. Panning back and forth
+    // used to remount the same panels every pass — a fresh DOM, a re-decode of
+    // every image in it — which showed up as frame hitches on heavy boards.
+    let hideTimer: ReturnType<typeof setTimeout> | null = null
     const io = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) setVisible(e.isIntersecting)
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            if (hideTimer) clearTimeout(hideTimer)
+            hideTimer = null
+            setVisible(true)
+          } else if (!hideTimer) {
+            hideTimer = setTimeout(() => {
+              hideTimer = null
+              setVisible(false)
+            }, UNMOUNT_DELAY_MS)
+          }
+        }
       },
       { root: null, rootMargin: `${CULL_MARGIN} ${CULL_MARGIN} ${CULL_MARGIN} ${CULL_MARGIN}`, threshold: 0 },
     )
     io.observe(el)
-    return () => io.disconnect()
+    return () => {
+      io.disconnect()
+      if (hideTimer) clearTimeout(hideTimer)
+    }
   }, [])
 
   // A screenshot force-mounts its target panels even if they're culled, so they
@@ -165,24 +186,32 @@ export function PanelLayer() {
   // Writing these straight to the DOM (instead of through a tracked render) keeps
   // Preact OUT of the pan/zoom hot path: a board of N panels no longer diffs N
   // memoised vnodes every frame — the camera moves with a single style write.
-  // While the camera moves, the layer is promoted (will-change) so the browser
-  // moves/scales its already-rastered tiles instead of repainting every panel
-  // and connector each frame — measured ~16x less raster work per pan on a
-  // 150-panel board, and connectors stop flickering as tiles re-raster. The
-  // promotion is dropped 200 ms after the camera settles, so text rasters
-  // crisp again at the new zoom (a permanently promoted layer would stay
-  // blurry after a zoom).
+  // The layer is promoted (will-change) at rest and while panning, so a pan
+  // slides already-rastered tiles instead of repainting every panel and
+  // connector each frame (~16x less raster work on a 150-panel board;
+  // connectors stop flickering) — and a pan never pays the promotion itself,
+  // which cost a 80-100 ms first frame when promotion started with the pan.
+  // A ZOOM drops the promotion (a promoted layer would scale a stale raster,
+  // then re-raster everything at once: the zoom stutter) and re-promotes
+  // 300 ms after the zoom stops, which also re-rasters text crisp.
   const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastZRef = useRef<number | null>(null)
   const writeCamera = (c: Camera) => {
     const cl = camLayerRef.current
     if (cl) {
       cl.style.transform = `translate(${c.x * c.z}px, ${c.y * c.z}px) scale(${c.z})`
-      if (cl.style.willChange !== 'transform') cl.style.willChange = 'transform'
-      if (settleRef.current) clearTimeout(settleRef.current)
-      settleRef.current = setTimeout(() => {
-        settleRef.current = null
-        if (camLayerRef.current) camLayerRef.current.style.willChange = ''
-      }, 200)
+      const zooming = lastZRef.current !== null && lastZRef.current !== c.z
+      lastZRef.current = c.z
+      if (zooming) {
+        if (cl.style.willChange) cl.style.willChange = ''
+        if (settleRef.current) clearTimeout(settleRef.current)
+        settleRef.current = setTimeout(() => {
+          settleRef.current = null
+          if (camLayerRef.current) camLayerRef.current.style.willChange = 'transform'
+        }, 300)
+      } else if (!settleRef.current && cl.style.willChange !== 'transform') {
+        cl.style.willChange = 'transform'
+      }
     }
     const root = rootRef.current
     if (!root) return
@@ -205,8 +234,11 @@ export function PanelLayer() {
     // Subscribe directly to the camera signal and update the DOM imperatively.
     // Runs once immediately (priming the transform), then on every camera write.
     const stopCam = effect(() => writeCamera(store.camera()))
+    // big images in panels are shown at the resolution the zoom needs
+    const detachLod = camLayerRef.current ? attachImageLod(camLayerRef.current) : undefined
     return () => {
       stopCam()
+      detachLod?.()
       detachCam?.()
       detachGestures?.()
       detachCursor?.()
