@@ -8,6 +8,7 @@ import { setCamera, getScrollMode, relayoutScroll, getScrollFitZoom } from './ca
 import { store } from './store'
 import { openContextMenuAt, closeContextMenu } from './contextmenu'
 import { gesturing } from './gesture'
+import { wheelIntent, wheelPanDelta, wheelInfo } from './wheel'
 
 const WHEEL_ZOOM_RATE = 0.002
 const PINCH_ZOOM_RATE = 0.01
@@ -363,10 +364,11 @@ function enableRightDragPan(el: HTMLElement): () => void {
   }
 }
 
-// The wheel always zooms toward the cursor (mouse and trackpad alike — the
-// canvas pans by right-drag, not by scroll), keeping the page point under the
-// cursor fixed. ctrl/pinch uses a finer rate. Scroll modes (serve(view=...)) are
-// the one exception: they lock zoom and pan one axis.
+// A mouse wheel zooms toward the cursor, keeping the page point under it
+// fixed; a trackpad two-finger swipe pans and a pinch zooms (see wheel.ts for
+// how they're told apart, and the Settings override). ctrl/pinch uses a finer
+// rate. Scroll modes (serve(view=...)) are the one exception: they lock zoom
+// and pan one axis.
 function enableWheelZoom(el: HTMLElement): () => void {
   const onWheel = (e: WheelEvent) => {
     // A panel marked wheel-local (React forward_wheel=False) keeps the wheel for
@@ -390,6 +392,13 @@ function enableWheelZoom(el: HTMLElement): () => void {
 
     e.preventDefault()
     e.stopPropagation()
+    const info = wheelInfo(e)
+    if (wheelIntent(info) === 'pan') {
+      const { dx, dy } = wheelPanDelta(info)
+      const c = store.camera()
+      setCamera({ x: c.x - dx / c.z, y: c.y - dy / c.z, z: c.z })
+      return
+    }
     const inst = store.instance()
     const cam = store.camera()
     const rect = el.getBoundingClientRect()

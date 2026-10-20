@@ -44,7 +44,9 @@ export function customHelper(cid: string, forwardWheel: boolean, sync: boolean |
   const id = JSON.stringify(cid)
   const wheel = forwardWheel
     ? "window.addEventListener('wheel',function(e){e.preventDefault();" +
-      "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY}},'*');" +
+      // the whole event: the parent decides zoom (wheel / pinch) or pan (trackpad swipe)
+      "parent.postMessage({__danvas_wheel:{x:e.clientX,y:e.clientY,d:e.deltaY,dx:e.deltaX,dy:e.deltaY," +
+      "m:e.deltaMode,c:e.ctrlKey,mt:e.metaKey,s:e.shiftKey,wd:e.wheelDeltaY}},'*');" +
       '},{passive:false,capture:true});'
     : ''
   return (

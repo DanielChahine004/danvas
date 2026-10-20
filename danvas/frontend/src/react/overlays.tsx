@@ -3,6 +3,7 @@
 // buttons + the kiosk hand tool. These render as siblings outside the panel host
 // (.tl-container), so they use self-contained colours rather than the --pc-* vars.
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { wheelMode, setWheelMode, type WheelMode } from '../engine/wheel'
 import { pageToScreen, screenToPage } from '../engine/editor'
 import { store } from '../engine/store'
 import { stylePanelOpen, openChrome, toggleChrome } from './uistate'
@@ -208,6 +209,7 @@ export function SettingsButton() {
   const dark = useValue('set-dark', () => editor.user.getIsDarkMode(), [editor])
   const grid = useValue('set-grid', () => editor.getInstanceState().isGridMode, [editor])
   const snap = useValue('set-snap', () => snapEnabled(), [])
+  const wheel = useValue('set-wheel', () => wheelMode(), [])
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
@@ -258,6 +260,19 @@ export function SettingsButton() {
             <Rocker left="Off" right={<><Icon name="grid" size={14} /> On</>} isRight={grid} onToggle={() => editor.updateInstanceState({ isGridMode: !grid })} />
             <div style={label}>Snap to edges &amp; centres</div>
             <Rocker left="Off" right="On" isRight={snap} onToggle={() => setSnapEnabled(!snap)} />
+            <div style={label}>Scroll wheel / trackpad</div>
+            <div data-pc-wheel-mode="" style={{ display: 'flex', gap: 4 }}>
+              {(['auto', 'zoom', 'pan'] as WheelMode[]).map((m) => (
+                <button
+                  key={m}
+                  title={m === 'auto' ? 'Trackpad swipe pans, pinch and mouse wheel zoom' : m === 'zoom' ? 'Every wheel / swipe zooms' : 'Every wheel / swipe pans (Ctrl or pinch zooms)'}
+                  onClick={() => setWheelMode(m)}
+                  style={{ flex: 1, padding: '5px 0', fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: 'pointer', border: '1px solid var(--ui-border)', background: wheel === m ? 'var(--ui-accent-grad)' : 'transparent', color: wheel === m ? '#fff' : 'var(--ui-fg-dim)' }}
+                >
+                  {m === 'auto' ? 'Auto' : m === 'zoom' ? 'Zoom' : 'Pan'}
+                </button>
+              ))}
+            </div>
           </div>
         </>
       )}

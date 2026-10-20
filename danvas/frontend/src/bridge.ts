@@ -14,6 +14,7 @@ import { store } from './engine/store'
 import { editor, screenToPage } from './engine/editor'
 import { applyCameraFrom, scheduleInitialFit, resetInitialFit, markInitialFitDone, setNavigationMode, zoomCanvasAtClient, setCamera, fitCameraToBounds } from './engine/camera'
 import { openContextMenuAt } from './engine/contextmenu'
+import { wheelIntent, wheelPanDelta } from './engine/wheel'
 import { toImage } from './engine/export'
 import { measuredTextSize } from './react/measure'
 import type { ArrowRecord, DrawingRecord, PanelRecord, PanelShapeType, WriteSignal } from './engine/types'
@@ -2274,6 +2275,17 @@ function zoomFromIframe(sourceWin: any, w: any): void {
   if (!iframe) return
   const rect = iframe.getBoundingClientRect()
   const z = store.camera().z
+  // Same rule as the bare canvas (engine/wheel.ts). A message without the
+  // full event (an older shim) is a zoom, as before.
+  if (typeof w.dx === 'number') {
+    const info = { deltaX: w.dx, deltaY: w.dy, deltaMode: w.m || 0, ctrlKey: !!w.c, metaKey: !!w.mt, shiftKey: !!w.s, wheelDeltaY: w.wd }
+    if (wheelIntent(info) === 'pan') {
+      const { dx, dy } = wheelPanDelta(info)
+      const cam = store.camera()
+      setCamera({ x: cam.x - dx / cam.z, y: cam.y - dy / cam.z, z: cam.z })
+      return
+    }
+  }
   zoomCanvasAtClient(rect.left + w.x * z, rect.top + w.y * z, w.d)
 }
 

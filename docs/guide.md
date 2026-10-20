@@ -105,6 +105,13 @@ canvas.serve(port=8000)                                    # LAST line: opens br
     the three kinds of state above. Anything held only in a component's own
     memory (`useState`, a plain HTML page's DOM) is lost unless it uses view
     state, shared state, `sync=`, or `keep_mounted=True`.
+    A panel unmounts a few seconds after it leaves the view (not at once), so
+    panning back and forth doesn't rebuild it. Large `<img>`s inside panels
+    are shown at the resolution the current zoom needs and swapped for a
+    sharper copy when you zoom in — still, ship images near the size they're
+    shown at: a 1920px PNG as a 95px thumbnail, base64'd into props, costs
+    load time and memory on every viewer. (A URL from `canvas.serve_bytes`
+    keeps big media out of the panel's props entirely.)
 
 ## 3. Panels — factory signatures
 
@@ -1072,10 +1079,13 @@ opens on a point, and `?focus=<panel name or label>` opens framed on one panel
 (after its size settles) — handy for sharing a link, or pointing an agent's
 browser straight at what it should check.
 
-**Moving around:** the wheel zooms at the cursor; right-drag, middle-drag or
-**Space + drag** pans with any tool; the hand tool (**H**) pans with a left drag
-(and is remembered across reloads); **V** goes back to select. Two fingers pinch
-and pan on touch. A
+**Moving around:** on a laptop trackpad, a **two-finger swipe pans** (any
+direction) and a **pinch zooms**. A mouse wheel zooms at the cursor, and
+Ctrl/Cmd + wheel always zooms. Right-drag, middle-drag or **Space + drag** pans
+with any tool; the hand tool (**H**) pans with a left drag (and is remembered
+across reloads); **V** goes back to select. Two fingers pinch and pan on touch
+screens. Trackpad vs. mouse is detected per gesture; if your device is
+misjudged, Settings → *Scroll wheel / trackpad* forces **Zoom** or **Pan**. A
 constrained `navigation` mode makes the scroll wheel **pan** the free axis and
 locks the other axis + the zoom — useful for vertical dashboards / horizontal
 timelines; it persists across reloads.
