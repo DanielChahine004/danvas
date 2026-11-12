@@ -36,7 +36,7 @@ def main() -> None:
                 z.write(f, rel.as_posix())
                 n += 1
     shutil.copytree(pkg / "frontend" / "dist", out / "danvas", ignore=shutil.ignore_patterns("*.br", "*.gz"))
-    for f in ("index.html", "boot.js"):
+    for f in ("index.html", "boot.js", "worker.js"):
         shutil.copy(HERE / f, out / f)
     print(f"{out}: runtime.zip ({n} files, {(out / 'runtime.zip').stat().st_size // 1024} KB), danvas frontend")
 

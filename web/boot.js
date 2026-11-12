@@ -1,6 +1,8 @@
 // Static danvas (web/boot.js): a GitHub repository's danvas app, built and run
-// in the reader's browser. danvas's Python bridge and the app's Python run in Pyodide; danvas's
-// own frontend shows them through an in-page socket instead of a WebSocket.
+// in the reader's browser. danvas's Python bridge and the app's Python run in
+// Pyodide in a worker (worker.js), cut off from this page's storage and DOM;
+// danvas's own frontend shows them through a socket that relays to the worker.
+// This page does the GitHub requests, so a token never reaches the app's code.
 //
 //   ?repo=owner/name          the repository (remembered)
 //   &ref=main                 branch, tag or commit (default: the repo's default branch)
@@ -18,7 +20,6 @@
 //   files    = ["notesmap.toml"]         # what the app reads; the entry module's files() can add more
 //   cwd      = ""                        # folder the app runs in, relative to the repo
 
-const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
 const POLL_MS = 60_000;
 const SKIP = /\.(pdf|zip|tar|gz|tgz|7z|exe|dll|so|dylib|mp4|mov|avi|mkv|iso)$/i;
 const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|\.pixi|tests?|docs|examples)\//;
@@ -27,7 +28,7 @@ const MAX_FILE = 20 * 1024 * 1024;
 const qs = new URLSearchParams(location.search);
 const $msg = document.getElementById("dv-msg");
 const $status = document.getElementById("dv-status");
-const say = (t) => { if ($msg) $msg.textContent = t; };
+const say = (t) => { if ($msg?.isConnected) $msg.textContent = t; };   // the boot screen, until the app shows
 const status = (t) => { $status.hidden = !t; $status.textContent = t || ""; };
 const DEBUG = qs.has("debug") ? (window.__dv = { sent: [], recv: [] }) : null;
 
@@ -99,28 +100,53 @@ const fetchable = (p, e) => !SKIP.test(p) && (e.size ?? 0) <= MAX_FILE;
 
 /** Copy the files of `snap` matching `specs` into Pyodide at `dest`, skipping
  * ones already there at the same blob; delete ones that went away. */
-async function sync(py, snap, specs, dest, have, label) {
+async function sync(snap, specs, dest, have, label) {
   const todo = [...snap.files.values()].filter((e) => under(e.path, specs) && fetchable(e.path, e) && have.get(e.path) !== e.sha);
   let n = 0;
   await Promise.all(todo.map(async (e) => {
     const data = await blob(snap, e);
-    const file = `${dest}/${e.path}`;
-    py.FS.mkdirTree(file.split("/").slice(0, -1).join("/"));
-    py.FS.writeFile(file, data);
+    await call("write", { path: `${dest}/${e.path}`, data: data.buffer }, [data.buffer]);
     have.set(e.path, e.sha);
     say(`${label} ${++n}/${todo.length}`);
   }));
   for (const p of [...have.keys()]) {
-    if (under(p, specs) && !snap.files.has(p)) { try { py.FS.unlink(`${dest}/${p}`); } catch { /* gone */ } have.delete(p); }
+    if (under(p, specs) && !snap.files.has(p)) { await call("unlink", { path: `${dest}/${p}` }); have.delete(p); }
   }
   return todo.length;
 }
 
-// --- the in-page socket -------------------------------------------------------------
-// danvas's frontend opens `new WebSocket(".../ws")`; it gets this instead.
+// --- the worker ------------------------------------------------------------------------
 
-let app = null;   // the Python App
+const worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
+const pending = new Map();
+const sockets = new Map();   // sid -> PageSocket
+let nextId = 0;
+
+/** Ask the worker to do `op`; resolves with its result, rejects with its error. */
+function call(op, args = {}, transfer = []) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    worker.postMessage({ id, op, ...args }, transfer);
+  });
+}
+function tell(op, args = {}, transfer = []) { worker.postMessage({ op, ...args }, transfer); }
+
+worker.onmessage = ({ data }) => {
+  if (data.ev) { sockets.get(data.sid)?._event(data); return; }
+  const p = pending.get(data.id);
+  pending.delete(data.id);
+  if (data.ok) p.resolve(data.result); else p.reject(new Error(data.error));
+};
+worker.onerror = (e) => fail(new Error("the Python worker failed: " + (e.message || "see the console")));
+
+// --- the socket -----------------------------------------------------------------------
+// danvas's frontend opens `new WebSocket(".../ws")`; it gets this instead, and
+// every frame goes to danvas's Bridge in the worker.
+
+let started = false;
 const NativeWS = window.WebSocket;
+let nextSid = 0;
 
 class PageSocket extends EventTarget {
   constructor(url) {
@@ -135,32 +161,38 @@ class PageSocket extends EventTarget {
     this.dispatchEvent(ev);
   }
   _open() {
-    this.py = app.connect({
-      deliver: (text) => {
-        if (DEBUG) DEBUG.recv.push(text.slice(0, 300));
-        if (this.readyState === 1) queueMicrotask(() => this._fire("message", { data: text }));
-      },
-      deliver_bytes: (u8) => {
-        if (this.readyState !== 1) return;
-        const buf = u8.slice().buffer;
-        queueMicrotask(() => this._fire("message", { data: this.binaryType === "arraybuffer" ? buf : new Blob([buf]) }));
-      },
-      closed: (code) => this._close(code),
-    });
+    if (!started) { setTimeout(() => this._open(), 100); return; }
+    this.sid = nextSid++;
+    sockets.set(this.sid, this);
+    tell("connect", { sid: this.sid });
     this.readyState = 1;
     this._fire("open");
+  }
+  _event({ ev, text, bytes, code }) {
+    if (ev === "closed") { this._close(code); return; }
+    if (this.readyState !== 1) return;
+    if (ev === "deliver") {
+      if (DEBUG) DEBUG.recv.push(text.slice(0, 300));
+      this._fire("message", { data: text });
+    } else {
+      this._fire("message", { data: this.binaryType === "arraybuffer" ? bytes : new Blob([bytes]) });
+    }
   }
   send(data) {
     if (this.readyState !== 1) return;
     if (DEBUG) DEBUG.sent.push(typeof data === "string" ? data.slice(0, 300) : "<bytes>");
-    if (typeof data === "string") this.py.push(data);
-    else if (data instanceof Blob) data.arrayBuffer().then((b) => this.py.push_bytes(new Uint8Array(b)));
-    else this.py.push_bytes(new Uint8Array(data.buffer ?? data, data.byteOffset ?? 0, data.byteLength));
+    if (typeof data === "string") tell("send", { sid: this.sid, text: data });
+    else if (data instanceof Blob) data.arrayBuffer().then((b) => tell("send", { sid: this.sid, bytes: b }, [b]));
+    else {
+      const b = (data.buffer ?? data).slice(data.byteOffset ?? 0, (data.byteOffset ?? 0) + data.byteLength);
+      tell("send", { sid: this.sid, bytes: b }, [b]);
+    }
   }
-  close(code = 1000) { this.py?.drop(); this._close(code); }
+  close(code = 1000) { if (this.sid !== undefined) tell("drop", { sid: this.sid }); this._close(code); }
   _close(code) {
     if (this.readyState === 3) return;
     this.readyState = 3;
+    sockets.delete(this.sid);
     this._fire("close", { code, wasClean: true });
   }
 }
@@ -224,29 +256,23 @@ async function main() {
 
   say("Loading Python…");
   const pyReady = (async () => {
-    const { loadPyodide } = await import(PYODIDE + "pyodide.mjs");
-    const py = await loadPyodide({ indexURL: PYODIDE });
-    await py.loadPackage(["micropip", "sqlite3"]);   // sqlite3: danvas's ledger
-    py.unpackArchive(await (await fetch("runtime.zip")).arrayBuffer(), "zip", { extractDir: "/lib/danvas" });
-    py.runPython("import sys; sys.path.insert(0, '/lib/danvas')");
-    return py;
+    const runtime = await (await fetch("runtime.zip")).arrayBuffer();
+    await call("init", { runtime }, [runtime]);
   })();
 
   say(`Reading ${repo}…`);
   let snap = await snapshot(repo, qs.get("ref"));
   if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
   const manifestText = new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath)));
-  const py = await pyReady;
-  const ds = py.pyimport("danvas.static");
-  const manifest = ds.read_manifest(manifestText);
-  const m = (manifest.get("app") ?? manifest).toJs({ dict_converter: Object.fromEntries });
-  py.FS.mkdirTree("/repo");
+  await pyReady;
+  const manifest = await call("manifest", { text: manifestText });
+  const m = manifest.app ?? manifest;
 
   // the code: other repos (github:), PyPI packages, and folders of this repo (paths)
   const pip = new Set(m.packages ?? []);
   const pyproject = async (s, path) => {
     const e = s.files.get(path);
-    if (e) for (const d of ds.requirements(new TextDecoder().decode(await blob(s, e))).toJs()) pip.add(d);
+    if (e) for (const d of await call("requirements", { text: new TextDecoder().decode(await blob(s, e)) })) pip.add(d);
   };
   for (const spec of m.requires ?? []) {
     if (!spec.startsWith("github:")) { pip.add(spec); continue; }
@@ -256,8 +282,8 @@ async function main() {
     const sub = req.sub ?? ([...s.files.keys()].some((p) => p.startsWith("src/") && p.endsWith(".py")) ? "src" : "");
     const dest = `/pkgs/${req.repo.replace("/", "__")}`;
     const code = [...s.files.keys()].filter((p) => !SKIP_DIRS.test(p) && (!sub || p.startsWith(sub + "/")));
-    await sync(py, s, code, dest, new Map(), `Fetching ${req.repo}…`);
-    py.runPython(`import sys; sys.path.insert(0, ${JSON.stringify(sub ? `${dest}/${sub}` : dest)})`);
+    await sync(s, code, dest, new Map(), `Fetching ${req.repo}…`);
+    await call("syspath", { path: sub ? `${dest}/${sub}` : dest });
     await pyproject(s, "pyproject.toml");
   }
   const paths = m.paths ?? [];
@@ -265,36 +291,37 @@ async function main() {
   const cwd = m.cwd ? m.cwd.replace(/\/?$/, "/") : "";
   let specs = [manifestPath, ...paths, ...(m.files ?? []).map((f) => cwd + f)];
   if ((m.entry ?? "app.py").endsWith(".py")) specs.push(cwd + (m.entry ?? "app.py"));
-  await sync(py, snap, specs, "/repo", have, `Reading ${repo}…`);
+  await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
   for (const p of paths) {
-    py.runPython(`import sys; sys.path.insert(0, ${JSON.stringify("/repo/" + p.replace(/\/$/, ""))})`);
+    await call("syspath", { path: "/repo/" + p.replace(/\/$/, "") });
     const parent = p.replace(/\/$/, "").split("/").slice(0, -1).join("/");
     await pyproject(snap, p.replace(/\/$/, "") + "/pyproject.toml");
     if (parent) await pyproject(snap, parent + "/pyproject.toml");
   }
   if (pip.size) {
     say(`Installing ${[...pip].join(", ")}…`);
-    const micropip = py.pyimport("micropip");
-    await micropip.install([...pip]);
+    await call("pip", { names: [...pip] });
   }
 
   // what the app itself says it reads
-  const extra = ds.extra_files(manifest, "/repo").toJs();
+  const extra = await call("extra_files", { manifest });
   specs = [...specs, ...extra];
-  await sync(py, snap, specs, "/repo", have, `Reading ${repo}…`);
+  await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
 
   say("Building the app…");
-  app = ds.App(manifest, "/repo");
-  console.log("[danvas-static]", app.start());
+  console.log("[danvas-static]", await call("start", { manifest }));
+  started = true;
 
+  // this viewer's drawings: the worker holds them, this page keeps them
   const drawKey = `dv-drawings:${repo}:${manifestPath}`;
-  app.load_drawings(safeGet(drawKey) || "{}");
+  await call("load_drawings", { text: safeGet(drawKey) || "{}" });
   let saved = "";
-  const save = () => { const s = app.drawings_json(); if (s !== saved) { safeSet(drawKey, s); saved = s; } };
+  const save = async () => { const s = await call("drawings"); if (s !== saved) { safeSet(drawKey, s); saved = s; } };
   setInterval(save, 3000);
   addEventListener("pagehide", save);
 
   remember(repo);
+  document.getElementById("dv-boot")?.remove();
   const link = document.getElementById("dv-repo-link");
   link.querySelector("b").textContent = repo;
   link.hidden = false;
@@ -307,11 +334,11 @@ async function main() {
     try {
       const s = await snapshot(repo, snap.ref, true);
       if (!s || s.sha === snap.sha) return;
-      if (s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { save(); location.reload(); return; }
+      if (s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { await save(); location.reload(); return; }
       snap = s;
       status("Updating…");
-      const n = await sync(py, snap, specs, "/repo", have, "Updating…");
-      if (n) console.log("[danvas-static] reloaded:", app.reload());
+      const n = await sync(snap, specs, "/repo", have, "Updating…");
+      if (n) console.log("[danvas-static] reloaded:", await call("reload"));
       status("");
     } catch (e) { console.warn("[danvas-static] poll:", e); status(""); }
   }, poll);

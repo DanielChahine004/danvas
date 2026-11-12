@@ -6,8 +6,9 @@ browser**, with no server to keep alive:
     https://danielchahine004.github.io/danvas/?repo=owner/name[&ref=branch][&app=path/danvas.toml]
 
 danvas's Python bridge and the app's own Python run in
-[Pyodide](https://pyodide.org); danvas's frontend, unchanged, talks to them
-through an in-page socket instead of a WebSocket. The app is the same code that
+[Pyodide](https://pyodide.org) inside a Web Worker (`worker.js`); danvas's
+frontend, unchanged, talks to them through a socket that relays to the worker
+instead of a WebSocket. The app is the same code that
 `canvas.serve()` would host: a script such as `examples/hello_world.py` runs
 as written.
 
@@ -41,18 +42,22 @@ cwd      = ""                  # folder the app runs in, relative to the repo
 
 - Each viewer runs their own copy of the canvas: no shared live session.
 - There are no threads. danvas's handler kernels and `threading.Thread` run on
-  the page's event loop, and `time.sleep` returns at once. Handlers that return
-  promptly work as they do served; `@canvas.background` loops must be
-  `async def`. Python runs on the page's thread, so a slow handler stalls the
-  canvas until it returns.
+  the worker's event loop, and `time.sleep` returns at once. Handlers that
+  return promptly work as they do served; `@canvas.background` loops must be
+  `async def`. A slow handler delays the app's replies but never freezes the
+  canvas, which runs on the page.
+- The app is kept apart from the page. Its code (Python, and JavaScript reached
+  through Pyodide's `js` module) runs in the worker, which has no DOM, no
+  `localStorage` or `sessionStorage`, and makes no GitHub requests: it cannot
+  read other repositories' saved drawings or a GitHub token. The page fetches
+  the repository and hands the worker the files.
 - `canvas.serve(...)` hands the canvas to the page and returns; its view and
   Inspector settings apply, its network settings do not. The Inspector stays
   off unless asked for.
 - Only what a browser may do: no local files, hardware or sockets, and only
   pure-Python packages or ones Pyodide builds.
 - A private repository needs `#token=<fine-grained token, Contents: read>` for
-  now, kept for the tab only. The page runs the repository's code, so that code
-  can see the token.
+  now, kept for the tab only and never passed to the app's code.
 
 ## Building and previewing
 
