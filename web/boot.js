@@ -44,7 +44,10 @@ function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private 
 const frag = new URLSearchParams(location.hash.slice(1));
 if (frag.get("token")) { sessionStorage.setItem("dv-token", frag.get("token")); history.replaceState(null, "", location.pathname + location.search); }
 const token = sessionStorage.getItem("dv-token");
-const repo = qs.get("repo") || safeGet("dv-repo");
+const repo = qs.get("repo");   // the bare link asks, offering recent repos
+const RECENT = "dv-recent";
+function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) => typeof r === "string"); } catch { return []; } }
+function remember(r) { safeSet(RECENT, JSON.stringify([r, ...recent().filter((x) => x !== r)].slice(0, 8))); }
 const manifestPath = qs.get("app") || "danvas.toml";
 
 // --- GitHub (or the local dev server standing in for it) -------------------------
@@ -171,12 +174,29 @@ Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 
 function askRepo() {
   const boot = document.getElementById("dv-boot");
   boot.classList.add("ask");
-  boot.innerHTML = `<div>Which repository holds the danvas app?</div>
-    <form><input name="r" placeholder="owner/name" autofocus><button>Open</button></form>`;
+  boot.innerHTML = `<div class="dv-title">Static danvas</div>
+    <div>Open a GitHub repository's danvas app. The repository needs a
+      <a href="https://github.com/DanielChahine004/danvas/blob/main/web/README.md" target="_blank" rel="noopener">danvas.toml</a>.</div>
+    <form><input name="r" placeholder="owner/name" autocomplete="off" autofocus><button>Open</button></form>
+    <div class="dv-recent"></div>`;
+  const list = boot.querySelector(".dv-recent");
+  const rs = recent();
+  if (rs.length) list.append(Object.assign(document.createElement("div"), { textContent: "Recent", className: "dv-label" }));
+  for (const r of rs) {
+    const a = document.createElement("a");
+    a.href = "?repo=" + encodeURIComponent(r);
+    a.textContent = r;
+    list.append(a);
+  }
+  const input = boot.querySelector("input");
+  input.oninput = () => input.setCustomValidity("");
   boot.querySelector("form").onsubmit = (e) => {
     e.preventDefault();
-    const r = e.target.r.value.trim();
-    if (r) location.search = "?repo=" + encodeURIComponent(r);
+    // a pasted GitHub URL works too
+    const r = input.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/(\.git|\/)+$/, "");
+    if (/^[\w.-]+\/[\w.-]+$/.test(r)) { location.search = "?repo=" + encodeURIComponent(r); return; }
+    input.setCustomValidity("owner/name, e.g. DanielChahine004/local_latex");
+    input.reportValidity();
   };
 }
 
@@ -199,7 +219,6 @@ function parseGithubReq(spec) {
 
 async function main() {
   if (!repo) return askRepo();
-  safeSet("dv-repo", repo);
   document.title = `${repo.split("/")[1]} · danvas`;
   try { devRepos = new Set(await (await fetch("/_gh/repos.json")).json()); } catch { /* not the dev server */ }
 
@@ -275,6 +294,10 @@ async function main() {
   setInterval(save, 3000);
   addEventListener("pagehide", save);
 
+  remember(repo);
+  const link = document.getElementById("dv-repo-link");
+  link.querySelector("b").textContent = repo;
+  link.hidden = false;
   await loadDanvasFrontend();
   console.log(`[danvas-static] ready ${Math.round(performance.now())} ms after navigation`);
 
