@@ -273,7 +273,7 @@ function askRepo() {
     // a pasted GitHub URL works too
     const r = input.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/(\.git|\/)+$/, "");
     if (/^[\w.-]+\/[\w.-]+$/.test(r)) { location.search = "?repo=" + encodeURIComponent(r); return; }
-    input.setCustomValidity("owner/name, e.g. DanielChahine004/local_latex");
+    input.setCustomValidity("owner/name, e.g. DanielChahine004/paper-notes");
     input.reportValidity();
   };
 }
