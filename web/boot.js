@@ -7,7 +7,8 @@
 //   ?repo=owner/name          the repository (remembered)
 //   &ref=main                 branch, tag or commit (default: the repo's default branch)
 //   &app=danvas.toml          the manifest's path in the repo
-//   #token=...                a GitHub token for a private repo (kept for this tab only)
+//   #token=...                a GitHub token for a private repo (kept for this tab only);
+//                             "Sign in with GitHub" fills it in
 //   &debug                    keep every frame in window.__dv
 //
 // The repo's danvas.toml:
@@ -38,13 +39,52 @@ function fail(err) {
   if (!boot) { status("⚠ " + (err.message || err)); return; }
   boot.classList.add("err");
   say(String(err.message || err));
+  if (!err.gh) return;
+  // a GitHub refusal: offer to sign in, or to share the repo with the sign-in app
+  const more = document.createElement("div");
+  more.className = "dv-auth";
+  if (!token || err.gh === 401) more.append(button("Sign in with GitHub", signIn));
+  else more.innerHTML = `Private? <a href="${GH_APP}/installations/new" target="_blank" rel="noopener">Give the sign-in app access to it</a>, then reload. · `;
+  if (token) more.append(button("Sign out", signOut, "dv-link"));
+  boot.append(more);
+}
+function button(text, onclick, className = "") {
+  return Object.assign(document.createElement("button"), { textContent: text, onclick, className, type: "button" });
 }
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
 
+// "Sign in with GitHub", for private repos: paperstore's GitHub App and its
+// sign-in worker, which sends the token back here in the URL fragment. The
+// token is kept for this tab only and never passed to the app's code.
+const AUTH = "https://paperstore-auth.daniel-chahine004.workers.dev";
+const GH_APP = "https://github.com/apps/paperstore-daniel";
+function keepToken(t, refresh, expiresIn) {
+  try {
+    sessionStorage.setItem("dv-token", t);
+    sessionStorage.setItem("dv-refresh", refresh || "");
+    sessionStorage.setItem("dv-expires", expiresIn > 0 ? String(Date.now() + expiresIn * 1000) : "");
+  } catch { /* storage blocked: this page load only */ }
+  token = t;
+}
+function ssGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+let token = ssGet("dv-token");
 const frag = new URLSearchParams(location.hash.slice(1));
-if (frag.get("token")) { sessionStorage.setItem("dv-token", frag.get("token")); history.replaceState(null, "", location.pathname + location.search); }
-const token = sessionStorage.getItem("dv-token");
+if (frag.get("token")) {
+  keepToken(frag.get("token"), frag.get("refresh"), +frag.get("expires_in") || 0);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+function signIn() { location.href = `${AUTH}/login?back=${encodeURIComponent(location.href.split("#")[0])}`; }
+function signOut() { for (const k of ["dv-token", "dv-refresh", "dv-expires"]) try { sessionStorage.removeItem(k); } catch { /* */ } location.reload(); }
+/** Renew a sign-in token shortly before it expires (GitHub's last 8 hours). */
+async function freshToken() {
+  const exp = +ssGet("dv-expires") || 0, refresh = ssGet("dv-refresh");
+  if (!token || !exp || !refresh || Date.now() < exp - 5 * 60_000) return;
+  try {
+    const res = await fetch(AUTH + "/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: refresh }) });
+    if (res.ok) { const t = await res.json(); keepToken(t.access_token, t.refresh_token, t.expires_in); }
+  } catch { /* offline: try again next time */ }
+}
 const repo = qs.get("repo");   // the bare link asks, offering recent repos
 const RECENT = "dv-recent";
 function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) => typeof r === "string"); } catch { return []; } }
@@ -59,6 +99,7 @@ const raw = (r) => (devRepos.has(r) ? "/_gh/raw" : "https://raw.githubuserconten
 const etags = {};
 
 async function gh(r, path, { conditional = false } = {}) {
+  await freshToken();
   const headers = { Accept: "application/vnd.github+json" };
   if (token && !devRepos.has(r)) headers.Authorization = "Bearer " + token;
   const key = r + path;
@@ -66,9 +107,10 @@ async function gh(r, path, { conditional = false } = {}) {
   const res = await fetch(api(r) + `/repos/${r}` + path, { headers });
   if (res.status === 304) return null;
   if (!res.ok) {
-    const hint = res.status === 404 ? (token ? "not found, or this token cannot read it" : "not found (a private repo needs #token=…)")
-      : res.status === 403 ? "GitHub's rate limit for anonymous visitors; try again later or add #token=…" : res.statusText;
-    throw new Error(`${r}${path.split("?")[0]}: ${res.status} ${hint}`);
+    const hint = res.status === 404 ? (token ? "not found, or not shared with the sign-in app" : "not found; if it is private, sign in")
+      : res.status === 403 || res.status === 429 ? (token ? "GitHub refused (rate limit?)" : "GitHub's limit for anonymous visitors; sign in, or try later")
+      : res.status === 401 ? "the sign-in has expired" : res.statusText;
+    throw Object.assign(new Error(`${r}${path.split("?")[0]}: ${res.status} ${hint}`), { gh: res.status });
   }
   if (res.headers.get("ETag")) etags[key] = res.headers.get("ETag");
   return res.json();
@@ -210,7 +252,11 @@ function askRepo() {
     <div>Open a GitHub repository's danvas app. The repository needs a
       <a href="https://github.com/DanielChahine004/danvas/blob/main/web/README.md" target="_blank" rel="noopener">danvas.toml</a>.</div>
     <form><input name="r" placeholder="owner/name" autocomplete="off" autofocus><button>Open</button></form>
-    <div class="dv-recent"></div>`;
+    <div class="dv-recent"></div>
+    <div class="dv-auth"></div>`;
+  const auth = boot.querySelector(".dv-auth");
+  if (token) auth.append("Signed in to GitHub · ", button("sign out", signOut, "dv-link"));
+  else auth.append("Private repo? ", button("Sign in with GitHub", signIn, "dv-link"));
   const list = boot.querySelector(".dv-recent");
   const rs = recent();
   if (rs.length) list.append(Object.assign(document.createElement("div"), { textContent: "Recent", className: "dv-label" }));

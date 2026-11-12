@@ -56,8 +56,13 @@ cwd      = ""                  # folder the app runs in, relative to the repo
   off unless asked for.
 - Only what a browser may do: no local files, hardware or sockets, and only
   pure-Python packages or ones Pyodide builds.
-- A private repository needs `#token=<fine-grained token, Contents: read>` for
-  now, kept for the tab only and never passed to the app's code.
+- A private repository needs **Sign in with GitHub** (on the picker, or offered
+  when GitHub says "not found"), and the
+  [sign-in app](https://github.com/apps/paperstore-daniel) given access to that
+  repository. Sign-in borrows [paperstore](https://github.com/DanielChahine004/paperstore)'s
+  GitHub App and worker, whose `VIEWERS` must list this page. The token is kept
+  for the tab only, renewed before it expires, and never passed to the app's
+  code. `#token=<fine-grained token, Contents: read>` works too.
 
 ## Building and previewing
 
