@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>danvas</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0f172a; }
+  #dv-boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; color: #94a3b8; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+    padding: 0 16px; text-align: center; }
+  #dv-boot .ring { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(148,163,184,.25);
+    border-top-color: #3b82f6; animation: dv-spin .8s linear infinite; }
+  #dv-boot.err .ring { display: none; }
+  #dv-boot.err { color: #fca5a5; }
+  #dv-boot.ask .ring { display: none; }
+  #dv-boot form { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #dv-boot input { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155;
+    background: #1e293b; color: #e2e8f0; width: min(320px, 80vw); }
+  #dv-boot button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 0; background: #3b82f6; color: white; cursor: pointer; }
+  #dv-status { position: fixed; right: 12px; top: 10px; z-index: 99999; font: 500 11px system-ui, sans-serif;
+    color: #94a3b8; background: rgba(15,23,42,.75); padding: 4px 8px; border-radius: 6px; pointer-events: none; }
+  @keyframes dv-spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"><div id="dv-boot"><div class="ring"></div><div id="dv-msg">Starting…</div></div></div>
+<div id="dv-status" hidden></div>
+<script type="module" src="./boot.js"></script>
+</body>
+</html>

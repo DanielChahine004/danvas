@@ -143,6 +143,15 @@ A live LTspice front-end ([`circuit_dashboard.py`](https://github.com/DanielChah
 
 ![Releasing a slider re-runs LTspice and every panel redraws with the notch moved](https://raw.githubusercontent.com/DanielChahine004/danvas/main/docs/screenshots/circuit_dashboard.gif)
 
+## Without a server
+
+A canvas that each viewer can run on their own can be published as a link
+instead of a process: add a `danvas.toml` to its repository and open
+`https://danielchahine004.github.io/danvas/?repo=owner/name`. The page runs
+danvas and the app's Python in the reader's browser (Pyodide), fetching the code
+and files from GitHub and following new commits. Threads, hardware and a shared
+live session are what it gives up; see [web/README.md](https://github.com/DanielChahine004/danvas/blob/main/web/README.md).
+
 ## Learn more
 
 - [The danvas manual](https://github.com/DanielChahine004/danvas/blob/main/docs/guide.md) — conventions, quick reference, and every feature in depth.
