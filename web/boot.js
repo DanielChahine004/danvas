@@ -630,18 +630,60 @@ function showNotices(list) {
   }
 }
 
+// --- loads that do not finish -------------------------------------------------------
+// A phone that runs out of memory reloads the tab, which loads it again, and
+// again. Each load writes how far it got; a load that finds the last two ended
+// partway stops there and says where, instead of looping.
+
+const lite = qs.has("lite");
+const bootKey = `dv-boot:${repo}:${manifestPath}${lite ? ":lite" : ""}`;
+const STAGES = { python: "loading Python", files: "reading the files", packages: "installing packages",
+  build: "building the app", draw: "drawing the canvas" };
+let tries = 1;
+function stage(name) { safeSet(bootKey, JSON.stringify({ stage: name, t: Date.now(), tries })); }
+
+function crashLoop() {
+  let last = null;
+  try { last = JSON.parse(safeGet(bootKey) || "null"); } catch { /* none */ }
+  const recent = last && last.stage !== "ok" && Date.now() - last.t < 10 * 60_000;
+  tries = recent ? (last.tries || 1) + 1 : 1;
+  return recent && tries >= 3 ? last : null;
+}
+
+function stoppedScreen(last) {
+  const boot = document.getElementById("dv-boot");
+  boot.classList.add("ask");
+  const where = STAGES[last.stage] || last.stage;
+  boot.innerHTML = `<div class="dv-title">This page keeps closing</div>
+    <div>The last ${last.tries} tries stopped while <b>${where}</b>. That usually means this
+      device ran out of memory for the page, and the browser reloaded it.</div>
+    <div class="dv-acts"></div>`;
+  const acts = boot.querySelector(".dv-acts");
+  const go = (url) => { try { localStorage.removeItem(bootKey); } catch { /* fine */ } location.href = url; };
+  if (!lite) {
+    const u = new URL(location.href); u.searchParams.set("lite", "1");
+    acts.append(button("Load without pictures", () => go(u.toString().replace(/%2F/gi, "/"))), " ");
+  }
+  acts.append(button("Try again", () => go(location.href), lite ? "" : "dv-link"));
+}
+
 async function main() {
   if (guest) return joinRoom();
   if (!repo) return askRepo();
+  const last = crashLoop();
+  if (last) return stoppedScreen(last);
+  if (lite) document.head.append(Object.assign(document.createElement("style"), { textContent: "img, image { display: none !important; }" }));
   document.title = `${repo.split("/")[1]} · danvas`;
   try { devRepos = new Set(await (await fetch("/_gh/repos.json")).json()); } catch { /* not the dev server */ }
 
+  stage("python");
   say("Loading Python…");
   const pyReady = (async () => {
     const runtime = await (await fetch("runtime.zip")).arrayBuffer();
     await call("init", { runtime }, [runtime]);
   })();
 
+  stage("files");
   say(`Reading ${repo}…`);
   let snap = await snapshot(repo, qs.get("ref"));
   if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
@@ -681,6 +723,7 @@ async function main() {
     if (parent) await pyproject(snap, parent + "/pyproject.toml");
   }
   if (pip.size) {
+    stage("packages");
     say(`Installing ${[...pip].join(", ")}…`);
     await call("pip", { names: [...pip] });
   }
@@ -692,6 +735,7 @@ async function main() {
   const notices = [];
   for (const mt of m.mount ?? []) { const n = await mount(mt); if (n) notices.push(n); }
 
+  stage("build");
   say("Building the app…");
   console.log("[danvas-static]", await call("start", { manifest }));
   started = true;
@@ -705,6 +749,7 @@ async function main() {
   addEventListener("pagehide", save);
 
   remember(repo);
+  stage("draw");
   document.getElementById("dv-boot")?.remove();
   const link = document.getElementById("dv-repo-link");
   link.querySelector("b").textContent = repo;
@@ -713,6 +758,8 @@ async function main() {
   showNotices(notices);
   shareControl();
   console.log(`[danvas-static] ready ${Math.round(performance.now())} ms after navigation`);
+  // still here a little after drawing: this load made it
+  setTimeout(() => { tries = 0; stage("ok"); }, 8000);
 
   // follow the repository
   const poll = devRepos.has(repo) ? 2000 : POLL_MS;
