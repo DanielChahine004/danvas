@@ -102,6 +102,12 @@ function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) 
 function remember(r) { safeSet(RECENT, JSON.stringify([r, ...recent().filter((x) => x !== r)].slice(0, 8))); }
 const manifestPath = qs.get("app") || "danvas.toml";
 
+// a live room: the host's tab runs the app, guests join it through the relay (rooms/)
+const ROOMS = qs.get("rooms") || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "ws://127.0.0.1:8788" : "wss://danvas-rooms.daniel-chahine004.workers.dev");
+const live = /^[A-Za-z0-9_-]{8,64}$/.test(qs.get("live") || "") ? qs.get("live") : null;
+const hostKey = `dv-host:${repo}:${manifestPath}`;
+const guest = !!live && (() => { try { return sessionStorage.getItem(hostKey) !== live; } catch { return true; } })();
+
 // --- GitHub (or the local dev server standing in for it) -------------------------
 
 let devRepos = new Set();   // repos the dev server serves from local folders
@@ -348,9 +354,149 @@ class PageSocket extends EventTarget {
   }
 }
 window.WebSocket = function (url, protocols) {
-  return /\/ws$/.test(new URL(url, location.href).pathname) ? new PageSocket(url) : new NativeWS(url, protocols);
+  const u = new URL(url, location.href);
+  if (!/\/ws$/.test(u.pathname)) return new NativeWS(url, protocols);
+  if (!guest) return new PageSocket(url);
+  // a guest: danvas's own socket, to the host through the relay, with its viewer identity
+  const ws = new NativeWS(`${ROOMS}/join?room=${live}&${u.search.slice(1)}`);
+  ws.addEventListener("close", (e) => guestClosed(e.code));
+  return ws;
 };
 Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+
+// --- live rooms --------------------------------------------------------------------
+
+const TEXT = 0, BYTES = 1, CLOSE = 2;
+let lastGuestNote = 0;
+
+function guestClosed(code) {
+  // danvas's frontend retries on its own; say why while it does
+  const why = code === 4404 ? "No one is hosting this room right now. It reconnects when the host is back."
+    : code === 4410 ? "The host left. It reconnects if they host again."
+    : code === 4429 ? "This room is full." : null;
+  if (!why || Date.now() - lastGuestNote < 30_000) return;
+  lastGuestNote = Date.now();
+  const n = note(why);
+  setTimeout(() => n.remove(), 12_000);
+}
+
+const tagged = (kind, g, body) => {
+  const out = new Uint8Array(body.length + 5);
+  out[0] = kind;
+  new DataView(out.buffer).setUint32(1, g);
+  out.set(body, 5);
+  return out;
+};
+
+/** Host this tab's canvas in a room: each guest becomes one more viewer of the app. */
+function hostRoom(room, onState) {
+  let ws = null, wait = 500, stopped = false;
+  const guests = new Map();   // guest number -> sid
+  const enc = new TextEncoder();
+  const drop = (g) => {
+    const sid = guests.get(g);
+    if (sid === undefined) return;
+    guests.delete(g);
+    sockets.delete(sid);
+    tell("drop", { sid });
+    onState(guests.size);
+  };
+  const open = () => {
+    ws = new NativeWS(`${ROOMS}/host?room=${room}`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { wait = 500; onState(0); };
+    ws.onmessage = ({ data }) => {
+      if (typeof data === "string") {
+        const m = JSON.parse(data);
+        if (m.join != null) {
+          const g = m.join, sid = nextSid++;
+          guests.set(g, sid);
+          // the worker's replies to this viewer go back to the relay, tagged for it
+          sockets.set(sid, { _event: ({ ev, text, bytes }) => {
+            if (ws.readyState !== 1) return;
+            if (ev === "deliver") ws.send(tagged(TEXT, g, enc.encode(text)));
+            else if (ev === "deliver_bytes") ws.send(tagged(BYTES, g, new Uint8Array(bytes)));
+            else if (ev === "closed") { ws.send(tagged(CLOSE, g, new Uint8Array())); drop(g); }
+          } });
+          tell("connect", { sid, query: m.query ?? {}, ua: m.ua ?? "" });
+          onState(guests.size);
+        } else if (m.leave != null) drop(m.leave);
+        return;
+      }
+      const b = new Uint8Array(data);
+      const g = new DataView(b.buffer).getUint32(1);
+      const sid = guests.get(g);
+      if (sid === undefined) return;
+      if (b[0] === TEXT) tell("send", { sid, text: new TextDecoder().decode(b.subarray(5)) });
+      else if (b[0] === BYTES) { const body = b.slice(5).buffer; tell("send", { sid, bytes: body }, [body]); }
+    };
+    ws.onclose = () => {
+      for (const g of [...guests.keys()]) drop(g);
+      if (stopped) return;
+      onState(null);   // reconnecting
+      setTimeout(open, wait);
+      wait = Math.min(wait * 2, 10_000);
+    };
+  };
+  open();
+  return { stop() { stopped = true; for (const g of [...guests.keys()]) drop(g); ws?.close(1000); } };
+}
+
+/** The Share live control, at the lower right above the repo link. */
+function shareControl() {
+  const box = document.getElementById("dv-live");
+  if (!box) return;
+  box.hidden = false;
+  let hosting = null, room = null;
+  const tidy = (u) => u.toString().replace(/%2F/gi, "/");   // owner/name reads better unescaped
+  const linkFor = (r) => { const u = new URL(location.href); u.searchParams.set("live", r); u.hash = ""; return tidy(u); };
+  const render = (n) => {
+    box.replaceChildren();
+    if (!hosting) {
+      box.append(button("Share live", start, "dv-live-btn"));
+      box.title = "Let others join this canvas: they see what you see, and their drawings and moves reach you";
+      return;
+    }
+    const dot = Object.assign(document.createElement("span"), { className: n === null ? "dv-dot off" : "dv-dot" });
+    box.append(dot, n === null ? "connecting… " : `live · ${n} guest${n === 1 ? "" : "s"} · `);
+    box.append(button("copy link", async (e) => {
+      const t = e.target;
+      try { await navigator.clipboard.writeText(linkFor(room)); t.textContent = "copied"; } catch { prompt("The room's link:", linkFor(room)); }
+      setTimeout(() => (t.textContent = "copy link"), 1500);
+    }, "dv-live-act"), " · ", button("stop", stop, "dv-live-act"));
+    box.title = "Anyone with the link can join while this tab is open";
+  };
+  function start(again) {
+    room = typeof again === "string" ? again : [...crypto.getRandomValues(new Uint8Array(10))].map((b) => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
+    try { sessionStorage.setItem(hostKey, room); } catch { /* still works, but not across a reload */ }
+    history.replaceState(null, "", linkFor(room));
+    hosting = hostRoom(room, render);
+    render(null);
+  }
+  function stop() {
+    hosting?.stop();
+    hosting = null;
+    try { sessionStorage.removeItem(hostKey); } catch { /* fine */ }
+    const u = new URL(location.href); u.searchParams.delete("live"); history.replaceState(null, "", tidy(u));
+    render();
+  }
+  if (live) start(live); else render();   // a host that reloads keeps its room
+}
+
+/** A guest: no Python here; danvas's frontend connects to the host's tab. */
+async function joinRoom() {
+  document.title = `${repo ? repo.split("/")[1] + " · " : ""}live · danvas`;
+  document.getElementById("dv-boot")?.remove();
+  const link = document.getElementById("dv-repo-link");
+  if (repo) { link.querySelector("b").textContent = repo; link.hidden = false; }
+  const box = document.getElementById("dv-live");
+  if (box) {
+    box.hidden = false;
+    box.title = "Another person's tab runs this canvas; you are a viewer of it";
+    box.append(Object.assign(document.createElement("span"), { className: "dv-dot" }), "joined a live room");
+  }
+  await loadDanvasFrontend();
+}
 
 // --- boot ------------------------------------------------------------------------
 
@@ -485,6 +631,7 @@ function showNotices(list) {
 }
 
 async function main() {
+  if (guest) return joinRoom();
   if (!repo) return askRepo();
   document.title = `${repo.split("/")[1]} · danvas`;
   try { devRepos = new Set(await (await fetch("/_gh/repos.json")).json()); } catch { /* not the dev server */ }
@@ -564,6 +711,7 @@ async function main() {
   link.hidden = false;
   await loadDanvasFrontend();
   showNotices(notices);
+  shareControl();
   console.log(`[danvas-static] ready ${Math.round(performance.now())} ms after navigation`);
 
   // follow the repository

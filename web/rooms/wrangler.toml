@@ -1,0 +1,18 @@
+# Live rooms for static danvas: npx wrangler deploy (from this folder)
+name = "danvas-rooms"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+# pages allowed to host or join a room (localhost is always allowed, for testing)
+ORIGINS = "https://danielchahine004.github.io"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

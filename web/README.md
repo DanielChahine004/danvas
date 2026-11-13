@@ -40,7 +40,10 @@ cwd      = ""                  # folder the app runs in, relative to the repo
 
 ## What changes in the browser
 
-- Each viewer runs their own copy of the canvas: no shared live session.
+- Each viewer runs their own copy of the canvas, unless one of them clicks
+  **Share live**: their tab then hosts a live room, and whoever opens its link
+  joins that same canvas as another viewer, with shared drawings, cursors and
+  panels, as on a served danvas. The relay is [`rooms/`](rooms/README.md).
 - There are no threads. danvas's handler kernels and `threading.Thread` run on
   the worker's event loop, and `time.sleep` returns at once. Handlers that
   return promptly work as they do served; `@canvas.background` loops must be

@@ -231,9 +231,15 @@ class App:
 
     # --- the socket ------------------------------------------------------------------
 
-    def connect(self, js):
-        """`js` is the page's end of the socket: deliver(text), deliver_bytes(u8), closed(code)."""
+    def connect(self, js, query=None, ua=None):
+        """`js` is the page's end of the socket: deliver(text), deliver_bytes(u8), closed(code).
+        A guest of a live room brings its viewer identity (`query`: vid, vname,
+        vcolor) and browser (`ua`), as a browser connecting to a served canvas would."""
         ws = _Socket(js, self)
+        if query:
+            ws.query_params = {str(k): str(v) for k, v in (query.to_py() if hasattr(query, "to_py") else query).items()}
+        if ua:
+            ws.headers = {"user-agent": str(ua)}
         self.sockets.append(ws)
         asyncio.ensure_future(self.canvas._bridge.handle_connection(ws))
         return ws

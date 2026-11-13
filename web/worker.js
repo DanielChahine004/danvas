@@ -46,12 +46,12 @@ const ops = {
   reload() { return app.reload(); },
   drawings() { return app.drawings_json(); },
   load_drawings({ text }) { app.load_drawings(text); },
-  connect({ sid }) {
+  connect({ sid, query, ua }) {
     sockets.set(sid, app.connect({
       deliver: (text) => postMessage({ ev: "deliver", sid, text }),
       deliver_bytes: (u8) => { const bytes = u8.slice().buffer; postMessage({ ev: "deliver_bytes", sid, bytes }, [bytes]); },
       closed: (code) => { sockets.delete(sid); postMessage({ ev: "closed", sid, code }); },
-    }));
+    }, query ? py.toPy(query) : null, ua ?? null));
   },
   send({ sid, text, bytes }) {
     const s = sockets.get(sid);
