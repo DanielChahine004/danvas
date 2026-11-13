@@ -247,6 +247,8 @@ class _FactoryMixin:
         """Insert an :class:`~danvas.Image` panel. See :meth:`insert` for ``place``.
 
         ``src`` is a path, URL, image bytes, Matplotlib/PIL figure, or array.
+        ``fit`` is ``"contain"`` (default), ``"cover"`` or ``"fill"`` (stretched
+        to the panel, so a small image can cover a large one).
         """
         return self._make(Image, src, name=name, label=label, fit=fit, **place)
 

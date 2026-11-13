@@ -16,11 +16,14 @@ from .react import React
 # Native React panel (not an iframe) so a vector/SVG or high-resolution image
 # stays sharp when the canvas is zoomed — an iframe is rasterised then scaled.
 # Scoped under `.pc-img`; the image is centred and never upscaled past natural
-# size (``max-*:100%``), with ``object-fit`` deciding contain vs cover.
+# size (``max-*:100%``), with ``object-fit`` deciding contain vs cover. ``fill``
+# stretches it to the panel exactly, up or down: a small picture can cover a big
+# panel without being enlarged (and sent, and decoded) at that size.
 _IMG_CSS = """
 .pc-img{width:100%;height:100%;box-sizing:border-box;display:flex;
  align-items:center;justify-content:center;background:#0b0f17}
 .pc-img img{max-width:100%;max-height:100%;display:block}
+.pc-img img.pc-fill{width:100%;height:100%;max-width:none;max-height:none}
 """
 
 from . import _jsx
@@ -41,8 +44,8 @@ class Image(React):
 
     def __init__(self, src, name="image", label=None, w=None, h=None,
                  fit="contain", color=None):
-        # ``fit`` is the CSS object-fit: "contain" (default, whole image) or
-        # "cover" (fill, cropping overflow).
+        # ``fit`` is the CSS object-fit: "contain" (default, whole image),
+        # "cover" (fill, cropping overflow) or "fill" (stretched to the panel).
         self._fit = fit
         super().__init__(source=_IMG_SOURCE, name=name, label=label, w=w, h=h,
                          props={"src": _to_data_uri(src), "fit": fit,
@@ -64,13 +67,13 @@ class Image(React):
 
     @property
     def fit(self):
-        """The CSS object-fit (``"contain"``/``"cover"``); assignable live."""
+        """The CSS object-fit (``"contain"``/``"cover"``/``"fill"``); assignable live."""
         return self._data.get("fit", self._fit)
 
     @fit.setter
     def fit(self, value):
-        if value not in ("contain", "cover"):
-            raise ValueError('fit must be "contain" or "cover"')
+        if value not in ("contain", "cover", "fill"):
+            raise ValueError('fit must be "contain", "cover" or "fill"')
         self._fit = value
         super(Image, self).update(fit=value)
 

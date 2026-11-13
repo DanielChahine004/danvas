@@ -42,7 +42,7 @@ const $msg = document.getElementById("dv-msg");
 const $status = document.getElementById("dv-status");
 const say = (t) => { if ($msg?.isConnected) $msg.textContent = t; };   // the boot screen, until the app shows
 const status = (t) => { $status.hidden = !t; $status.textContent = t || ""; };
-const DEBUG = qs.has("debug") ? (window.__dv = { sent: [], recv: [] }) : null;
+const DEBUG = qs.has("debug") ? (window.__dv = { sent: [], recv: [], memory: () => call("memory") }) : null;
 
 function fail(err) {
   console.error(err);
