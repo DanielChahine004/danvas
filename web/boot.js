@@ -20,6 +20,10 @@
 //   packages = ["numpy"]                 # Pyodide/PyPI packages
 //   files    = ["notesmap.toml"]         # what the app reads; the entry module's files() can add more
 //   cwd      = ""                        # folder the app runs in, relative to the repo
+//   max_image = 1200                     # optional: shrink PNG/JPEG/WebP files wider or taller than
+//                                        # this (pixels) as they are fetched, so the app, the page
+//                                        # and a phone's memory carry what is shown, not the original
+//                                        # (opaque PNGs are stored as JPEG data, keeping their name)
 //
 //   [[app.mount]]                        # optional: files from another repo, if this reader may read it
 //   repo  = "owner/private-repo"
@@ -157,13 +161,59 @@ async function blob(snap, entry) {
 const under = (p, specs) => specs.some((s) => p === s || p.startsWith(s.endsWith("/") ? s : s + "/"));
 const fetchable = (p, e) => !SKIP.test(p) && (e.size ?? 0) <= MAX_FILE;
 
+// [app] max_image: big pictures are shrunk on the way in, one at a time (a phone
+// decoding dozens at once would run out of memory doing it)
+let maxImage = 0;
+let shrinking = Promise.resolve();
+const IMAGE = /\.(png|jpe?g|webp)$/i;
+
+function shrink(data, path) {
+  if (!maxImage || !IMAGE.test(path) || data.length < 100_000) return Promise.resolve(data);
+  const job = shrinking.then(() => shrinkNow(data, path));
+  shrinking = job.catch(() => {});
+  return job;
+}
+
+async function shrinkNow(data, path) {
+  const type = /\.png$/i.test(path) ? "image/png" : /\.webp$/i.test(path) ? "image/webp" : "image/jpeg";
+  try {
+    const bmp = await createImageBitmap(new Blob([data], { type }));
+    const k = Math.min(1, maxImage / Math.max(bmp.width, bmp.height));
+    // a PNG is re-encoded even at full size: photos saved as PNG are many times
+    // their JPEG size (browsers read the bytes, not the name, so it stays .png)
+    if (k === 1 && type !== "image/png") { bmp.close(); return data; }
+    const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
+    const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement("canvas"), { width: w, height: h });
+    const g = c.getContext("2d");
+    g.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    let to = type;
+    if (type === "image/png") {   // JPEG unless it has see-through pixels
+      const px = g.getImageData(0, 0, w, h).data;
+      let opaque = true;
+      for (let i = 3; i < px.length; i += 4) if (px[i] < 255) { opaque = false; break; }
+      if (opaque) to = "image/jpeg";
+    }
+    const out = c.convertToBlob ? await c.convertToBlob({ type: to, quality: 0.85 })
+      : await new Promise((r) => c.toBlob(r, to, 0.85));
+    c.width = c.height = 0;   // let go of the pixels now: iOS counts canvas memory strictly
+    if (!out || out.type !== to) return data;   // e.g. no WebP encoder: keep the original
+    const small = new Uint8Array(await out.arrayBuffer());
+    return small.length < data.length ? small : data;
+  } catch (e) {
+    console.warn("[danvas-static] could not shrink", path, e);
+    return data;
+  }
+}
+
 /** Copy the files of `snap` matching `specs` into Pyodide at `dest`, skipping
  * ones already there at the same blob; delete ones that went away. */
 async function sync(snap, specs, dest, have, label) {
   const todo = [...snap.files.values()].filter((e) => under(e.path, specs) && fetchable(e.path, e) && have.get(e.path) !== e.sha);
   let n = 0;
   await Promise.all(todo.map(async (e) => {
-    const data = await blob(snap, e);
+    const data = await shrink(await blob(snap, e), e.path);
     await call("write", { path: `${dest}/${e.path}`, data: data.buffer }, [data.buffer]);
     have.set(e.path, e.sha);
     say(`${label} ${++n}/${todo.length}`);
@@ -691,6 +741,7 @@ async function main() {
   await pyReady;
   const manifest = await call("manifest", { text: manifestText });
   const m = manifest.app ?? manifest;
+  maxImage = Number.isFinite(m.max_image) && m.max_image > 0 ? m.max_image : 0;
 
   // the code: other repos (github:), PyPI packages, and folders of this repo (paths)
   const pip = new Set(m.packages ?? []);
