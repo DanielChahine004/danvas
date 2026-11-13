@@ -7,7 +7,8 @@ A browser has no threads, so this paces itself with threading.Timer (which the
 static page runs on the browser's event loop) rather than a thread that sleeps.
 """
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import danvas
@@ -29,21 +30,22 @@ FACE = """
 canvas = danvas.Canvas()
 canvas.markdown((Path(__file__).parent / "notes.md").read_text(encoding="utf-8"), name="about", x=60, y=60, w=420, h=200)
 clock = canvas.custom(html=FACE, name="clock", x=520, y=40, w=240, h=240)
-speed = canvas.slider("updates per second", min=1, max=10, default=1, x=60, y=300)
+speed = canvas.slider("clock speed", min=1, max=600, default=1, x=60, y=300)
 status = canvas.label("status", "", below=speed)
+
+# the clock's own time: it starts at now and runs `speed` times faster than real time
+shown, last = datetime.now(), time.monotonic()
 
 
 def tick():
-    now = datetime.now()
-    clock.push({"h": now.hour, "m": now.minute, "s": now.second})
-    threading.Timer(1 / speed.value, tick).start()
+    global shown, last
+    t = time.monotonic()
+    shown += timedelta(seconds=(t - last) * speed.value)
+    last = t
+    clock.push({"h": shown.hour, "m": shown.minute, "s": shown.second + shown.microsecond / 1e6})
+    status.update(f"{shown:%H:%M:%S} at {speed.value}x")
+    threading.Timer(0.1, tick).start()
 
 
-@speed.on_change
-def on_speed(value):
-    status.update(f"updating {value}x a second")
-
-
-on_speed(speed.value)
 tick()
 canvas.serve(port=8000)
