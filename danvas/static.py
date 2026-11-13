@@ -190,7 +190,7 @@ class App:
         result = None
         if entry.endswith(".py"):
             # a script: run as __main__, as `python app.py` would; its serve() returns at once
-            runpy.run_path(os.path.join(self.root, entry), run_name="__main__")
+            runpy.run_path(os.path.join(self.root, self.m.get("cwd", ""), entry), run_name="__main__")
         else:
             mod, _, fn = entry.partition(":")
             result = getattr(importlib.import_module(mod), fn or "app")()

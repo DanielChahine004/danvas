@@ -72,6 +72,7 @@ Every script is self-contained: `python examples/<name>.py` opens a browser tab 
 - [`merge_hub.py`](merge_hub.py) — Canvas-as-hub: pull *other* running canvases in — from the UI or from code
 - [`public_tunnel.py`](public_tunnel.py) — Share a canvas with anyone, anywhere — via a public HTTPS tunnel
 - [`load_canvas.py`](load_canvas.py) — Reopen a board: live panels in code, plus your saved formation + drawings
+- [`static_app/`](static_app) — A canvas published as a link, run in each reader's browser: a `danvas.toml` and an `app.py` ([open it](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml))
 - [`bake_app.py`](bake_app.py) — Package a canvas into a standalone desktop app with canvas.bake()
 
 Notebooks: `merge_canvases.ipynb`, `notebook_autopanel.ipynb`, `notebook_dynamic.ipynb` — the same API from Jupyter.

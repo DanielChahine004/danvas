@@ -1,0 +1,10 @@
+# A danvas app hosted as a link, with no server: danvas's static page reads this
+# file from GitHub and runs app.py in the reader's browser (Pyodide).
+#   https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml
+# In your own repo, put a danvas.toml at the top and the link is just ?repo=you/yourrepo.
+[app]
+cwd = "examples/static_app"   # the folder app.py runs in, relative to the repo
+entry = "app.py"              # a script that builds a canvas and calls canvas.serve()
+files = ["notes.md"]          # data the app reads, fetched next to it
+# packages = ["numpy"]        # PyPI packages Pyodide can install
+# requires = ["github:owner/pkg@ref"]   # Python packages from other repos
