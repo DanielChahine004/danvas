@@ -58,9 +58,9 @@ cwd      = ""                  # folder the app runs in, relative to the repo
   pure-Python packages or ones Pyodide builds.
 - A private repository needs **Sign in with GitHub** (on the picker, or offered
   when GitHub says "not found"), and the
-  [sign-in app](https://github.com/apps/paperstore-daniel) given access to that
-  repository. Sign-in borrows [paperstore](https://github.com/DanielChahine004/paperstore)'s
-  GitHub App and worker, whose `VIEWERS` must list this page. The token is kept
+  [sign-in app](https://github.com/apps/danvas-daniel) given access to that
+  repository. Sign-in goes through the worker in [`auth/`](auth/README.md),
+  which holds the app's client secret. The token is kept
   for the tab only, renewed before it expires, and never passed to the app's
   code. `#token=<fine-grained token, Contents: read>` works too.
 

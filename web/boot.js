@@ -54,11 +54,11 @@ function button(text, onclick, className = "") {
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
 
-// "Sign in with GitHub", for private repos: paperstore's GitHub App and its
-// sign-in worker, which sends the token back here in the URL fragment. The
-// token is kept for this tab only and never passed to the app's code.
-const AUTH = "https://paperstore-auth.daniel-chahine004.workers.dev";
-const GH_APP = "https://github.com/apps/paperstore-daniel";
+// "Sign in with GitHub", for private repos: danvas's GitHub App and its
+// sign-in worker (web/auth/), which sends the token back here in the URL
+// fragment. The token is kept for this tab only and never passed to the app's code.
+const AUTH = "https://danvas-auth.daniel-chahine004.workers.dev";
+const GH_APP = "https://github.com/apps/danvas-daniel";
 function keepToken(t, refresh, expiresIn) {
   try {
     sessionStorage.setItem("dv-token", t);

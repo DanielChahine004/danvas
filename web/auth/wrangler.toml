@@ -1,0 +1,10 @@
+name = "danvas-auth"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = true      # served at danvas-auth.<subdomain>.workers.dev
+preview_urls = false    # no per-version preview addresses
+
+[vars]
+VIEWER = "https://danielchahine004.github.io/danvas/"
+VIEWERS = ""                          # other approved pages, space separated
+CLIENT_ID = "Iv23liJKe7ZOwWHIzFha"   # the danvas-daniel GitHub App; the secret goes in with: npx wrangler secret put CLIENT_SECRET
