@@ -54,8 +54,16 @@ cwd      = ""                  # folder the app runs in, relative to the repo
 - `canvas.serve(...)` hands the canvas to the page and returns; its view and
   Inspector settings apply, its network settings do not. The Inspector stays
   off unless asked for.
-- Only what a browser may do: no local files, hardware or sockets, and only
+- Only what a browser may do: no local files or sockets, and only
   pure-Python packages or ones Pyodide builds.
+- A serial device on the reader's computer, through `danvas.webserial.Serial`
+  (Web Serial: Chrome or Edge on a computer). The page holds the port and the
+  reader chooses the device in the browser's picker, so call `open()` from a
+  button's handler; if the click is too long ago for the browser, the page
+  asks with its own "Choose a device" prompt, and a device chosen before is
+  reused on the next visit. The same code opens a named port with pyserial
+  when the app runs as a script. See
+  [examples/static_serial](../examples/static_serial).
 - `[[app.mount]]` (`repo`, `files`, `at`, optional `ref`) adds files from a
   second repository, fetched with the reader's sign-in: a reader who cannot
   read it gets the app without them. A mount from another owner's repository

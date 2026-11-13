@@ -27,7 +27,7 @@ function Component({ canvas, value, props }) {
           onChange={(e) => setText(e.target.value)}
           onBlur={(e) => commit(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") { commit(e.target.value); e.target.blur(); }
+            if (e.key === "Enter") e.target.blur();   // the blur commits it, once
           }} />
       </div>
     </>

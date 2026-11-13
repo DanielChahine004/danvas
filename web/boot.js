@@ -186,12 +186,110 @@ function call(op, args = {}, transfer = []) {
 function tell(op, args = {}, transfer = []) { worker.postMessage({ op, ...args }, transfer); }
 
 worker.onmessage = ({ data }) => {
+  if (data.ev === "serial") { serialOp(data); return; }
   if (data.ev) { sockets.get(data.sid)?._event(data); return; }
   const p = pending.get(data.id);
   pending.delete(data.id);
   if (data.ok) p.resolve(data.result); else p.reject(new Error(data.error));
 };
 worker.onerror = (e) => fail(new Error("the Python worker failed: " + (e.message || "see the console")));
+
+// --- serial ports (danvas.webserial) -------------------------------------------------
+// The app's Python asks for a port; the page holds it, because the browser's
+// port picker belongs to the page and needs a click. Bytes go to the worker as
+// they arrive; what the app writes comes back here.
+
+const serials = new Map();   // pid -> { port, reader, writer }
+
+function toSerial(pid, kind, value, transfer = []) { tell("serial", { pid, kind, value }, transfer); }
+
+async function serialOpen(pid, { baud, filters }) {
+  if (!("serial" in navigator)) {
+    toSerial(pid, "closed", "this browser has no Web Serial: open the link in Chrome or Edge on a computer");
+    return;
+  }
+  const want = (p) => !filters?.length || filters.some((f) => {
+    const i = p.getInfo();
+    return (f.usbVendorId === undefined || f.usbVendorId === i.usbVendorId) && (f.usbProductId === undefined || f.usbProductId === i.usbProductId);
+  });
+  // a port the reader chose before on this site, if there is just one
+  const known = (await navigator.serial.getPorts()).filter(want);
+  let port = known.length === 1 ? known[0] : null;
+  if (!port) {
+    try {
+      port = await navigator.serial.requestPort({ filters: filters ?? [] });
+    } catch (e) {
+      if (e.name === "NotFoundError") { toSerial(pid, "closed", "no device was chosen"); return; }
+      // too long after a click for the browser to show its picker: ask for one
+      port = await new Promise((resolve) => {
+        const n = note("The app asks for a serial device.", ["Choose a device", async () => {
+          n.remove();
+          try { resolve(await navigator.serial.requestPort({ filters: filters ?? [] })); } catch { resolve(null); }
+        }], () => resolve(null));
+      });
+      if (!port) { toSerial(pid, "closed", "no device was chosen"); return; }
+    }
+  }
+  try {
+    await port.open({ baudRate: baud });
+  } catch (e) {
+    // InvalidStateError: this page has it open already
+    if (e.name !== "InvalidStateError") { toSerial(pid, "closed", `could not open the port: ${e.message}`); return; }
+  }
+  const s = { port, writer: port.writable.getWriter(), reader: null };
+  serials.set(pid, s);
+  const i = port.getInfo();
+  toSerial(pid, "open", i.usbVendorId ? `USB ${i.usbVendorId.toString(16).padStart(4, "0")}:${(i.usbProductId ?? 0).toString(16).padStart(4, "0")}` : "serial port");
+  let why = "closed";
+  try {
+    while (port.readable && serials.get(pid) === s) {
+      s.reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await s.reader.read();
+          if (done) break;
+          const b = value.slice().buffer;
+          toSerial(pid, "data", b, [b]);
+        }
+      } catch (e) {
+        why = e.message;   // a framing or parity error, or the device unplugged
+      } finally {
+        s.reader.releaseLock();
+      }
+      if (serials.get(pid) !== s) break;
+    }
+  } finally {
+    if (serials.get(pid) === s) serials.delete(pid);
+    try { s.writer.releaseLock(); } catch { /* gone */ }
+    try { await port.close(); } catch { /* gone */ }
+    toSerial(pid, "closed", why);
+  }
+}
+
+async function serialClose(pid) {
+  const s = serials.get(pid);
+  if (!s) return;
+  serials.delete(pid);
+  try { await s.reader?.cancel(); } catch { /* gone */ }
+}
+
+function serialOp({ pid, op, ...args }) {
+  if (op === "open") serialOpen(pid, args).catch((e) => toSerial(pid, "closed", String(e?.message || e)));
+  else if (op === "write") serials.get(pid)?.writer.write(args.data).catch(() => serialClose(pid));
+  else if (op === "close") serialClose(pid);
+}
+
+/** A notice at the top with an action button and ×; returns its element. */
+function note(text, act, onDismiss) {
+  const box = document.getElementById("dv-notes");
+  const div = document.createElement("div");
+  div.append(text + " ");
+  if (act) div.append(Object.assign(document.createElement("button"), { className: "dv-act", type: "button", textContent: act[0], onclick: act[1] }));
+  div.append(Object.assign(document.createElement("button"), { className: "dv-x", type: "button", textContent: "×", title: "Dismiss",
+    onclick: () => { div.remove(); onDismiss?.(); } }));
+  box?.append(div);
+  return div;
+}
 
 // --- the socket -----------------------------------------------------------------------
 // danvas's frontend opens `new WebSocket(".../ws")`; it gets this instead, and

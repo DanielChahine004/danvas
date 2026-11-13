@@ -151,10 +151,13 @@ A canvas that each viewer can run on their own can be published as a link
 instead of a process: add a `danvas.toml` to its repository and open
 `https://danielchahine004.github.io/danvas/?repo=owner/name`. The page runs
 danvas and the app's Python in the reader's browser (Pyodide), fetching the code
-and files from GitHub and following new commits. Threads, hardware and a shared
-live session are what it gives up; see [web/README.md](https://github.com/DanielChahine004/danvas/blob/main/web/README.md).
+and files from GitHub and following new commits. Threads, sockets and a shared
+live session are what it gives up (a serial device on the reader's computer
+still works, through `danvas.webserial`); see [web/README.md](https://github.com/DanielChahine004/danvas/blob/main/web/README.md).
 A small one to copy: [examples/static_app](https://github.com/DanielChahine004/danvas/tree/main/examples/static_app),
-[open it](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml).
+[open it](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml); and one that plots a serial device:
+[examples/static_serial](https://github.com/DanielChahine004/danvas/tree/main/examples/static_serial),
+[open it](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_serial/danvas.toml).
 
 ## Learn more
 

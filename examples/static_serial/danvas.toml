@@ -1,0 +1,7 @@
+# A serial device on the reader's own computer, plotted by an app opened as a link:
+#   https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_serial/danvas.toml
+# The browser asks the reader to choose the device (Chrome or Edge on a computer).
+# The same app.py runs locally too: python app.py COM3
+[app]
+cwd = "examples/static_serial"
+entry = "app.py"

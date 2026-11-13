@@ -60,6 +60,10 @@ const ops = {
     else s.push_bytes(new Uint8Array(bytes));
   },
   drop({ sid }) { sockets.get(sid)?.drop(); sockets.delete(sid); },
+  // a serial port the page holds for danvas.webserial: kind "data" | "open" | "closed"
+  serial({ pid, kind, value }) {
+    py.pyimport("danvas.webserial")._from_page(pid, kind, value instanceof ArrayBuffer ? new Uint8Array(value) : value);
+  },
 };
 
 // one message at a time, in order: a frame sent while a file is still being
