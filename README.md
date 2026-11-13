@@ -1,6 +1,6 @@
 # danvas
 
-**▶ [Open a danvas app from a GitHub repo, no server](https://danielchahine004.github.io/danvas/)** · [how](#without-a-server)
+**▶ [Open a danvas app from a GitHub repo, no server](https://danielchahine004.github.io/danvas/)** · [try an example](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml) ([its code](https://github.com/DanielChahine004/danvas/tree/main/examples/static_app)) · [how](#without-a-server)
 
 danvas builds interactive browser UIs — dashboards, control panels, live
 visualizations — entirely in Python, with no HTML, JavaScript, or build step. You
