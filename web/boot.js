@@ -306,23 +306,27 @@ function parseGithubReq(spec) {
   return { repo: m[1], ref: m[2], sub: m[3] };
 }
 
+const owner = (r) => r.split("/")[0].toLowerCase();
+
 /** Copy a [[app.mount]]'s files into the app's folder, if this reader may read
- * that repo; otherwise leave them out and say so in the console. */
+ * that repo; otherwise leave them out, and return a notice saying why. */
 async function mount(mt) {
   const at = String(mt.at ?? "").replace(/^\/+|\/+$/g, "");
   if (!/^[\w.-]+\/[\w.-]+$/.test(mt.repo ?? "") || !at || at.split("/").includes("..") || !Array.isArray(mt.files)) {
     console.warn("[danvas-static] mount skipped: needs repo, files and at (inside this repo)", mt);
-    return;
+    return null;
   }
-  const owner = (r) => r.split("/")[0].toLowerCase();
+  const askKey = `dv-mount-ok:${repo}>${mt.repo}`;
   if (token && owner(mt.repo) !== owner(repo)) {
-    const key = `dv-mount-ok:${repo}>${mt.repo}`;
-    if (safeGet(key) !== "yes") {
-      if (!confirm(`${repo} asks to read files from ${mt.repo} with your GitHub sign-in (${mt.files.join(", ")}).\n\nAllow?`)) {
-        console.info(`[danvas-static] mount of ${mt.repo} declined`);
-        return;
-      }
-      safeSet(key, "yes");
+    let ok = safeGet(askKey);
+    if (ok !== "yes" && ok !== "no") {
+      ok = confirm(`${repo} asks to read files from ${mt.repo} with your GitHub sign-in (${mt.files.join(", ")}).\n\nAllow?`) ? "yes" : "no";
+      safeSet(askKey, ok);
+    }
+    if (ok === "no") {
+      console.info(`[danvas-static] mount of ${mt.repo} declined`);
+      return { id: `declined:${mt.repo}`, text: `You chose not to let this map read ${mt.repo}, so some of it is left out.`,
+        act: ["Allow", () => { safeSet(askKey, "yes"); location.reload(); }] };
     }
   }
   try {
@@ -330,9 +334,55 @@ async function mount(mt) {
     const s = await snapshot(mt.repo, mt.ref);
     const n = await sync(s, mt.files, `/repo/${at}`, new Map(), `Reading ${mt.repo}…`);
     console.info(`[danvas-static] mounted ${n} file(s) of ${mt.repo} at ${at}/`);
+    return null;
   } catch (e) {
     if (!e.gh) throw e;
     console.info(`[danvas-static] ${mt.repo} not mounted (${e.gh}): ${token ? "no access" : "sign in to see it"}`);
+    return whyNotMounted(mt.repo, e.gh);
+  }
+}
+
+/** A notice for a mount GitHub refused: signed out, expired, rate-limited, the
+ * sign-in app not given the repo, or the reader not a collaborator. GitHub says
+ * 404 for both of the last two; the reader's installations of the app tell them apart. */
+async function whyNotMounted(r, status) {
+  const id = `${status}:${r}`;
+  if (!token) return { id, text: `Some of this map comes from ${r}, which is private or missing. If you have access, sign in to see it.`, act: ["Sign in with GitHub", signIn] };
+  if (status === 401) return { id, text: "Your GitHub sign-in has expired, so some of this map is left out.", act: ["Sign in again", signIn] };
+  if (status === 403 || status === 429) return { id, text: `GitHub refused to send ${r} just now (rate limit?), so some of this map is left out. Try reloading later.` };
+  let me = "", insts = [];
+  try {
+    const h = { Accept: "application/vnd.github+json", Authorization: "Bearer " + token };
+    me = (await (await fetch("https://api.github.com/user", { headers: h })).json()).login || "";
+    insts = (await (await fetch("https://api.github.com/user/installations", { headers: h })).json()).installations || [];
+  } catch { /* offline: fall through to the general wording */ }
+  const inst = insts.find((i) => (i.account?.login || "").toLowerCase() === owner(r));
+  const who = me ? `Signed in as ${me}. ` : "";
+  if (me && me.toLowerCase() === owner(r)) {
+    return inst
+      ? { id, text: `${who}${r} isn't among the repositories this map's sign-in app may read, so some of the map is left out.`,
+          link: ["Give it access", `https://github.com/settings/installations/${inst.id}`] }
+      : { id, text: `${who}The sign-in app isn't installed on your account, so ${r} is left out of this map.`,
+          link: ["Install it on that repository", `${GH_APP}/installations/new`] };
+  }
+  return { id, text: `${who}You don't have access to ${r}, or its owner hasn't given this map's sign-in app access to it, so some of the map is left out.`,
+    act: ["Sign in as someone else", signOut] };
+}
+
+/** Notices above the repo link; each can be dismissed, and stays dismissed for this map. */
+function showNotices(list) {
+  const box = document.getElementById("dv-notes");
+  if (!box) return;
+  for (const n of list) {
+    const key = `dv-note-off:${repo}:${n.id}`;
+    if (safeGet(key)) continue;
+    const div = document.createElement("div");
+    div.append(n.text + " ");
+    if (n.act) div.append(Object.assign(document.createElement("button"), { className: "dv-act", type: "button", textContent: n.act[0], onclick: n.act[1] }));
+    if (n.link) div.append(Object.assign(document.createElement("a"), { href: n.link[1], target: "_blank", rel: "noopener", textContent: n.link[0] }), ", then reload.");
+    div.append(Object.assign(document.createElement("button"), { className: "dv-x", type: "button", textContent: "×", title: "Dismiss",
+      onclick: () => { safeSet(key, "1"); div.remove(); } }));
+    box.append(div);
   }
 }
 
@@ -394,7 +444,8 @@ async function main() {
   const extra = await call("extra_files", { manifest });
   specs = [...specs, ...extra];
   await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
-  for (const mt of m.mount ?? []) await mount(mt);
+  const notices = [];
+  for (const mt of m.mount ?? []) { const n = await mount(mt); if (n) notices.push(n); }
 
   say("Building the app…");
   console.log("[danvas-static]", await call("start", { manifest }));
@@ -414,6 +465,7 @@ async function main() {
   link.querySelector("b").textContent = repo;
   link.hidden = false;
   await loadDanvasFrontend();
+  showNotices(notices);
   console.log(`[danvas-static] ready ${Math.round(performance.now())} ms after navigation`);
 
   // follow the repository

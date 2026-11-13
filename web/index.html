@@ -31,12 +31,23 @@
     color: #94a3b8; background: rgba(15,23,42,.8); padding: 5px 9px; border-radius: 6px; text-decoration: none; }
   #dv-repo-link:hover { color: #e2e8f0; }
   #dv-repo-link b { font-weight: 600; color: #cbd5e1; }
+  #dv-notes { position: fixed; left: 50%; transform: translateX(-50%); top: 56px; z-index: 99999; display: flex;
+    flex-direction: column; align-items: center; gap: 6px; width: max-content;
+    max-width: min(420px, calc(100vw - 24px)); font: 500 12px/1.4 system-ui, sans-serif; }
+  #dv-notes > div { color: #cbd5e1; background: rgba(15,23,42,.9); border: 1px solid #334155; padding: 7px 28px 7px 10px;
+    border-radius: 8px; position: relative; }
+  #dv-notes a, #dv-notes button.dv-act { color: #93c5fd; background: none; border: 0; padding: 0; font: inherit;
+    text-decoration: underline; cursor: pointer; }
+  #dv-notes button.dv-x { position: absolute; top: 3px; right: 6px; background: none; border: 0; color: #64748b;
+    font: 16px/1 system-ui, sans-serif; cursor: pointer; padding: 2px; }
+  #dv-notes button.dv-x:hover { color: #e2e8f0; }
   @keyframes dv-spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 <div id="root"><div id="dv-boot"><div class="ring"></div><div id="dv-msg">Starting…</div></div></div>
 <div id="dv-status" hidden></div>
+<div id="dv-notes"></div>
 <a id="dv-repo-link" href="./" hidden title="Open another repository"><b></b> · open another</a>
 <script type="module" src="./boot.js"></script>
 </body>
