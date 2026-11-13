@@ -48,6 +48,14 @@
   #dv-live button:hover { text-decoration: underline; }
   #dv-live .dv-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 3px; }
   #dv-live .dv-dot.off { background: #f59e0b; }
+  /* a phone: danvas's toolbar spans the bottom, so the page's labels go to the
+     top right, below where danvas shows its viewer count */
+  @media (max-width: 640px) {
+    #dv-live { top: 44px; bottom: auto; }
+    #dv-repo-link { top: 76px; bottom: auto; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #dv-status { top: 44px; right: auto; left: 12px; }
+    #dv-notes { top: 108px; }
+  }
   @keyframes dv-spin { to { transform: rotate(360deg); } }
 </style>
 </head>

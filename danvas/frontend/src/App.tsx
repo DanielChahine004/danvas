@@ -80,7 +80,9 @@ function PresenceBadge() {
   useEffect(() => subscribeRoster(setRosterState), [])
   const processes = roster.filter((v) => v.device === 'process').length
   const count = roster.length - processes
-  if (count + processes < 1) return null
+  // alone, there is nothing to say: the badge appears once someone else (or a
+  // program) joins
+  if (count < 2 && processes < 1) return null
   return (
     <div
       style={{
