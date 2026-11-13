@@ -56,6 +56,11 @@ cwd      = ""                  # folder the app runs in, relative to the repo
   off unless asked for.
 - Only what a browser may do: no local files, hardware or sockets, and only
   pure-Python packages or ones Pyodide builds.
+- `[[app.mount]]` (`repo`, `files`, `at`, optional `ref`) adds files from a
+  second repository, fetched with the reader's sign-in: a reader who cannot
+  read it gets the app without them. A mount from another owner's repository
+  is asked about first. E.g. figures kept in a private papers repo show on a
+  public notes map for collaborators only.
 - A private repository needs **Sign in with GitHub** (on the picker, or offered
   when GitHub says "not found"), and the
   [sign-in app](https://github.com/apps/danvas-daniel) given access to that

@@ -20,6 +20,17 @@
 //   packages = ["numpy"]                 # Pyodide/PyPI packages
 //   files    = ["notesmap.toml"]         # what the app reads; the entry module's files() can add more
 //   cwd      = ""                        # folder the app runs in, relative to the repo
+//
+//   [[app.mount]]                        # optional: files from another repo, if this reader may read it
+//   repo  = "owner/private-repo"
+//   ref   = "main"                       # optional; default: its default branch
+//   files = ["figures/"]                 # paths or folder/ prefixes in that repo
+//   at    = "notes/remote"               # where they appear, relative to this repo
+//
+// A mount is fetched with the reader's own sign-in. A reader who cannot read it
+// (signed out, or not a collaborator) gets the app without those files. A
+// mount from another owner's repo is asked about first, once per pair, so a
+// stranger's map cannot quietly read a signed-in reader's private repos.
 
 const POLL_MS = 60_000;
 const SKIP = /\.(pdf|zip|tar|gz|tgz|7z|exe|dll|so|dylib|mp4|mov|avi|mkv|iso)$/i;
@@ -295,6 +306,36 @@ function parseGithubReq(spec) {
   return { repo: m[1], ref: m[2], sub: m[3] };
 }
 
+/** Copy a [[app.mount]]'s files into the app's folder, if this reader may read
+ * that repo; otherwise leave them out and say so in the console. */
+async function mount(mt) {
+  const at = String(mt.at ?? "").replace(/^\/+|\/+$/g, "");
+  if (!/^[\w.-]+\/[\w.-]+$/.test(mt.repo ?? "") || !at || at.split("/").includes("..") || !Array.isArray(mt.files)) {
+    console.warn("[danvas-static] mount skipped: needs repo, files and at (inside this repo)", mt);
+    return;
+  }
+  const owner = (r) => r.split("/")[0].toLowerCase();
+  if (token && owner(mt.repo) !== owner(repo)) {
+    const key = `dv-mount-ok:${repo}>${mt.repo}`;
+    if (safeGet(key) !== "yes") {
+      if (!confirm(`${repo} asks to read files from ${mt.repo} with your GitHub sign-in (${mt.files.join(", ")}).\n\nAllow?`)) {
+        console.info(`[danvas-static] mount of ${mt.repo} declined`);
+        return;
+      }
+      safeSet(key, "yes");
+    }
+  }
+  try {
+    say(`Reading ${mt.repo}…`);
+    const s = await snapshot(mt.repo, mt.ref);
+    const n = await sync(s, mt.files, `/repo/${at}`, new Map(), `Reading ${mt.repo}…`);
+    console.info(`[danvas-static] mounted ${n} file(s) of ${mt.repo} at ${at}/`);
+  } catch (e) {
+    if (!e.gh) throw e;
+    console.info(`[danvas-static] ${mt.repo} not mounted (${e.gh}): ${token ? "no access" : "sign in to see it"}`);
+  }
+}
+
 async function main() {
   if (!repo) return askRepo();
   document.title = `${repo.split("/")[1]} · danvas`;
@@ -353,6 +394,7 @@ async function main() {
   const extra = await call("extra_files", { manifest });
   specs = [...specs, ...extra];
   await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
+  for (const mt of m.mount ?? []) await mount(mt);
 
   say("Building the app…");
   console.log("[danvas-static]", await call("start", { manifest }));
