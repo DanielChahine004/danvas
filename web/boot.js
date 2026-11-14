@@ -493,6 +493,12 @@ function hostRoom(room, onState) {
 }
 
 /** The Share live control, at the lower right above the repo link. */
+// what this viewer added to the canvas (saved in this browser), and a way to clear it
+let mine = 0;
+let clearMine = null;
+let renderBar = () => {};
+function setMine(n) { if (n !== mine) { mine = n; renderBar(); } }
+
 function shareControl() {
   const box = document.getElementById("dv-live");
   if (!box) return;
@@ -505,6 +511,11 @@ function shareControl() {
     if (!hosting) {
       box.append(button("Share live", start, "dv-live-btn"));
       box.title = "Let others join this canvas: they see what you see, and their drawings and moves reach you";
+      if (mine && clearMine) {
+        const c = button("clear mine", () => clearMine(), "dv-live-act");
+        c.title = "What's added to this canvas is kept in this browser only. Remove it all";
+        box.append(" · ", c);
+      }
       return;
     }
     const dot = Object.assign(document.createElement("span"), { className: n === null ? "dv-dot off" : "dv-dot" });
@@ -530,6 +541,7 @@ function shareControl() {
     const u = new URL(location.href); u.searchParams.delete("live"); history.replaceState(null, "", tidy(u));
     render();
   }
+  renderBar = () => { if (!hosting) render(); };
   if (live) start(live); else render();   // a host that reloads keeps its room
 }
 
@@ -668,14 +680,16 @@ function showNotices(list) {
   const box = document.getElementById("dv-notes");
   if (!box) return;
   for (const n of list) {
-    const key = `dv-note-off:${repo}:${n.id}`;
-    if (safeGet(key)) continue;
+    const key = `dv-note-off:${repo}:${n.id}`;   // `once` notes come back next load
+    if (!n.once && safeGet(key)) continue;
     const div = document.createElement("div");
+    div.id = `dv-${n.id}`;
+    if (n.autohide) setTimeout(() => div.remove(), n.autohide);
     div.append(n.text + " ");
     if (n.act) div.append(Object.assign(document.createElement("button"), { className: "dv-act", type: "button", textContent: n.act[0], onclick: n.act[1] }));
     if (n.link) div.append(Object.assign(document.createElement("a"), { href: n.link[1], target: "_blank", rel: "noopener", textContent: n.link[0] }), ", then reload.");
     div.append(Object.assign(document.createElement("button"), { className: "dv-x", type: "button", textContent: "×", title: "Dismiss",
-      onclick: () => { safeSet(key, "1"); div.remove(); } }));
+      onclick: () => { if (!n.once) safeSet(key, "1"); div.remove(); } }));
     box.append(div);
   }
 }
@@ -793,11 +807,25 @@ async function main() {
 
   // this viewer's drawings: the worker holds them, this page keeps them
   const drawKey = `dv-drawings:${repo}:${manifestPath}`;
-  await call("load_drawings", { text: safeGet(drawKey) || "{}" });
+  const restored = await call("load_drawings", { text: safeGet(drawKey) || "{}" });
   let saved = "";
-  const save = async () => { const s = await call("drawings"); if (s !== saved) { safeSet(drawKey, s); saved = s; } };
+  const save = async () => {
+    const s = await call("drawings");
+    if (s !== saved) { safeSet(drawKey, s); saved = s; setMine(await call("user_drawings")); }
+  };
   setInterval(save, 3000);
   addEventListener("pagehide", save);
+  clearMine = async () => {
+    if (!confirm("Remove everything added to this canvas in this browser (drawings, shapes, text, notes)? This can't be undone.")) return;
+    await call("clear_drawings");
+    await save();
+    document.getElementById("dv-restored")?.remove();
+  };
+  if (restored) notices.push({ id: "restored", once: true, autohide: 20_000,
+    text: `What was added to this canvas here last time is back (${restored} item${restored === 1 ? "" : "s"}). ` +
+      "Drawings, shapes, text and notes are kept in this browser only: nobody else sees them, and the repository isn't changed.",
+    act: ["Clear it", () => clearMine()] });
+  setMine(restored);
 
   remember(repo);
   stage("draw");

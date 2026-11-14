@@ -199,6 +199,9 @@ class App:
         if not _served:
             raise RuntimeError(f"{entry} built no canvas: it should call canvas.serve() or return the canvas")
         self.canvas = _served[-1]
+        # shapes the app drew itself share the store with the viewer's: note
+        # which are the app's, so clearing leaves them
+        self._app_ids = set(self.canvas._bridge._drawings)
         # an entry may return a reload hook (or an object with .reload): called
         # when new files arrive, instead of rebuilding the canvas from scratch
         self.reloader = result.reload if hasattr(result, "reload") else result if callable(result) else None
@@ -223,11 +226,30 @@ class App:
     def drawings_json(self) -> str:
         return json.dumps(self.canvas._bridge._drawings) if self.canvas else "{}"
 
-    def load_drawings(self, text: str) -> None:
+    def load_drawings(self, text: str) -> int:
+        """Put back what this viewer saved; returns how many of their own came back."""
         try:
             self.canvas._bridge._drawings.update(json.loads(text or "{}"))
         except ValueError:
             pass
+        return self.user_drawings()
+
+    def _mine(self) -> list:
+        app = getattr(self, "_app_ids", set())
+        return [rid for rid in self.canvas._bridge._drawings if rid not in app] if self.canvas else []
+
+    def user_drawings(self) -> int:
+        """How many records on the canvas the viewer (or a guest) added."""
+        return len(self._mine())
+
+    def clear_drawings(self) -> int:
+        """Remove everything the viewer added, from the canvas and every open view."""
+        bridge = self.canvas._bridge if self.canvas else None
+        gone = {rid: bridge._drawings.pop(rid) for rid in self._mine()} if bridge else {}
+        if gone:
+            bridge.broadcast({"type": "draw", "diff": {"added": {}, "updated": {}, "removed": gone}})
+            bridge._notify_mutation()
+        return len(gone)
 
     # --- the socket ------------------------------------------------------------------
 

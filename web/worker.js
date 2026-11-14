@@ -7,7 +7,7 @@
 // The page talks to it by message:
 //   {id, op, ...args}            -> {id, ok, result} | {id, ok: false, error}
 //   ops: init, write, unlink, syspath, manifest, requirements, pip,
-//        extra_files, start, reload, drawings, load_drawings,
+//        extra_files, start, reload, drawings, load_drawings, user_drawings, clear_drawings,
 //        connect {sid}, send {sid, text | bytes}, drop {sid}
 //   events to the page: {ev: "deliver", sid, text} | {ev: "deliver_bytes", sid, bytes}
 //                       | {ev: "closed", sid, code}
@@ -47,7 +47,9 @@ const ops = {
   // ?debug: the Python heap (WebAssembly memory, which only grows), in MB
   memory() { return Math.round(py._module.HEAPU8.length / 1e6); },
   drawings() { return app.drawings_json(); },
-  load_drawings({ text }) { app.load_drawings(text); },
+  load_drawings({ text }) { return app.load_drawings(text); },
+  user_drawings() { return app.user_drawings(); },
+  clear_drawings() { return app.clear_drawings(); },
   connect({ sid, query, ua }) {
     sockets.set(sid, app.connect({
       deliver: (text) => postMessage({ ev: "deliver", sid, text }),

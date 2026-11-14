@@ -22,6 +22,7 @@ paths    = ["tools/pkg/src"]   # ...or code kept in this repo, put on sys.path
 packages = ["numpy"]           # extra Pyodide/PyPI packages
 files    = ["data/"]           # what the app reads (files or folder/ prefixes)
 cwd      = ""                  # folder the app runs in, relative to the repo
+max_image = 1200               # optional: shrink big pictures as they are fetched
 ```
 
 - **Where the code comes from.** `requires = ["github:…@tag"]` uses a shared,
@@ -35,8 +36,16 @@ cwd      = ""                  # folder the app runs in, relative to the repo
 - **Updates.** The page checks the repository for new commits every minute,
   fetches what changed, and calls the reload hook the entry returned (a callable,
   or an object with `.reload()`), else rebuilds the canvas.
-- **Drawings.** What a viewer draws with danvas's tools is kept in their
-  browser, per repository.
+- **What a viewer adds.** Drawings, shapes, text and notes made with danvas's
+  tools (a live room's guests' included) are kept in that viewer's browser, per
+  repository, and come back when they open the link again; nobody else sees
+  them, and the repository is never changed. The page says so when it puts them
+  back, and **clear mine** beside **Share live** removes them. Preferences
+  (theme, colours, tool) are kept per browser too. Clearing the site's data in
+  the browser removes all of it.
+- **Images.** `max_image = 1200` under `[app]` shrinks PNG/JPEG/WebP files
+  wider or taller than that as they are fetched (opaque PNGs become JPEG data,
+  keeping their names), so a map with many figures fits in a phone's memory.
 
 ## What changes in the browser
 

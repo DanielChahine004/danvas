@@ -154,6 +154,8 @@ danvas and the app's Python in the reader's browser (Pyodide), fetching the code
 and files from GitHub and following new commits. Threads and sockets are what it
 gives up. A serial device on the reader's computer still works (`danvas.webserial`),
 and a reader can click **Share live** to host the canvas for others to join; see [web/README.md](https://github.com/DanielChahine004/danvas/blob/main/web/README.md).
+What a reader draws or writes on it is saved in their own browser only, and
+comes back when they reopen the link; **clear mine** removes it.
 A small one to copy: [examples/static_app](https://github.com/DanielChahine004/danvas/tree/main/examples/static_app),
 [open it](https://danielchahine004.github.io/danvas/?repo=DanielChahine004/danvas&app=examples/static_app/danvas.toml); and one that plots a serial device:
 [examples/static_serial](https://github.com/DanielChahine004/danvas/tree/main/examples/static_serial),
