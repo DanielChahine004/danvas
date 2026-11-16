@@ -504,6 +504,7 @@ function shareControl() {
   if (!box) return;
   box.hidden = false;
   let hosting = null, room = null;
+  window.liveBusy = () => !!hosting;   // live.js: a new version waits while this tab hosts a room
   const tidy = (u) => u.toString().replace(/%2F/gi, "/");   // owner/name reads better unescaped
   const linkFor = (r) => { const u = new URL(location.href); u.searchParams.set("live", r); u.hash = ""; return tidy(u); };
   const render = (n) => {
