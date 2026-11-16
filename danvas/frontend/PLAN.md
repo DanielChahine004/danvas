@@ -3,7 +3,7 @@
 A tldraw-free, drop-in replacement for `danvas/frontend`, built to speak danvas's
 existing wire protocol **unchanged**. Python is the source of truth; the frontend
 conforms to it. This plan reconciles the original architecture spec against the
-*actual* current code in `C:\Users\h\Desktop\danvas`.
+*actual* current code in `C:\Users\h\Code\danvas`.
 
 ---
 
