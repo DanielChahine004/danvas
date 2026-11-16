@@ -207,13 +207,15 @@ class App:
         self.reloader = result.reload if hasattr(result, "reload") else result if callable(result) else None
         return f"{entry}: {len(self.canvas.components)} panels"
 
-    def reload(self) -> str:
+    def reload(self, code: bool = False) -> str:
         """New files are in place. Let the app update in place, else rebuild:
-        the frontend reconnects to the new canvas, keeping this viewer's drawings."""
-        if self.reloader is not None:
+        the frontend reconnects to the new canvas, keeping this viewer's drawings.
+        `code`: a github: requirement (under /pkgs) has new code, which the app's own
+        update cannot pick up, so its modules are dropped too and the app rebuilt."""
+        if self.reloader is not None and not code:
             return str(self.reloader())
         drawings = self.canvas._bridge._drawings if self.canvas else {}
-        for mod in [m for m, v in sys.modules.items() if _from_repo(v, self.root)]:
+        for mod in [m for m, v in sys.modules.items() if _from_repo(v, self.root) or (code and _from_repo(v, "/pkgs"))]:
             del sys.modules[mod]
         summary = self.start()
         self.canvas._bridge._drawings.update(drawings)

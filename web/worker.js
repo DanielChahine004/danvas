@@ -43,7 +43,7 @@ const ops = {
     app = ds.App(py.toPy(manifest), "/repo");
     return app.start();
   },
-  reload() { return app.reload(); },
+  reload({ code } = {}) { return app.reload(!!code); },
   // ?debug: the Python heap (WebAssembly memory, which only grows), in MB
   memory() { return Math.round(py._module.HEAPU8.length / 1e6); },
   drawings() { return app.drawings_json(); },

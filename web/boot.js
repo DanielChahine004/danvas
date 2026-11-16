@@ -36,7 +36,7 @@
 // mount from another owner's repo is asked about first, once per pair, so a
 // stranger's map cannot quietly read a signed-in reader's private repos.
 
-const POLL_MS = 60_000;
+const POLL_MS = 20_000;
 const SKIP = /\.(pdf|zip|tar|gz|tgz|7z|exe|dll|so|dylib|mp4|mov|avi|mkv|iso)$/i;
 const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|\.pixi|tests?|docs|examples)\//;
 const MAX_FILE = 20 * 1024 * 1024;
@@ -764,6 +764,7 @@ async function main() {
     const e = s.files.get(path);
     if (e) for (const d of await call("requirements", { text: new TextDecoder().decode(await blob(s, e)) })) pip.add(d);
   };
+  const deps = [];   // each github: requirement, followed like this repo (below)
   for (const spec of m.requires ?? []) {
     if (!spec.startsWith("github:")) { pip.add(spec); continue; }
     const req = parseGithubReq(spec);
@@ -772,7 +773,9 @@ async function main() {
     const sub = req.sub ?? ([...s.files.keys()].some((p) => p.startsWith("src/") && p.endsWith(".py")) ? "src" : "");
     const dest = `/pkgs/${req.repo.replace("/", "__")}`;
     const code = [...s.files.keys()].filter((p) => !SKIP_DIRS.test(p) && (!sub || p.startsWith(sub + "/")));
-    await sync(s, code, dest, new Map(), `Fetching ${req.repo}…`);
+    const dep = { req, sub, dest, snap: s, have: new Map() };
+    deps.push(dep);
+    await sync(s, code, dest, dep.have, `Fetching ${req.repo}…`);
     await call("syspath", { path: sub ? `${dest}/${sub}` : dest });
     await pyproject(s, "pyproject.toml");
   }
@@ -845,13 +848,25 @@ async function main() {
   const poll = devRepos.has(repo) ? 2000 : POLL_MS;
   setInterval(async () => {
     try {
+      // a github: requirement with new code (a pinned tag or commit never moves): its files, then a rebuild
+      let code = 0;
+      for (const d of deps) {
+        const s = await snapshot(d.req.repo, d.snap.ref, true);
+        if (!s || s.sha === d.snap.sha) continue;
+        if (s.files.get("pyproject.toml")?.sha !== d.snap.files.get("pyproject.toml")?.sha) { await save(); location.reload(); return; }   // new dependencies: start over
+        d.snap = s;
+        status("Updating…");
+        code += await sync(s, [...s.files.keys()].filter((p) => !SKIP_DIRS.test(p) && (!d.sub || p.startsWith(d.sub + "/"))), d.dest, d.have, "Updating…");
+      }
       const s = await snapshot(repo, snap.ref, true);
-      if (!s || s.sha === snap.sha) return;
-      if (s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { await save(); location.reload(); return; }
-      snap = s;
-      status("Updating…");
-      const n = await sync(snap, specs, "/repo", have, "Updating…");
-      if (n) console.log("[danvas-static] reloaded:", await call("reload"));
+      let n = 0;
+      if (s && s.sha !== snap.sha) {
+        if (s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { await save(); location.reload(); return; }
+        snap = s;
+        status("Updating…");
+        n = await sync(snap, specs, "/repo", have, "Updating…");
+      }
+      if (n || code) console.log("[danvas-static] reloaded:", await call("reload", { code: code > 0 }));
       status("");
     } catch (e) { console.warn("[danvas-static] poll:", e); status(""); }
   }, poll);
