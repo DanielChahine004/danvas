@@ -42,7 +42,7 @@ const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|\.pixi|tests?|do
 const MAX_FILE = 20 * 1024 * 1024;
 
 const qs = new URLSearchParams(location.search);
-const $msg = document.getElementById("dv-msg");
+let $msg = document.getElementById("dv-msg");
 const $status = document.getElementById("dv-status");
 const say = (t) => { if ($msg?.isConnected) $msg.textContent = t; };   // the boot screen, until the app shows
 const status = (t) => { $status.hidden = !t; $status.textContent = t || ""; };
@@ -100,7 +100,9 @@ async function freshToken() {
     if (res.ok) { const t = await res.json(); keepToken(t.access_token, t.refresh_token, t.expires_in); }
   } catch { /* offline: try again next time */ }
 }
-const repo = qs.get("repo");   // the bare link asks, offering recent repos
+// ?local=owner/name: the app comes from that repo, the files from the reader's own computer
+const localApp = /^[\w.-]+\/[\w.-]+$/.test(qs.get("local") || "") ? qs.get("local") : null;
+const repo = qs.get("repo") || (localApp ? "local:" + localApp : null);   // the bare link asks, offering recent repos
 const RECENT = "dv-recent";
 function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) => typeof r === "string"); } catch { return []; } }
 function remember(r) { safeSet(RECENT, JSON.stringify([r, ...recent().filter((x) => x !== r)].slice(0, 8))); }
@@ -147,6 +149,7 @@ async function snapshot(r, ref, conditional = false) {
 }
 
 async function blob(snap, entry) {
+  if (entry.read) return entry.read();   // a file on the reader's own computer
   if (!token || devRepos.has(snap.repo)) {
     const res = await fetch(`${raw(snap.repo)}/${snap.repo}/${snap.sha}/${entry.path.split("/").map(encodeURIComponent).join("/")}`);
     if (!res.ok) throw new Error(`${entry.path}: ${res.status}`);
@@ -158,7 +161,7 @@ async function blob(snap, entry) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-const under = (p, specs) => specs.some((s) => p === s || p.startsWith(s.endsWith("/") ? s : s + "/"));
+const under = (p, specs) => specs.some((s) => s === "*" || p === s || p.startsWith(s.endsWith("/") ? s : s + "/"));
 const fetchable = (p, e) => !SKIP.test(p) && (e.size ?? 0) <= MAX_FILE;
 
 // [app] max_image: big pictures are shrunk on the way in, one at a time (a phone
@@ -561,6 +564,282 @@ async function joinRoom() {
   await loadDanvasFrontend();
 }
 
+// --- files on the reader's own computer (?local=owner/name) ------------------------
+// The app's repo holds danvas.local.toml: the manifest to run ([app]) and, under
+// [local], what to make of the files a reader opens:
+//
+//   [local]
+//   main = ["main.tex", "*.tex"]      # the opened files' main file: first pattern that matches, shallowest path
+//   [local.write]                     # files added when the opened ones lack them; {main} is the main file
+//   "notesmap.toml" = '''[source]
+//   path = "{main}"'''
+//   [local.starter]                   # "Start new notes": files copied from the app's repo into a folder
+//   "main.tex" = "src/notesmap/templates/main.tex"
+//
+// A danvas.toml among the opened files is used instead of [app]. Nothing is
+// uploaded: the files go from the disk into this tab's Python. Chrome and Edge
+// can keep a chosen folder (or file), so the map follows each save and the
+// folder can be reopened next visit; other browsers read a snapshot, and
+// dropping the files again updates it.
+
+const LOCAL_SKIP_DIR = /^(\.|node_modules$|__pycache__$|venv$)/;   // hidden folders (.git, .venv, ...) too
+const LOCAL_MAX_FILES = 3000;
+const LOCAL_POLL_MS = 1500;
+const canPickDir = typeof window.showDirectoryPicker === "function";
+const canPickFile = typeof window.showOpenFilePicker === "function";
+const enc = new TextEncoder();
+
+/** IndexedDB, for the folder handle Chrome lets a page keep between visits. */
+function idb(mode, fn) {
+  return new Promise((resolve) => {
+    try {
+      const open = indexedDB.open("dv-local", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("handles");
+      open.onerror = () => resolve(null);
+      open.onsuccess = () => {
+        const tx = open.result.transaction("handles", mode);
+        const req = fn(tx.objectStore("handles"));
+        tx.oncomplete = () => resolve(req?.result ?? null);
+        tx.onerror = () => resolve(null);
+      };
+    } catch { resolve(null); }
+  });
+}
+const keepHandle = (h) => idb("readwrite", (s) => s.put(h, localApp));
+const keptHandle = () => idb("readonly", (s) => s.get(localApp));
+
+function tooMany(name) {
+  return new Error(`"${name}" holds more than ${LOCAL_MAX_FILES} files: choose the folder that holds your notes, not one above it`);
+}
+
+/** Every file under a directory handle: [[path, FileSystemFileHandle], ...]. */
+async function walkDir(dir, prefix = "", out = []) {
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === "directory") {
+      if (!LOCAL_SKIP_DIR.test(name)) await walkDir(h, prefix + name + "/", out);
+    } else out.push([prefix + name, h]);
+    if (out.length > LOCAL_MAX_FILES) throw tooMany(dir.name);
+  }
+  return out;
+}
+
+/** Files from a drop or an <input>, as [[path, File], ...] relative to the chosen folder. */
+async function droppedFiles(entries, fileList) {
+  const out = [];
+  const readEntry = async (entry, prefix) => {
+    if (entry.isFile) {
+      out.push([prefix + entry.name, await new Promise((ok, no) => entry.file(ok, no))]);
+    } else if (entry.isDirectory && !LOCAL_SKIP_DIR.test(entry.name)) {
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+        if (!batch.length) break;
+        for (const e of batch) await readEntry(e, prefix + entry.name + "/");
+      }
+    }
+    if (out.length > LOCAL_MAX_FILES) throw tooMany(entry.name);
+  };
+  if (entries) {
+    // one folder dropped: paths start inside it
+    if (entries.length === 1 && entries[0].isDirectory) {
+      const reader = entries[0].createReader();
+      for (;;) {
+        const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+        if (!batch.length) break;
+        for (const e of batch) await readEntry(e, "");
+      }
+    } else for (const e of entries) await readEntry(e, "");
+    return out;
+  }
+  for (const f of fileList) {
+    const rel = f.webkitRelativePath ? f.webkitRelativePath.split("/").slice(1).join("/") : f.name;
+    if (!rel.split("/").slice(0, -1).some((d) => LOCAL_SKIP_DIR.test(d))) out.push([rel, f]);
+    if (out.length > LOCAL_MAX_FILES) throw tooMany(f.webkitRelativePath?.split("/")[0] || "that folder");
+  }
+  return out;
+}
+
+/** What a drop holds, taken at once: the browser empties dataTransfer after the
+ * handler's first await. Chrome/Edge give handles (watchable); all give entries. */
+function grabDrop(dt) {
+  const items = [...dt.items].filter((i) => i.kind === "file");
+  return {
+    any: items.length > 0,
+    handles: items[0]?.getAsFileSystemHandle ? Promise.all(items.map((i) => i.getAsFileSystemHandle())) : Promise.resolve([]),
+    entries: items.map((i) => i.webkitGetAsEntry?.()).filter(Boolean),
+  };
+}
+
+/** Open what a drop held: a watched folder or file where the browser allows it, else a snapshot. */
+async function openDrop(drop, name) {
+  const handles = await drop.handles.catch(() => []);
+  if (handles.length === 1 && handles[0]?.kind === "directory") return pickedDir(handles[0]);
+  if (handles.length && handles.every((h) => h?.kind === "file")) return pickedFiles(handles);
+  const files = await droppedFiles(drop.entries, null);
+  const one = drop.entries.length === 1 ? drop.entries[0].name : null;
+  return files.length ? pickedSnapshot(one || name, files) : null;
+}
+
+/** What the reader opened: {name, watch, list()} where list() gives [[path, File], ...] now. */
+function pickedDir(dir) {
+  return { name: dir.name, watch: true, handle: dir,
+    list: async () => Promise.all((await walkDir(dir)).map(async ([p, h]) => [p, await h.getFile()])) };
+}
+function pickedFiles(handles) {
+  return { name: handles[0].name, watch: true, handle: handles.length === 1 ? handles[0] : null,
+    list: async () => Promise.all(handles.map(async (h) => [h.name, await h.getFile()])) };
+}
+function pickedSnapshot(name, files) {
+  return { name, watch: false, list: async () => files };
+}
+
+const globRe = (g) => new RegExp("^" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, ".") + "$", "i");
+
+/** The opened files as a snapshot (like a repo's), with [local.write]'s files added where missing. */
+async function localSnapshot(picked, conf) {
+  const files = new Map();
+  for (const [p, f] of await picked.list()) {
+    files.set(p, { path: p, size: f.size, sha: `${f.size}:${f.lastModified}`,
+      read: async () => new Uint8Array(await f.arrayBuffer()) });
+  }
+  const paths = [...files.keys()].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  let main = "";
+  for (const g of conf?.main ?? []) {
+    const re = globRe(g);
+    main = paths.find((p) => re.test(p.split("/").pop())) || "";
+    if (main) break;
+  }
+  for (const [p, text] of Object.entries(conf?.write ?? {})) {
+    if (files.has(p) || typeof text !== "string") continue;
+    const data = enc.encode(text.replaceAll("{main}", main));
+    files.set(p, { path: p, size: data.length, sha: "w:" + main, read: async () => data });
+  }
+  const sha = [...files.values()].map((e) => `${e.path}:${e.sha}`).sort().join("\n");
+  return { repo, ref: null, sha, files, name: picked.name, main };
+}
+
+/** The app repo's danvas.local.toml (text). */
+async function localPreset() {
+  const ref = qs.get("ref") || "HEAD";
+  const res = await fetch(`${raw(localApp)}/${localApp}/${ref}/danvas.local.toml`, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`${localApp} has no danvas.local.toml (${res.status}): it is what says how to open files from this computer`);
+  return res.text();
+}
+
+/** "Start new notes": copy [local.starter] from the app's repo into a folder the reader chooses. */
+async function writeStarter(dir, conf) {
+  const ref = qs.get("ref") || "HEAD";
+  for (const [to, from] of Object.entries(conf?.starter ?? {})) {
+    if (typeof from !== "string" || to.split("/").includes("..")) continue;
+    let exists = true;
+    try { await (await dirFor(dir, to, false)).getFileHandle(to.split("/").pop()); } catch { exists = false; }
+    if (exists) continue;   // never overwrite the reader's own file
+    const res = await fetch(`${raw(localApp)}/${localApp}/${ref}/${from}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`could not fetch ${from} from ${localApp}: ${res.status}`);
+    const fh = await (await dirFor(dir, to, true)).getFileHandle(to.split("/").pop(), { create: true });
+    const w = await fh.createWritable();
+    await w.write(await res.arrayBuffer());
+    await w.close();
+  }
+}
+async function dirFor(dir, path, create) {
+  for (const part of path.split("/").slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create });
+  return dir;
+}
+
+/** The opening screen: choose a folder or file, drop one, reopen last time's, or
+ * start new notes. Resolves with what was opened. Python loads meanwhile. */
+function askLocal(confReady) {
+  const appName = localApp.split("/")[1];
+  const boot = document.getElementById("dv-boot");
+  boot.classList.add("ask");
+  boot.innerHTML = `<div class="dv-title">Open your ${appName} notes</div>
+    <div>Choose the folder that holds your notes (the <code>.tex</code> file and its images), or just the
+      <code>.tex</code> file. Nothing is uploaded: the files stay on this computer and are read by this tab only.</div>
+    <div class="dv-acts dv-pick"></div>
+    <div class="dv-drop">or drop the folder or file here</div>
+    <div class="dv-again"></div>
+    <div class="dv-auth"></div>
+    <div class="dv-why"></div>`;
+  const acts = boot.querySelector(".dv-pick");
+  const why = boot.querySelector(".dv-why");
+  const oops = (e) => { if (e?.name !== "AbortError") { console.error(e); why.textContent = "⚠ " + (e.message || e); } };
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (picked) => {
+      if (done || !picked) return;
+      done = true;
+      if (picked.handle) keepHandle(picked.handle);
+      resolve(picked);
+    };
+    const input = (dir) => {
+      const el = Object.assign(document.createElement("input"), { type: "file", multiple: !dir });
+      if (dir) el.webkitdirectory = true;
+      else el.accept = ".tex,.md,.toml";
+      el.onchange = async () => {
+        try {
+          const files = await droppedFiles(null, el.files);
+          const name = dir ? (el.files[0]?.webkitRelativePath.split("/")[0] || "notes") : el.files[0]?.name;
+          if (files.length) finish(pickedSnapshot(name, files));
+        } catch (e) { oops(e); }
+      };
+      el.click();
+    };
+    acts.append(button("Choose folder", async () => {
+      try {
+        if (canPickDir) finish(pickedDir(await showDirectoryPicker({ id: "dv-notes", mode: "read" })));
+        else input(true);
+      } catch (e) { oops(e); }
+    }), button("Choose .tex file", async () => {
+      try {
+        if (canPickFile) finish(pickedFiles(await showOpenFilePicker({ id: "dv-notes", multiple: true,
+          types: [{ description: "Notes", accept: { "text/plain": [".tex", ".md", ".toml"] } }] })));
+        else input(false);
+      } catch (e) { oops(e); }
+    }, "dv-second"));
+
+    // drop: a folder or files from the desktop
+    const drop = boot.querySelector(".dv-drop");
+    boot.ondragover = (e) => { e.preventDefault(); drop.classList.add("on"); };
+    boot.ondragleave = () => drop.classList.remove("on");
+    boot.ondrop = async (e) => {
+      e.preventDefault();
+      drop.classList.remove("on");
+      const d = grabDrop(e.dataTransfer);
+      try { if (d.any) finish(await openDrop(d, "notes")); } catch (err) { oops(err); }
+    };
+
+    // last time's folder (Chrome/Edge): one click, as the browser asks again
+    keptHandle().then((h) => {
+      if (!h || done) return;
+      boot.querySelector(".dv-again").append(button(`Reopen “${h.name}”`, async () => {
+        try {
+          if ((await h.requestPermission({ mode: "read" })) !== "granted") return;
+          finish(h.kind === "directory" ? pickedDir(h) : pickedFiles([h]));
+        } catch (e) { oops(e); }
+      }));
+    });
+
+    // new notes from the app's starter files, written into a folder the reader picks
+    if (canPickDir) {
+      const auth = boot.querySelector(".dv-auth");
+      confReady.then((conf) => {
+        if (done || !conf?.starter || !Object.keys(conf.starter).length) return;
+        auth.append("No notes yet? ", button("Start new notes in a folder", async () => {
+          try {
+            const dir = await showDirectoryPicker({ id: "dv-notes", mode: "readwrite" });
+            why.textContent = "Writing the starter notes…";
+            await writeStarter(dir, conf);
+            why.textContent = "";
+            finish(pickedDir(dir));
+          } catch (e) { oops(e); }
+        }, "dv-link"));
+      }).catch(() => {});
+    }
+  });
+}
+
 // --- boot ------------------------------------------------------------------------
 
 function askRepo() {
@@ -738,21 +1017,43 @@ async function main() {
   const last = crashLoop();
   if (last) return stoppedScreen(last);
   if (lite) document.head.append(Object.assign(document.createElement("style"), { textContent: "img, image { display: none !important; }" }));
-  document.title = `${repo.split("/")[1]} · danvas`;
+  document.title = `${(localApp || repo).split("/")[1]} · danvas`;
   try { devRepos = new Set(await (await fetch("/_gh/repos.json")).json()); } catch { /* not the dev server */ }
 
   stage("python");
-  say("Loading Python…");
   const pyReady = (async () => {
     const runtime = await (await fetch("runtime.zip")).arrayBuffer();
     await call("init", { runtime }, [runtime]);
   })();
+  pyReady.catch(() => {});   // reported where it is awaited
 
-  stage("files");
-  say(`Reading ${repo}…`);
-  let snap = await snapshot(repo, qs.get("ref"));
-  if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
-  const manifestText = new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath)));
+  // the files: a GitHub repo, or (?local=) what the reader opens from their own computer
+  let snap, manifestText, picked = null, localConf = null;
+  if (localApp) {
+    const presetText = localPreset();
+    presetText.catch(() => {});
+    const confReady = (async () => { const t = await presetText; await pyReady; return (await call("manifest", { text: t })).local ?? {}; })();
+    confReady.catch(() => {});
+    picked = await askLocal(confReady);
+    const boot = document.getElementById("dv-boot");
+    boot.classList.remove("ask");
+    boot.innerHTML = `<div class="ring"></div><div id="dv-msg"></div>`;
+    $msg = document.getElementById("dv-msg");
+    stage("files");
+    say("Loading Python…");
+    localConf = await confReady;
+    say(`Reading ${picked.name}…`);
+    snap = await localSnapshot(picked, localConf);
+    manifestText = snap.files.has(manifestPath) ? new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath))) : await presetText;
+  } else {
+    say("Loading Python…");
+    stage("files");
+    say(`Reading ${repo}…`);
+    snap = await snapshot(repo, qs.get("ref"));
+    if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
+    manifestText = new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath)));
+  }
+  const label = picked ? picked.name : repo;
   await pyReady;
   const manifest = await call("manifest", { text: manifestText });
   const m = manifest.app ?? manifest;
@@ -782,9 +1083,10 @@ async function main() {
   const paths = m.paths ?? [];
   const have = new Map();
   const cwd = m.cwd ? m.cwd.replace(/\/?$/, "/") : "";
-  let specs = [manifestPath, ...paths, ...(m.files ?? []).map((f) => cwd + f)];
-  if ((m.entry ?? "app.py").endsWith(".py")) specs.push(cwd + (m.entry ?? "app.py"));
-  await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
+  // opened from this computer: every file the reader chose (they chose them for this)
+  let specs = picked ? ["*"] : [manifestPath, ...paths, ...(m.files ?? []).map((f) => cwd + f)];
+  if (!picked && (m.entry ?? "app.py").endsWith(".py")) specs.push(cwd + (m.entry ?? "app.py"));
+  await sync(snap, specs, "/repo", have, `Reading ${label}…`);
   for (const p of paths) {
     await call("syspath", { path: "/repo/" + p.replace(/\/$/, "") });
     const parent = p.replace(/\/$/, "").split("/").slice(0, -1).join("/");
@@ -798,11 +1100,13 @@ async function main() {
   }
 
   // what the app itself says it reads
-  const extra = await call("extra_files", { manifest });
-  specs = [...specs, ...extra];
-  await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
   const notices = [];
-  for (const mt of m.mount ?? []) { const n = await mount(mt); if (n) notices.push(n); }
+  if (!picked) {
+    const extra = await call("extra_files", { manifest });
+    specs = [...specs, ...extra];
+    await sync(snap, specs, "/repo", have, `Reading ${repo}…`);
+    for (const mt of m.mount ?? []) { const n = await mount(mt); if (n) notices.push(n); }
+  } else if ((m.mount ?? []).length) console.info("[danvas-static] [[app.mount]] is skipped for files opened from this computer");
 
   stage("build");
   say("Building the app…");
@@ -810,7 +1114,7 @@ async function main() {
   started = true;
 
   // this viewer's drawings: the worker holds them, this page keeps them
-  const drawKey = `dv-drawings:${repo}:${manifestPath}`;
+  const drawKey = `dv-drawings:${repo}${picked ? ":" + picked.name : ""}:${manifestPath}`;
   const restored = await call("load_drawings", { text: safeGet(drawKey) || "{}" });
   let saved = "";
   const save = async () => {
@@ -827,15 +1131,19 @@ async function main() {
   };
   if (restored) notices.push({ id: "restored", once: true, autohide: 20_000,
     text: `What was added to this canvas here last time is back (${restored} item${restored === 1 ? "" : "s"}). ` +
-      "Drawings, shapes, text and notes are kept in this browser only: nobody else sees them, and the repository isn't changed.",
+      `Drawings, shapes, text and notes are kept in this browser only: nobody else sees them, and ${picked ? "your files aren't" : "the repository isn't"} changed.`,
     act: ["Clear it", () => clearMine()] });
+  if (picked) notices.push({ id: "local", once: true, autohide: 15_000,
+    text: picked.watch ? `Showing “${picked.name}” from this computer. Edit and save it in any editor: the map follows within a couple of seconds.`
+      : `Showing “${picked.name}” from this computer. This browser can't watch it for changes: after saving, drop it on the map again.` });
   setMine(restored);
 
-  remember(repo);
+  if (!picked) remember(repo);
   stage("draw");
   document.getElementById("dv-boot")?.remove();
   const link = document.getElementById("dv-repo-link");
-  link.querySelector("b").textContent = repo;
+  link.querySelector("b").textContent = picked ? picked.name : repo;
+  if (picked) { link.href = "?local=" + encodeURIComponent(localApp).replace(/%2F/gi, "/"); link.title = "Open other notes"; }
   link.hidden = false;
   await loadDanvasFrontend();
   showNotices(notices);
@@ -844,11 +1152,10 @@ async function main() {
   // still here a little after drawing: this load made it
   setTimeout(() => { tries = 0; stage("ok"); }, 8000);
 
-  // follow the repository
-  const poll = devRepos.has(repo) ? 2000 : POLL_MS;
-  setInterval(async () => {
+  // follow the code: a github: requirement with new code (a pinned tag or commit never moves)
+  const fresh = async (n, code) => { if (n || code) console.log("[danvas-static] reloaded:", await call("reload", { code: code > 0 })); status(""); };
+  if (deps.length) setInterval(async () => {
     try {
-      // a github: requirement with new code (a pinned tag or commit never moves): its files, then a rebuild
       let code = 0;
       for (const d of deps) {
         const s = await snapshot(d.req.repo, d.snap.ref, true);
@@ -858,18 +1165,46 @@ async function main() {
         status("Updating…");
         code += await sync(s, [...s.files.keys()].filter((p) => !SKIP_DIRS.test(p) && (!d.sub || p.startsWith(d.sub + "/"))), d.dest, d.have, "Updating…");
       }
-      const s = await snapshot(repo, snap.ref, true);
-      let n = 0;
+      await fresh(0, code);
+    } catch (e) { console.warn("[danvas-static] poll:", e); status(""); }
+  }, devRepos.size ? 2000 : POLL_MS);
+
+  // follow the files: the reader's own (each save, or each drop), or the repository
+  let busy = false;
+  const update = async (next) => {
+    if (busy) return;
+    busy = true;
+    try {
+      const s = await next();
       if (s && s.sha !== snap.sha) {
-        if (s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { await save(); location.reload(); return; }
+        if (!picked && s.files.get(manifestPath)?.sha !== snap.files.get(manifestPath)?.sha) { await save(); location.reload(); return; }
         snap = s;
         status("Updating…");
-        n = await sync(snap, specs, "/repo", have, "Updating…");
+        await fresh(await sync(snap, specs, "/repo", have, "Updating…"), 0);
       }
-      if (n || code) console.log("[danvas-static] reloaded:", await call("reload", { code: code > 0 }));
-      status("");
     } catch (e) { console.warn("[danvas-static] poll:", e); status(""); }
-  }, poll);
+    finally { busy = false; }
+  };
+  if (picked) {
+    if (picked.watch) setInterval(() => update(() => localSnapshot(picked, localConf)), LOCAL_POLL_MS);
+    // dropping files on the map again replaces them (the only way to update in browsers that cannot watch)
+    addEventListener("dragover", (e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) e.preventDefault(); }, true);
+    addEventListener("drop", async (e) => {
+      const d = grabDrop(e.dataTransfer);
+      if (!d.any) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const next = await openDrop(d, picked.name);
+        if (!next) return;
+        picked = next;
+        if (picked.handle) keepHandle(picked.handle);
+        update(() => localSnapshot(picked, localConf));
+      } catch (err) { console.warn("[danvas-static] drop:", err); status("⚠ " + (err.message || err)); }
+    }, true);
+  } else {
+    setInterval(() => update(() => snapshot(repo, snap.ref, true)), devRepos.has(repo) ? 2000 : POLL_MS);
+  }
 }
 
 main().catch(fail);

@@ -12,6 +12,40 @@ instead of a WebSocket. The app is the same code that
 `canvas.serve()` would host: a script such as `examples/hello_world.py` runs
 as written.
 
+## Files from the reader's own computer
+
+    https://danielchahine004.github.io/danvas/?local=owner/name
+
+runs the app named by that repository's `danvas.local.toml` on files the
+reader opens from their own computer: a folder, or a file, chosen or dropped on
+the page. Nothing is uploaded and nothing is installed; the files go from the
+disk into the tab's Python. In Chrome and Edge the page keeps the folder, so
+the canvas follows each save within a couple of seconds and the folder can be
+reopened on the next visit with one click; other browsers read a snapshot, and
+dropping the files on the canvas again updates it. Python loads while the
+reader chooses.
+
+```toml
+[app]                                  # as in danvas.toml; a danvas.toml among the opened files wins
+entry = "notesmap.static:app"
+requires = ["github:DanielChahine004/notesmap@main"]
+
+[local]
+main = ["main.tex", "*.tex"]           # the opened files' main file: first pattern found, shallowest first
+
+[local.write]                          # added where the opened files lack them; {main} is the main file
+"notesmap.toml" = '''
+[source]
+path = "{main}"
+'''
+
+[local.starter]                        # "Start new notes in a folder" (Chrome/Edge): copied from the repo
+"main.tex" = "src/notesmap/templates/main.tex"
+```
+
+Every opened file is read (hidden folders, `node_modules` and `__pycache__`
+skipped; up to 3000 files). `[[app.mount]]` does not apply.
+
 ## The repository's `danvas.toml`
 
 ```toml
