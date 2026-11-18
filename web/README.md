@@ -46,6 +46,15 @@ path = "{main}"
 Every opened file is read (hidden folders, `node_modules` and `__pycache__`
 skipped; up to 3000 files). `[[app.mount]]` does not apply.
 
+The same file runs a GitHub repository that holds only plain files, such as
+an Overleaf project synced to GitHub:
+
+    https://danielchahine004.github.io/danvas/?repo=you/notes&with=owner/name
+
+uses owner/name's `[app]` and adds its `[local.write]` files on every fetch,
+unless the repository has its own `danvas.toml`. The `?local=` page builds
+this link from its "Notes on GitHub" box.
+
 ## The repository's `danvas.toml`
 
 ```toml
