@@ -583,7 +583,7 @@ async function joinRoom() {
 //
 // A danvas.toml among the opened files is used instead of [app]. Nothing is
 // uploaded: the files go from the disk into this tab's Python. Chrome and Edge
-// can keep a chosen folder (or file), so the map follows each save and the
+// can keep a chosen folder, so the map follows each save and the
 // folder can be reopened next visit; other browsers read a snapshot, and
 // dropping the files again updates it.
 
@@ -591,7 +591,6 @@ const LOCAL_SKIP_DIR = /^(\.|node_modules$|__pycache__$|venv$)/;   // hidden fol
 const LOCAL_MAX_FILES = 3000;
 const LOCAL_POLL_MS = 1500;
 const canPickDir = typeof window.showDirectoryPicker === "function";
-const canPickFile = typeof window.showOpenFilePicker === "function";
 const enc = new TextEncoder();
 
 /** IndexedDB, for the folder handle Chrome lets a page keep between visits. */
@@ -675,11 +674,14 @@ function grabDrop(dt) {
   };
 }
 
-/** Open what a drop held: a watched folder or file where the browser allows it, else a snapshot. */
+/** Open what a drop held: a folder, watched where the browser allows it, else a snapshot.
+ * Only a folder: a page sees just what it is given, so a lone .tex would come without its pictures. */
 async function openDrop(drop, name) {
   const handles = await drop.handles.catch(() => []);
   if (handles.length === 1 && handles[0]?.kind === "directory") return pickedDir(handles[0]);
-  if (handles.length && handles.every((h) => h?.kind === "file")) return pickedFiles(handles);
+  if (!drop.entries.some((e) => e.isDirectory)) {
+    throw new Error("Drop the folder that holds your notes, not a file from it: the page only sees what it is given, so the pictures beside the file would be missing");
+  }
   const files = await droppedFiles(drop.entries, null);
   const one = drop.entries.length === 1 ? drop.entries[0].name : null;
   return files.length ? pickedSnapshot(one || name, files) : null;
@@ -689,10 +691,6 @@ async function openDrop(drop, name) {
 function pickedDir(dir) {
   return { name: dir.name, watch: true, handle: dir,
     list: async () => Promise.all((await walkDir(dir)).map(async ([p, h]) => [p, await h.getFile()])) };
-}
-function pickedFiles(handles) {
-  return { name: handles[0].name, watch: true, handle: handles.length === 1 ? handles[0] : null,
-    list: async () => Promise.all(handles.map(async (h) => [h.name, await h.getFile()])) };
 }
 function pickedSnapshot(name, files) {
   return { name, watch: false, list: async () => files };
@@ -759,18 +757,25 @@ async function dirFor(dir, path, create) {
   return dir;
 }
 
-/** The opening screen: choose a folder or file, drop one, reopen last time's, or
- * start new notes. Resolves with what was opened. Python loads meanwhile. */
-function askLocal(confReady) {
+/** [local] template = "path.zip" in danvas.local.toml, read at once (Python is still loading). */
+function templateOf(text) {
+  const local = text.split(/^\s*\[/m).find((s) => /^local\]/.test(s)) ?? "";
+  return local.match(/^\s*template\s*=\s*["']([^"']+)["']/m)?.[1] ?? null;
+}
+
+/** The opening screen: choose a folder, drop one, reopen last time's, download the
+ * template folder, or start new notes. Resolves with what was opened. Python loads meanwhile. */
+function askLocal(confReady, presetText) {
   const appName = localApp.split("/")[1];
   const boot = document.getElementById("dv-boot");
   boot.classList.add("ask");
   boot.innerHTML = `<div class="dv-title">Open your ${appName} notes</div>
-    <div>Choose the folder that holds your notes (the <code>.tex</code> file and its images), or just the
-      <code>.tex</code> file. Nothing is uploaded: the files stay on this computer and are read by this tab only.</div>
+    <div>Choose the folder that holds your notes: the <code>.tex</code> file and its pictures.
+      Nothing is uploaded: the files stay on this computer and are read by this tab only.</div>
     <div class="dv-acts dv-pick"></div>
-    <div class="dv-drop">or drop the folder or file here</div>
+    <div class="dv-drop">or drop the folder here</div>
     <div class="dv-again"></div>
+    <div class="dv-tpl"></div>
     <div class="dv-auth"></div>
     <form class="dv-gh"><span>Notes on GitHub (synced from Overleaf, say)?</span>
       <input name="r" placeholder="owner/name" autocomplete="off"><button class="dv-second">Open</button></form>
@@ -796,15 +801,13 @@ function askLocal(confReady) {
       if (picked.handle) keepHandle(picked.handle);
       resolve(picked);
     };
-    const input = (dir) => {
-      const el = Object.assign(document.createElement("input"), { type: "file", multiple: !dir });
-      if (dir) el.webkitdirectory = true;
-      else el.accept = ".tex,.md,.toml";
+    // browsers without a folder picker (Firefox, Safari): the folder <input>
+    const input = () => {
+      const el = Object.assign(document.createElement("input"), { type: "file", webkitdirectory: true });
       el.onchange = async () => {
         try {
           const files = await droppedFiles(null, el.files);
-          const name = dir ? (el.files[0]?.webkitRelativePath.split("/")[0] || "notes") : el.files[0]?.name;
-          if (files.length) finish(pickedSnapshot(name, files));
+          if (files.length) finish(pickedSnapshot(el.files[0]?.webkitRelativePath.split("/")[0] || "notes", files));
         } catch (e) { oops(e); }
       };
       el.click();
@@ -812,17 +815,11 @@ function askLocal(confReady) {
     acts.append(button("Choose folder", async () => {
       try {
         if (canPickDir) finish(pickedDir(await showDirectoryPicker({ id: "dv-notes", mode: "read" })));
-        else input(true);
+        else input();
       } catch (e) { oops(e); }
-    }), button("Choose .tex file", async () => {
-      try {
-        if (canPickFile) finish(pickedFiles(await showOpenFilePicker({ id: "dv-notes", multiple: true,
-          types: [{ description: "Notes", accept: { "text/plain": [".tex", ".md", ".toml"] } }] })));
-        else input(false);
-      } catch (e) { oops(e); }
-    }, "dv-second"));
+    }));
 
-    // drop: a folder or files from the desktop
+    // drop: a folder from the desktop
     const drop = boot.querySelector(".dv-drop");
     boot.ondragover = (e) => { e.preventDefault(); drop.classList.add("on"); };
     boot.ondragleave = () => drop.classList.remove("on");
@@ -835,21 +832,31 @@ function askLocal(confReady) {
 
     // last time's folder (Chrome/Edge): one click, as the browser asks again
     keptHandle().then((h) => {
-      if (!h || done) return;
+      if (!h || done || h.kind !== "directory") return;
       boot.querySelector(".dv-again").append(button(`Reopen “${h.name}”`, async () => {
         try {
           if ((await h.requestPermission({ mode: "read" })) !== "granted") return;
-          finish(h.kind === "directory" ? pickedDir(h) : pickedFiles([h]));
+          finish(pickedDir(h));
         } catch (e) { oops(e); }
       }));
     });
 
-    // new notes from the app's starter files, written into a folder the reader picks
+    // no notes yet: the app's template folder, as a zip ([local] template), or
+    // (Chrome/Edge) its starter files written straight into a folder
+    const tpl = boot.querySelector(".dv-tpl");
+    presetText.then((text) => {
+      const zip = templateOf(text);
+      if (done || !zip || zip.split("/").includes("..")) return;
+      const a = Object.assign(document.createElement("a"), {
+        href: `${raw(localApp)}/${localApp}/${qs.get("ref") || "HEAD"}/${zip}`,
+        download: zip.split("/").pop(), textContent: "Download the template folder" });
+      tpl.append("No notes yet? ", a, " (unzip it, then choose the folder inside)");
+    }).catch(() => {});
     if (canPickDir) {
-      const auth = boot.querySelector(".dv-auth");
       confReady.then((conf) => {
         if (done || !conf?.starter || !Object.keys(conf.starter).length) return;
-        auth.append("No notes yet? ", button("Start new notes in a folder", async () => {
+        const box = document.createElement("div");
+        box.append("or ", button("start new notes in a folder", async () => {
           try {
             const dir = await showDirectoryPicker({ id: "dv-notes", mode: "readwrite" });
             why.textContent = "Writing the starter notes…";
@@ -857,7 +864,8 @@ function askLocal(confReady) {
             why.textContent = "";
             finish(pickedDir(dir));
           } catch (e) { oops(e); }
-        }, "dv-link"));
+        }, "dv-link"), " on this computer");
+        tpl.append(box);
       }).catch(() => {});
     }
   });
@@ -1058,7 +1066,7 @@ async function main() {
     presetText.catch(() => {});
     const confReady = (async () => { const t = await presetText; await pyReady; return (await call("manifest", { text: t })).local ?? {}; })();
     confReady.catch(() => {});
-    picked = await askLocal(confReady);
+    picked = await askLocal(confReady, presetText);
     const boot = document.getElementById("dv-boot");
     boot.classList.remove("ask");
     boot.innerHTML = `<div class="ring"></div><div id="dv-msg"></div>`;

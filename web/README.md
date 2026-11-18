@@ -17,8 +17,9 @@ as written.
     https://danielchahine004.github.io/danvas/?local=owner/name
 
 runs the app named by that repository's `danvas.local.toml` on files the
-reader opens from their own computer: a folder, or a file, chosen or dropped on
-the page. Nothing is uploaded and nothing is installed; the files go from the
+reader opens from their own computer: a folder, chosen or dropped on the page
+(a folder, not a file, so the files beside the main one, its pictures say,
+come too). Nothing is uploaded and nothing is installed; the files go from the
 disk into the tab's Python. In Chrome and Edge the page keeps the folder, so
 the canvas follows each save within a couple of seconds and the folder can be
 reopened on the next visit with one click; other browsers read a snapshot, and
@@ -32,6 +33,7 @@ requires = ["github:DanielChahine004/notesmap@main"]
 
 [local]
 main = ["main.tex", "*.tex"]           # the opened files' main file: first pattern found, shallowest first
+template = "notesmap-notes.zip"        # optional: "Download the template folder", a file in the app's repo
 
 [local.write]                          # added where the opened files lack them; {main} is the main file
 "notesmap.toml" = '''
@@ -39,8 +41,9 @@ main = ["main.tex", "*.tex"]           # the opened files' main file: first patt
 path = "{main}"
 '''
 
-[local.starter]                        # "Start new notes in a folder" (Chrome/Edge): copied from the repo
+[local.starter]                        # "start new notes in a folder" (Chrome/Edge): copied from the repo
 "main.tex" = "src/notesmap/templates/main.tex"
+"img/example.png" = "src/notesmap/templates/img/example.png"
 ```
 
 Every opened file is read (hidden folders, `node_modules` and `__pycache__`
