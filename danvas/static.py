@@ -156,6 +156,9 @@ def _serve(self, *args, view=None, ui_inspector=None, ui_graveyard=None, ui_host
     b._ui_graveyard = bool(ui_graveyard) if ui_graveyard is not None else b._ui_graveyard
     b._ui_hosting = False
     b.set_loop(_loop)
+    # panels added later (an app's reload hook adding one) are pushed to open
+    # views, as Canvas.serve() does: Canvas gates that on _serving
+    self._serving = True
     for fn, a, k in getattr(self, "_background", []):
         if inspect.iscoroutinefunction(fn):
             asyncio.ensure_future(fn(*a, **k))
