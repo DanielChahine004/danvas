@@ -771,7 +771,7 @@ function askLocal(confReady, presetText) {
   boot.classList.add("ask");
   boot.innerHTML = `<div class="dv-title">Open your ${appName} notes</div>
     <div>Choose the folder that holds your notes: the <code>.tex</code> file and its pictures.
-      Nothing is uploaded: the files stay on this computer and are read by this tab only.</div>
+      Nothing is uploaded.</div>
     <div class="dv-acts dv-pick"></div>
     <div class="dv-drop">or drop the folder here</div>
     <div class="dv-again"></div>
