@@ -55,8 +55,7 @@ an Overleaf project synced to GitHub:
     https://danielchahine004.github.io/danvas/?repo=you/notes&with=owner/name
 
 uses owner/name's `[app]` and adds its `[local.write]` files on every fetch,
-unless the repository has its own `danvas.toml`. The `?local=` page builds
-this link from its "Notes on GitHub" box.
+unless the repository has its own `danvas.toml`.
 
 ## The repository's `danvas.toml`
 

@@ -777,18 +777,7 @@ function askLocal(confReady, presetText) {
     <div class="dv-again"></div>
     <div class="dv-tpl"></div>
     <div class="dv-auth"></div>
-    <form class="dv-gh"><span>Notes on GitHub (synced from Overleaf, say)?</span>
-      <input name="r" placeholder="owner/name" autocomplete="off"><button class="dv-second">Open</button></form>
     <div class="dv-why"></div>`;
-  const gh = boot.querySelector(".dv-gh");
-  gh.onsubmit = (e) => {
-    e.preventDefault();
-    const r = gh.r.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/(\.git|\/)+$/, "");
-    if (/^[\w.-]+\/[\w.-]+$/.test(r)) { location.href = `?repo=${r}&with=${localApp}`; return; }
-    gh.r.setCustomValidity("owner/name, as in github.com/owner/name");
-    gh.r.reportValidity();
-  };
-  gh.r.oninput = () => gh.r.setCustomValidity("");
   const acts = boot.querySelector(".dv-pick");
   const why = boot.querySelector(".dv-why");
   const oops = (e) => { if (e?.name !== "AbortError") { console.error(e); why.textContent = "⚠ " + (e.message || e); } };
