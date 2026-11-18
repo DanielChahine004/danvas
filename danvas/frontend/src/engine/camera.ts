@@ -100,6 +100,32 @@ export function setCamera(cam: Camera, opts?: { force?: boolean }): void {
   if (inst.lockedCamera && !opts?.force) return
   const z = Math.max(inst.zoomLimits.min, Math.min(inst.zoomLimits.max, cam.z))
   store.camera({ x: cam.x, y: cam.y, z })
+  const vsb = editor.getViewportScreenBounds()
+  camViewW = vsb.w
+  camViewH = vsb.h
+}
+
+// The viewport size the camera was last placed against. A camera is anchored at
+// the viewport's top-left, so when the viewport changes size the view's centre
+// drifts. That matters most on load: a page laid out after the first camera was
+// placed (a tab opened in the background, a pane still hidden) measured 0x0, and
+// serve(view=)'s centre ended up in the top-left corner.
+let camViewW = -1
+let camViewH = -1
+
+// Keep the page point at the viewport's centre where it is when the viewport is
+// resized (window resize, phone rotate, first real layout). Scroll modes re-lay
+// themselves out instead.
+export function followViewportResize(): void {
+  const vsb = editor.getViewportScreenBounds()
+  if (camViewW >= 0 && scrollMode === 'free' && (vsb.w !== camViewW || vsb.h !== camViewH)) {
+    const cam = store.camera()
+    const dx = (vsb.w - camViewW) / (2 * cam.z)
+    const dy = (vsb.h - camViewH) / (2 * cam.z)
+    store.camera({ x: cam.x + dx, y: cam.y + dy, z: cam.z })
+  }
+  camViewW = vsb.w
+  camViewH = vsb.h
 }
 
 // Union of every positioned record's page-space bounds, or null if empty. Skips

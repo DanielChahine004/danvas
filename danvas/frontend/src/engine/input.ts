@@ -4,7 +4,7 @@
 // interactive panels), and right-drag pans. All camera writes go through
 // camera.setCamera, which respects the zoom limits and a locked camera. The math
 // is identical to the old build (and to the standard convention: screen = (page+cam)*z).
-import { setCamera, getScrollMode, relayoutScroll, getScrollFitZoom } from './camera'
+import { setCamera, getScrollMode, relayoutScroll, getScrollFitZoom, followViewportResize } from './camera'
 import { store } from './store'
 import { openContextMenuAt, closeContextMenu } from './contextmenu'
 import { gesturing } from './gesture'
@@ -54,6 +54,7 @@ export function attachCameraInput(el: HTMLElement): () => void {
   if (typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => {
       if (getScrollMode() !== 'free') relayoutScroll()
+      else followViewportResize()
     })
     ro.observe(el)
   }
