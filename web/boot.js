@@ -7,6 +7,8 @@
 //   ?repo=owner/name          the repository (remembered)
 //   &ref=main                 branch, tag or commit (default: the repo's default branch)
 //   &app=danvas.toml          the manifest's path in the repo
+//   &with=owner/name          a repo of plain files, run as that app's danvas.local.toml says
+//   ?local=owner/name         files from the reader's own computer, run the same way
 //   #token=...                a GitHub token for a private repo (kept for this tab only);
 //                             "Sign in with GitHub" fills it in
 //   &debug                    keep every frame in window.__dv
@@ -103,6 +105,9 @@ async function freshToken() {
 // ?local=owner/name: the app comes from that repo, the files from the reader's own computer
 const localApp = /^[\w.-]+\/[\w.-]+$/.test(qs.get("local") || "") ? qs.get("local") : null;
 const repo = qs.get("repo") || (localApp ? "local:" + localApp : null);   // the bare link asks, offering recent repos
+// ?repo=...&with=owner/name: a repo of plain files (notes synced from Overleaf, say)
+// run by the app that owner/name's danvas.local.toml names, as ?local= would
+const withApp = !localApp && /^[\w.-]+\/[\w.-]+$/.test(qs.get("with") || "") ? qs.get("with") : null;
 const RECENT = "dv-recent";
 function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) => typeof r === "string"); } catch { return []; } }
 function remember(r) { safeSet(RECENT, JSON.stringify([r, ...recent().filter((x) => x !== r)].slice(0, 8))); }
@@ -161,7 +166,7 @@ async function blob(snap, entry) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-const under = (p, specs) => specs.some((s) => s === "*" || p === s || p.startsWith(s.endsWith("/") ? s : s + "/"));
+const under = (p, specs) => specs.some((s) => s === "*" || p === s || p.startsWith(s.endsWith("/*") ? s.slice(0, -1) : s.endsWith("/") ? s : s + "/"));
 const fetchable = (p, e) => !SKIP.test(p) && (e.size ?? 0) <= MAX_FILE;
 
 // [app] max_image: big pictures are shrunk on the way in, one at a time (a phone
@@ -702,7 +707,16 @@ async function localSnapshot(picked, conf) {
     files.set(p, { path: p, size: f.size, sha: `${f.size}:${f.lastModified}`,
       read: async () => new Uint8Array(await f.arrayBuffer()) });
   }
-  const paths = [...files.keys()].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  const main = addDefaults(files, conf);
+  const sha = [...files.values()].map((e) => `${e.path}:${e.sha}`).sort().join("\n");
+  return { repo, ref: null, sha, files, name: picked.name, main };
+}
+
+/** [local]'s defaults, into a snapshot's files: finds the main file ([local] main)
+ * and adds each [local.write] file the files lack. Returns the main file's path. */
+function addDefaults(files, conf) {
+  const paths = [...files.keys()].filter((p) => !files.get(p).written)
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
   let main = "";
   for (const g of conf?.main ?? []) {
     const re = globRe(g);
@@ -710,19 +724,17 @@ async function localSnapshot(picked, conf) {
     if (main) break;
   }
   for (const [p, text] of Object.entries(conf?.write ?? {})) {
-    if (files.has(p) || typeof text !== "string") continue;
+    if ((files.has(p) && !files.get(p).written) || typeof text !== "string") continue;
     const data = enc.encode(text.replaceAll("{main}", main));
-    files.set(p, { path: p, size: data.length, sha: "w:" + main, read: async () => data });
+    files.set(p, { path: p, size: data.length, sha: "w:" + main, written: true, read: async () => data });
   }
-  const sha = [...files.values()].map((e) => `${e.path}:${e.sha}`).sort().join("\n");
-  return { repo, ref: null, sha, files, name: picked.name, main };
+  return main;
 }
 
-/** The app repo's danvas.local.toml (text). */
-async function localPreset() {
-  const ref = qs.get("ref") || "HEAD";
-  const res = await fetch(`${raw(localApp)}/${localApp}/${ref}/danvas.local.toml`, { cache: "no-cache" });
-  if (!res.ok) throw new Error(`${localApp} has no danvas.local.toml (${res.status}): it is what says how to open files from this computer`);
+/** An app repo's danvas.local.toml (text). */
+async function localPreset(app = localApp, ref = qs.get("ref") || "HEAD") {
+  const res = await fetch(`${raw(app)}/${app}/${ref}/danvas.local.toml`, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`${app} has no danvas.local.toml (${res.status}): it is what says how to run plain files with it`);
   return res.text();
 }
 
@@ -760,7 +772,18 @@ function askLocal(confReady) {
     <div class="dv-drop">or drop the folder or file here</div>
     <div class="dv-again"></div>
     <div class="dv-auth"></div>
+    <form class="dv-gh"><span>Notes on GitHub (synced from Overleaf, say)?</span>
+      <input name="r" placeholder="owner/name" autocomplete="off"><button class="dv-second">Open</button></form>
     <div class="dv-why"></div>`;
+  const gh = boot.querySelector(".dv-gh");
+  gh.onsubmit = (e) => {
+    e.preventDefault();
+    const r = gh.r.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/(\.git|\/)+$/, "");
+    if (/^[\w.-]+\/[\w.-]+$/.test(r)) { location.href = `?repo=${r}&with=${localApp}`; return; }
+    gh.r.setCustomValidity("owner/name, as in github.com/owner/name");
+    gh.r.reportValidity();
+  };
+  gh.r.oninput = () => gh.r.setCustomValidity("");
   const acts = boot.querySelector(".dv-pick");
   const why = boot.querySelector(".dv-why");
   const oops = (e) => { if (e?.name !== "AbortError") { console.error(e); why.textContent = "⚠ " + (e.message || e); } };
@@ -859,7 +882,8 @@ function askRepo() {
   if (rs.length) list.append(Object.assign(document.createElement("div"), { textContent: "Recent", className: "dv-label" }));
   for (const r of rs) {
     const a = document.createElement("a");
-    a.href = "?repo=" + encodeURIComponent(r);
+    const [rr, w] = r.split(" with ");
+    a.href = "?repo=" + rr + (w ? "&with=" + w : "");
     a.textContent = r;
     list.append(a);
   }
@@ -1050,8 +1074,17 @@ async function main() {
     stage("files");
     say(`Reading ${repo}…`);
     snap = await snapshot(repo, qs.get("ref"));
-    if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
-    manifestText = new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath)));
+    if (withApp) {
+      // the repo's own danvas.toml wins; else the app's, with its defaults added
+      const presetText = await localPreset(withApp, "HEAD");
+      await pyReady;
+      localConf = (await call("manifest", { text: presetText })).local ?? {};
+      addDefaults(snap.files, localConf);
+      manifestText = snap.files.has(manifestPath) ? new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath))) : presetText;
+    } else {
+      if (!snap.files.has(manifestPath)) throw new Error(`${repo} has no ${manifestPath}: it is what tells this page which danvas app to run`);
+      manifestText = new TextDecoder().decode(await blob(snap, snap.files.get(manifestPath)));
+    }
   }
   const label = picked ? picked.name : repo;
   await pyReady;
@@ -1138,7 +1171,7 @@ async function main() {
       : `Showing “${picked.name}” from this computer. This browser can't watch it for changes: after saving, drop it on the map again.` });
   setMine(restored);
 
-  if (!picked) remember(repo);
+  if (!picked) remember(withApp ? `${repo} with ${withApp}` : repo);
   stage("draw");
   document.getElementById("dv-boot")?.remove();
   const link = document.getElementById("dv-repo-link");
@@ -1203,7 +1236,12 @@ async function main() {
       } catch (err) { console.warn("[danvas-static] drop:", err); status("⚠ " + (err.message || err)); }
     }, true);
   } else {
-    setInterval(() => update(() => snapshot(repo, snap.ref, true)), devRepos.has(repo) ? 2000 : POLL_MS);
+    const next = async () => {
+      const s = await snapshot(repo, snap.ref, true);
+      if (s && withApp) addDefaults(s.files, localConf);
+      return s;
+    };
+    setInterval(() => update(next), devRepos.has(repo) ? 2000 : POLL_MS);
   }
 }
 
