@@ -52,6 +52,7 @@ const DEBUG = qs.has("debug") ? (window.__dv = { sent: [], recv: [], memory: () 
 
 function fail(err) {
   console.error(err);
+  loadEnded();   // an error on screen is not a crash
   const boot = document.getElementById("dv-boot");
   if (!boot) { status("⚠ " + (err.message || err)); return; }
   boot.classList.add("err");
@@ -1008,6 +1009,11 @@ const STAGES = { python: "loading Python", files: "reading the files", packages:
   build: "building the app", draw: "drawing the canvas" };
 let tries = 1;
 function stage(name) { safeSet(bootKey, JSON.stringify({ stage: name, t: Date.now(), tries })); }
+// a load that ended on purpose: an error shown, or the reader leaving (signing in,
+// reloading, closing the tab). A tab killed for memory fires no pagehide, so only
+// those still count towards the loop.
+function loadEnded() { if (!repo) return; tries = 0; stage("ok"); }
+if (repo) addEventListener("pagehide", loadEnded);
 
 function crashLoop() {
   let last = null;
@@ -1186,7 +1192,7 @@ async function main() {
   shareControl();
   console.log(`[danvas-static] ready ${Math.round(performance.now())} ms after navigation`);
   // still here a little after drawing: this load made it
-  setTimeout(() => { tries = 0; stage("ok"); }, 8000);
+  setTimeout(loadEnded, 8000);
 
   // follow the code: a github: requirement with new code (a pinned tag or commit never moves)
   const fresh = async (n, code) => { if (n || code) console.log("[danvas-static] reloaded:", await call("reload", { code: code > 0 })); status(""); };
