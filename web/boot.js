@@ -107,7 +107,9 @@ const localApp = /^[\w.-]+\/[\w.-]+$/.test(qs.get("local") || "") ? qs.get("loca
 const repo = qs.get("repo") || (localApp ? "local:" + localApp : null);   // the bare link asks, offering recent repos
 // ?repo=...&with=owner/name: a repo of plain files (notes synced from Overleaf, say)
 // run by the app that owner/name's danvas.local.toml names, as ?local= would
-const withApp = !localApp && /^[\w.-]+\/[\w.-]+$/.test(qs.get("with") || "") ? qs.get("with") : null;
+let withApp = !localApp && /^[\w.-]+\/[\w.-]+$/.test(qs.get("with") || "") ? qs.get("with") : null;
+// a repo with no danvas.toml and no ?with=: the app whose config file it holds
+const KNOWN_APPS = [["notesmap.toml", "DanielChahine004/notesmap"]];
 const RECENT = "dv-recent";
 function recent() { try { return JSON.parse(safeGet(RECENT) || "[]").filter((r) => typeof r === "string"); } catch { return []; } }
 function remember(r) { safeSet(RECENT, JSON.stringify([r, ...recent().filter((x) => x !== r)].slice(0, 8))); }
@@ -1049,7 +1051,7 @@ async function main() {
   pyReady.catch(() => {});   // reported where it is awaited
 
   // the files: a GitHub repo, or (?local=) what the reader opens from their own computer
-  let snap, manifestText, picked = null, localConf = null;
+  let snap, manifestText, picked = null, localConf = null, inferred = false;
   if (localApp) {
     const presetText = localPreset();
     presetText.catch(() => {});
@@ -1071,6 +1073,10 @@ async function main() {
     stage("files");
     say(`Reading ${repo}…`);
     snap = await snapshot(repo, qs.get("ref"));
+    if (!withApp && !snap.files.has(manifestPath)) {
+      withApp = KNOWN_APPS.find(([marker]) => snap.files.has(marker))?.[1] ?? null;
+      inferred = !!withApp;
+    }
     if (withApp) {
       // the repo's own danvas.toml wins; else the app's, with its defaults added
       const presetText = await localPreset(withApp, "HEAD");
@@ -1168,7 +1174,7 @@ async function main() {
       : `Showing “${picked.name}” from this computer. This browser can't watch it for changes: after saving, drop it on the map again.` });
   setMine(restored);
 
-  if (!picked) remember(withApp ? `${repo} with ${withApp}` : repo);
+  if (!picked) remember(withApp && !inferred ? `${repo} with ${withApp}` : repo);
   stage("draw");
   document.getElementById("dv-boot")?.remove();
   const link = document.getElementById("dv-repo-link");
