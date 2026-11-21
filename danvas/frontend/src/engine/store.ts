@@ -38,7 +38,7 @@ const DEFAULT_INSTANCE: InstanceState = {
   observer: false,
   gridOn: false,
   lockedCamera: false,
-  zoomLimits: { min: 0.1, max: 8 },
+  zoomLimits: { min: 0.02, max: 8 },
   tool: savedTool(),
   style: { color: 'blue', size: 'm', fill: 'none', dash: 'solid', opacity: 1 },
   hoveredId: null,
