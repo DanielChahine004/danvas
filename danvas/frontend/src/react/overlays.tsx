@@ -3,6 +3,7 @@
 // buttons + the kiosk hand tool. These render as siblings outside the panel host
 // (.tl-container), so they use self-contained colours rather than the --pc-* vars.
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { effect } from 'alien-signals'
 import { wheelMode, setWheelMode, type WheelMode } from '../engine/wheel'
 import { pageToScreen, screenToPage } from '../engine/editor'
 import { store } from '../engine/store'
@@ -34,14 +35,17 @@ export function CursorLayer() {
   const [cursors, setCursors] = useState<any[]>([])
   const [, force] = useState(0)
   useEffect(() => subscribePeerCursors(setCursors), [])
-  // Follow the camera: re-read page->screen each frame while cursors exist.
+  // Follow the camera: re-place the cursors when it moves (pageToScreen reads
+  // it). This used to re-render on EVERY animation frame for as long as anyone
+  // else was on the canvas, moving or not.
   useEffect(() => {
     if (!cursors.length) return
-    let raf = requestAnimationFrame(function loop() {
-      force((n) => n + 1)
-      raf = requestAnimationFrame(loop)
+    let first = true
+    return effect(() => {
+      store.camera() // tracked
+      if (first) first = false
+      else force((n) => n + 1)
     })
-    return () => cancelAnimationFrame(raf)
   }, [cursors.length])
 
   if (!cursors.length) return null

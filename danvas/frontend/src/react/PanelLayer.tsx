@@ -17,6 +17,7 @@ import { attachCameraInput } from '../engine/input'
 import { attachInteraction } from '../engine/interaction'
 import { exportTargets } from '../engine/export'
 import { attachImageLod } from './imageLod'
+import { currentPageBounds } from '../engine/camera'
 import { setupCursorReporting, componentIdOf, isSourceTagHidden, tagOfComponentId, measuredPanels } from '../bridge'
 import { useValue } from './EngineContext'
 import { PanelForShape } from './panels'
@@ -115,6 +116,13 @@ function Panel({ id }: { id: string }) {
         // For rotation=0 this is identical to '0 0', so unrotated panels are
         // unaffected; rotated panels now spin about their middle.
         transformOrigin: 'center',
+        // Clip to the panel's own box (the Card inside already does; the margin
+        // leaves room for its shadow). With a fixed clip the browser's cull rect
+        // for the panel stops changing as the camera moves, so a pan no longer
+        // re-paints every panel each time it travels ~500 page px — a third of
+        // the remaining pan cost on a 1000-panel board.
+        overflow: 'clip',
+        overflowClipMargin: 8,
         opacity,
         display: srcHidden ? 'none' : undefined,
         visibility: keep && !visible && !(exportSet && exportSet.has(id))
@@ -140,11 +148,39 @@ function Panel({ id }: { id: string }) {
 // signals (which fire inside, independent of props). This is the big mobile
 // pan/pinch win — pan/zoom updates one transform instead of the whole subtree.
 const MemoPanel = memo(Panel)
+
+// The backing plate: one near-invisible rectangle under the whole board, the
+// first thing painted in the camera layer. Without it Chrome gives EVERY panel
+// its own compositor layer ("Overlap"): each panel carries its own transform and
+// clip, and the compositor only merges such content into a neighbouring layer
+// when that doesn't add much empty area — which spaced-apart panels always do.
+// A board of 1000 panels was 1013 layers, re-layered on every pan and hover
+// frame (140 ms of main thread each at 1000 panels, 45-60 ms at 400). With a
+// plate already covering the board, merging a panel adds no area, so everything
+// lands in ONE layer and a pan is a compositor-only move again.
+// It must paint something (a fully transparent box is dropped), hence alpha 1/255.
+const PLATE_PAD = 1500 // page px of slack, so a drag near the edge stays on the plate
+const PLATE_BG = 'rgba(128,128,128,0.004)'
+interface Plate { x: number; y: number; w: number; h: number }
+function nextPlate(cur: Plate | null): Plate | null {
+  const b = currentPageBounds()
+  if (!b) return null
+  const want = { x: b.x - PLATE_PAD, y: b.y - PLATE_PAD, w: b.w + 2 * PLATE_PAD, h: b.h + 2 * PLATE_PAD }
+  // Keep the current plate while it still covers the board and isn't far too
+  // big: resizing it re-rasters, so it shouldn't follow every drag frame.
+  if (
+    cur &&
+    b.x >= cur.x && b.y >= cur.y && b.x + b.w <= cur.x + cur.w && b.y + b.h <= cur.y + cur.h &&
+    cur.w * cur.h <= 4 * want.w * want.h
+  ) return cur
+  return want
+}
 const MemoDrawings = memo(DrawingRun)
 
 export function PanelLayer() {
   const rootRef = useRef<HTMLDivElement>(null)
   const camLayerRef = useRef<HTMLDivElement>(null)
+  const plateRef = useRef<HTMLDivElement>(null)
   // The z-order, as DOM children: each panel is a div; each maximal run of
   // consecutive drawings/arrows is one SVG (DrawingRun). Walking the ONE id
   // list keeps DOM order == z-order, so drawings can interleave with panels.
@@ -236,7 +272,34 @@ export function PanelLayer() {
     const stopCam = effect(() => writeCamera(store.camera()))
     // big images in panels are shown at the resolution the zoom needs
     const detachLod = camLayerRef.current ? attachImageLod(camLayerRef.current) : undefined
+    // Keep the backing plate under the board as records come, go and move
+    // (at most once a frame; the bounds walk is O(records)).
+    let plate: Plate | null = null
+    let plateRaf = 0
+    const syncPlate = () => {
+      plateRaf = 0
+      const pe = plateRef.current
+      if (!pe) return
+      const next = nextPlate(plate)
+      if (next === plate) return
+      plate = next
+      if (!next) {
+        pe.style.display = 'none'
+        return
+      }
+      pe.style.display = ''
+      pe.style.left = `${next.x}px`
+      pe.style.top = `${next.y}px`
+      pe.style.width = `${next.w}px`
+      pe.style.height = `${next.h}px`
+    }
+    const stopPlate = store.subscribe(() => {
+      if (!plateRaf) plateRaf = requestAnimationFrame(syncPlate)
+    })
+    syncPlate()
     return () => {
+      stopPlate()
+      if (plateRaf) cancelAnimationFrame(plateRaf)
       stopCam()
       detachLod?.()
       detachCam?.()
@@ -279,6 +342,12 @@ export function PanelLayer() {
         data-pc-camera-layer=""
         style={{ position: 'absolute', left: 0, top: 0, transform: layerTransform, transformOrigin: '0 0' }}
       >
+        <div
+          ref={plateRef}
+          data-pc-plate=""
+          aria-hidden="true"
+          style={{ position: 'absolute', display: 'none', background: PLATE_BG, pointerEvents: 'none' }}
+        />
         {/* z-order, in DOM order. A fresh drawing/arrow appends to the list, so it
             lands on top; the SVGs are pointer-transparent, so panels under an
             arrow stay interactive. A run's key is its first id: a run only

@@ -28,7 +28,6 @@ Notable bundled packages (all **MIT** unless noted), from
   (loaded lazily, only when a plot panel first appears)
 - [Sucrase](https://github.com/alangpierce/sucrase) — MIT (compiles React panel JSX in-browser)
 - [perfect-freehand](https://github.com/steveruizok/perfect-freehand) — MIT (ink strokes)
-- [rbush](https://github.com/mourner/rbush) — MIT (spatial index)
 - [fractional-indexing](https://github.com/rocicorp/fractional-indexing) — MIT (z-order keys)
 - [@use-gesture](https://github.com/pmndrs/use-gesture) — MIT (pointer gestures)
 - [modern-screenshot](https://github.com/qq15725/modern-screenshot) — MIT (PNG/SVG export)

@@ -185,6 +185,8 @@ function enableRightDragPan(el: HTMLElement): () => void {
     el.classList.remove('pc-space-pan')
   }
   let moved = 0
+  // A right-press whose context menu is decided at release (see onContextMenu).
+  let pendingMenu: { x: number; y: number } | null = null
   let suppressMenuUntil = 0
   let lastX = 0
   let lastY = 0
@@ -199,6 +201,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
 
   const begin = (e: PointerEvent) => {
     panning = true
+    pendingMenu = null
     moved = 0
     lastX = e.clientX
     lastY = e.clientY
@@ -294,6 +297,11 @@ function enableRightDragPan(el: HTMLElement): () => void {
     if (!panning) return
     panning = false
     el.classList.remove('pc-gesturing')
+    const menu = pendingMenu
+    pendingMenu = null
+    // The press was captured to the container, so the event's own target is the
+    // container: look up what is actually under the pointer.
+    if (menu && moved <= 4 && !store.instance().readOnly) openContextMenuAt(menu.x, menu.y, document.elementFromPoint(menu.x, menu.y))
     try {
       el.releasePointerCapture(e.pointerId)
     } catch {
@@ -304,6 +312,15 @@ function enableRightDragPan(el: HTMLElement): () => void {
   const onContextMenu = (e: MouseEvent) => {
     // Always suppress the browser menu; open ours only on a click (not a pan-drag).
     e.preventDefault()
+    // Windows fires `contextmenu` on release, so `moved` already says whether
+    // this was a click or a pan. macOS and Linux fire it on PRESS, before any
+    // movement: opening the menu then put its full-screen backdrop over a pan
+    // that was just starting, and left it there swallowing the wheel until the
+    // next click. So while the right button is still down, wait for the release.
+    if (panning) {
+      pendingMenu = { x: e.clientX, y: e.clientY }
+      return
+    }
     if (moved > 4) return
     if (store.instance().readOnly) return // its actions all edit the board
     openContextMenuAt(e.clientX, e.clientY, e.target)
