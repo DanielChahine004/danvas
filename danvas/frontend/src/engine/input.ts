@@ -40,6 +40,11 @@ function predictedLead(vx: number, vy: number): { x: number; y: number } {
   return { x, y }
 }
 
+// Pinch -> pan handover. When a two-finger pinch drops to one finger, that finger
+// carries on as a pan (any tool): it never gets a pointerdown of its own, so the
+// pan handler can't pick it up by itself. Set by enableRightDragPan.
+let panHandoff: ((pointerId: number, x: number, y: number) => void) | null = null
+
 const WHEEL_ZOOM_RATE = 0.002
 const PINCH_ZOOM_RATE = 0.01
 
@@ -168,6 +173,11 @@ function enablePinch(el: HTMLElement): () => void {
       // Back at (or below) the fitted zoom in a scroll mode → snap the column back to
       // centred/fitted; if still zoomed in, leave the pinched view as-is.
       if (getScrollMode() !== 'free' && store.camera().z <= getScrollFitZoom() * 1.02) relayoutScroll()
+      // One finger still down: it pans from where it is, no lift needed.
+      if (pts.size === 1 && e.type === 'pointerup') {
+        const [[pid, at]] = [...pts.entries()]
+        panHandoff?.(pid, at.x, at.y)
+      }
     }
   }
   el.addEventListener('pointerdown', onDown, true)
@@ -225,6 +235,9 @@ function enableRightDragPan(el: HTMLElement): () => void {
   // (or a small/cross-axis move) still reaches the panel content under it (a table's
   // filter bars, a chat field, etc.). Right-drag and the hand tool grab immediately.
   let pendingPid: number | null = null
+  // The finger a pinch handed over (see panHandoff): the only pointer that then
+  // moves or ends the pan. null for a pan that began with its own press.
+  let handoffPid: number | null = null
   let startX = 0
   let startY = 0
   const SCROLL_THRESHOLD = 8
@@ -295,6 +308,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
 
   const begin = (e: PointerEvent) => {
     panning = true
+    handoffPid = null
     pendingMenu = null
     dropLead(false)
     samples = []
@@ -319,6 +333,20 @@ function enableRightDragPan(el: HTMLElement): () => void {
       e.preventDefault()
       e.stopPropagation()
     }
+  }
+
+  panHandoff = (pointerId, x, y) => {
+    stopCoast()
+    dropLead(false)
+    panning = true
+    handoffPid = pointerId
+    pendingPid = null
+    pendingMenu = null
+    samples = []
+    moved = 0
+    lastX = x
+    lastY = y
+    el.classList.add('pc-gesturing')
   }
 
   const onDown = (e: PointerEvent) => {
@@ -362,9 +390,11 @@ function enableRightDragPan(el: HTMLElement): () => void {
     if (gesturing()) {
       panning = false
       pendingPid = null
+      handoffPid = null
       dropLead(false)
       return
     }
+    if (handoffPid !== null && e.pointerId !== handoffPid) return
     const mode = getScrollMode()
     // Deferred scroll: commit only once past the threshold along the scroll axis.
     if (pendingPid === e.pointerId && !panning) {
@@ -416,6 +446,9 @@ function enableRightDragPan(el: HTMLElement): () => void {
   const onUp = (e: PointerEvent) => {
     if (pendingPid === e.pointerId) pendingPid = null
     if (!panning) return
+    // the pinch's OTHER finger lifting is what started this pan, not its end
+    if (handoffPid !== null && e.pointerId !== handoffPid) return
+    handoffPid = null
     panning = false
     el.classList.remove('pc-gesturing')
     dropLead(false) // the finger is gone: leave the canvas where it is
@@ -491,6 +524,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
   return () => {
+    panHandoff = null
     stopCoast()
     dropLead(false)
     window.removeEventListener('keydown', onKeyDown)
