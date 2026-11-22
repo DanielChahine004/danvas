@@ -10,6 +10,14 @@ import { openContextMenuAt, closeContextMenu } from './contextmenu'
 import { gesturing } from './gesture'
 import { wheelIntent, wheelPanDelta, wheelInfo } from './wheel'
 
+// Pan momentum: a drag-pan released while still moving keeps drifting and eases
+// to a stop, like a flicked page. Speeds are screen px per ms.
+const COAST_TAU = 200 // ms; the drift covers (release speed x this) px in all
+const COAST_MIN_START = 0.25 // slower releases just stop
+const COAST_MAX_START = 6
+const COAST_STOP = 0.02
+const COAST_WINDOW = 80 // ms of recent movement the release speed is taken from
+
 const WHEEL_ZOOM_RATE = 0.002
 const PINCH_ZOOM_RATE = 0.01
 
@@ -199,9 +207,59 @@ function enableRightDragPan(el: HTMLElement): () => void {
   let startY = 0
   const SCROLL_THRESHOLD = 8
 
+  // --- momentum -------------------------------------------------------------
+  let samples: { t: number; dx: number; dy: number }[] = []
+  let coastRaf = 0
+  const stopCoast = () => {
+    if (coastRaf) cancelAnimationFrame(coastRaf)
+    coastRaf = 0
+  }
+  const startCoast = () => {
+    const now = performance.now()
+    const recent = samples.filter((m) => now - m.t <= COAST_WINDOW)
+    samples = []
+    // Held still before letting go (or barely moved): a placed view, not a flick.
+    if (recent.length < 2) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const span = Math.max(now - recent[0].t, 16)
+    let vx = recent.reduce((a, m) => a + m.dx, 0) / span
+    let vy = recent.reduce((a, m) => a + m.dy, 0) / span
+    const speed = Math.hypot(vx, vy)
+    if (speed < COAST_MIN_START) return
+    if (speed > COAST_MAX_START) {
+      vx *= COAST_MAX_START / speed
+      vy *= COAST_MAX_START / speed
+    }
+    let last = now
+    // Every camera write makes a new object, so identity tells us whether the
+    // camera is still where WE left it. Anything else moving it (a wheel zoom,
+    // a fit, a Python set_view) ends the drift.
+    let ours = store.camera()
+    const tick = (t: number) => {
+      coastRaf = 0
+      const cam = store.camera()
+      if (cam !== ours) return
+      const dt = Math.min(Math.max(t - last, 0), 50)
+      last = t
+      const k = Math.exp(-dt / COAST_TAU)
+      // distance covered in dt by a speed decaying as exp(-t/tau)
+      const dx = vx * COAST_TAU * (1 - k)
+      const dy = vy * COAST_TAU * (1 - k)
+      vx *= k
+      vy *= k
+      setCamera({ x: cam.x + dx / cam.z, y: cam.y + dy / cam.z, z: cam.z })
+      ours = store.camera()
+      if (ours === cam) return // refused (locked camera)
+      if (Math.hypot(vx, vy) < COAST_STOP) return
+      coastRaf = requestAnimationFrame(tick)
+    }
+    coastRaf = requestAnimationFrame(tick)
+  }
+
   const begin = (e: PointerEvent) => {
     panning = true
     pendingMenu = null
+    samples = []
     moved = 0
     lastX = e.clientX
     lastY = e.clientY
@@ -226,6 +284,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
   }
 
   const onDown = (e: PointerEvent) => {
+    stopCoast() // any press catches a drifting canvas
     const tool = store.instance().tool
     const inScroll = getScrollMode() !== 'free'
     const handPan = e.button === 0 && tool === 'hand'
@@ -285,6 +344,9 @@ function enableRightDragPan(el: HTMLElement): () => void {
     // the centred document column sideways (or scroll the locked axis).
     if (mode === 'scroll_y') dx = 0
     else if (mode === 'scroll_x') dy = 0
+    const now = performance.now()
+    samples.push({ t: now, dx, dy })
+    while (samples.length && now - samples[0].t > COAST_WINDOW * 2) samples.shift()
     const cam = store.camera()
     setCamera({ x: cam.x + dx / cam.z, y: cam.y + dy / cam.z, z: cam.z })
     if (e.pointerType !== 'touch') {
@@ -297,6 +359,8 @@ function enableRightDragPan(el: HTMLElement): () => void {
     if (!panning) return
     panning = false
     el.classList.remove('pc-gesturing')
+    if (e.type === 'pointerup') startCoast()
+    else samples = []
     const menu = pendingMenu
     pendingMenu = null
     // The press was captured to the container, so the event's own target is the
@@ -367,6 +431,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener('blur', onBlur)
   return () => {
+    stopCoast()
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
     window.removeEventListener('blur', onBlur)
