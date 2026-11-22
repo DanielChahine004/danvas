@@ -12,7 +12,7 @@ import { memo } from 'preact/compat'
 import { effect } from 'alien-signals'
 import { store } from '../engine/store'
 import type { Camera, PanelRecord } from '../engine/types'
-import { setContainer } from '../engine/editor'
+import { setContainer, editor } from '../engine/editor'
 import { attachCameraInput } from '../engine/input'
 import { attachInteraction } from '../engine/interaction'
 import { exportTargets } from '../engine/export'
@@ -30,45 +30,77 @@ import { DrawingRun, ArrowMarkerDefs } from './DrawingLayer'
 // bounds, layout and the observer geometry stay stable across the unmount. State
 // integrity is owned by Python, so dropping a culled panel's local React state is
 // safe (it re-mounts from the record + replayed value on scroll-in).
-const CULL_MARGIN = '60%'
+const CULL_MARGIN = 0.6 // of the viewport's width/height, on each side
 const UNMOUNT_DELAY_MS = 4000
+
+// One pass over the panels' page-space boxes decides who is in range, at most
+// once a frame and only when the camera or a record changed. This used to be an
+// IntersectionObserver per panel: the browser re-computed every one of them on
+// every pan frame (their transform changed), visible or not — about a third of
+// a zoomed-in pan frame on a phone-class CPU with a few hundred panels.
+// Hysteresis: mount at once on the way in, but unmount only after the panel has
+// stayed out of range for a few seconds. Panning back and forth used to remount
+// the same panels every pass — a fresh DOM, a re-decode of every image in it —
+// which showed up as frame hitches on heavy boards.
+interface CullEntry {
+  set: (visible: boolean) => void
+  visible: boolean
+  timer: ReturnType<typeof setTimeout> | null
+}
+const cullEntries = new Map<string, CullEntry>()
+let cullRaf = 0
+function cullPass(): void {
+  cullRaf = 0
+  const vsb = editor.getViewportScreenBounds()
+  if (vsb.w <= 1 || vsb.h <= 1) return // not laid out yet: leave everything mounted
+  const c = store.camera()
+  const mx = vsb.w * CULL_MARGIN
+  const my = vsb.h * CULL_MARGIN
+  const x0 = -mx / c.z - c.x
+  const x1 = (vsb.w + mx) / c.z - c.x
+  const y0 = -my / c.z - c.y
+  const y1 = (vsb.h + my) / c.z - c.y
+  for (const [id, e] of cullEntries) {
+    const r = store.peek(id) as PanelRecord | undefined
+    if (!r) continue
+    const w = r.props.w || 0
+    const h = r.props.h || 0
+    // a rotated panel is tested by the circle around its centre
+    const pad = r.rotation ? (Math.hypot(w, h) - Math.min(w, h)) / 2 : 0
+    const inside = r.x + w + pad > x0 && r.x - pad < x1 && r.y + h + pad > y0 && r.y - pad < y1
+    if (inside) {
+      if (e.timer) clearTimeout(e.timer)
+      e.timer = null
+      if (!e.visible) {
+        e.visible = true
+        e.set(true)
+      }
+    } else if (e.visible && !e.timer) {
+      e.timer = setTimeout(() => {
+        e.timer = null
+        e.visible = false
+        e.set(false)
+      }, UNMOUNT_DELAY_MS)
+    }
+  }
+}
+function scheduleCull(): void {
+  if (!cullRaf) cullRaf = requestAnimationFrame(cullPass)
+}
 
 function Panel({ id }: { id: string }) {
   const shape = useValue('rec:' + id, () => store.get(id) as PanelRecord | undefined, [id])
-  const ref = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(true)
 
   useEffect(() => {
-    const el = ref.current
-    if (!el || typeof IntersectionObserver === 'undefined') return
-    // Hysteresis: mount at once on the way in, but unmount only after the
-    // panel has stayed out of range for a few seconds. Panning back and forth
-    // used to remount the same panels every pass — a fresh DOM, a re-decode of
-    // every image in it — which showed up as frame hitches on heavy boards.
-    let hideTimer: ReturnType<typeof setTimeout> | null = null
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            if (hideTimer) clearTimeout(hideTimer)
-            hideTimer = null
-            setVisible(true)
-          } else if (!hideTimer) {
-            hideTimer = setTimeout(() => {
-              hideTimer = null
-              setVisible(false)
-            }, UNMOUNT_DELAY_MS)
-          }
-        }
-      },
-      { root: null, rootMargin: `${CULL_MARGIN} ${CULL_MARGIN} ${CULL_MARGIN} ${CULL_MARGIN}`, threshold: 0 },
-    )
-    io.observe(el)
+    const entry: CullEntry = { set: setVisible, visible: true, timer: null }
+    cullEntries.set(id, entry)
+    scheduleCull()
     return () => {
-      io.disconnect()
-      if (hideTimer) clearTimeout(hideTimer)
+      if (entry.timer) clearTimeout(entry.timer)
+      if (cullEntries.get(id) === entry) cullEntries.delete(id)
     }
-  }, [])
+  }, [id])
 
   // A screenshot force-mounts its target panels even if they're culled, so they
   // exist in the DOM to be captured.
@@ -84,9 +116,8 @@ function Panel({ id }: { id: string }) {
   // keepMounted (Custom keep_mounted=True, e.g. Model3D): culling HIDES the
   // content instead of unmounting it, so browser-local state — a 3D camera,
   // window/level, tool toggles — survives scroll-out/scroll-in, and a heavy
-  // engine isn't rebooted per scroll-in. visibility (not display): a
-  // display:none wrapper has no box, so the IntersectionObserver could
-  // never see it re-enter the viewport.
+  // engine isn't rebooted per scroll-in. visibility (not display): the
+  // wrapper keeps its box, so layout that hangs off it is unaffected.
   // An auto-sized panel that hasn't measured yet is kept mounted (hidden) even
   // when culled: layouts hang off its real height (below= chains, flows,
   // canvas.wait_settled), and that shouldn't wait for someone to scroll to it.
@@ -103,7 +134,6 @@ function Panel({ id }: { id: string }) {
   const show = (exportSet ? exportSet.has(id) : false) || visible || keep
   return (
     <div
-      ref={ref}
       data-pc-panel-id={id}
       style={{
         position: 'absolute',
@@ -295,10 +325,20 @@ export function PanelLayer() {
     }
     const stopPlate = store.subscribe(() => {
       if (!plateRaf) plateRaf = requestAnimationFrame(syncPlate)
+      scheduleCull() // a panel moved, resized, came or went
     })
+    const stopCull = effect(() => {
+      store.camera() // tracked
+      scheduleCull()
+    })
+    window.addEventListener('resize', scheduleCull)
     syncPlate()
     return () => {
       stopPlate()
+      stopCull()
+      window.removeEventListener('resize', scheduleCull)
+      if (cullRaf) cancelAnimationFrame(cullRaf)
+      cullRaf = 0
       if (plateRaf) cancelAnimationFrame(plateRaf)
       stopCam()
       detachLod?.()

@@ -18,6 +18,28 @@ const COAST_MAX_START = 6
 const COAST_STOP = 0.02
 const COAST_WINDOW = 80 // ms of recent movement the release speed is taken from
 
+// Touch prediction. A canvas moved from script lands a frame or two behind the
+// finger (event -> script -> style -> compositor), where native scrolling is
+// glued to it. So a one-finger touch pan aims slightly AHEAD of the finger: at
+// where its recent speed puts it PREDICT_MS from now. The lead is an offset on
+// top of the real movement, never accumulated, and is taken back out if the
+// finger stops moving. (The browser's own getPredictedEvents is not used: its
+// points come and go from one event to the next, which made the lead flicker.)
+const PREDICT_MS = 12
+const PREDICT_MAX = 48 // px; a burst of speed can't throw the canvas
+const PREDICT_SETTLE_MS = 70
+const PREDICT_SMOOTH = 0.5 // how far the lead moves toward its new value per event
+function predictedLead(vx: number, vy: number): { x: number; y: number } {
+  let x = vx * PREDICT_MS
+  let y = vy * PREDICT_MS
+  const m = Math.hypot(x, y)
+  if (m > PREDICT_MAX) {
+    x *= PREDICT_MAX / m
+    y *= PREDICT_MAX / m
+  }
+  return { x, y }
+}
+
 const WHEEL_ZOOM_RATE = 0.002
 const PINCH_ZOOM_RATE = 0.01
 
@@ -256,9 +278,25 @@ function enableRightDragPan(el: HTMLElement): () => void {
     coastRaf = requestAnimationFrame(tick)
   }
 
+  // --- touch prediction (see predictedLead) ----------------------------------
+  let leadX = 0 // the lead currently applied to the camera, screen px
+  let leadY = 0
+  let settleTimer: ReturnType<typeof setTimeout> | null = null
+  const dropLead = (undo: boolean) => {
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = null
+    if (undo && (leadX || leadY)) {
+      const cam = store.camera()
+      setCamera({ x: cam.x - leadX / cam.z, y: cam.y - leadY / cam.z, z: cam.z })
+    }
+    leadX = 0
+    leadY = 0
+  }
+
   const begin = (e: PointerEvent) => {
     panning = true
     pendingMenu = null
+    dropLead(false)
     samples = []
     moved = 0
     lastX = e.clientX
@@ -324,6 +362,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
     if (gesturing()) {
       panning = false
       pendingPid = null
+      dropLead(false)
       return
     }
     const mode = getScrollMode()
@@ -347,8 +386,28 @@ function enableRightDragPan(el: HTMLElement): () => void {
     const now = performance.now()
     samples.push({ t: now, dx, dy })
     while (samples.length && now - samples[0].t > COAST_WINDOW * 2) samples.shift()
+    // Aim ahead of a finger (not a mouse: its cursor shows exactly where it is).
+    let nlx = 0
+    let nly = 0
+    if (e.pointerType !== 'mouse') {
+      const recent = samples.filter((m) => now - m.t <= 50)
+      const span = recent.length > 1 ? Math.max(now - recent[0].t, 8) : 0
+      const vx = span ? recent.reduce((a, m) => a + m.dx, 0) / span : 0
+      const vy = span ? recent.reduce((a, m) => a + m.dy, 0) / span : 0
+      const lead = predictedLead(vx, vy)
+      nlx = leadX + (lead.x - leadX) * PREDICT_SMOOTH
+      nly = leadY + (lead.y - leadY) * PREDICT_SMOOTH
+      // a finger that stops sends no more moves: take the lead back out then
+      if (settleTimer) clearTimeout(settleTimer)
+      settleTimer = setTimeout(() => {
+        settleTimer = null
+        if (panning) dropLead(true)
+      }, PREDICT_SETTLE_MS)
+    }
     const cam = store.camera()
-    setCamera({ x: cam.x + dx / cam.z, y: cam.y + dy / cam.z, z: cam.z })
+    setCamera({ x: cam.x + (dx + nlx - leadX) / cam.z, y: cam.y + (dy + nly - leadY) / cam.z, z: cam.z })
+    leadX = nlx
+    leadY = nly
     if (e.pointerType !== 'touch') {
       e.preventDefault()
       e.stopPropagation()
@@ -359,6 +418,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
     if (!panning) return
     panning = false
     el.classList.remove('pc-gesturing')
+    dropLead(false) // the finger is gone: leave the canvas where it is
     if (e.type === 'pointerup') startCoast()
     else samples = []
     const menu = pendingMenu
@@ -432,6 +492,7 @@ function enableRightDragPan(el: HTMLElement): () => void {
   window.addEventListener('blur', onBlur)
   return () => {
     stopCoast()
+    dropLead(false)
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
     window.removeEventListener('blur', onBlur)
